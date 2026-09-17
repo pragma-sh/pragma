@@ -24,4 +24,16 @@ describe("quoteShellPath", () => {
       "'C:\\Users\\me\\it''s here.png'",
     );
   });
+
+  it("double-quotes cmd.exe paths instead of single-quoting them", () => {
+    expect(quoteShellPath("C:\\Users\\me\\Screen Shot.png", "cmd")).toBe(
+      '"C:\\Users\\me\\Screen Shot.png"',
+    );
+  });
+
+  it("drops embedded quotes for cmd.exe, which has no escape for them", () => {
+    expect(quoteShellPath('C:\\Users\\me\\it"s here.png', "cmd")).toBe(
+      '"C:\\Users\\me\\its here.png"',
+    );
+  });
 });

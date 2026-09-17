@@ -15,6 +15,11 @@ import {
 } from "@/lib/native-editing";
 import { isMacPlatform, isWindowsPlatform } from "@/lib/platform";
 import {
+  loadTerminalScopes,
+  nativeShellQuoteStyle,
+  resolveConfiguredShell,
+} from "@/lib/shell-profile";
+import {
   ptyAttach,
   ptyDetach,
   ptyKill,
@@ -1083,10 +1088,17 @@ export class TerminalManager {
         }
         event.preventDefault();
         event.stopPropagation();
-        const quoteStyle: ShellQuoteStyle =
+        // `tab.shell` only ever names the backend (native vs. WSL), never the
+        // actual program, so the shell a native Windows profile launches has
+        // to be resolved from Settings — it may be `cmd.exe`, which cannot
+        // parse PowerShell's single-quote escaping. Kicked off here so it
+        // resolves in parallel with copying any dropped files below.
+        const quoteStyle: Promise<ShellQuoteStyle> =
           isWindowsPlatform() && (tab.shell?.backend ?? "native") === "native"
-            ? "powershell"
-            : "posix";
+            ? loadTerminalScopes(tab.projectId).then((scopes) =>
+                nativeShellQuoteStyle(resolveConfiguredShell(scopes)),
+              )
+            : Promise.resolve("posix");
         resolveTerminalDrop(event.dataTransfer, {
           worktreeId: managed.tab.worktreeId,
           root: managed.cwd,

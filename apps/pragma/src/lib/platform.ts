@@ -18,7 +18,7 @@ export function hasWorkspaceModifier(event: KeyboardEvent, platform = navigator.
   return workspaceModifier(platform) === "ctrl" ? event.ctrlKey : event.altKey;
 }
 
-/** Returns true on Windows, where a native terminal shell is PowerShell. */
+/** Returns true on Windows, where a native terminal shell defaults to PowerShell but is user-configurable. */
 export function isWindowsPlatform(platform = navigator.platform): boolean {
   return platform.startsWith("Win");
 }

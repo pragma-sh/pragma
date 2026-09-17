@@ -924,9 +924,15 @@ real path (`dragDropEnabled` is off for tab dragging), and a remote PTY could no
 so `src/lib/terminal-drop.ts` sends the bytes through `save_dropped_file` → `FsRequest::SaveDroppedFile`
 to the PTY's host, which writes them to an owner-only `<temp>/pragma-dropped-files/<uuid>/` and
 returns the absolute path; the path is shell-quoted (backslash-escaped POSIX, single-quoted
-PowerShell) and pasted with bracketed paste. File-tree drags paste absolute worktree paths; text
-drops paste verbatim. Size limit: `terminalDefaults.maxDroppedFileBytes`. A WSL tab still gets a
-Windows path until host-level WSL exists.
+PowerShell, double-quoted `cmd.exe`) and pasted with bracketed paste. Native-Windows quoting is
+resolved from the actual configured `terminal.shell` (`nativeShellQuoteStyle` in
+`lib/shell-profile.ts`), not assumed to be PowerShell — `cmd.exe` cannot parse a PowerShell
+single-quoted string, and would split a quoted path with a space apart. File-tree drags paste
+absolute worktree paths; text drops paste verbatim. Size limit:
+`terminalDefaults.maxDroppedFileBytes`. A WSL tab still gets a Windows path until host-level WSL
+exists. Dropped-file directories are swept once at `pragma-server` startup and hourly after that
+(`start_dropped_files_sweeper`), removing any older than `terminalDefaults.droppedFilesMaxAgeMs` —
+otherwise repeated drops would retain copies, and disk space, indefinitely.
 
 **Terminal font:** Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`, …) at **fontSize
 14 / lineHeight 1.0**. 14px is required — at 13px macOS WebKit rounds the cell to 15px
@@ -1300,9 +1306,17 @@ once in `main.tsx`) — never add the full multi-MB `@iconify-json/{lucide,simpl
 packages; when you add a `brandIcon` to `values.json`, add that icon's body to
 `brand-icons.json` too.
 
-**All filesystem + git work is worktree-scoped:** every `fs.rs` / `git.rs` command takes
-a `worktreeId` + relative path; `resolve_in_worktree` rejects `..`/absolute/symlink
-escapes — **no absolute path ever crosses IPC**.
+**All filesystem + git work is worktree-scoped:** every `fs.rs` / `git.rs` command that
+reads or writes a worktree entry takes a `worktreeId` + relative path; `resolve_in_worktree`
+rejects `..`/absolute/symlink escapes — **no absolute path ever crosses IPC for a
+worktree-relative operation.** Two `fs.rs` commands are deliberate, narrow exceptions to
+that, not violations of it, because their whole job is to hand back a real host path:
+`HomeDir` (a client anchoring user-scoped files like `~/.pragma/theme.json` cannot know a
+remote host's home directory any other way) and `save_dropped_file` (see "Drops onto a
+terminal paste paths" above — the path is meant to be visible, typed at the shell prompt,
+so hiding it from the IPC response would not reduce what the renderer ends up displaying).
+Neither accepts an absolute path as input, and `resolve_in_worktree` still rejects one if
+either result were ever fed back into a worktree-scoped command.
 
 **⌘+End** (mac) / **Ctrl+End** (linux) is registered as `scrollTerminalBottom` and
 scrolls the active terminal to the live cursor row.

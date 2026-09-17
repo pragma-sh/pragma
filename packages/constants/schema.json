@@ -1809,7 +1809,8 @@
         "hiddenDistros",
         "rememberLastShell",
         "maxDroppedFileBytes",
-        "droppedFilesDirName"
+        "droppedFilesDirName",
+        "droppedFilesMaxAgeMs"
       ],
       "description": "Shipped defaults for terminal launching. A user overrides these per install/project via the `terminal` key of `.pragma/config.json` (`TerminalSettings`).",
       "properties": {
@@ -1832,6 +1833,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Directory under the host's temporary directory that holds copies of files dropped onto a terminal, whose absolute paths are pasted into the PTY."
+        },
+        "droppedFilesMaxAgeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a per-drop directory under `droppedFilesDirName` may sit on disk before a sweep deletes it. The host sweeps once at startup and on a fixed interval after that (`DROPPED_FILES_SWEEP_INTERVAL` in `pragma-server`), so a drop is retained for at most this age plus one sweep interval."
         }
       }
     },

@@ -125,6 +125,10 @@ pub enum FsRequest {
     /// under the host's temporary directory and returns its absolute path. The
     /// webview never learns a dropped file's real path, and a remote PTY could
     /// not open it anyway, so the bytes travel to whichever host runs the shell.
+    /// A deliberate, narrow exception to "no absolute path crosses IPC" (see
+    /// `apps/pragma/AGENTS.md`): the path is meant to be visible, typed at the
+    /// shell prompt, and is never accepted back as input to a worktree-scoped
+    /// command.
     SaveDroppedFile { name: String, contents: String },
     /// Renames (or moves) an entry within the worktree.
     Rename {
@@ -788,6 +792,46 @@ fn save_dropped_file(temp: &Path, name: &str, contents: &str) -> CoreResult<Stri
         .into_owned())
 }
 
+/// Removes per-drop directories under `<temp>/<droppedFilesDirName>/` older
+/// than `terminalDefaults.droppedFilesMaxAgeMs`, so repeated terminal drops
+/// don't retain copies (and disk space, and potentially sensitive contents)
+/// forever. Best-effort: a missing directory, a permission error, or a race
+/// with an in-flight [`save_dropped_file`] is silently skipped rather than
+/// failing the caller, which runs this on a maintenance schedule rather than
+/// in response to a request. See `DROPPED_FILES_SWEEP_INTERVAL` in
+/// `pragma-server` for when it's called.
+pub fn cleanup_dropped_files(temp: &Path) {
+    let max_age = Duration::from_millis(CONSTANTS.terminal_defaults.dropped_files_max_age_ms.get());
+    sweep_dropped_files(temp, max_age);
+}
+
+/// [`cleanup_dropped_files`] with an explicit `max_age`, so a sweep can be
+/// exercised in tests without waiting out the real, day-long default.
+fn sweep_dropped_files(temp: &Path, max_age: Duration) {
+    let base = temp.join(CONSTANTS.terminal_defaults.dropped_files_dir_name.as_str());
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age > max_age {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Reduces a dropped file's name to one safe path component, keeping its
 /// extension so tools that sniff by extension (image-aware agents) still work.
 fn dropped_file_name(name: &str) -> String {
@@ -847,7 +891,7 @@ mod tests {
 
     use super::{
         dropped_file_name, palette_search, resolve_in_worktree, save_dropped_file,
-        PaletteSearchRoot, MAX_READ_BYTES,
+        sweep_dropped_files, PaletteSearchRoot, MAX_READ_BYTES,
     };
 
     fn git_init(path: &std::path::Path) {
@@ -872,6 +916,28 @@ mod tests {
             Some("shot.png")
         );
         assert_eq!(std::fs::read(first).expect("read"), b"png");
+    }
+
+    #[test]
+    fn sweeps_dropped_files_past_the_max_age_but_leaves_fresh_ones() {
+        use std::time::Duration;
+
+        let temp = tempdir().expect("tempdir");
+        let contents = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"png");
+        let stale = save_dropped_file(temp.path(), "stale.png", &contents).expect("save");
+        std::thread::sleep(Duration::from_millis(150));
+        let fresh = save_dropped_file(temp.path(), "fresh.png", &contents).expect("save");
+
+        sweep_dropped_files(temp.path(), Duration::from_millis(75));
+
+        assert!(!std::path::Path::new(&stale).exists());
+        assert!(std::path::Path::new(&fresh).exists());
+    }
+
+    #[test]
+    fn sweep_is_a_no_op_when_nothing_has_been_dropped() {
+        let temp = tempdir().expect("tempdir");
+        sweep_dropped_files(temp.path(), std::time::Duration::from_secs(0));
     }
 
     #[test]

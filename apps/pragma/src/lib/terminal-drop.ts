@@ -3,15 +3,24 @@ import { constants } from "@pragma/constants";
 import { fileBase64, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
 import { saveDroppedFile } from "@/lib/tauri";
 
-/** How a pasted path must be quoted for the shell reading it. */
-export type ShellQuoteStyle = "posix" | "powershell";
+/**
+ * How a pasted path must be quoted for the shell reading it. `cmd.exe` needs
+ * its own style: it has no escape for an embedded quote, and treats a
+ * PowerShell-style single-quoted string as literal, unsplit text — a quoted
+ * path with a space would paste as one unusable argument.
+ */
+export type ShellQuoteStyle = "posix" | "powershell" | "cmd";
 
 /** Where a terminal drop lands: the worktree whose host owns the PTY, and its root. */
 export interface TerminalDropTarget {
   worktreeId: string;
   /** Absolute worktree root; in-app file-tree paths are relative to it. */
   root: string;
-  quoteStyle: ShellQuoteStyle;
+  /**
+   * Resolved lazily (it may need a config read) but requested up front, in
+   * parallel with copying any dropped files to the PTY host.
+   */
+  quoteStyle: Promise<ShellQuoteStyle>;
 }
 
 // Characters that never need escaping in a POSIX shell word.
@@ -21,9 +30,14 @@ const POSIX_SAFE = /^[\w@%+=:,./~-]+$/;
  * Quotes one path for pasting at a shell prompt. POSIX paths are
  * backslash-escaped the way Terminal.app and iTerm2 paste a dropped file, which
  * image-aware agent TUIs recognise; control characters cannot be escaped that
- * way, so those fall back to single quotes.
+ * way, so those fall back to single quotes. `cmd.exe` has no escape for a
+ * double quote at all, so one is simply dropped rather than allowed to end the
+ * quoted string early — mirrors `pragma_platform::shell::quote_cmd`.
  */
 export function quoteShellPath(path: string, style: ShellQuoteStyle): string {
+  if (style === "cmd") {
+    return POSIX_SAFE.test(path) ? path : `"${path.replaceAll('"', "")}"`;
+  }
   if (style === "powershell") {
     return POSIX_SAFE.test(path) ? path : `'${path.replaceAll("'", "''")}'`;
   }
@@ -63,14 +77,19 @@ export async function resolveTerminalDrop(
   transfer: DataTransfer | null,
   target: TerminalDropTarget,
 ): Promise<string | null> {
+  // Every read of `transfer` happens here, synchronously, before any `await` —
+  // the browser can invalidate a drop event's DataTransfer once its handler's
+  // synchronous portion returns.
   const treePaths = isPathDragActive() ? readDraggedPaths({ dataTransfer: transfer }) : null;
+  const files = transfer ? [...transfer.files] : [];
+  const text = transfer?.getData("text/plain") || transfer?.getData("text/uri-list") || "";
+
   if (treePaths && treePaths.length > 0) {
     return joinQuoted(
       treePaths.map((path) => absoluteTreePath(target.root, path)),
-      target.quoteStyle,
+      await target.quoteStyle,
     );
   }
-  const files = transfer ? [...transfer.files] : [];
   if (files.length > 0) {
     const maxBytes = constants.terminalDefaults.maxDroppedFileBytes;
     const oversized = files.find((file) => file.size > maxBytes);
@@ -79,14 +98,16 @@ export async function resolveTerminalDrop(
         `${oversized.name} is larger than the ${Math.floor(maxBytes / (1024 * 1024))} MiB terminal drop limit`,
       );
     }
-    const paths = await Promise.all(
-      files.map(async (file) =>
-        saveDroppedFile(target.worktreeId, file.name, await fileBase64(file)),
+    const [paths, quoteStyle] = await Promise.all([
+      Promise.all(
+        files.map(async (file) =>
+          saveDroppedFile(target.worktreeId, file.name, await fileBase64(file)),
+        ),
       ),
-    );
-    return joinQuoted(paths, target.quoteStyle);
+      target.quoteStyle,
+    ]);
+    return joinQuoted(paths, quoteStyle);
   }
-  const text = transfer?.getData("text/plain") || transfer?.getData("text/uri-list") || "";
   return text.length > 0 ? text : null;
 }
 
