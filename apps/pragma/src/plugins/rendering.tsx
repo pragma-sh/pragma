@@ -181,7 +181,16 @@ class PluginErrorBoundary extends ReactComponent<
   }
 }
 
-/** Renders a plugin component with per-plugin config and crash isolation. */
+/**
+ * Renders a plugin component with per-plugin config and crash isolation.
+ *
+ * The boundary is keyed on gateway connectivity as well as the caller's reset
+ * key: the gateway spawns lazily, so a contribution that calls `useSdk` during
+ * that window throws, and without this the boundary would latch that startup
+ * transient for the rest of the session even though the SDK arrives seconds
+ * later. The `false` -> `true` transition happens once, so this costs one
+ * remount at startup and nothing after.
+ */
 export function RenderPluginContribution(props: {
   pluginId: string;
   config: unknown;
@@ -190,8 +199,10 @@ export function RenderPluginContribution(props: {
   component: PluginComponent;
 }): ReactNode {
   const PluginComponent = props.component;
+  const connected = usePluginRuntimeState().sdk !== null;
+  const resetKey = `${props.resetKey}:${connected ? "sdk" : "no-sdk"}`;
   return (
-    <PluginErrorBoundary key={props.resetKey} pluginId={props.pluginId} resetKey={props.resetKey}>
+    <PluginErrorBoundary key={resetKey} pluginId={props.pluginId} resetKey={resetKey}>
       <PluginBoundary
         config={props.config}
         pluginId={props.pluginId}

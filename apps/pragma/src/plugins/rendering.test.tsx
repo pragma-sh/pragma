@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginDefinition } from "@pragma/plugin";
@@ -8,6 +8,7 @@ import {
   setPluginRuntimeProject,
   setPluginRuntimeSdk,
   setPluginRuntimeSessions,
+  usePluginRuntimeState,
 } from "./host-hooks";
 import { clearPlugins, setPluginsForScope, type PluginRecord } from "./registry";
 import {
@@ -50,6 +51,13 @@ function SettingsProbe() {
 
 function BrokenContribution(): never {
   throw new Error("boom");
+}
+
+/** Mirrors a plugin that calls `useSdk` at the top of its component. */
+function NeedsSdkContribution() {
+  const { sdk } = usePluginRuntimeState();
+  if (!sdk) throw new Error("Pragma SDK is not connected yet — the local gateway has not come up");
+  return <div>sdk ready</div>;
 }
 
 afterEach(() => {
@@ -170,6 +178,26 @@ describe("plugin rendering helpers", () => {
 
     expect(screen.getByText('Plugin "broken-plugin" crashed.')).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("recovers a plugin that crashed before the gateway came up", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    render(
+      <RenderPluginContribution
+        component={NeedsSdkContribution}
+        config={{}}
+        pluginId="sdk-plugin"
+        resetKey="sdk-plugin:card"
+      />,
+    );
+    expect(screen.getByText('Plugin "sdk-plugin" crashed.')).toBeInTheDocument();
+
+    // The gateway spawns lazily; the boundary must not latch that transient.
+    act(() => setPluginRuntimeSdk({} as PragmaClient));
+
+    expect(screen.getByText("sdk ready")).toBeInTheDocument();
+    expect(screen.queryByText('Plugin "sdk-plugin" crashed.')).not.toBeInTheDocument();
   });
 
   it("passes web view payload directly to plugin components", () => {
