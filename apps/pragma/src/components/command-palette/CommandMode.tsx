@@ -11,6 +11,7 @@ import {
   RefreshCw,
   RotateCw,
   Server,
+  Settings,
   Sparkles,
   Terminal,
 } from "lucide-react";
@@ -320,6 +321,16 @@ export function CommandMode({
       disabled: !workspace.selectedProjectId,
       run: () => {
         kanban.openBoard();
+        close();
+      },
+    },
+    {
+      id: "settings",
+      label: "Open settings",
+      keywords: "preferences plugins keybindings themes",
+      icon: Settings,
+      run: () => {
+        kanban.openSettings();
         close();
       },
     },

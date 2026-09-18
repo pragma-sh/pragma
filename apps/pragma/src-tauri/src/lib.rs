@@ -47,6 +47,8 @@ use pragma_constants::{
 };
 use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
 use tauri::ipc::{Channel, InvokeResponseBody};
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::PredefinedMenuItem;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -89,12 +91,21 @@ const MENU_ACCELERATORS: [(&str, &str); 5] = [
     (MENU_OPEN_COMMAND_MODE, "CmdOrCtrl+Shift+P"),
 ];
 
-/// Returns the accelerator registered for a workspace menu item id.
-fn menu_accelerator(id: &str) -> &'static str {
+/// Returns the accelerator registered for a workspace menu item id, or `None`
+/// when the webview owns that chord on this platform.
+///
+/// Settings is the one exception: outside macOS the menu bar is drawn inside the
+/// window, and several Linux desktops hide it entirely, so its chord is handled
+/// by the in-app keybinding (`openSettings` in `use-shortcuts.ts`) instead of a
+/// menu item the user may never see.
+fn menu_accelerator(id: &str) -> Option<&'static str> {
+    if id == MENU_OPEN_SETTINGS && !cfg!(target_os = "macos") {
+        return None;
+    }
     MENU_ACCELERATORS
         .iter()
         .find(|(item_id, _)| *item_id == id)
-        .map_or("", |(_, accelerator)| *accelerator)
+        .map(|(_, accelerator)| *accelerator)
 }
 
 /// The workspace menu items whose accelerators Settings can suspend while
@@ -248,35 +259,35 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         MENU_OPEN_SETTINGS,
         "Settings…",
         true,
-        Some(menu_accelerator(MENU_OPEN_SETTINGS)),
+        menu_accelerator(MENU_OPEN_SETTINGS),
     )?;
     let new_terminal_tab = MenuItem::with_id(
         app,
         MENU_NEW_TERMINAL_TAB,
         "New Terminal Tab",
         true,
-        Some(menu_accelerator(MENU_NEW_TERMINAL_TAB)),
+        menu_accelerator(MENU_NEW_TERMINAL_TAB),
     )?;
     let close_active_tab = MenuItem::with_id(
         app,
         MENU_CLOSE_ACTIVE_TAB,
         "Close Tab",
         true,
-        Some(menu_accelerator(MENU_CLOSE_ACTIVE_TAB)),
+        menu_accelerator(MENU_CLOSE_ACTIVE_TAB),
     )?;
     let open_command_palette = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_PALETTE,
         "Open Command Palette",
         true,
-        Some(menu_accelerator(MENU_OPEN_COMMAND_PALETTE)),
+        menu_accelerator(MENU_OPEN_COMMAND_PALETTE),
     )?;
     let open_command_mode = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_MODE,
         "Open Command Mode",
         true,
-        Some(menu_accelerator(MENU_OPEN_COMMAND_MODE)),
+        menu_accelerator(MENU_OPEN_COMMAND_MODE),
     )?;
     // No accelerator: replaying the tour is a rare, deliberate action, and an
     // unregistered chord here would shadow one the workspace already owns.
@@ -300,7 +311,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
     #[cfg(target_os = "macos")]
     install_macos_workspace_menu(app, menu, &items)?;
     #[cfg(not(target_os = "macos"))]
-    install_non_macos_workspace_menu(menu, &items)?;
+    install_non_macos_workspace_menu(app, menu, &items)?;
     Ok(())
 }
 
@@ -348,27 +359,34 @@ fn install_macos_workspace_menu(
 }
 
 /// Installs the workspace actions on Linux and Windows, which share Ctrl-based
-/// accelerators. Both append to the `window` submenu: it is the only submenu
-/// `Menu::default` gives a stable id, so it is the only one `menu.get` can
-/// resolve (Windows' File menu carries a generated id, and Linux has none).
+/// accelerators. Neither platform gets the macOS app menu, and `Menu::default`
+/// gives Linux no File submenu at all, so Pragma's own actions go in a dedicated
+/// leading submenu rather than tucked under `Window` — the previous placement
+/// left "Settings…" as the last item of an unrelated menu, which on Linux read
+/// as "there is no way to open settings".
 #[cfg(not(target_os = "macos"))]
 fn install_non_macos_workspace_menu(
+    app: &tauri::AppHandle,
     menu: &Menu<tauri::Wry>,
     items: &WorkspaceMenuItems,
 ) -> tauri::Result<()> {
-    if let Some(window_menu) = menu
-        .get("window")
-        .and_then(|item| item.as_submenu().cloned())
-    {
-        // Neither platform offers a reachable File menu, so surface Pragma tab
-        // actions here.
-        window_menu.append(&items.open_settings)?;
-        window_menu.append(&items.start_tour)?;
-        window_menu.append(&items.new_terminal_tab)?;
-        window_menu.append(&items.close_active_tab)?;
-        window_menu.append(&items.open_command_palette)?;
-        window_menu.append(&items.open_command_mode)?;
-    }
+    let separator = PredefinedMenuItem::separator(app)?;
+    let pragma_menu = Submenu::with_id_and_items(
+        app,
+        "pragma",
+        "Pragma",
+        true,
+        &[
+            &items.open_settings,
+            &items.start_tour,
+            &separator,
+            &items.new_terminal_tab,
+            &items.close_active_tab,
+            &items.open_command_palette,
+            &items.open_command_mode,
+        ],
+    )?;
+    menu.insert(&pragma_menu, 0)?;
     Ok(())
 }
 
@@ -434,7 +452,11 @@ fn set_menu_accelerators_enabled(
     enabled: bool,
 ) -> AppResult<()> {
     for item in &accelerators.0 {
-        let accelerator = enabled.then(|| menu_accelerator(item.id().as_ref()));
+        let accelerator = if enabled {
+            menu_accelerator(item.id().as_ref())
+        } else {
+            None
+        };
         item.set_accelerator(accelerator)?;
     }
     Ok(())
