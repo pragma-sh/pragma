@@ -52,11 +52,20 @@ export function createBridge(hooks: Partial<PragmaHooksBridge> = {}): BridgeHand
     useWebViewPayload: () => undefined,
     useNotify: () => () => undefined,
     useStoredState: <T>(key: string, initialValue: T) => {
-      const value = (stored.has(key) ? stored.get(key) : initialValue) as T;
-      const setter: StoredSetter<T> = (next) => {
-        stored.set(key, next);
-      };
-      return [value, setter];
+      const [value, setValue] = React.useState<T>(() =>
+        stored.has(key) ? (stored.get(key) as T) : initialValue,
+      );
+      const setter: StoredSetter<T> = React.useCallback(
+        (next) => {
+          setValue((previous) => {
+            const resolved = typeof next === "function" ? (next as (prev: T) => T)(previous) : next;
+            stored.set(key, resolved);
+            return resolved;
+          });
+        },
+        [key],
+      );
+      return [value, setter] as [T, StoredSetter<T>];
     },
     useSdkQuery: () => ({ data: undefined, error: null, loading: true, refetch: () => undefined }),
     useEvent: <TPayload>(name: string, handler: (payload: TPayload) => void): void => {

@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { useNotify, useProject, useStoredState, useTheme } from "@pragma/plugin";
 import { Button } from "@pragma/plugin/ui";
 
@@ -14,13 +12,10 @@ export function DevTestDiagnosticsPage() {
   const project = useProject();
   const theme = useTheme();
   const notify = useNotify();
-  const [saved, setSaved] = useStoredState<number>("dev-test-plugin.diagnostics.checks", 0);
-  const [checks, setChecks] = useState<number>(saved);
+  const [checks, setChecks] = useStoredState<number>("dev-test-plugin.diagnostics.checks", 0);
 
   function runCheck() {
-    const next = checks + 1;
-    setChecks(next);
-    setSaved(next);
+    setChecks((previous) => previous + 1);
     notify("Diagnostics check recorded", { variant: "success" });
   }
 
