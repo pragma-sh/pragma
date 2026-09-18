@@ -152,15 +152,26 @@ interface PluginErrorBoundaryProps {
 
 interface PluginErrorBoundaryState {
   error: string | null;
+  resetKey: string;
 }
 
 class PluginErrorBoundary extends ReactComponent<
   PluginErrorBoundaryProps,
   PluginErrorBoundaryState
 > {
-  state: PluginErrorBoundaryState = { error: null };
+  state: PluginErrorBoundaryState = { error: null, resetKey: "" };
 
-  static getDerivedStateFromError(cause: unknown): PluginErrorBoundaryState {
+  static getDerivedStateFromProps(
+    props: PluginErrorBoundaryProps,
+    state: PluginErrorBoundaryState,
+  ): Partial<PluginErrorBoundaryState> | null {
+    if (props.resetKey !== state.resetKey) {
+      return { error: null, resetKey: props.resetKey };
+    }
+    return null;
+  }
+
+  static getDerivedStateFromError(cause: unknown): Partial<PluginErrorBoundaryState> {
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
 
@@ -184,12 +195,14 @@ class PluginErrorBoundary extends ReactComponent<
 /**
  * Renders a plugin component with per-plugin config and crash isolation.
  *
- * The boundary is keyed on gateway connectivity as well as the caller's reset
+ * The boundary resets on gateway connectivity as well as the caller's reset
  * key: the gateway spawns lazily, so a contribution that calls `useSdk` during
  * that window throws, and without this the boundary would latch that startup
  * transient for the rest of the session even though the SDK arrives seconds
- * later. The `false` -> `true` transition happens once, so this costs one
- * remount at startup and nothing after.
+ * later. The reset clears the caught error without remounting healthy child
+ * subtrees — only a contribution that actually crashed is rendered afresh, so
+ * component-local state and mount effects in working plugins survive the
+ * startup connectivity flip.
  */
 export function RenderPluginContribution(props: {
   pluginId: string;
@@ -202,7 +215,7 @@ export function RenderPluginContribution(props: {
   const connected = usePluginRuntimeState().sdk !== null;
   const resetKey = `${props.resetKey}:${connected ? "sdk" : "no-sdk"}`;
   return (
-    <PluginErrorBoundary key={resetKey} pluginId={props.pluginId} resetKey={resetKey}>
+    <PluginErrorBoundary pluginId={props.pluginId} resetKey={resetKey}>
       <PluginBoundary
         config={props.config}
         pluginId={props.pluginId}

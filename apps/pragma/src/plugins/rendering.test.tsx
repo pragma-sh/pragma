@@ -1,4 +1,5 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginDefinition } from "@pragma/plugin";
@@ -58,6 +59,17 @@ function NeedsSdkContribution() {
   const { sdk } = usePluginRuntimeState();
   if (!sdk) throw new Error("Pragma SDK is not connected yet — the local gateway has not come up");
   return <div>sdk ready</div>;
+}
+
+/** Healthy contribution whose component-local state must survive a reset. */
+function StatefulContribution() {
+  const [count, setCount] = useState(0);
+  return (
+    <div>
+      <button onClick={() => setCount((current) => current + 1)}>increment</button>
+      <span data-testid="count">{count}</span>
+    </div>
+  );
 }
 
 afterEach(() => {
@@ -198,6 +210,24 @@ describe("plugin rendering helpers", () => {
 
     expect(screen.getByText("sdk ready")).toBeInTheDocument();
     expect(screen.queryByText('Plugin "sdk-plugin" crashed.')).not.toBeInTheDocument();
+  });
+
+  it("preserves healthy component state when connectivity resets the boundary", () => {
+    render(
+      <RenderPluginContribution
+        component={StatefulContribution}
+        config={{}}
+        pluginId="healthy-plugin"
+        resetKey="healthy-plugin:card"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "increment" }));
+    expect(screen.getByTestId("count")).toHaveTextContent("1");
+
+    // The gateway connecting must not remount a contribution that never crashed.
+    act(() => setPluginRuntimeSdk({} as PragmaClient));
+
+    expect(screen.getByTestId("count")).toHaveTextContent("1");
   });
 
   it("passes web view payload directly to plugin components", () => {

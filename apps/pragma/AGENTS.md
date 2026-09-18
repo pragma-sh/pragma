@@ -551,12 +551,14 @@ of its own so its settings stay reachable.
 
 **`useSdk` throws until the gateway is up, and the gateway spawns lazily.** Any
 contribution that calls it — a sidebar card is the common case, since it renders at
-startup — throws during that window, so `RenderPluginContribution` keys the plugin error
-boundary on SDK connectivity as well as the caller's reset key. Without that the boundary
-latches a startup transient as a permanent "Plugin … crashed. Pragma SDK is not connected
-yet" card, even though `useRuntimeSdk` retries every 2s and connects seconds later. A
-crash card that _survives_ connection is a real failure: check the console for
-`plugin SDK bridge: gateway unavailable, retrying`.
+startup — throws during that window, so `RenderPluginContribution` resets the plugin error
+boundary on SDK connectivity as well as the caller's reset key. The reset clears the caught
+error without remounting healthy child subtrees; only a contribution that actually crashed
+renders afresh, so component-local state in working plugins survives the connectivity flip.
+Without it the boundary latches a startup transient as a permanent "Plugin … crashed.
+Pragma SDK is not connected yet" card, even though `useRuntimeSdk` retries every 2s and
+connects seconds later. A crash card that _survives_ connection is a real failure: check the
+console for `plugin SDK bridge: gateway unavailable, retrying`.
 
 **Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
 `other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
