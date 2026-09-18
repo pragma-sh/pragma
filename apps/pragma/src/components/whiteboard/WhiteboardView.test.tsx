@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getWhiteboard: vi.fn(),
   renameTerminalTab: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   // Captured from the mocked Excalidraw element so tests can assert the
   // composition props WhiteboardView passes for theme/library disabling.
   excalidrawProps: {
@@ -52,7 +53,9 @@ vi.mock("@/lib/tauri", () => ({
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => ({ renameTerminalTab: mocks.renameTerminalTab }),
 }));
-vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
+vi.mock("sonner", () => ({
+  toast: { error: mocks.toastError, warning: mocks.toastWarning },
+}));
 
 import { isTabDirty, setTabDirty } from "@/state/editor-dirty-store";
 import { WhiteboardView } from "./WhiteboardView";
@@ -108,6 +111,7 @@ beforeEach(() => {
   mocks.getWhiteboard.mockReset().mockResolvedValue(board);
   mocks.renameTerminalTab.mockReset().mockResolvedValue(undefined);
   mocks.toastError.mockReset();
+  mocks.toastWarning.mockReset();
   mocks.excalidrawProps.current = {};
   // The dirty store is module state shared across tests; reset the tab.
   setTabDirty("tab", false);
@@ -205,6 +209,66 @@ describe("WhiteboardView", () => {
       await Promise.resolve();
     });
     expect(isTabDirty("tab")).toBe(false);
+  });
+
+  it("recovers from an optimistic conflict instead of stalling every later save", async () => {
+    mocks.editWhiteboard
+      .mockRejectedValueOnce(new Error("whiteboard changed since version 1"))
+      .mockResolvedValueOnce({ ...board, version: 8 });
+    // Another writer advanced the board while this canvas held version 1.
+    mocks.getWhiteboard
+      .mockResolvedValueOnce(board)
+      .mockResolvedValueOnce({ ...board, version: 7 });
+    render(<WhiteboardView tab={tab} />);
+    await settleLoaded();
+
+    editScene("First edit");
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.editWhiteboard.mock.calls[0]?.[4]).toBe(1);
+    expect(mocks.toastWarning).toHaveBeenCalledTimes(1);
+    expect(isTabDirty("tab")).toBe(true);
+
+    // The queued retry carries the head version, so the save succeeds instead
+    // of resending the obsolete one forever.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.editWhiteboard).toHaveBeenCalledTimes(2);
+    expect(mocks.editWhiteboard.mock.calls[1]?.[4]).toBe(7);
+    expect(isTabDirty("tab")).toBe(false);
+  });
+
+  it("reports a non-conflict save failure without queuing a retry", async () => {
+    mocks.editWhiteboard.mockRejectedValue(new Error("host unreachable"));
+    render(<WhiteboardView tab={tab} />);
+    await settleLoaded();
+
+    editScene("First edit");
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.toastError).toHaveBeenCalledTimes(1);
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+    expect(isTabDirty("tab")).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+    expect(mocks.editWhiteboard).toHaveBeenCalledTimes(1);
   });
 
   it("does not save redundantly on the authoritative initial load", async () => {

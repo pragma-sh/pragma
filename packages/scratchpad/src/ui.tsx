@@ -26,6 +26,7 @@ export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): R
   const versionRef = useRef<number | undefined>(undefined);
   const darkRef = useRef<boolean | undefined>(undefined);
   const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
   const openWhiteboard = globalThis.pragmaScratchpad?.openWhiteboard;
 
   const open = (): void => {
@@ -37,6 +38,11 @@ export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): R
 
   // fallow-ignore-next-line complexity -- one bounded poll updates theme/version refs and the three request outcomes atomically.
   const refresh = useCallback(async () => {
+    // One snapshot request at a time: a poll tick or a manual refresh landing
+    // while the host is still rendering would otherwise stack requests (and
+    // native PNG renders) instead of applying backpressure.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const dark = document.documentElement.classList.contains("dark");
       const knownVersion = darkRef.current === dark ? versionRef.current : undefined;
@@ -51,12 +57,14 @@ export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): R
     } catch (cause) {
       if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      inFlightRef.current = false;
       if (mountedRef.current) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
     mountedRef.current = true;
+    inFlightRef.current = false;
     versionRef.current = undefined;
     darkRef.current = undefined;
     setSnapshot(null);

@@ -114,7 +114,30 @@ export function WhiteboardView({ tab }: { tab: Tab }) {
       }
     } catch (cause) {
       setTabDirty(tab.id, true);
-      toast.error(`Failed to save whiteboard: ${errorMessage(cause)}`);
+      // A conflicting writer (the SDK, the CLI, another window) advances the
+      // stored version, which makes the version we just sent permanently
+      // obsolete: every later save would resend it and fail identically, so
+      // the canvas could never be saved again. Re-read the head version and
+      // queue a retry that carries it — the local scene stays authoritative
+      // and is written on top. A failure to even re-read leaves the board as
+      // it was, with the tab dirty and Cmd/Ctrl+S still able to retry.
+      const stale = boardRef.current;
+      let conflict = false;
+      try {
+        const head = await getWhiteboard(tab.worktreeId, whiteboardId);
+        if (stale && head.version !== stale.version) {
+          boardRef.current = head;
+          pendingRef.current = true;
+          conflict = true;
+        }
+      } catch {
+        // Keep the original save error as the reported failure.
+      }
+      if (conflict) {
+        toast.warning("Whiteboard changed elsewhere - re-applying your edits on top.");
+      } else {
+        toast.error(`Failed to save whiteboard: ${errorMessage(cause)}`);
+      }
     } finally {
       savingRef.current = false;
       if (pendingRef.current) {

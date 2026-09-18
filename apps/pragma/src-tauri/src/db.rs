@@ -655,6 +655,10 @@ impl Db {
     }
 
     /// Creates or reuses a tab projecting one host-owned whiteboard.
+    ///
+    /// The dedupe lookup and the insert run under a single connection lock:
+    /// two concurrent opens of the same board would otherwise both observe
+    /// "no tab yet" and insert duplicates into the workspace snapshot.
     pub fn create_whiteboard_tab(
         &self,
         project_id: &str,
@@ -662,14 +666,27 @@ impl Db {
         whiteboard_id: &str,
         title: String,
     ) -> AppResult<Tab> {
-        if let Some(tab) = self.list_tabs(project_id)?.into_iter().find(|tab| {
-            matches!(tab.kind, TabKind::Whiteboard)
-                && tab.worktree_id == worktree_id
-                && tab.whiteboard_id.as_deref() == Some(whiteboard_id)
-        }) {
+        let conn = self.0.lock()?;
+        let existing = conn
+            .query_row(
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
+                 FROM tabs
+                 WHERE project_id = ?1 AND worktree_id = ?2 AND kind = ?3 AND whiteboard_id = ?4
+                 ORDER BY order_index, created_at LIMIT 1",
+                params![
+                    project_id,
+                    worktree_id,
+                    kind_as_str(TabKind::Whiteboard),
+                    whiteboard_id
+                ],
+                tab_from_row,
+            )
+            .optional()?;
+        if let Some(tab) = existing {
             return Ok(tab);
         }
-        self.create_tab_record(
+        let id = insert_tab_record(
+            &conn,
             project_id,
             worktree_id,
             TabKind::Whiteboard,
@@ -685,7 +702,8 @@ impl Db {
             None,
             None,
             None,
-        )
+        )?;
+        tab_row(&conn, &id)
     }
 
     // A tab row carries enough locating data that insertion exceeds clippy's
@@ -741,40 +759,27 @@ impl Db {
         plugin_dedupe_key: Option<String>,
         shell: Option<ShellProfile>,
     ) -> AppResult<Tab> {
-        let id = Uuid::new_v4().to_string();
-        {
-            let (shell_backend, shell_distro) = shell_to_columns(shell.as_ref());
+        let id = {
             let conn = self.0.lock()?;
-            let order_index: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
-                [project_id],
-                |row| row.get(0),
-            )?;
-            conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, whiteboard_id, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
-                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-                params![
-                    id,
-                    project_id,
-                    worktree_id,
-                    kind_as_str(kind),
-                    title,
-                    url,
-                    file_path,
-                    whiteboard_id,
-                    diff_side.map(diff_side_as_str),
-                    diff_commit,
-                    pr_number,
-                    plugin_id,
-                    plugin_view_id,
-                    plugin_payload,
-                    plugin_dedupe_key,
-                    order_index,
-                    shell_backend,
-                    shell_distro
-                ],
-            )?;
-        }
+            insert_tab_record(
+                &conn,
+                project_id,
+                worktree_id,
+                kind,
+                title,
+                url,
+                file_path,
+                whiteboard_id,
+                diff_side,
+                diff_commit,
+                pr_number,
+                plugin_id,
+                plugin_view_id,
+                plugin_payload,
+                plugin_dedupe_key,
+                shell,
+            )?
+        };
         self.tab(&id)
     }
 
@@ -1064,6 +1069,76 @@ impl Db {
     }
 }
 
+/// Inserts one tab row on an already-locked connection and returns its id.
+///
+/// Free-standing so callers that must keep the dedupe lookup and the insert
+/// under one lock (`create_whiteboard_tab`) can reuse the exact insert the
+/// locking `Db::create_tab_record` performs.
+// A tab row carries enough locating data that insertion exceeds clippy's
+// default argument ceiling; the columns are all genuinely independent.
+#[allow(clippy::too_many_arguments)]
+fn insert_tab_record(
+    conn: &Connection,
+    project_id: &str,
+    worktree_id: &str,
+    kind: TabKind,
+    title: Option<String>,
+    url: Option<String>,
+    file_path: Option<String>,
+    whiteboard_id: Option<String>,
+    diff_side: Option<DiffSide>,
+    diff_commit: Option<String>,
+    pr_number: Option<i64>,
+    plugin_id: Option<String>,
+    plugin_view_id: Option<String>,
+    plugin_payload: Option<String>,
+    plugin_dedupe_key: Option<String>,
+    shell: Option<ShellProfile>,
+) -> AppResult<String> {
+    let id = Uuid::new_v4().to_string();
+    let (shell_backend, shell_distro) = shell_to_columns(shell.as_ref());
+    let order_index: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, whiteboard_id, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        params![
+            id,
+            project_id,
+            worktree_id,
+            kind_as_str(kind),
+            title,
+            url,
+            file_path,
+            whiteboard_id,
+            diff_side.map(diff_side_as_str),
+            diff_commit,
+            pr_number,
+            plugin_id,
+            plugin_view_id,
+            plugin_payload,
+            plugin_dedupe_key,
+            order_index,
+            shell_backend,
+            shell_distro
+        ],
+    )?;
+    Ok(id)
+}
+
+/// Reads one tab by id on an already-locked connection.
+fn tab_row(conn: &Connection, tab_id: &str) -> AppResult<Tab> {
+    conn.query_row(
+        "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id FROM tabs WHERE id = ?1",
+        [tab_id],
+        tab_from_row,
+    )
+    .map_err(AppError::from)
+}
+
 /// Serializes a tab kind to the lowercase string stored in the `tabs.kind` column.
 fn kind_as_str(kind: TabKind) -> &'static str {
     match kind {
@@ -1307,6 +1382,49 @@ mod tests {
             .list_tabs(&project.id)
             .expect("tabs should list")
             .is_empty());
+    }
+
+    #[test]
+    fn reuses_one_tab_per_whiteboard_under_a_single_lock() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktree = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+
+        let first = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "board", "Board".to_string())
+            .expect("whiteboard tab should insert");
+        let second = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "board", "Renamed".to_string())
+            .expect("whiteboard tab should be reused");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.kind, TabKind::Whiteboard);
+        assert_eq!(first.whiteboard_id.as_deref(), Some("board"));
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list").len(),
+            1
+        );
+
+        // A different board in the same worktree is still its own tab.
+        let other = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "other", "Other".to_string())
+            .expect("second whiteboard tab should insert");
+        assert_ne!(other.id, first.id);
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list").len(),
+            2
+        );
     }
 
     #[test]

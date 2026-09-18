@@ -1244,6 +1244,12 @@ a host-rendered PNG through the token-scoped frame bridge and rejects cross-work
 unchanged version polls do not rerender, while theme changes request the matching Excalidraw
 export palette. Clicking the preview opens the same board in its deduplicated interactive tab.
 Native PNG output comes from `pragma-core`, never canvas APIs in the webview.
+Three invariants are load-bearing: tab dedupe holds one `Db` lock across the lookup and
+the insert, so concurrent opens of one board cannot both insert; a save that loses the
+optimistic version race re-reads the head version and retries on top of it, because
+resending the stale `expectedVersion` would stall every later save; and deleting a
+worktree fails rather than logs when the `DeleteForWorktree` RPC fails, since nothing
+garbage-collects host-side scenes and the checkout removal it follows is idempotent.
 
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`

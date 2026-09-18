@@ -217,14 +217,17 @@ pub fn delete_worktree(
         },
     )?;
 
-    if let Err(error) = pty.rpc(
+    // Whiteboard scenes are durable user content the host keys by worktree id,
+    // and nothing garbage-collects them: swallowing this failure would strand
+    // them forever, still readable through the whiteboards RPC. Fail the delete
+    // instead — the checkout removal above is idempotent, so retrying the delete
+    // re-runs this cleanup rather than leaving the record half-removed.
+    pty.rpc(
         ProtocolRpcMethod::Whiteboards,
         serde_json::to_value(WhiteboardsRequest::DeleteForWorktree {
             worktree_id: worktree_id.clone(),
         })?,
-    ) {
-        log::warn!("failed to delete whiteboards for {worktree_id}: {error}");
-    }
+    )?;
 
     if delete_branch {
         // Branch deletion must run from a worktree that *doesn't* have the

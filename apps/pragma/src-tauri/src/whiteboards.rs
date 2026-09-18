@@ -7,11 +7,16 @@ use pragma_core::whiteboards::WhiteboardsRequest;
 use tauri::{AppHandle, State};
 
 use crate::db::Db;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::workspace_mirror::WorkspacePublisher;
 
-async fn rpc<T: serde::de::DeserializeOwned>(
+/// Sends one whiteboards RPC to the worktree's owning host.
+///
+/// `client.rpc` blocks on the host socket, and `View` additionally waits on a
+/// native render, so the call runs on a blocking worker: leaving it on an async
+/// worker would stall unrelated commands behind a slow host.
+async fn rpc<T: serde::de::DeserializeOwned + Send + 'static>(
     app: AppHandle,
     db: &Db,
     hosts: &Hosts,
@@ -19,11 +24,13 @@ async fn rpc<T: serde::de::DeserializeOwned>(
     request: WhiteboardsRequest,
 ) -> AppResult<T> {
     let client = crate::ssh_host::client_for_worktree(app, db, hosts, worktree_id).await?;
-    let value = client.rpc(
-        ProtocolRpcMethod::Whiteboards,
-        serde_json::to_value(request)?,
-    )?;
-    Ok(serde_json::from_value(value)?)
+    let payload = serde_json::to_value(request)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let value = client.rpc(ProtocolRpcMethod::Whiteboards, payload)?;
+        Ok(serde_json::from_value(value)?)
+    })
+    .await
+    .map_err(|error| AppError::Daemon(format!("whiteboards task failed: {error}")))?
 }
 
 /// Creates a host-owned whiteboard without opening a desktop tab.
