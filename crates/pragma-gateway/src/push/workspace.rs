@@ -96,6 +96,7 @@ mod tests {
                 id: "project-1".to_string(),
                 name: "pragma".to_string(),
                 path: "/repo".to_string(),
+                icon_emoji: None,
                 order_index: 0,
                 created_at: "now".to_string(),
             }],

@@ -30,9 +30,12 @@ and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
   declared with `defineWebView`; `openReportWebView()` opens it with a typed
   payload and `dedupeKey`, and the view reads that payload via
   `useWebViewPayload`.
-- **`DevTestSettingsPage`** (`src/settings-page.tsx`) — React Settings page declared
-  with `defineSettingsPage`; its form calls `sdk.createBoardDraft` with prompt,
+- **`DevTestSettingsPage`** (`src/settings-page.tsx`) — "Board Drafts" Settings page
+  declared with `defineSettingsPage`; its form calls `sdk.createBoardDraft` with prompt,
   worktree, agent, model, and reasoning selections.
+- **`DevTestDiagnosticsPage`** (`src/diagnostics-page.tsx`) — a second Settings page,
+  so Settings → Plugins shows **two** nested options under this plugin. Reports
+  `useProject` / `useTheme` and counts checks through `useStoredState`.
 - One `defineCommand` greeting (`pragma-dev-test-plugin.hello`).
 - One `defineCommand` web view opener (`pragma-dev-test-plugin.report.open`).
 
@@ -58,6 +61,8 @@ SDK event async generator). Cover:
   host bridge action with the `defineWebView` handle and dedupe metadata.
 - `src/settings-page.test.tsx` — Settings form forwards all board-draft fields and
   reports the created card through `useNotify`.
+- `src/diagnostics-page.test.tsx` — host state renders and a recorded check
+  increments the counter and notifies.
 
 ## Rules
 

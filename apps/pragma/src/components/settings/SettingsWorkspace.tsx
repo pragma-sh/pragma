@@ -4,11 +4,13 @@ import {
   ArrowLeft,
   BellRing,
   Blocks,
+  ChevronRight,
   Clock,
   Keyboard,
   LogOut,
   Palette,
   RefreshCw,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
   SquareTerminal,
@@ -292,9 +294,11 @@ export function SettingsWorkspace() {
   const latestConfig = useRef<PragmaConfig | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const worktreeId = workspace.selectedWorktree?.id ?? null;
+  // Plugin pages are nested under the Plugins list, which lists this scope's
+  // configured plugins — so only this scope's pages belong there.
   const settingsPages = usePluginSettingsPages(
     scope === "project" ? workspace.selectedProjectId : null,
-  );
+  ).filter((page) => page.record.scope === scope);
   // Project settings describe the machine that project's terminals run on,
   // which for an SSH project is not this one.
   const wslAvailable = useWslAvailable(scope === "project" ? worktreeId : null);
@@ -414,7 +418,6 @@ export function SettingsWorkspace() {
           scope={scope}
           section={section}
           setSection={setSection}
-          settingsPages={settingsPages}
           wslAvailable={wslAvailable}
         />
         <SettingsContent
@@ -427,6 +430,7 @@ export function SettingsWorkspace() {
           reload={load}
           scope={scope}
           section={section}
+          setSection={setSection}
           settingsPages={settingsPages}
           worktreeId={worktreeId}
         />
@@ -439,13 +443,11 @@ function SettingsNavigation({
   scope,
   section,
   setSection,
-  settingsPages,
   wslAvailable,
 }: {
   scope: ConfigScope;
   section: Section;
   setSection: (section: Section) => void;
-  settingsPages: ReturnType<typeof usePluginSettingsPages>;
   wslAvailable: boolean;
 }) {
   return (
@@ -487,19 +489,6 @@ function SettingsNavigation({
       >
         Agent Status
       </SettingsNavItem>
-      {settingsPages.map((page) => {
-        const PageIcon = page.contribution.icon;
-        return (
-          <SettingsNavItem
-            key={page.key}
-            active={section === pluginSection(page.key)}
-            icon={PageIcon ? <PageIcon /> : <Blocks />}
-            onClick={() => setSection(pluginSection(page.key))}
-          >
-            {page.contribution.title}
-          </SettingsNavItem>
-        );
-      })}
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
       ) : null}
@@ -566,6 +555,7 @@ function SettingsContent({
   reload,
   scope,
   section,
+  setSection,
   settingsPages,
   worktreeId,
 }: {
@@ -578,6 +568,7 @@ function SettingsContent({
   reload: () => Promise<void>;
   scope: ConfigScope;
   section: Section;
+  setSection: (section: Section) => void;
   settingsPages: ReturnType<typeof usePluginSettingsPages>;
   worktreeId: string | null;
 }) {
@@ -586,6 +577,15 @@ function SettingsContent({
     return (
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
+          <Button
+            aria-label="Back to plugins"
+            className="-ml-2 mb-4"
+            size="sm"
+            variant="ghost"
+            onClick={() => setSection("plugins")}
+          >
+            <ArrowLeft /> Plugins
+          </Button>
           <RenderPluginContribution
             pluginId={settingsPage.pluginId}
             config={settingsPage.record.config}
@@ -627,6 +627,8 @@ function SettingsContent({
             persist={persist}
             projectPath={projectPath}
             scope={scope}
+            settingsPages={settingsPages}
+            onOpenPage={(key) => setSection(pluginSection(key))}
           />
         ) : null}
         {section === "keybindings" ? (
@@ -766,19 +768,73 @@ function SettingsNavItem({
   );
 }
 
+type PluginSettingsPages = ReturnType<typeof usePluginSettingsPages>;
+
+/** One row of the Plugins list: a plugin plus the Settings pages it contributes. */
+interface PluginListEntry {
+  key: string;
+  name: string;
+  /** The configured specifier, or `null` for a plugin this scope does not list. */
+  path: string | null;
+  /** Index into `plugins`, or `null` when the row has no config entry to delete. */
+  index: number | null;
+  pages: PluginSettingsPages;
+}
+
+/**
+ * Pairs every configured plugin with the Settings pages its loaded definition
+ * contributes, so the pages render nested under their plugin instead of as
+ * their own top-level Settings sections. A record resolves to its
+ * `package.json` name, falling back to the specifier when resolution failed —
+ * match on both. Pages left over (no matching row in this scope's config) keep
+ * a row of their own so their settings stay reachable.
+ */
+function pluginListEntries(
+  plugins: PluginConfig[],
+  names: Map<string, string>,
+  settingsPages: PluginSettingsPages,
+): PluginListEntry[] {
+  const byPlugin = new Map<string, PluginSettingsPages>();
+  for (const page of settingsPages) {
+    byPlugin.set(page.pluginId, [...(byPlugin.get(page.pluginId) ?? []), page]);
+  }
+  const entries: PluginListEntry[] = plugins.map((plugin, index) => {
+    const name = names.get(plugin.path);
+    const pages = byPlugin.get(name ?? plugin.path) ?? byPlugin.get(plugin.path) ?? [];
+    if (name !== undefined) byPlugin.delete(name);
+    byPlugin.delete(plugin.path);
+    return {
+      key: pluginKey(plugins, index),
+      name: name ?? pluginNameFromPath(plugin.path),
+      path: plugin.path,
+      index,
+      pages,
+    };
+  });
+  for (const [pluginId, pages] of byPlugin) {
+    entries.push({ key: `plugin:${pluginId}`, name: pluginId, path: null, index: null, pages });
+  }
+  return entries;
+}
+
 function PluginsSection({
   config,
   persist,
   projectPath,
   scope,
+  settingsPages,
+  onOpenPage,
 }: {
   config: PragmaConfig;
   persist: PersistConfig;
   projectPath: string | null;
   scope: ConfigScope;
+  settingsPages: PluginSettingsPages;
+  onOpenPage: (key: string) => void;
 }) {
   const plugins = config.plugins ?? [];
   const names = usePluginNames(projectPath, scope);
+  const entries = pluginListEntries(plugins, names, settingsPages);
 
   async function remove(index: number): Promise<void> {
     await persist((current) => ({
@@ -790,34 +846,80 @@ function PluginsSection({
   return (
     <SettingsCard title="Loaded plugins" description={`Plugins loaded from ${scope} settings.`}>
       <div className="divide-y">
-        {plugins.length === 0 ? (
+        {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">No plugins loaded from this scope.</p>
         ) : null}
-        {plugins.map((plugin, index) => {
-          const name = names.get(plugin.path) ?? pluginNameFromPath(plugin.path);
-          return (
-            <div
-              className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
-              key={pluginKey(plugins, index)}
-            >
-              <p className="min-w-0 truncate text-sm" title={plugin.path}>
-                {name}
-              </p>
-              <IconButton
-                aria-label={`Delete plugin ${name}`}
-                className="shrink-0"
-                label="Delete plugin"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => void remove(index)}
-              >
-                <Trash2 />
-              </IconButton>
-            </div>
-          );
-        })}
+        {entries.map((entry) => (
+          <PluginListRow key={entry.key} entry={entry} onOpenPage={onOpenPage} onRemove={remove} />
+        ))}
       </div>
     </SettingsCard>
+  );
+}
+
+function PluginListRow({
+  entry,
+  onOpenPage,
+  onRemove,
+}: {
+  entry: PluginListEntry;
+  onOpenPage: (key: string) => void;
+  onRemove: (index: number) => Promise<void>;
+}) {
+  const { index, name } = entry;
+  return (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <div className="flex items-center justify-between gap-4">
+        <p className="min-w-0 truncate text-sm" title={entry.path ?? name}>
+          {name}
+        </p>
+        {index === null ? null : (
+          <IconButton
+            aria-label={`Delete plugin ${name}`}
+            className="shrink-0"
+            label="Delete plugin"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => void onRemove(index)}
+          >
+            <Trash2 />
+          </IconButton>
+        )}
+      </div>
+      {entry.pages.length === 0 ? null : (
+        <div className="mt-2 ml-1 flex flex-col gap-0.5 border-l pl-3">
+          {entry.pages.map((page) => (
+            <PluginSettingsPageItem
+              key={page.key}
+              page={page}
+              onClick={() => onOpenPage(page.key)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A plugin's Settings page, nested under its plugin in the Plugins list. */
+function PluginSettingsPageItem({
+  page,
+  onClick,
+}: {
+  page: PluginSettingsPages[number];
+  onClick: () => void;
+}) {
+  const PageIcon = page.contribution.icon;
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground [&_svg]:size-4"
+      type="button"
+      onClick={onClick}
+    >
+      {PageIcon ? <PageIcon /> : <SlidersHorizontal />}
+      <span className="min-w-0 truncate">{page.contribution.title}</span>
+      <ChevronRight className="ml-auto shrink-0 opacity-60" />
+    </button>
   );
 }
 

@@ -9,7 +9,7 @@ import { useProjectCycle } from "./use-project-cycle";
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
 
 function project(id: string): Project {
-  return { id, name: id, path: `/tmp/${id}`, orderIndex: 0, createdAt: "now" };
+  return { id, name: id, path: `/tmp/${id}`, iconEmoji: null, orderIndex: 0, createdAt: "now" };
 }
 
 function wheelEvent(deltaX: number): React.WheelEvent {

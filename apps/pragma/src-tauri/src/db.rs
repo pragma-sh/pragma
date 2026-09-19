@@ -342,9 +342,24 @@ impl Db {
             }
             conn.execute_batch("PRAGMA user_version = 16;")?;
         }
-        // v17 adds the durable host-owned whiteboard reference to client tab rows.
-        // Whiteboard contents remain in pragma-server's SQLite store.
+        // v17 adds `icon_emoji` to `projects`: the emoji the user picked for the
+        // project switcher. NULL (the default, and every pre-existing row) means
+        // "no override" — the switcher keeps falling back to a favicon found in
+        // the checkout, then to the project name's initial.
         if version < 17 {
+            let has_icon_emoji: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'icon_emoji'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_icon_emoji == 0 {
+                conn.execute_batch("ALTER TABLE projects ADD COLUMN icon_emoji TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 17;")?;
+        }
+        // v18 adds the durable host-owned whiteboard reference to client tab rows.
+        // Whiteboard contents remain in pragma-server's SQLite store.
+        if version < 18 {
             let has_whiteboard_id: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'whiteboard_id'",
                 [],
@@ -353,7 +368,7 @@ impl Db {
             if has_whiteboard_id == 0 {
                 conn.execute_batch("ALTER TABLE tabs ADD COLUMN whiteboard_id TEXT;")?;
             }
-            conn.execute_batch("PRAGMA user_version = 17;")?;
+            conn.execute_batch("PRAGMA user_version = 18;")?;
         }
         Ok(())
     }
@@ -361,7 +376,7 @@ impl Db {
     pub fn list_projects(&self) -> AppResult<Vec<Project>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, path, order_index, created_at FROM projects ORDER BY order_index, created_at",
+            "SELECT id, name, path, icon_emoji, order_index, created_at FROM projects ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([], project_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
@@ -400,11 +415,25 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, name, path, order_index, created_at FROM projects WHERE id = ?1",
+                "SELECT id, name, path, icon_emoji, order_index, created_at FROM projects WHERE id = ?1",
                 [project_id],
                 project_from_row,
             )
             .map_err(AppError::from)
+    }
+
+    /// Sets (or, with `None`, clears) the emoji shown for a project in the
+    /// project switcher.
+    pub fn set_project_icon_emoji(
+        &self,
+        project_id: &str,
+        icon_emoji: Option<&str>,
+    ) -> AppResult<()> {
+        self.0.lock()?.execute(
+            "UPDATE projects SET icon_emoji = ?1 WHERE id = ?2",
+            params![icon_emoji, project_id],
+        )?;
+        Ok(())
     }
 
     pub fn delete_project(&self, project_id: &str) -> AppResult<()> {
@@ -1259,8 +1288,9 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         id: row.get(0)?,
         name: row.get(1)?,
         path: row.get(2)?,
-        order_index: row.get::<_, i64>(3)?,
-        created_at: row.get(4)?,
+        icon_emoji: row.get(3)?,
+        order_index: row.get::<_, i64>(4)?,
+        created_at: row.get(5)?,
     })
 }
 
@@ -1342,6 +1372,35 @@ fn shell_to_columns(shell: Option<&ShellProfile>) -> (Option<&'static str>, Opti
 mod tests {
     use super::Db;
     use pragma_constants::TabKind;
+
+    #[test]
+    fn sets_and_clears_a_project_icon_emoji() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/icon-repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        assert_eq!(project.icon_emoji, None);
+
+        db.set_project_icon_emoji(&project.id, Some("\u{1f680}"))
+            .expect("emoji should save");
+        let stored = db.project(&project.id).expect("project should read");
+        assert_eq!(stored.icon_emoji.as_deref(), Some("\u{1f680}"));
+        let listed = db.list_projects().expect("projects should list");
+        assert_eq!(listed[0].icon_emoji.as_deref(), Some("\u{1f680}"));
+
+        db.set_project_icon_emoji(&project.id, None)
+            .expect("emoji should clear");
+        assert_eq!(
+            db.project(&project.id)
+                .expect("project should read")
+                .icon_emoji,
+            None
+        );
+    }
 
     #[test]
     fn migrates_and_cruds_projects_worktrees_and_tabs() {

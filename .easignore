@@ -57,3 +57,13 @@ apps/pragma/src-tauri/icons-dev/
 .github/
 .rwx/
 .husky/
+
+# Local native prebuilds. `expo prebuild` / `expo run:ios` generate these, and they
+# hold absolute paths from the machine that ran them (`.xcode.env.local`, the Pods
+# xcconfigs). They are ignored by apps/pragma-go/.gitignore, but a root .easignore
+# appears to suppress nested .gitignore files too, so they must be named here: build 11
+# uploaded a 454 MB archive and died in `Run fastlane` with
+# `…/node_modules/hermes-compiler/hermesc/osx-bin/hermesc: No such file or directory`
+# — the worker running the uploader's local hermesc path. EAS prebuilds on its own.
+apps/pragma-go/ios/
+apps/pragma-go/android/

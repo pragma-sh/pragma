@@ -59,6 +59,13 @@ const EVENT_STREAM_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// socket fd, so response, event, and brokered-control writes are all covered.
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often the dropped-files sweep runs after its initial startup pass.
+/// Files dropped onto a terminal accumulate under the host's temp directory
+/// (see `pragma_core::fs::save_dropped_file`) with nothing else to remove
+/// them, so an hourly sweep against `terminalDefaults.droppedFilesMaxAgeMs`
+/// bounds both the disk space and how long a dropped file's contents survive.
+const DROPPED_FILES_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
+
 const DETACH_FLAG: &str = "--detach";
 
 /// Runs this process as a stdio relay to an already-running server instead of
@@ -141,6 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let core = Arc::new(Core::new(&paths.dir)?);
     start_watcher_reconciler(&registry);
+    start_dropped_files_sweeper();
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
         // must not take the whole process down with it: every other
@@ -179,6 +187,17 @@ fn start_watcher_reconciler(registry: &Arc<Registry>) {
     thread::spawn(move || loop {
         registry.reconcile_watchers();
         thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
+}
+
+/// Sweeps stale dropped-file directories at startup (covering whatever a prior
+/// run or crash left behind) and again on [`DROPPED_FILES_SWEEP_INTERVAL`], so
+/// a long-lived server also cleans up drops from sessions that have since
+/// ended.
+fn start_dropped_files_sweeper() {
+    thread::spawn(|| loop {
+        pragma_core::fs::cleanup_dropped_files(&std::env::temp_dir());
+        thread::sleep(DROPPED_FILES_SWEEP_INTERVAL);
     });
 }
 

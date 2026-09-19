@@ -116,6 +116,29 @@ function gitHubValue(overrides: Partial<ReturnType<typeof useGitHub>> = {}) {
   };
 }
 
+/** Registers a loaded global plugin that contributes one Settings page. */
+function loadSettingsPlugin(pluginId: string): void {
+  const definition = {
+    name: "Plugin Settings",
+    ui: {
+      settingsPages: [
+        { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
+      ],
+    },
+    __apiVersion: "0.4.0",
+  } as PluginDefinition;
+  setPluginsForScope("global", null, [
+    {
+      pluginId,
+      version: "1.0.0",
+      scope: "global",
+      status: "loaded",
+      config: undefined,
+      definition,
+    },
+  ]);
+}
+
 describe("SettingsWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -189,26 +212,25 @@ describe("SettingsWorkspace", () => {
     expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
   });
 
-  it("renders plugin settings pages from the Settings navigation", async () => {
-    const definition = {
-      name: "Plugin Settings",
-      ui: {
-        settingsPages: [
-          { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
-        ],
-      },
-      __apiVersion: "0.4.0",
-    } as PluginDefinition;
-    setPluginsForScope("global", null, [
-      {
-        pluginId: "plugin-settings",
-        version: "1.0.0",
-        scope: "global",
-        status: "loaded",
-        config: undefined,
-        definition,
-      },
-    ]);
+  it("nests plugin settings pages under their plugin in the Plugins list", async () => {
+    loadSettingsPlugin("@pragma/plugin-one");
+
+    render(<SettingsWorkspace />);
+    await screen.findByText("@pragma/plugin-one");
+    // The pages are options inside Plugins, not their own navigation section.
+    expect(screen.queryByRole("button", { name: "Keybindings" })).toBeInTheDocument();
+    const nested = screen.getByRole("button", { name: "Plugin Account" });
+    expect(nested.closest("aside")).toBeNull();
+
+    fireEvent.click(nested);
+    expect(screen.getByText("Account settings")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to plugins" }));
+    expect(screen.queryByText("Account settings")).not.toBeInTheDocument();
+  });
+
+  it("keeps a settings page reachable when its plugin has no row in this scope", async () => {
+    loadSettingsPlugin("plugin-settings");
 
     render(<SettingsWorkspace />);
     fireEvent.click(await screen.findByRole("button", { name: "Plugin Account" }));
