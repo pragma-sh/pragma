@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/github-copilot-cli-plugin",
-  "version": "0.1.0-alpha.0",
+  "version": "1.0.0",
   "description": "GitHub Copilot CLI plugin that reports agent status and usage to Pragma.",
   "license": "AGPL-3.0-only",
   "files": [
