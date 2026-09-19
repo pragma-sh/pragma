@@ -3863,6 +3863,7 @@
         "scrollTerminalBottom",
         "openCommandPalette",
         "openCommandMode",
+        "openSettings",
         "switchToWorkspace1",
         "switchToWorkspace2",
         "switchToWorkspace3",
@@ -3935,6 +3936,9 @@
           "$ref": "#/definitions/PlatformChord"
         },
         "openCommandMode": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "openSettings": {
           "$ref": "#/definitions/PlatformChord"
         },
         "switchToWorkspace1": {
