@@ -47,7 +47,7 @@ function StepRow({ step }: { step: WorktreeCreationStep }) {
  * this screen back.
  */
 export function WorktreeCreationScreen() {
-  const { creation, dismiss, retry } = useWorktreeCreation();
+  const { creation, dismiss, retry, tryAgain } = useWorktreeCreation();
   if (!creation) {
     return null;
   }
@@ -74,10 +74,18 @@ export function WorktreeCreationScreen() {
             <p className="text-sm text-destructive">{creation.error}</p>
             <div className="flex justify-center gap-2">
               {creation.retry ? (
+                // The worktree already exists — this only resumes opening it.
+                // Re-running the dialog here would create a second one.
                 <Button size="sm" onClick={retry}>
                   Retry
                 </Button>
-              ) : null}
+              ) : (
+                // Creation itself failed, so nothing exists yet: reopen the
+                // dialog with the same input for the user to fix.
+                <Button size="sm" onClick={tryAgain}>
+                  Try again
+                </Button>
+              )}
               <Button size="sm" variant="secondary" onClick={dismiss}>
                 Dismiss
               </Button>

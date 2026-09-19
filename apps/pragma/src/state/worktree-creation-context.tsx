@@ -48,6 +48,8 @@ interface WorktreeCreationRequest {
 /** Live progress for the full-frame creating-worktree screen. */
 interface WorktreeCreationState {
   projectId: string;
+  /** The request this run was started from, so a failed one can be edited. */
+  request: WorktreeCreationRequest;
   /** Worktree the pending one hangs under, so the sidebar can place its row. */
   parentWorktreeId: string;
   branch: string;
@@ -66,6 +68,9 @@ interface WorktreeCreationState {
 interface WorktreeCreationContextValue {
   /** Non-null while a creation is running or has failed. */
   creation: WorktreeCreationState | null;
+  /** A failed run's request, published once so the create dialog can reopen
+   *  pre-filled with it. Consumers clear it with {@link clearDraft}. */
+  draft: WorktreeCreationRequest | null;
   /** Re-opens the progress screen (from the optimistic sidebar row). */
   viewCreation: () => void;
   /** Starts a creation in the background — the caller closes its dialog immediately. */
@@ -74,6 +79,11 @@ interface WorktreeCreationContextValue {
   dismiss: () => void;
   /** Retries opening a worktree after terminal/session launch fails. */
   retry: () => void;
+  /** Clears a failed run and republishes its request as a {@link draft}, so the
+   *  user can fix the input in the create dialog and submit again. */
+  tryAgain: () => void;
+  /** Consumes the published draft. */
+  clearDraft: () => void;
 }
 
 const STEP_LABELS: Record<WorktreeCreationStepId, string> = {
@@ -139,6 +149,7 @@ async function runWorktreeCreation(
   viewingRef.current = true;
   setCreation({
     projectId: request.projectId,
+    request,
     parentWorktreeId: request.parentWorktreeId,
     branch: request.branch,
     label: request.title?.trim() || request.branch,
@@ -192,6 +203,58 @@ async function runWorktreeCreation(
   } finally {
     unlisten?.();
   }
+}
+
+/**
+ * The ways out of a failed run: dismiss it, resume opening a worktree that was
+ * created (`retry`), or hand the input back to the dialog to be fixed
+ * (`tryAgain`). Kept out of the provider so it stays a thin set of callbacks.
+ */
+function useFailureRecovery({
+  creation,
+  setCreation,
+  runningRef,
+  viewingRef,
+  selectionRef,
+  openCreatedWorktree,
+}: {
+  creation: WorktreeCreationState | null;
+  setCreation: RunCreationDeps["setCreation"];
+  runningRef: { current: boolean };
+  viewingRef: { current: boolean };
+  selectionRef: { current: string };
+  openCreatedWorktree: RunCreationDeps["openCreatedWorktree"];
+}): Pick<WorktreeCreationContextValue, "draft" | "dismiss" | "retry" | "tryAgain" | "clearDraft"> {
+  const [draft, setDraft] = useState<WorktreeCreationRequest | null>(null);
+  const dismiss = useCallback(() => setCreation(null), [setCreation]);
+  const retry = useCallback(() => {
+    if (runningRef.current || !creation?.retry) return;
+    runningRef.current = true;
+    viewingRef.current = true;
+    const { request, worktree } = creation.retry;
+    setCreation((current) =>
+      current
+        ? { ...current, error: null, viewing: true, viewedFrom: selectionRef.current }
+        : current,
+    );
+    void openCreatedWorktree(request, worktree, true)
+      .then(() => setCreation(null))
+      .catch((cause: unknown) => {
+        setCreation((current) => (current ? { ...current, error: errorMessage(cause) } : current));
+      })
+      .finally(() => {
+        runningRef.current = false;
+      });
+  }, [creation, openCreatedWorktree, runningRef, selectionRef, setCreation, viewingRef]);
+  const tryAgain = useCallback(() => {
+    if (runningRef.current || !creation) return;
+    // The screen goes with it: the dialog owns the flow from here.
+    viewingRef.current = false;
+    setDraft(creation.request);
+    setCreation(null);
+  }, [creation, runningRef, setCreation, viewingRef]);
+  const clearDraft = useCallback(() => setDraft(null), []);
+  return { draft, dismiss, retry, tryAgain, clearDraft };
 }
 
 /**
@@ -284,29 +347,17 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
       current ? { ...current, viewing: true, viewedFrom: selectionRef.current } : current,
     );
   }, []);
-  const dismiss = useCallback(() => setCreation(null), []);
-  const retry = useCallback(() => {
-    if (runningRef.current || !creation?.retry) return;
-    runningRef.current = true;
-    viewingRef.current = true;
-    const { request, worktree } = creation.retry;
-    setCreation((current) =>
-      current
-        ? { ...current, error: null, viewing: true, viewedFrom: selectionRef.current }
-        : current,
-    );
-    void openCreatedWorktree(request, worktree, true)
-      .then(() => setCreation(null))
-      .catch((cause: unknown) => {
-        setCreation((current) => (current ? { ...current, error: errorMessage(cause) } : current));
-      })
-      .finally(() => {
-        runningRef.current = false;
-      });
-  }, [creation, openCreatedWorktree]);
+  const { draft, dismiss, retry, tryAgain, clearDraft } = useFailureRecovery({
+    creation,
+    setCreation,
+    runningRef,
+    viewingRef,
+    selectionRef,
+    openCreatedWorktree,
+  });
   const value = useMemo(
-    () => ({ creation, startCreation, viewCreation, dismiss, retry }),
-    [creation, startCreation, viewCreation, dismiss, retry],
+    () => ({ creation, draft, startCreation, viewCreation, dismiss, retry, tryAgain, clearDraft }),
+    [creation, draft, startCreation, viewCreation, dismiss, retry, tryAgain, clearDraft],
   );
 
   return <WorktreeCreationContext value={value}>{children}</WorktreeCreationContext>;
