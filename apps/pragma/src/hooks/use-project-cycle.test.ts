@@ -1,4 +1,4 @@
-import type { Project } from "@pragma/constants";
+import type { Project } from "@pragma-sh/constants";
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

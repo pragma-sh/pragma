@@ -3,7 +3,7 @@ import type {
   Keybindings,
   KeybindingsConfig,
   PlatformChord,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 export type KeybindingAction = keyof Keybindings;
 export type KeybindingPlatform = "mac" | "linux";

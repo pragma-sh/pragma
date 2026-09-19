@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import "@xterm/xterm/css/xterm.css";
 
 import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";

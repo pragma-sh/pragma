@@ -53,7 +53,7 @@ report() {
 
 # Reports a coarse rich message. Hook payloads are intentionally not parsed
 # beyond the prompt extraction below; this keeps hooks fail-open and portable.
-# AgentMessage.ts is milliseconds since Unix epoch (see @pragma/constants).
+# AgentMessage.ts is milliseconds since Unix epoch (see @pragma-sh/constants).
 # `date +%s` is seconds -- multiply so chat clients that stamp local input with
 # Date.now() don't sort every agent bubble above the user's messages.
 message_ts_ms() {

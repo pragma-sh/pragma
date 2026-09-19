@@ -5,7 +5,7 @@ import {
   type ScratchpadComment,
   type ScratchpadViewerCommand,
   type ScratchpadViewerMessage,
-} from "@pragma/scratchpad-viewer";
+} from "@pragma-sh/scratchpad-viewer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
@@ -43,8 +43,8 @@ export interface ScratchpadWebViewProps {
 /**
  * Renders one scratchpad read-only in a web view.
  *
- * The document is built by `@pragma/scratchpad-viewer` and handed over as a
- * string: it evaluates the MDX with the real `@pragma/scratchpad` components, so
+ * The document is built by `@pragma-sh/scratchpad-viewer` and handed over as a
+ * string: it evaluates the MDX with the real `@pragma-sh/scratchpad` components, so
  * an interactive block a desktop user would see is the same block here. The
  * page is rebuilt only when its source or palette changes — comments and
  * comment mode are pushed in as commands, because rebuilding the HTML remounts

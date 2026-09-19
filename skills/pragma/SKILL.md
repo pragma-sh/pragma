@@ -1,6 +1,6 @@
 ---
 name: pragma
-description: Use when someone wants an agent to operate Pragma, automate a Pragma workspace, build a Pragma plugin, write a Pragma automation, integrate a coding-agent tool such as OpenCode, Claude Code, Cursor, or Codex so it reports status into Pragma and appears in its launcher, use pragma-cli or @pragma/sdk, or understand user-facing Pragma concepts such as projects, worktrees, tabs, agents, scratchpads, whiteboards, and fanouts.
+description: Use when someone wants an agent to operate Pragma, automate a Pragma workspace, build a Pragma plugin, write a Pragma automation, integrate a coding-agent tool such as OpenCode, Claude Code, Cursor, or Codex so it reports status into Pragma and appears in its launcher, use pragma-cli or @pragma-sh/sdk, or understand user-facing Pragma concepts such as projects, worktrees, tabs, agents, scratchpads, whiteboards, and fanouts.
 ---
 
 # Use Pragma
@@ -32,10 +32,10 @@ Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate na
 | Goal                                                                        | Surface                                     | Reference                    |
 | --------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------- |
 | Control worktrees, tabs, agents, browser, or fanout                         | `pragma-cli`                                | `references/cli.md`          |
-| Build typed JavaScript/TypeScript integration                               | `@pragma/sdk`                               | `references/sdk.md`          |
-| Add Pragma UI, commands, launchable agents, themes                          | `@pragma/plugin`                            | `references/plugin-api.md`   |
-| Run scheduled or event-driven host tasks                                    | `@pragma/automations`                       | `references/automations.md`  |
-| Make coding-agent tool report status and appear in launcher                 | `@pragma/plugin` + `pragma-cli`             | `references/agent-plugin.md` |
+| Build typed JavaScript/TypeScript integration                               | `@pragma-sh/sdk`                            | `references/sdk.md`          |
+| Add Pragma UI, commands, launchable agents, themes                          | `@pragma-sh/plugin`                         | `references/plugin-api.md`   |
+| Run scheduled or event-driven host tasks                                    | `@pragma-sh/automations`                    | `references/automations.md`  |
+| Make coding-agent tool report status and appear in launcher                 | `@pragma-sh/plugin` + `pragma-cli`          | `references/agent-plugin.md` |
 | Author rich, interactive agent output (plan, comparison, review, dashboard) | Scratchpad (`pragma-cli scratchpad create`) | `references/scratchpads.md`  |
 | Create, search, edit, render, or embed a visual canvas                      | `pragma-cli whiteboard`                     | `references/whiteboards.md`  |
 | Make repository-internal architecture change                                | `pragma-architecture` skill                 | Not this skill.              |

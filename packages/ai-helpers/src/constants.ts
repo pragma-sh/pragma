@@ -3,7 +3,7 @@
  *
  * These are TypeScript-only because model selection runs entirely inside the
  * pi (JS) sidecar — they never cross the TS/Rust boundary, so they live here
- * rather than in `@pragma/constants`.
+ * rather than in `@pragma-sh/constants`.
  *
  * **Rankings are relative, never absolute.** Every percentile cut below is
  * taken over the user's own authenticated pool, so a user with one Anthropic

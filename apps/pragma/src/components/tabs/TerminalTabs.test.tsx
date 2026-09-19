@@ -1,4 +1,4 @@
-import type { ShellProfile, Tab } from "@pragma/constants";
+import type { ShellProfile, Tab } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

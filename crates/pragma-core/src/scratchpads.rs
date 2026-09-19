@@ -81,7 +81,7 @@ pub fn list(root: &str) -> CoreResult<Vec<ScratchpadFile>> {
 
 /// Path of a scratchpad's sibling comment thread.
 ///
-/// The name is part of the `@pragma/scratchpad-contract` file contract; keep
+/// The name is part of the `@pragma-sh/scratchpad-contract` file contract; keep
 /// it in step with `scratchpadCommentsPath` there.
 #[must_use]
 pub fn comments_path(file_path: &str) -> String {

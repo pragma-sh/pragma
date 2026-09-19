@@ -1,4 +1,4 @@
-import type { PluginContext } from "@pragma/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { describe, expect, it, vi } from "vitest";
 
 import opencodeAgentPlugin from "./pragma-plugin";

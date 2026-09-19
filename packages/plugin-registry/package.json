@@ -1,5 +1,5 @@
 {
-  "name": "@pragma/plugin-registry",
+  "name": "@pragma-sh/plugin-registry",
   "version": "0.1.0-alpha.0",
   "private": true,
   "description": "Official Pragma plugin list, locked manifests, and registry tooling.",

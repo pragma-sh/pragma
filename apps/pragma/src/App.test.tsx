@@ -59,7 +59,7 @@ vi.mock("@/lib/terminal-manager", () => ({
   },
 }));
 
-// `@pragma/plugin` is a compile-time stub that fails loudly without
+// `@pragma-sh/plugin` is a compile-time stub that fails loudly without
 // `globalThis.__PRAGMA__` installed. The Tauri mocks above are hoisted to
 // the top of the file, so the bridge's transitive Tauri imports resolve
 // to the stubs and the bridge installs cleanly.

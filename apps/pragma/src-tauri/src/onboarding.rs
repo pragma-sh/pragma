@@ -81,7 +81,7 @@ fn extract(dir: &Dir<'_>, destination: &Path) -> AppResult<()> {
 
 /// Installs the bundled Pragma skill into the named global skill directories.
 ///
-/// `targets` are `onboarding.skill.targets[].id` values from `@pragma/constants`;
+/// `targets` are `onboarding.skill.targets[].id` values from `@pragma-sh/constants`;
 /// each resolves to a directory relative to the user's home. Returns the absolute
 /// path written for each target, in the order given. Re-installing overwrites the
 /// shipped files in place, so an existing install is upgraded rather than doubled.

@@ -1,4 +1,4 @@
-import type { AgentIcon as AgentIconRef } from "@pragma/sdk";
+import type { AgentIcon as AgentIconRef } from "@pragma-sh/sdk";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Image, View } from "react-native";
 import { SvgCss } from "react-native-svg/css";

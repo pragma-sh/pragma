@@ -3,7 +3,7 @@
  * Two-stage build.
  *
  * 1. esbuild bundles `src/runtime/main.tsx` — React, the MDX compiler, and the
- *    `@pragma/scratchpad` components — into one IIFE, which is written out as a
+ *    `@pragma-sh/scratchpad` components — into one IIFE, which is written out as a
  *    TypeScript module exporting it as a string. The document this package
  *    produces has no network and no module loader, so the runtime has to arrive
  *    inline; a string constant is what lets a native client ship it with no

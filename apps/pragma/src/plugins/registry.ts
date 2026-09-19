@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import type { PluginDefinition } from "@pragma/plugin";
+import type { PluginDefinition } from "@pragma-sh/plugin";
 
 /** Where a plugin was declared. */
 export type PluginScope = "global" | "project";

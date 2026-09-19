@@ -14,7 +14,7 @@ The **desktop app is a controller, not a host**. It renders UI and brokers contr
 decisions, but a persistent **`pragma-server`** owns the terminals, scrollback, agent
 status, and sidecars, listening on an owner-only Unix socket. A small HTTP
 **`pragma-gateway`** fronts the same server for remote clients — the mobile app, the
-web build, and `@pragma/sdk`. **`pragma-cli`** is installed into agent terminals to speak
+web build, and `@pragma-sh/sdk`. **`pragma-cli`** is installed into agent terminals to speak
 to the socket directly. The desktop can therefore be closed, restarted, or updated while
 sessions keep running.
 

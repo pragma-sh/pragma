@@ -25,7 +25,7 @@ import {
   type GitHubSettings,
   type TerminalSettings,
   type OtherSettings,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { AGENT_COMMAND_SUBMITTED_EVENT } from "@/lib/agent-plugin-prompt";
 

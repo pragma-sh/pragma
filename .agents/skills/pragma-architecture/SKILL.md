@@ -27,20 +27,20 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `crates/pragma-protocol/` — shared daemon wire frames/framing used by daemon, Tauri app, and CLI.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
-- `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
-- `packages/scratchpad/` — `@pragma/scratchpad`, browser-safe interaction/runtime APIs and
+- `packages/sdk/` — `@pragma-sh/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
+- `packages/scratchpad/` — `@pragma-sh/scratchpad`, browser-safe interaction/runtime APIs and
   UI components for agent-authored MDX scratchpads.
-- `packages/plugin/` — `@pragma/plugin`, the public TS API/runtime stub for pure Pragma
+- `packages/plugin/` — `@pragma-sh/plugin`, the public TS API/runtime stub for pure Pragma
   plugins loaded from `.pragma/config.json`.
-- `packages/automations/` — `@pragma/automations`, the authoring API plus
+- `packages/automations/` — `@pragma-sh/automations`, the authoring API plus
   `pragma-automations` Bun sidecar supervised by `pragma-server`.
 - `packages/create-pragma-plugin/` — `create-pragma-plugin` scaffolder CLI for
   single-bundle plugin projects.
-- `packages/github-helpers/` — `@pragma/github-helpers`, the `pragma-github` host-side sidecar scaffold.
-- `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
+- `packages/github-helpers/` — `@pragma-sh/github-helpers`, the `pragma-github` host-side sidecar scaffold.
+- `packages/ai-helpers/` — `@pragma-sh/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma-sh/opencode-plugin`, an ESM opencode plugin that reports
-  status via `@pragma/sdk`. Launchable Pragma agents are `defineAgent` plugin contributions,
+  status via `@pragma-sh/sdk`. Launchable Pragma agents are `defineAgent` plugin contributions,
   not bundled `pragma/agents` JSON.
   Pragma does **not** bundle, install, or register the plugin — you register its built
   `dist/index.mjs` absolute path in opencode's own `plugin` config array yourself (opencode does
@@ -54,10 +54,10 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Value used by BOTH frontend and backend          | `packages/constants` (`values.json`)                              |
 | Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                                            |
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                                        |
-| Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                                    |
-| Scratchpad runtime or first-party MDX component  | `packages/scratchpad` (`@pragma/scratchpad`)                      |
-| Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                              |
-| Automation authoring API / host sidecar          | `packages/automations` (`@pragma/automations`)                    |
+| Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma-sh/sdk`)                                 |
+| Scratchpad runtime or first-party MDX component  | `packages/scratchpad` (`@pragma-sh/scratchpad`)                   |
+| Public Pragma plugin authoring API               | `packages/plugin` (`@pragma-sh/plugin`)                           |
+| Automation authoring API / host sidecar          | `packages/automations` (`@pragma-sh/automations`)                 |
 | Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                                   |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)                       |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                                        |
@@ -83,7 +83,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 2. **Extract on the second use.** Duplicated logic moves to `src/lib/` or a package.
 3. **Create packages freely.** Small single-purpose packages > sprawling apps. If it's
    shared or could be, give it a `packages/*` home.
-4. **No magic values across the boundary.** Put them in `@pragma/constants`.
+4. **No magic values across the boundary.** Put them in `@pragma-sh/constants`.
 5. **Never route terminal output through React state.** Workspace state tracks metadata only.
 6. **Agent status is runtime-only.** Daemon snapshots live in memory; frontend status uses `useSyncExternalStore`; pins use localStorage; no SQLite migration.
 7. **Agent model discovery parsing belongs to plugins.** Plugin agents provide static models or

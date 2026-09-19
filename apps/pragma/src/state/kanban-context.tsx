@@ -17,7 +17,7 @@ import type {
   KanbanCompletedAction,
   KanbanPromptCard,
   Worktree,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { startBackgroundAgentSession } from "@/lib/agent-launch";

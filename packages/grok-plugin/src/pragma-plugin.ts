@@ -5,8 +5,8 @@ import {
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { asRecord, asText, readGrokAcp } from "./acp";
 import { loadGrokUsageLimits, PRIMARY_LIMIT_ID } from "./usage-limits";

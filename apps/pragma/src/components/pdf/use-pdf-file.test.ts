@@ -1,5 +1,5 @@
-import type { FileChange, FileChunk, Tab } from "@pragma/constants";
-import { constants } from "@pragma/constants";
+import type { FileChange, FileChunk, Tab } from "@pragma-sh/constants";
+import { constants } from "@pragma-sh/constants";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

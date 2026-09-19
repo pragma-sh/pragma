@@ -6,7 +6,7 @@ import type {
   ChangedFile,
   WorktreeChanges,
   WorktreeCommit,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 import { ArrowDown, ArrowUp, Minus, Plus, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 

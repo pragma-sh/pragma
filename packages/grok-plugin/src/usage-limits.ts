@@ -1,4 +1,4 @@
-import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
+import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 
 import { asNumber, asRecord, asText, readGrokAcp } from "./acp";
 

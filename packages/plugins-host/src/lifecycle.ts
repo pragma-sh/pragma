@@ -1,8 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { PluginContext } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { PluginContext } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import type { ResolvedPlugin } from "./catalog";
 

@@ -43,7 +43,7 @@ export type {
   WhiteboardIdInput,
   WhiteboardListInput,
   WhiteboardViewResult,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
 export { HealthClient, type GatewayHealth } from "./health-client";

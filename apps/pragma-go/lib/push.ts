@@ -1,4 +1,4 @@
-import { PragmaGatewayError, type PragmaClient } from "@pragma/sdk";
+import { PragmaGatewayError, type PragmaClient } from "@pragma-sh/sdk";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "./secret-store";

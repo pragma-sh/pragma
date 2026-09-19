@@ -28,7 +28,7 @@ process therefore follows persistent server lifetime, not Tauri client lifetime.
 
 ## Plugin catalog host
 
-`plugins_host.rs` supervises the `pragma-plugins` sidecar (`@pragma/plugins-host`),
+`plugins_host.rs` supervises the `pragma-plugins` sidecar (`@pragma-sh/plugins-host`),
 mirroring the `automations` supervisor: a lazily respawned child with a stdout reader
 thread. It caches the last `catalog` event plus the hash → asset map; a sidecar crash
 never blanks the catalog — a respawn re-runs `load` and the cache holds until a fresh
@@ -172,7 +172,7 @@ protocol to report back.
 
 ## Socket And Access Control
 
-- The socket filename comes from `@pragma/constants` (`daemon.socketFile`, still
+- The socket filename comes from `@pragma-sh/constants` (`daemon.socketFile`, still
   `daemon.sock`) so SSH `direct-streamlocal` forwards
   the same path.
 - The socket is restricted to its owner by `pragma_platform::ipc::bind` — `0600` on

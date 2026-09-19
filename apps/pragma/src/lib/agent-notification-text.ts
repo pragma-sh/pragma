@@ -1,4 +1,4 @@
-import { constants, type AgentReportPayload } from "@pragma/constants";
+import { constants, type AgentReportPayload } from "@pragma-sh/constants";
 
 /**
  * Where an agent report came from, in names a person recognises. Every field is

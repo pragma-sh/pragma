@@ -6,11 +6,11 @@
 // raises the Pragma toast / mobile answer UI), and this watcher writes the
 // matching keystrokes.
 //
-// Type-only imports keep this module free of the `@pragma/plugin` runtime
+// Type-only imports keep this module free of the `@pragma-sh/plugin` runtime
 // barrel so plugin watcher bundles stay lean.
-import type { AgentStreamEvent } from "@pragma/sdk";
+import type { AgentStreamEvent } from "@pragma-sh/sdk";
 
-import type { WatcherContext, WatcherDefinition } from "@pragma/plugin";
+import type { WatcherContext, WatcherDefinition } from "@pragma-sh/plugin";
 
 /** Per-plugin config controlling which keystrokes answer the agent's prompts. */
 export interface TuiWatcherConfig {

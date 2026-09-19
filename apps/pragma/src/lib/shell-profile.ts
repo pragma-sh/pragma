@@ -3,7 +3,7 @@ import {
   type ShellProfile,
   type TerminalSettings,
   type WslDistro,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import type { ShellQuoteStyle } from "@/lib/terminal-drop";
 import { readConfig } from "@/lib/tauri";

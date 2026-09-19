@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition, ThemeDefinition } from "@pragma/plugin";
+import type { PluginDefinition, ThemeDefinition } from "@pragma-sh/plugin";
 
 import { ThemeSection } from "./ThemeSection";
 import { writeTheme } from "@/lib/tauri";

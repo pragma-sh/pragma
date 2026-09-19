@@ -1,6 +1,6 @@
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { Button } from "@/components/ui/button";

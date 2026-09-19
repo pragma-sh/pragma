@@ -12,7 +12,7 @@ covers the general plugin API and does not define status semantics.
 Companion references:
 
 - `plugin-api.md`: `definePlugin` contributions, plugin context, hooks, bundling rules.
-- `sdk.md`: typed `@pragma/sdk` client and reporting helpers.
+- `sdk.md`: typed `@pragma-sh/sdk` client and reporting helpers.
 - `cli.md`: general `pragma-cli` surface.
 - `agent-plugin-cli.md`: exact agent CLI commands and flags.
 - `agent-plugin-patterns.md`: abort, sub-agent, watcher, and usage-limit patterns.
@@ -169,10 +169,10 @@ Model discovery rules:
 
 Attach `createTuiWatcher`:
 
-Use `@pragma/watcher-kit` for basic agent prompting operations: interjections, command
+Use `@pragma-sh/watcher-kit` for basic agent prompting operations: interjections, command
 decisions, question answers, and prompt submit timing. Do not reimplement its connection,
 replay, request-id dedupe, or TUI-key logic in each extension. Inside the Pragma monorepo,
-install it in the extension package as `"@pragma/watcher-kit": "workspace:*"`; external
+install it in the extension package as `"@pragma-sh/watcher-kit": "workspace:*"`; external
 plugins install the published package normally.
 
 - `handleDecisions: true` when host lacks a decision-returning hook (OpenCode).

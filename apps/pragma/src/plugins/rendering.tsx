@@ -9,7 +9,7 @@ import type {
   SidebarTabDefinition,
   TopperItemDefinition,
   UsageLimitProviderDefinition,
-} from "@pragma/plugin";
+} from "@pragma-sh/plugin";
 import {
   PluginBoundary,
   notifyFromPlugin,

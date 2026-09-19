@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import { PdfDocument } from "@/components/pdf/PdfDocument";
 import { PdfStatus } from "@/components/pdf/PdfStatus";

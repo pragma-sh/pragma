@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import { formatBytes, useBinaryFile, type BinaryFileState } from "@/lib/binary-file";
 

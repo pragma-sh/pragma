@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { WslDistroList } from "@pragma/constants";
+import type { WslDistroList } from "@pragma-sh/constants";
 
 import { listWslDistros } from "@/lib/tauri";
 

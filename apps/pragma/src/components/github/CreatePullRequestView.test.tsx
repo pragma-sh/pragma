@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 
-import type { BranchSyncStatus, GitHubRepoRef, WorktreeChanges } from "@pragma/constants";
+import type { BranchSyncStatus, GitHubRepoRef, WorktreeChanges } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import type { AgentMessage, AgentReportPayload, AgentStatus } from "@pragma/constants";
+import type { AgentMessage, AgentReportPayload, AgentStatus } from "@pragma-sh/constants";
 
 type AgentMap = Map<string, AgentStatus>;
 type TabMap = Map<string, AgentMap>;

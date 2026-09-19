@@ -12,8 +12,8 @@ bun packages/create-pragma-plugin/dist/cli.js my-plugin \
 
 Capabilities: `ui` (sidebar tab), `commands`, `agents`. The generator produces a
 self-contained Vite project: a single ESM bundle at `./dist/index.js` (`main` points
-at it), React aliased to `@pragma/plugin/react` / `@pragma/plugin/react-dom` /
-`@pragma/plugin/jsx-runtime`.
+at it), React aliased to `@pragma-sh/plugin/react` / `@pragma-sh/plugin/react-dom` /
+`@pragma-sh/plugin/jsx-runtime`.
 
 ```sh
 cd my-plugin
@@ -21,7 +21,7 @@ bun install
 bun run build
 ```
 
-`@pragma/…` is a reserved package scope — rename your plugin before publishing.
+`@pragma-sh/…` is a reserved package scope — rename your plugin before publishing.
 
 ## Register
 
@@ -61,5 +61,5 @@ The manifest is read **without executing your code**.
 
 `definePlugin` stamps the compiled `PLUGIN_API_VERSION` into the definition; the host
 checks compatibility (semver) before importing your bundle. Regenerating against an
-updated `@pragma/plugin` picks up the new stamp — a mismatching bundle is reported, not
+updated `@pragma-sh/plugin` picks up the new stamp — a mismatching bundle is reported, not
 loaded.

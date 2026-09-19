@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 import { rankEditorWorktrees } from "./command-mode-ranking";
 

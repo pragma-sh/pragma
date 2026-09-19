@@ -7,7 +7,7 @@ import {
   reportStarted,
   reportStopped,
   type AgentMessage,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 
 import { PiLifecycleReporter, type PiReporter } from "./reporter";
 

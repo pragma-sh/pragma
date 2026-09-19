@@ -1,5 +1,5 @@
-import type { GitHubRepoRef } from "@pragma/constants";
-import { constants } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
+import { constants } from "@pragma-sh/constants";
 import { Octokit } from "octokit";
 
 import {

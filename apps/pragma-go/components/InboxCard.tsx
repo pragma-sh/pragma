@@ -10,7 +10,7 @@ import { hapticImpact, hapticSelection, hapticSuccess, hapticWarning } from "@/l
 import type { InboxItem } from "@/lib/types";
 import { useThemeColors } from "@/lib/theme";
 import { useCatalogAgent } from "@/lib/use-catalog";
-import type { QuestionOption } from "@pragma/constants";
+import type { QuestionOption } from "@pragma-sh/constants";
 import { AgentIcon } from "./AgentIcon";
 import { IconSymbol } from "./IconSymbol";
 import { RequestTypeBadge } from "./RequestTypeBadge";

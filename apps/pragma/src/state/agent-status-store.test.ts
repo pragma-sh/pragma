@@ -1,4 +1,4 @@
-import type { AgentReportPayload, AgentStatus } from "@pragma/constants";
+import type { AgentReportPayload, AgentStatus } from "@pragma-sh/constants";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {

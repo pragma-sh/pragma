@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { decodeBase64 } from "@/lib/base64";
 import { errorMessage } from "@/lib/errors";

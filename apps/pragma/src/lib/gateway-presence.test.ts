@@ -19,7 +19,7 @@ vi.mock("@/lib/tauri", () => ({
   gatewayConnectionInfo: () => Promise.resolve({ baseUrl: "http://127.0.0.1:1", token: "t" }),
 }));
 
-vi.mock("@pragma/sdk", () => ({
+vi.mock("@pragma-sh/sdk", () => ({
   PragmaClient: class {
     push = { presence: (payload: { focused: boolean }) => presenceMock(payload) };
   },

@@ -32,7 +32,7 @@ const CLI_LINES: readonly TerminalLine[] = [
 ];
 
 /** Sample plugin shown in the extensibility section instead of a screen recording. */
-const PLUGIN_SOURCE = `import { defineCommand, definePlugin, defineSidebarTab } from "@pragma/plugin";
+const PLUGIN_SOURCE = `import { defineCommand, definePlugin, defineSidebarTab } from "@pragma-sh/plugin";
 
 import { ReviewQueue } from "./review-queue";
 
@@ -287,7 +287,7 @@ export default function HomePage() {
       <FeatureSection
         id="cli"
         title="Agents that operate the workspace itself"
-        description="pragma-cli and @pragma/sdk make Pragma scriptable, so an agent can create the worktree, launch a peer, compare attempts, and publish a document for you to read."
+        description="pragma-cli and @pragma-sh/sdk make Pragma scriptable, so an agent can create the worktree, launch a peer, compare attempts, and publish a document for you to read."
         media={<TerminalCard title="agent@worktree — fan/8fa2" lines={CLI_LINES} />}
         points={
           <>

@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@pragma/constants": ["../constants/src/index.ts"]
+      "@pragma-sh/constants": ["../constants/src/index.ts"]
     }
   }
 }

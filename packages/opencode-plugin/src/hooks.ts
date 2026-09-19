@@ -4,7 +4,7 @@ import {
   type AgentMessage,
   type AgentQuestion,
   type QuestionOption,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 
 type ReportKey = "started" | "stopped" | "cleared" | `attention:${AgentAttentionKind}`;
 type Environment = Record<string, string | undefined>;

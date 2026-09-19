@@ -232,7 +232,7 @@ diagram itself. Pragma themes the editor chrome, not the persisted drawing.
 Create the board first and copy its returned id into MDX:
 
 ```mdx
-import { Whiteboard } from "@pragma/scratchpad/ui";
+import { Whiteboard } from "@pragma-sh/scratchpad/ui";
 
 # Request flow
 

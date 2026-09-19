@@ -3,7 +3,7 @@
 // `import()`, the same way a real compiled plugin bundle would be, without
 // needing a bundler in the test fixture itself.
 //
-// `__apiVersion` is hardcoded to "0.0.0" to match `@pragma/plugin`'s current
+// `__apiVersion` is hardcoded to "0.0.0" to match `@pragma-sh/plugin`'s current
 // version — update this alongside `packages/plugin/package.json`'s version if
 // it ever changes from "0.0.0".
 export default {

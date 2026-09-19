@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { PluginDefinition } from "@pragma-sh/plugin";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import type { PluginRecord } from "@/plugins/registry";
 

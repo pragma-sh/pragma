@@ -1,7 +1,7 @@
-# packages/scratchpad - @pragma/scratchpad
+# packages/scratchpad - @pragma-sh/scratchpad
 
 Browser-safe API bundled into agent-authored MDX scratchpads. Root re-exports
-`@pragma/sdk` and adds scratchpad-host interaction. `ui` contains composed interactive
+`@pragma-sh/sdk` and adds scratchpad-host interaction. `ui` contains composed interactive
 components; `ui/primitives` contains their small shadcn-compatible building blocks.
 
 ## Rules
@@ -44,23 +44,23 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   process with startup `NODE_ENV=production` in `scripts/build.ts` until Bun honors
   `jsx.development: false` after startup.
 - **Never bundle dependencies into this package (`--packages bundle`).** Inlining
-  `@pragma/sdk` resolves it through `node_modules`, a path outside the entry root, and
+  `@pragma-sh/sdk` resolves it through `node_modules`, a path outside the entry root, and
   Bun's Windows bundler panics on it with
   `Expected pretty file path to have only forward slashes` for that backslashed
   `node_modules` path. macOS and Linux build fine, so it only shows up in the Windows CI
-  build job. `@pragma/sdk` stays `--external`
+  build job. `@pragma-sh/sdk` stays `--external`
   and the consuming Vite build resolves the workspace package.
 - **`exports` subpaths beyond one segment are invisible to fallow.** It resolves
-  `@pragma/scratchpad/ui` but not `@pragma/scratchpad/ui/primitives`, which is why that
+  `@pragma-sh/scratchpad/ui` but not `@pragma-sh/scratchpad/ui/primitives`, which is why that
   specifier is listed in `.fallowrc.jsonc`'s `ignoreUnresolvedImports`. Add any new nested
   subpath there too, or the Fallow gate fails on an import that is actually valid.
 
 ## Commands
 
 ```bash
-bun run --filter @pragma/scratchpad build
-bun run --filter @pragma/scratchpad typecheck
-bun run --filter @pragma/scratchpad test
+bun run --filter @pragma-sh/scratchpad build
+bun run --filter @pragma-sh/scratchpad typecheck
+bun run --filter @pragma-sh/scratchpad test
 ```
 
 `test`/`typecheck`/`lint` depend on `^build` (dependency builds only, never this
@@ -69,6 +69,6 @@ inside its own `build` script cannot clobber `dist/*.d.ts` while dependents
 typecheck. Do not reintroduce a `pretest` that runs the full `build` — a
 concurrent turbo `build` + `pretest` races bunup on `dist/` (ENOENT on
 `primitives.cjs`). A `pretest` that only emits a gitignored `src/generated/**`
-file without touching `dist/` is fine: `@pragma/scratchpad-viewer` generates its
+file without touching `dist/` is fine: `@pragma-sh/scratchpad-viewer` generates its
 runtime string this way (`build.ts --runtime-only`, mirroring its
 `pretypecheck`).

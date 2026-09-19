@@ -5,8 +5,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-import { constants } from "@pragma/constants";
-import type { WorkspaceSnapshot } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
+import type { WorkspaceSnapshot } from "@pragma-sh/constants";
 
 function usage(): never {
   throw new Error('usage: bun run dev:command -- <dev-id> "<command>"');

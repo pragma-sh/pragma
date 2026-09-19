@@ -1,5 +1,5 @@
-import { defineAgent, definePlugin, type PluginDefinition } from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+import { defineAgent, definePlugin, type PluginDefinition } from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { loadKimiModels } from "./models";
 

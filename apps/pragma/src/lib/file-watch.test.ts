@@ -1,4 +1,4 @@
-import type { FileChange } from "@pragma/constants";
+import type { FileChange } from "@pragma-sh/constants";
 import type { Channel } from "@tauri-apps/api/core";
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

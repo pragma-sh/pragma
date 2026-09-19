@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
+import type { PluginDefinition } from "@pragma-sh/plugin";
 
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
@@ -164,7 +164,7 @@ describe("SettingsWorkspace", () => {
         projectPath: null,
         config: null,
         manifest: {
-          name: "@pragma/plugin-one",
+          name: "@pragma-sh/plugin-one",
           version: "1.0.0",
           dir: "/plugins/one",
           mainPath: "/plugins/one/index.js",
@@ -187,13 +187,13 @@ describe("SettingsWorkspace", () => {
   it("shows loaded plugins by name with delete controls only", async () => {
     render(<SettingsWorkspace />);
 
-    expect(await screen.findByText("@pragma/plugin-one")).toBeInTheDocument();
+    expect(await screen.findByText("@pragma-sh/plugin-one")).toBeInTheDocument();
     // Unresolvable entries fall back to the last path segment.
     expect(screen.getByText("two")).toBeInTheDocument();
     expect(screen.queryByText("./plugins/one")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete plugin @pragma/plugin-one" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete plugin @pragma-sh/plugin-one" }));
 
     await waitFor(() =>
       expect(writeConfig).toHaveBeenCalledWith(
@@ -209,14 +209,14 @@ describe("SettingsWorkspace", () => {
         "project-1",
       ),
     );
-    expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
+    expect(screen.queryByText("@pragma-sh/plugin-one")).not.toBeInTheDocument();
   });
 
   it("nests plugin settings pages under their plugin in the Plugins list", async () => {
-    loadSettingsPlugin("@pragma/plugin-one");
+    loadSettingsPlugin("@pragma-sh/plugin-one");
 
     render(<SettingsWorkspace />);
-    await screen.findByText("@pragma/plugin-one");
+    await screen.findByText("@pragma-sh/plugin-one");
     // The pages are options inside Plugins, not their own navigation section.
     expect(screen.queryByRole("button", { name: "Keybindings" })).toBeInTheDocument();
     const nested = screen.getByRole("button", { name: "Plugin Account" });

@@ -1,4 +1,4 @@
-import { constants, type PairingPayload } from "@pragma/constants";
+import { constants, type PairingPayload } from "@pragma-sh/constants";
 
 export type { PairingPayload };
 

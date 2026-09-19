@@ -8,7 +8,7 @@ description: defineAutomation, triggers, the AutomationContext, and how dependen
 A file exports **one default** `defineAutomation` result:
 
 ```ts
-import { defineAutomation } from "@pragma/automations";
+import { defineAutomation } from "@pragma-sh/automations";
 
 export default defineAutomation({
   name: "Stale branch sweep", // required
@@ -76,9 +76,9 @@ locate files without walking the whole tree yourself.
 
 ## Dependencies
 
-Bare imports (anything that is not a builtin, a relative path, or `@pragma/automations`
+Bare imports (anything that is not a builtin, a relative path, or `@pragma-sh/automations`
 itself) are installed automatically with `bun add` into a managed cache when the
-automation loads. Imports of `@pragma/automations` are rewritten to the runtime shim —
+automation loads. Imports of `@pragma-sh/automations` are rewritten to the runtime shim —
 your file is loaded from a cache copy, and a source change produces a new cache version.
 
 Two practical rules:
@@ -88,7 +88,7 @@ Two practical rules:
 
 ## What automations can do
 
-Anything the host can: shell out to `pragma-cli`, call the gateway with `@pragma/sdk`
+Anything the host can: shell out to `pragma-cli`, call the gateway with `@pragma-sh/sdk`
 (the terminal environment's `PRAGMA_*` variables are the sidecar's — read
 [Getting started](/docs/sdk/getting-started) for the client construction), or write
 files. An automation that needs user visibility should **publish a scratchpad**:

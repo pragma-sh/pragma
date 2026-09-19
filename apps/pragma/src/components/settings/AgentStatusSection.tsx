@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Upload } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants, type AgentSound, type AgentStatusSettings } from "@pragma/constants";
+import { constants, type AgentSound, type AgentStatusSettings } from "@pragma-sh/constants";
 
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";

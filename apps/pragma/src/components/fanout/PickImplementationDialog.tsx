@@ -1,4 +1,4 @@
-import type { Fanout, FanoutPickResult } from "@pragma/constants";
+import type { Fanout, FanoutPickResult } from "@pragma-sh/constants";
 import { useState } from "react";
 import { toast } from "sonner";
 

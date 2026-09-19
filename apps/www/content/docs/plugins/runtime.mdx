@@ -75,7 +75,7 @@ events such as `agent.report` (typed `AgentReportPayload`) and your plugin's own
 ## Theming
 
 ```tsx
-import { defineTheme } from "@pragma/plugin";
+import { defineTheme } from "@pragma-sh/plugin";
 
 themes: [
   defineTheme({
@@ -97,6 +97,6 @@ forced override.
 
 ## UI primitives
 
-`@pragma/plugin/ui` exports the host's `Button` and `Kbd`;
-`@pragma/plugin/icons` the host icon map. Use them so your UI tracks the app's theme —
+`@pragma-sh/plugin/ui` exports the host's `Button` and `Kbd`;
+`@pragma-sh/plugin/icons` the host icon map. Use them so your UI tracks the app's theme —
 and reach for the theme CSS variables in your own styles rather than literal colours.

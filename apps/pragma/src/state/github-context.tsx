@@ -1,7 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRequiredContext } from "@/lib/context";
 
-import type { GitHubAuthStatus } from "@pragma/constants";
+import type { GitHubAuthStatus } from "@pragma-sh/constants";
 
 import { githubAuthStatus, githubSignOut, setGithubSetupDismissed } from "@/lib/tauri";
 

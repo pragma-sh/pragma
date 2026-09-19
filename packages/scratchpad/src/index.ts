@@ -1,4 +1,4 @@
-export * from "@pragma/sdk";
+export * from "@pragma-sh/sdk";
 
 /** Status rendered by scratchpad progress components. */
 export type ScratchpadAgentStatus = "running" | "attention" | "done" | "cleared";
@@ -56,7 +56,7 @@ declare global {
 function bridge(): ScratchpadBridge {
   const value = globalThis.pragmaScratchpad;
   if (!value) {
-    throw new Error("@pragma/scratchpad can only prompt agents inside a Pragma scratchpad");
+    throw new Error("@pragma-sh/scratchpad can only prompt agents inside a Pragma scratchpad");
   }
   return value;
 }

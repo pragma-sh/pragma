@@ -2,7 +2,7 @@ import { type KeyboardEvent, type MouseEvent, useCallback } from "react";
 
 import { GitBranch, Loader2, Trash2 } from "lucide-react";
 
-import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma/constants";
+import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma-sh/constants";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AgentIcon } from "@/components/agents/AgentIcon";

@@ -1,4 +1,4 @@
-import type { KanbanPromptStatus } from "@pragma/constants";
+import type { KanbanPromptStatus } from "@pragma-sh/constants";
 
 /**
  * What a card drag between columns resolves to. The board mirrors the per-card

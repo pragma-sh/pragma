@@ -3,7 +3,7 @@ import { builtinModules } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { readStdinLines } from "@pragma/sidecar-kit";
+import { readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import { findFiles } from "./find.ts";
 import { defineAutomation, type AutomationContext, type AutomationDefinition } from "./index.ts";
@@ -74,7 +74,7 @@ const IMPORT_PATTERNS = [
 ];
 
 function isExternalSpecifier(specifier: string | undefined): specifier is string {
-  if (!specifier || specifier === "@pragma/automations") return false;
+  if (!specifier || specifier === "@pragma-sh/automations") return false;
   if (/^[./]/.test(specifier)) return false;
   return !builtins.has(specifier);
 }
@@ -95,7 +95,7 @@ async function ensureRuntimePackage(root: string): Promise<void> {
   await writeFile(
     join(pkgRoot, "package.json"),
     JSON.stringify(
-      { name: "@pragma/automations", type: "module", exports: { ".": "./index.ts" } },
+      { name: "@pragma-sh/automations", type: "module", exports: { ".": "./index.ts" } },
       null,
       2,
     ),
@@ -168,7 +168,7 @@ async function copyEntry(command: LoadCommand, source: string, root: string): Pr
   await mkdir(entryRoot, { recursive: true });
   const extension = command.path.endsWith(".js") ? "js" : "ts";
   const rewritten = source.replaceAll(
-    "@pragma/automations",
+    "@pragma-sh/automations",
     pathToFileURL(join(root, "node_modules", "@pragma", "automations", "index.ts")).href,
   );
   const entry = join(entryRoot, `automation.${extension}`);

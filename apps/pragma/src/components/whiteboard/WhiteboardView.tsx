@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ExcalidrawScene, Tab, Whiteboard } from "@pragma/constants";
+import type { ExcalidrawScene, Tab, Whiteboard } from "@pragma-sh/constants";
 import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
 import type { ExcalidrawInitialDataState, ExcalidrawProps } from "@excalidraw/excalidraw/types";
 import { toast } from "sonner";

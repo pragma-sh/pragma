@@ -1,5 +1,5 @@
-import type { PluginDefinition, UsageLimitsResult } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { PluginDefinition, UsageLimitsResult } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ResolvedPlugin } from "./catalog";

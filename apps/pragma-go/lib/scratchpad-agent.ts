@@ -1,4 +1,4 @@
-import { runtimeAgentId, type ScratchpadFile } from "@pragma/sdk";
+import { runtimeAgentId, type ScratchpadFile } from "@pragma-sh/sdk";
 
 import type { AgentTab } from "./types";
 

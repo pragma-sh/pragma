@@ -48,7 +48,7 @@ with the same name: the Rust handler, the TS wrapper, and tests.
   minimum `#[tauri::command(async)]`, which runs the sync body on the tokio pool. Only
   trivially fast work (in-memory state, a single SQLite row, native window calls that
   must run on the main thread anyway) may stay a plain sync command.
-- One responsibility per command; share payload types via `@pragma/constants`.
+- One responsibility per command; share payload types via `@pragma-sh/constants`.
 - Return `Result` on the Rust side for fallible work; surface errors as typed values to
   the frontend and narrow with `instanceof Error`.
 - Run `bun run --filter pragma tauri:dev` to exercise it end-to-end.

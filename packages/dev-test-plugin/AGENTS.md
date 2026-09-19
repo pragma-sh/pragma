@@ -1,6 +1,6 @@
-# packages/dev-test-plugin — @pragma/dev-test-plugin
+# packages/dev-test-plugin — @pragma-sh/dev-test-plugin
 
-Lightweight dev/test Pragma plugin. Exercises the public `@pragma/plugin`
+Lightweight dev/test Pragma plugin. Exercises the public `@pragma-sh/plugin`
 surface (sidebar tabs, a sidebar card, a Settings page, a plugin web view, host + SDK event hooks) and ships with
 Vitest + jsdom coverage for those React hooks. It also served as the
 real-world test target for the `create-pragma-plugin` scaffolder CLI: it was
@@ -8,7 +8,7 @@ generated non-interactively with
 
 ```bash
 bun packages/create-pragma-plugin/dist/cli.js packages/dev-test-plugin \
-  --name @pragma/dev-test-plugin --pm bun --capabilities ui,commands,agents --force
+  --name @pragma-sh/dev-test-plugin --pm bun --capabilities ui,commands,agents --force
 ```
 
 and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
@@ -41,12 +41,12 @@ and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
 
 `src/index.tsx` is the single `definePlugin` entry the host loadser as the
 ESM bundle (`dist/index.js`, built by Vite with React externalized to the
-`@pragma/plugin` shims via `vite.config.ts` aliases).
+`@pragma-sh/plugin` shims via `vite.config.ts` aliases).
 
 ## Testing the React hooks
 
 Tests run under jsdom (`vitest.config.ts`) against the real React from
-`node_modules`; the `@pragma/plugin` hooks and UI still delegate to a
+`node_modules`; the `@pragma-sh/plugin` hooks and UI still delegate to a
 mocked `globalThis.__PRAGMA__` bridge installed by `src/test/setup.ts` +
 `src/test/bridge.ts` (`createBridge(overrides)` builds the bridge and
 returns an `emit(name, payload)` for `useEvent`; `eventsFrom(...)` builds an
@@ -66,12 +66,12 @@ SDK event async generator). Cover:
 
 ## Rules
 
-- Stay a **pure TypeScript Pragma plugin**: import only `@pragma/plugin`,
-  `@pragma/plugin/ui`, and `@pragma/sdk`. Do not import host app internals.
+- Stay a **pure TypeScript Pragma plugin**: import only `@pragma-sh/plugin`,
+  `@pragma-sh/plugin/ui`, and `@pragma-sh/sdk`. Do not import host app internals.
 - **Never bundle React.** `vite.config.ts` aliases `react`,
-  `react-dom`, and `react/jsx-runtime` to the `@pragma/plugin` shims; tests
+  `react-dom`, and `react/jsx-runtime` to the `@pragma-sh/plugin` shims; tests
   instead resolve the real React and set `jsxImportSource: "react"` in
-  `tsconfig.json` so intrinsic elements type-check (the `@pragma/plugin`
+  `tsconfig.json` so intrinsic elements type-check (the `@pragma-sh/plugin`
   jsx-runtime shim intentionally re-exports `jsx`/`jsxs`/`Fragment` but not a
   JSX namespace; the vite alias still externalizes JSX to the shim at build
   time).
@@ -83,10 +83,10 @@ SDK event async generator). Cover:
 ## Commands
 
 ```bash
-bun run --filter @pragma/dev-test-plugin build
-bun run --filter @pragma/dev-test-plugin typecheck
-bun run --filter @pragma/dev-test-plugin test
-bun run --filter @pragma/dev-test-plugin lint
+bun run --filter @pragma-sh/dev-test-plugin build
+bun run --filter @pragma-sh/dev-test-plugin typecheck
+bun run --filter @pragma-sh/dev-test-plugin test
+bun run --filter @pragma-sh/dev-test-plugin lint
 ```
 
 ## Adding functionality

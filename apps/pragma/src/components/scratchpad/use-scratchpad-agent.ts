@@ -1,6 +1,6 @@
 import { useRef, useState, type RefObject } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { toast } from "sonner";
 
 import { attachScratchpadAgent } from "@/components/scratchpad/scratchpad-document";

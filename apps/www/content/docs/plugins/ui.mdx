@@ -10,7 +10,7 @@ config.
 ## Sidebar tabs
 
 ```tsx
-import { definePlugin, defineSidebarTab } from "@pragma/plugin";
+import { definePlugin, defineSidebarTab } from "@pragma-sh/plugin";
 
 export default definePlugin({
   name: "Review Queue",
@@ -64,7 +64,7 @@ usage-limits gauge).
 ## Commands
 
 ```tsx
-import { definePlugin, defineCommand } from "@pragma/plugin";
+import { definePlugin, defineCommand } from "@pragma-sh/plugin";
 
 commands: [
   defineCommand({
@@ -83,7 +83,7 @@ keybinding files. `hidden` keeps a command out of the palette while keeping it c
 ## Web views
 
 ```tsx
-import { definePlugin, defineWebView } from "@pragma/plugin";
+import { definePlugin, defineWebView } from "@pragma-sh/plugin";
 
 const webView = defineWebView({ id: "docs", title: "Docs", component: DocsPage });
 
@@ -98,7 +98,7 @@ instance instead of opening a second one. Web views render as their own tab kind
 ## Config
 
 ```tsx
-import { z } from "@pragma/plugin"; // the host's zod — never bundle your own
+import { z } from "@pragma-sh/plugin"; // the host's zod — never bundle your own
 
 config: z.object({ enabled: z.boolean().default(true), level: z.number().optional() }),
 ```

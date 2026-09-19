@@ -1,4 +1,4 @@
-import type { ScratchpadViewerCommand } from "@pragma/scratchpad-viewer";
+import type { ScratchpadViewerCommand } from "@pragma-sh/scratchpad-viewer";
 
 /** Settles one async viewer request without leaving rejected bridge promises hanging. */
 export function respondToViewer(

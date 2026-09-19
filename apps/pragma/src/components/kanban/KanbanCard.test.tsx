@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import type { KanbanPromptCard, KanbanPromptStatus } from "@pragma/constants";
+import type { KanbanPromptCard, KanbanPromptStatus } from "@pragma-sh/constants";
 
 import { KanbanCard } from "@/components/kanban/KanbanCard";
 import type { AgentConfig } from "@/lib/tauri";

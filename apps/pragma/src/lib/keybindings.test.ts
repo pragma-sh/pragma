@@ -10,7 +10,7 @@ import {
   workspaceIndexForAction,
 } from "./keybindings";
 
-import type { KeybindingChord, KeybindingsConfig } from "@pragma/constants";
+import type { KeybindingChord, KeybindingsConfig } from "@pragma-sh/constants";
 
 function config(): KeybindingsConfig {
   return {

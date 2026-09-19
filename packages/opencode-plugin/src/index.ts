@@ -11,7 +11,7 @@ import {
   type AgentMessage,
   type AgentQuestion,
   type QuestionOption,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 
 import { type Environment, type PragmaReporter, createPragmaOpencodeHooks } from "./hooks";
 

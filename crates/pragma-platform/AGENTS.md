@@ -75,7 +75,7 @@ Consequences worth knowing:
 - There is no peer-credential API (no `SO_PEERCRED`). Nothing uses one today; gateway auth
   is token-based. If you ever need to authenticate the _connecting process_, this choice
   has to be revisited.
-- Socket files must be spelled from `@pragma/constants` (`ipc::socket_file_name()` and
+- Socket files must be spelled from `@pragma-sh/constants` (`ipc::socket_file_name()` and
   friends), never inline.
 
 ### `perms` — `icacls`, not the Win32 API
@@ -131,7 +131,7 @@ plain string handling and the module compiles everywhere, reporting nothing wher
 ## Adding a seam
 
 1. Add the module here with a real implementation for every target.
-2. Put any tunable default in `@pragma/constants` under `platform`, not in Rust.
+2. Put any tunable default in `@pragma-sh/constants` under `platform`, not in Rust.
 3. Test the platform-independent core on every platform. Parsers for foreign-OS output
    (`parse_tasklist_image_name`, `parse_distros`) are plain
    string handling — write them so they compile and run everywhere, or CI on Linux and

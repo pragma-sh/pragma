@@ -27,8 +27,8 @@
     "lint": "oxlint ."
   },
   "devDependencies": {
-    "@pragma/plugin": "workspace:*",
-    "@pragma/watcher-kit": "workspace:*",
+    "@pragma-sh/plugin": "workspace:*",
+    "@pragma-sh/watcher-kit": "workspace:*",
     "@types/node": "^24.12.3",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",

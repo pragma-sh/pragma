@@ -106,7 +106,7 @@ describe("loadPluginEntries", () => {
   it("refuses a major API version mismatch, naming both versions", async () => {
     const records = await loadWith({ default: definition({ __apiVersion: "2.1.0" }) });
     expect(records[0]?.status).toBe("failed");
-    expect(records[0]?.error).toContain("built against @pragma/plugin 2.1.0");
+    expect(records[0]?.error).toContain("built against @pragma-sh/plugin 2.1.0");
     expect(records[0]?.error).toContain("supports 1.x");
   });
 

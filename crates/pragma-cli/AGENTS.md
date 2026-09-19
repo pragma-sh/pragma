@@ -171,7 +171,7 @@ current worktree (as a parent or as an attempt). `--member` defaults to
 `$PRAGMA_FANOUT_MEMBER_ID`, which every attempt session exports.
 
 The CLI only supplies defaults — the request that leaves is the same one
-`@pragma/sdk` sends. `create` exits non-zero on a partial provisioning while
+`@pragma-sh/sdk` sends. `create` exits non-zero on a partial provisioning while
 still printing the persisted members, and `pick` requires a typed `yes` (or
 `--yes`) after printing every worktree, branch, and session it will delete.
 

@@ -5,7 +5,7 @@ ESM opencode plugin that reports agent status into Pragma. Built with Bunup
 opencode hooks/events, and reports `started` / `stopped` / `attention` / `cleared` /
 `session-name` (the parent session's title from `session.created`/`session.updated`,
 deduplicated, so Pragma renames the hosting tab on create/rename/switch)
-through `@pragma/sdk`.
+through `@pragma-sh/sdk`.
 
 ## File map
 
@@ -199,7 +199,7 @@ front** so opening opencode never inherits a stale indicator from a previous run
 same tab that exited without cleanup (`dispose` only runs on a graceful quit; a crash
 leaves the last status lingering in the long-lived daemon).
 
-Reporting uses the fetch-based `@pragma/sdk` gateway helpers. Plugin options no longer
+Reporting uses the fetch-based `@pragma-sh/sdk` gateway helpers. Plugin options no longer
 accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` unless
 `PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
 `PRAGMA_WORKTREE_ID` are present.

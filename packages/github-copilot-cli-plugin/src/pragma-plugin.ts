@@ -3,8 +3,8 @@ import {
   definePlugin,
   defineUsageLimitProvider,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { loadGitHubCopilotUsageLimits } from "./usage-limits";
 

@@ -1,5 +1,5 @@
 import type { AgentEndEvent } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage } from "@pragma/sdk";
+import type { AgentMessage } from "@pragma-sh/sdk";
 
 /** Best-effort reporting surface used by the Pi lifecycle state machine. */
 export interface PiReporter {

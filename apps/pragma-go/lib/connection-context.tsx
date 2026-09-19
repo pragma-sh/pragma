@@ -1,4 +1,4 @@
-import { PragmaClient, PragmaGatewayError } from "@pragma/sdk";
+import { PragmaClient, PragmaGatewayError } from "@pragma-sh/sdk";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { Platform } from "react-native";
@@ -17,7 +17,7 @@ import type { ConnectionConfig } from "./pairing";
 import { flushPendingRevocations, forgetPendingRevocations, unregisterFromPush } from "./push";
 import * as SecureStore from "./secret-store";
 import { takeTokenFromUrl } from "./web-handoff";
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 // App-wide owner of the single PragmaClient. The chat hook and the live data
 // layer both consume the client from here, so pairing state lives in exactly

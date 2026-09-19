@@ -1,4 +1,4 @@
-# `@pragma/automations` - Automation Runtime
+# `@pragma-sh/automations` - Automation Runtime
 
 Author-facing automation API plus the `pragma-automations` Bun sidecar.
 

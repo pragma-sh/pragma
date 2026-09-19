@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import type { AgentConfig } from "@/lib/tauri";
 import { AGENT_COMMAND_SUBMITTED_EVENT } from "./agent-plugin-prompt";

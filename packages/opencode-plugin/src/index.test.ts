@@ -13,7 +13,7 @@ function forwardReportMock(mock: (...args: unknown[]) => Promise<object>) {
   return (...args: unknown[]) => mock(...args);
 }
 
-vi.mock("@pragma/sdk", () => {
+vi.mock("@pragma-sh/sdk", () => {
   return {
     hasPragmaEnvironment: (env: Record<string, string | undefined>) =>
       ["PRAGMA_GATEWAY_URL", "PRAGMA_GATEWAY_TOKEN", "PRAGMA_TAB_ID", "PRAGMA_WORKTREE_ID"].every(

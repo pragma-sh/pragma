@@ -6,8 +6,8 @@ import {
   type PluginContext,
   type PluginDefinition,
   type UsageLimitProviderDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 const KITTY_ENTER = "\x1b[13u";
 const KITTY_ALT_ENTER = "\x1b[13;3u";

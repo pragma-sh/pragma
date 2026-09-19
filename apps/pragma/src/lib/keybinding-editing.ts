@@ -1,4 +1,4 @@
-import type { KeybindingChord, KeybindingsConfig, PlatformChord } from "@pragma/constants";
+import type { KeybindingChord, KeybindingsConfig, PlatformChord } from "@pragma-sh/constants";
 
 import {
   chordForPlatform,

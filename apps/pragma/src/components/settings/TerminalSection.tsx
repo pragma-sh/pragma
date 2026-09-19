@@ -1,4 +1,4 @@
-import { constants, type ShellProfile, type TerminalSettings } from "@pragma/constants";
+import { constants, type ShellProfile, type TerminalSettings } from "@pragma-sh/constants";
 import { Check, MonitorCog } from "lucide-react";
 import { Icon } from "@iconify/react";
 

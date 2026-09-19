@@ -1,4 +1,4 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { modelLaunchArgs } from "@/lib/agent-model-selection";

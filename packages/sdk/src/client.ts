@@ -1,5 +1,5 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
-import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma/constants";
+import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma-sh/constants";
 
 import { AgentsClient } from "./agents-client";
 import { AssetsClient } from "./assets-client";

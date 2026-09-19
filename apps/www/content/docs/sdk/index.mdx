@@ -1,14 +1,14 @@
 ---
-title: "@pragma/sdk"
+title: "@pragma-sh/sdk"
 description: A typed TypeScript client for a running Pragma host — sessions, agent events, fanouts, scratchpads, whiteboards, and the workspace.
 ---
 
-`@pragma/sdk` is a TypeScript client for the **Pragma gateway** — the HTTP/JSON surface a
+`@pragma-sh/sdk` is a TypeScript client for the **Pragma gateway** — the HTTP/JSON surface a
 running host exposes. The mobile app, the browser build, and agent plugins all speak
 through it; anything you build can too.
 
 ```ts
-import { PragmaClient } from "@pragma/sdk";
+import { PragmaClient } from "@pragma-sh/sdk";
 
 const client = new PragmaClient(); // config from the environment
 
@@ -63,7 +63,7 @@ for await (const event of client.workspace.subscribe()) {
   newline-delimited JSON over `fetch` + `ReadableStream` — no sockets, no SSE, so it runs
   in Node, Bun, React Native (the mobile client uses it), and browsers.
 - **Dual ESM/CJS** with `.d.ts`, built with bunup. Types for every wire shape
-  (`Fanout`, `KanbanPromptCard`, …) are re-exported from `@pragma/constants`, so TS and
+  (`Fanout`, `KanbanPromptCard`, …) are re-exported from `@pragma-sh/constants`, so TS and
   Rust agree by construction.
 - **Typed errors.** `PragmaGatewayError` (the gateway answered with a code and details)
   vs `PragmaTransportError` (network, config, or non-JSON response).

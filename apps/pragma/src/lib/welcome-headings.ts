@@ -1,6 +1,6 @@
 /**
  * Heading copy for the no-tabs welcome screen. Frontend-only, so it lives here
- * rather than in `@pragma/constants` (nothing in Rust renders it).
+ * rather than in `@pragma-sh/constants` (nothing in Rust renders it).
  */
 
 /**

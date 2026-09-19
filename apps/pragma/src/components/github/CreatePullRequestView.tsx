@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { BranchSyncStatus, GitHubRepoRef } from "@pragma/constants";
+import type { BranchSyncStatus, GitHubRepoRef } from "@pragma-sh/constants";
 import { ArrowLeft, ChevronDown, GitPullRequestCreate, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 

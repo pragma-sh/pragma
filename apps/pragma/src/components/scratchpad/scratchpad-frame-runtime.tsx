@@ -3,9 +3,9 @@ import * as React from "react";
 import * as ReactDomClient from "react-dom/client";
 import * as ReactJsxRuntime from "react/jsx-runtime";
 
-import * as Scratchpad from "@pragma/scratchpad";
-import * as ScratchpadPrimitives from "@pragma/scratchpad/ui/primitives";
-import * as ScratchpadUi from "@pragma/scratchpad/ui";
+import * as Scratchpad from "@pragma-sh/scratchpad";
+import * as ScratchpadPrimitives from "@pragma-sh/scratchpad/ui/primitives";
+import * as ScratchpadUi from "@pragma-sh/scratchpad/ui";
 
 declare global {
   var pragmaScratchpadToken: string | undefined;

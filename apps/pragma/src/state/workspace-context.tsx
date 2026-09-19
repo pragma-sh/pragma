@@ -13,7 +13,7 @@ import {
 } from "react";
 import { useRequiredContext } from "@/lib/context";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 import type {
   AgentReportPayload,
   DiffSide,
@@ -25,7 +25,7 @@ import type {
   Tab,
   Worktree,
   WorktreeStatus,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { toast } from "sonner";
 

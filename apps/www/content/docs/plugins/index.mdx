@@ -1,13 +1,13 @@
 ---
 title: Plugin development
-description: The @pragma/plugin API — sidebar tabs, cards, commands, web views, agents, watchers, usage limits, and themes.
+description: The @pragma-sh/plugin API — sidebar tabs, cards, commands, web views, agents, watchers, usage limits, and themes.
 ---
 
 Pragma's own agent integrations are plugins. Everything they use is public, so anything
 you build sits at the same level as what ships.
 
 ```tsx
-import { definePlugin, defineSidebarTab, useProject } from "@pragma/plugin";
+import { definePlugin, defineSidebarTab, useProject } from "@pragma-sh/plugin";
 
 function Queue() {
   const project = useProject();
@@ -55,7 +55,7 @@ export default definePlugin({
 
 - A plugin is **one self-contained ESM bundle** (`main` in its `package.json`).
 - The host injects React, React DOM, the JSX runtime, zod, UI primitives, and icons —
-  **never bundle them**. `@pragma/plugin` is a compile-time stub that delegates to the
+  **never bundle them**. `@pragma-sh/plugin` is a compile-time stub that delegates to the
   host bridge (`globalThis.__PRAGMA__`).
 - Registration is declarative: a `plugins[]` entry in `.pragma/config.json`
   ([global](/docs/user-guide/core-model#where-things-live) or per project). Presence

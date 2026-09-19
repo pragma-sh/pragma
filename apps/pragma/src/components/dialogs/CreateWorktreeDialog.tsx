@@ -1,4 +1,4 @@
-import type { FanoutParentSpec } from "@pragma/constants";
+import type { FanoutParentSpec } from "@pragma-sh/constants";
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 

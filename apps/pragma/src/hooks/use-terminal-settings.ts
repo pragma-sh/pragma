@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ShellProfile } from "@pragma/constants";
+import type { ShellProfile } from "@pragma-sh/constants";
 
 import {
   loadTerminalScopes,

@@ -4,7 +4,7 @@ import { LayoutGrid, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";

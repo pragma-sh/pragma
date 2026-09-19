@@ -40,7 +40,7 @@ describe("checkPluginCompatibility", () => {
     const result = checkPluginCompatibility("2.1.0", "1.4.0");
     expect(result.kind).toBe("refuse");
     if (result.kind === "refuse") {
-      expect(result.message).toContain("built against @pragma/plugin 2.1.0");
+      expect(result.message).toContain("built against @pragma-sh/plugin 2.1.0");
       expect(result.message).toContain("supports 1.x");
     }
   });

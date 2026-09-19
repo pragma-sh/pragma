@@ -19,7 +19,7 @@ import {
 } from "@/lib/tauri";
 import { expandWorktree } from "@/state/worktree-collapsed";
 import { useWorkspace } from "@/state/workspace-context";
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 /** The stages a create-worktree run can move through, in display order. */
 export type WorktreeCreationStepId = "sync" | "create" | "scripts";

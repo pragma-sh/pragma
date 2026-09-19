@@ -1,5 +1,5 @@
-import { runProviderCommand } from "@pragma/plugin/catalog";
-import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
+import { runProviderCommand } from "@pragma-sh/plugin/catalog";
+import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 
 const QUOTA_REQUEST_ID = 2;
 const COPILOT_DRAIN_SECONDS = 3;

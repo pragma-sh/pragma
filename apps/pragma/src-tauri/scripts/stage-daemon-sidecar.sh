@@ -58,21 +58,21 @@ done
 # A debug app runs several of these from source via `bun`, but the binary must
 # still exist so the Tauri CLI's externalBin copy step succeeds.
 bun_sidecars=(
-  "@pragma/ai-helpers:ai-helpers:pragma-ai"
-  "@pragma/github-helpers:github-helpers:pragma-github"
-  "@pragma/watcher:watcher:pragma-watch"
-  "@pragma/automations:automations:pragma-automations"
-  "@pragma/plugins-host:plugins-host:pragma-plugins"
+  "@pragma-sh/ai-helpers:ai-helpers:pragma-ai"
+  "@pragma-sh/github-helpers:github-helpers:pragma-github"
+  "@pragma-sh/watcher:watcher:pragma-watch"
+  "@pragma-sh/automations:automations:pragma-automations"
+  "@pragma-sh/plugins-host:plugins-host:pragma-plugins"
 )
 
-bun --filter @pragma/ai-helpers build:sidecar
-bun --filter @pragma/github-helpers build:sidecar
-bun --filter @pragma/watcher build:sidecar
-bun --filter @pragma/automations build:sidecar
-# The plugin catalog sidecar bundles `@pragma/sdk` and `@pragma/plugin`, which
+bun --filter @pragma-sh/ai-helpers build:sidecar
+bun --filter @pragma-sh/github-helpers build:sidecar
+bun --filter @pragma-sh/watcher build:sidecar
+bun --filter @pragma-sh/automations build:sidecar
+# The plugin catalog sidecar bundles `@pragma-sh/sdk` and `@pragma-sh/plugin`, which
 # resolve to their built `dist/`; build its workspace dependencies first.
-bunx turbo run build --filter=@pragma/plugins-host^...
-bun --filter @pragma/plugins-host build:sidecar
+bunx turbo run build --filter=@pragma-sh/plugins-host^...
+bun --filter @pragma-sh/plugins-host build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
 

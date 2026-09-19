@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { Whiteboard } from "@pragma/constants";
+import type { Whiteboard } from "@pragma-sh/constants";
 import { ChevronDown, PencilRuler, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 

@@ -1,4 +1,4 @@
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentReportPayload } from "@pragma-sh/constants";
 import type { ZodType, ZodTypeAny } from "zod";
 import type { AgentDefinition } from "./agent";
 import type {
@@ -83,13 +83,13 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
 export interface PluginDefinition<
   TConfigSchema extends ZodTypeAny = ZodTypeAny,
 > extends PluginDefinitionInput<TConfigSchema> {
-  /** @internal The `@pragma/plugin` version this plugin was compiled against. */
+  /** @internal The `@pragma-sh/plugin` version this plugin was compiled against. */
   readonly __apiVersion: string;
 }
 
 /**
  * Declares a Pragma plugin. This is the single entry point a plugin's bundle
- * must default-export. Stamps the compiled-against `@pragma/plugin` version
+ * must default-export. Stamps the compiled-against `@pragma-sh/plugin` version
  * onto the result so the host can check compatibility before loading it.
  */
 export function definePlugin<TConfigSchema extends ZodTypeAny = ZodTypeAny>(

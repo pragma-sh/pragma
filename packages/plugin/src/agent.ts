@@ -1,4 +1,4 @@
-import type { AgentFeature as SharedAgentFeature } from "@pragma/constants";
+import type { AgentFeature as SharedAgentFeature } from "@pragma-sh/constants";
 
 import type { PluginIcon } from "./contributions";
 import type { PluginContext } from "./types";

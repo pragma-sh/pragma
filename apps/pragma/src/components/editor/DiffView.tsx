@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import { MergeDiff } from "@/components/editor/MergeDiff";
 import { useWorktreeFileChange } from "@/lib/file-watch";

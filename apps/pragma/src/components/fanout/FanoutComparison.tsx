@@ -1,4 +1,4 @@
-import type { Fanout, FanoutMember, ScratchpadFile, Tab } from "@pragma/constants";
+import type { Fanout, FanoutMember, ScratchpadFile, Tab } from "@pragma-sh/constants";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,7 +15,7 @@ import {
   unionChangedPaths,
   type ScratchpadRow,
 } from "@/lib/fanout";
-import type { WorktreeChanges } from "@pragma/constants";
+import type { WorktreeChanges } from "@pragma-sh/constants";
 import { listScratchpadFiles, openScratchpadTab, worktreeChangesSince } from "@/lib/tauri";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";

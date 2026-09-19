@@ -2,7 +2,7 @@
  * Viewport widths at which the shell sheds chrome, in px.
  *
  * Frontend-only: nothing in Rust reads these, so they live here rather than in
- * `@pragma/constants`. They are ordered so the panes disappear one at a time —
+ * `@pragma-sh/constants`. They are ordered so the panes disappear one at a time —
  * the right sidebar (the widest, at a 360px minimum) goes first, and the
  * project sidebar only follows once the centre pane would otherwise be
  * unusable.

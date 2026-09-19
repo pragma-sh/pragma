@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 
 import { Icon } from "@iconify/react";
-import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma/constants";
+import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma-sh/constants";
 import {
   ArrowLeft,
   ChevronDown,
@@ -86,7 +86,7 @@ import {
   type SplitPaneNode,
   useWorkspace,
 } from "@/state/workspace-context";
-import type { TopperItemDefinition } from "@pragma/plugin";
+import type { TopperItemDefinition } from "@pragma-sh/plugin";
 
 const SELECTED_EDITOR_STORAGE_KEY = "pragma.selectedEditorLauncher";
 const fallbackEditor =

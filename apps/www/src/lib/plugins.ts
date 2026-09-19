@@ -2,7 +2,7 @@ import {
   officialPluginLock,
   type LockedPlugin,
   type PragmaPluginManifest,
-} from "@pragma/plugin-registry";
+} from "@pragma-sh/plugin-registry";
 
 import { webDeepLinkUrl } from "@/lib/deep-link";
 import { pluginsRoute } from "@/lib/shared";

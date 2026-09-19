@@ -1,4 +1,4 @@
-import type { PairingPayload } from "@pragma/constants";
+import type { PairingPayload } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import {

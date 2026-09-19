@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { PluginDefinition } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import {
   setPluginRuntimeProject,

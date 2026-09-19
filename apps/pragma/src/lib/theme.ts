@@ -9,7 +9,7 @@
  * `index.css` says.
  */
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { isCssColor } from "@/lib/theme-color";
 import { THEME_DEFAULTS, THEME_TOKENS, type ThemeMode } from "@/lib/theme-tokens";

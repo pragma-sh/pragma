@@ -7,7 +7,7 @@
 //! The CLI's only extra job over the shared contract is defaulting: the
 //! positional prompt, `$PRAGMA_WORKTREE_ID`, `$PRAGMA_FANOUT_ID`, and
 //! `$PRAGMA_FANOUT_MEMBER_ID` are resolved here and the request that leaves is
-//! the same one `@pragma/sdk` sends.
+//! the same one `@pragma-sh/sdk` sends.
 
 use std::io::{IsTerminal, Write};
 

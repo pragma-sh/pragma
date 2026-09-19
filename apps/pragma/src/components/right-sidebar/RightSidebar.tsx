@@ -33,7 +33,7 @@ import {
   usePluginSidebarTabs,
   type VisiblePluginContribution,
 } from "@/plugins/rendering";
-import type { SidebarTabDefinition } from "@pragma/plugin";
+import type { SidebarTabDefinition } from "@pragma-sh/plugin";
 
 const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
 

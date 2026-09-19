@@ -1,6 +1,6 @@
 // Which icon slots Pragma Go ships, and the SVG document behind each one.
 //
-// The mark and its colour treatments come from `@pragma/brand`; everything
+// The mark and its colour treatments come from `@pragma-sh/brand`; everything
 // here is Expo- and platform-shaped — appearance slots, launcher safe zones,
 // the web shell. `generate-icons.ts` rasterises the result.
 //
@@ -35,9 +35,9 @@ import {
   ON_LIGHT,
   ON_TRANSPARENT,
   placedMark,
-} from "@pragma/brand";
+} from "@pragma-sh/brand";
 
-export { faviconSvg } from "@pragma/brand";
+export { faviconSvg } from "@pragma-sh/brand";
 
 /**
  * Coverage for the Android adaptive foreground.
