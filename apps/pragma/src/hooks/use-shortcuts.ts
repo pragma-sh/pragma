@@ -192,13 +192,19 @@ function shouldIgnoreShortcut(
   action: KeybindingAction,
   state: ShortcutState,
 ): boolean {
-  // Plugin bindings own their chords; native menus own unchanged default chords.
-  const nativeMenuOwns =
-    NATIVE_MENU_ACTIONS.has(action) ||
-    (state.platform === "mac" && MAC_ONLY_NATIVE_MENU_ACTIONS.has(action));
+  if (hasPluginCommandForEvent(event)) return true;
+  // `openSettings` on macOS is always native menu-owned: the Rust side keeps
+  // that menu item's accelerator in sync with this same keybindings config
+  // (`sync_settings_menu_accelerator` in src-tauri/src/lib.rs), so whichever
+  // chord resolves to `openSettings` here is exactly what the OS routes to
+  // the native menu — remapping it fully replaces the old chord rather than
+  // leaving both live. The other native-owned actions never change their
+  // accelerator, so they only cede a keystroke that still matches their
+  // unchanged default chord.
+  if (state.platform === "mac" && MAC_ONLY_NATIVE_MENU_ACTIONS.has(action)) return true;
   return (
-    hasPluginCommandForEvent(event) ||
-    (nativeMenuOwns && actionForEvent(event, defaultKeybindingsConfig, state.platform) === action)
+    NATIVE_MENU_ACTIONS.has(action) &&
+    actionForEvent(event, defaultKeybindingsConfig, state.platform) === action
   );
 }
 

@@ -18,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
@@ -208,15 +209,14 @@ function ExpandedProjectSidebar({
 function SettingsButton() {
   const kanban = useKanban();
   return (
-    <Button
-      aria-label="Open settings"
+    <IconButton
+      label="Settings"
       size="icon-sm"
-      title="Settings"
       variant="ghost"
       onClick={() => kanban.openSettings()}
     >
       <Settings />
-    </Button>
+    </IconButton>
   );
 }
 

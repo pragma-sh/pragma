@@ -112,6 +112,14 @@ fn menu_accelerator(id: &str) -> Option<&'static str> {
 /// recording a keyboard shortcut.
 struct WorkspaceAccelerators(Vec<MenuItem<tauri::Wry>>);
 
+/// The Settings menu item's live accelerator, kept in sync with the user's
+/// current `openSettings` keybinding by [`sync_settings_menu_accelerator`].
+/// `None` until the first `load_keybindings` call resolves, so
+/// [`set_menu_accelerators_enabled`] falls back to the built-in default
+/// (`CmdOrCtrl+,`) until then.
+#[derive(Default)]
+struct SettingsMenuAccelerator(std::sync::Mutex<Option<String>>);
+
 /// The Pragma-owned menu items, built once and then placed by the per-platform
 /// installer that knows which submenu each platform actually exposes.
 struct WorkspaceMenuItems {
@@ -299,6 +307,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         open_command_palette.clone(),
         open_command_mode.clone(),
     ]));
+    app.manage(SettingsMenuAccelerator::default());
 
     let items = WorkspaceMenuItems {
         open_settings,
@@ -420,12 +429,14 @@ async fn load_keybindings(
 ) -> AppResult<KeybindingsConfig> {
     let global = keybindings::read_or_ensure_text(app_handle.path().home_dir()?)?;
     let Some(project_id) = project_id else {
-        return keybindings::effective(&global, None);
+        let config = keybindings::effective(&global, None)?;
+        sync_settings_menu_accelerator(&app_handle, &config);
+        return Ok(config);
     };
     // A project without readable bindings (e.g. an unreachable remote host) must
     // still get working shortcuts, so fall back to the global layer alone.
     let project = match config_file::read_scoped(
-        app_handle,
+        app_handle.clone(),
         &db,
         &hosts,
         config_file::ConfigScope::Project,
@@ -440,20 +451,72 @@ async fn load_keybindings(
             String::new()
         }
     };
-    keybindings::effective(&global, Some(&project))
+    let config = keybindings::effective(&global, Some(&project))?;
+    sync_settings_menu_accelerator(&app_handle, &config);
+    Ok(config)
+}
+
+/// Keeps the native macOS "Settings…" menu accelerator in sync with the
+/// current `openSettings` keybinding, so remapping it in Settings actually
+/// replaces the default Cmd+, instead of leaving both chords live (the
+/// webview handles every other platform's chord itself; see
+/// `MAC_ONLY_NATIVE_MENU_ACTIONS` in `use-shortcuts.ts`). Runs every time
+/// `load_keybindings` resolves — on startup, on project switch, and after
+/// Settings saves a binding (which reloads keybindings via
+/// `KEYBINDINGS_CHANGED_EVENT`) — so it never drifts from what the webview
+/// honors. Best-effort: an unparsable accelerator is logged and left as-is
+/// rather than failing keybindings loading entirely.
+fn sync_settings_menu_accelerator(app: &tauri::AppHandle, config: &KeybindingsConfig) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Some(accelerators) = app.try_state::<WorkspaceAccelerators>() else {
+        return;
+    };
+    let Some(item) = accelerators
+        .0
+        .iter()
+        .find(|item| item.id().as_ref() == MENU_OPEN_SETTINGS)
+    else {
+        return;
+    };
+    let accelerator = keybindings::mac_accelerator(&config.bindings.open_settings.mac);
+    if let Err(error) = item.set_accelerator(Some(accelerator.as_str())) {
+        log::warn!("failed to sync Settings menu accelerator to {accelerator:?}: {error}");
+        return;
+    }
+    if let Some(current) = app.try_state::<SettingsMenuAccelerator>() {
+        if let Ok(mut guard) = current.0.lock() {
+            *guard = Some(accelerator);
+        }
+    }
 }
 
 /// Suspends or restores the native menu accelerators while Settings records a
 /// shortcut. Without this, recording Cmd+W would close a tab before the webview
-/// ever sees the chord.
+/// ever sees the chord. Settings' own accelerator restores to whatever
+/// [`sync_settings_menu_accelerator`] last synced — not the static default —
+/// so recording an unrelated shortcut can't momentarily revert a remapped
+/// `openSettings` chord back to Cmd+,.
 #[tauri::command]
 fn set_menu_accelerators_enabled(
     accelerators: tauri::State<'_, WorkspaceAccelerators>,
+    settings_accelerator: tauri::State<'_, SettingsMenuAccelerator>,
     enabled: bool,
 ) -> AppResult<()> {
     for item in &accelerators.0 {
-        let accelerator = if enabled {
-            menu_accelerator(item.id().as_ref())
+        let id = item.id().as_ref();
+        let accelerator: Option<String> = if enabled {
+            if id == MENU_OPEN_SETTINGS {
+                settings_accelerator
+                    .0
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.clone())
+                    .or_else(|| menu_accelerator(id).map(str::to_string))
+            } else {
+                menu_accelerator(id).map(str::to_string)
+            }
         } else {
             None
         };
