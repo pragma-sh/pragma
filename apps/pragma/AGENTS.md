@@ -787,6 +787,16 @@ release-built dev app keeps its own per-worktree instance.
   `<app_data_dir>/<channel>`. The app hands the channel to the server via
   `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
   `daemon.sock` for SSH streamlocal compatibility.
+- **The OS-level single-instance guard must key off the channel too, not the bare
+  bundle identifier.** `tauri-plugin-single-instance` (Linux + Windows only, wired in
+  `run()` in `lib.rs`) defaults to deduping on `Config::identifier` alone
+  (`com.pragma.app`), which every dev worktree shares with production — a second dev
+  checkout would redirect into the first instead of starting its own. On Linux,
+  `Builder::dbus_id` lets us scope the D-Bus service name to
+  `"{identifier}.{channel}"`. On Windows the plugin hardcodes its named mutex to
+  `Config::identifier` with **no** override in its public API, so there the guard is
+  only installed when the channel is `pragma_protocol::PROD_CHANNEL`; every dev
+  worktree runs unguarded on Windows rather than colliding.
 
 **Remote projects use the same host-server protocol through an SSH streamlocal
 bridge.** `ssh_host::connect_remote_project` probes the remote project, ensures a
@@ -820,12 +830,23 @@ Mode) **must** be real menu items — the webview otherwise swallows chords like
 `install_workspace_menu` builds them once into a `WorkspaceMenuItems` struct (one struct,
 not a growing argument list — clippy's `too_many_arguments` caps it at seven), then hands
 that to `install_macos_workspace_menu` or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
-share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
-it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
-generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated
+share Ctrl-based chords. The non-macOS arm builds its **own leading `Pragma` submenu**
+rather than appending to `Menu::default`'s `window` one: `Menu::default` gives Linux no
+File submenu at all and Windows' carries a generated id, and appending left "Settings…"
+as the last entry of an unrelated menu — which on Linux reads as "there is no way to open
+settings". Keep that arm gated
 `#[cfg(not(target_os = "macos"))]`, never `#[cfg(target_os = "linux")]`: the latter
 silently drops every accelerator on Windows _and_ trips `-D warnings` there, since all
 five bindings then go unused.
+
+**Settings must never depend on the native menu alone.** Outside macOS the menu bar is
+drawn inside the window and several Linux desktops (and any GTK build with the menu bar
+hidden) never show it, so Settings also has a gear button in the project-sidebar footer,
+an "Open settings" command-palette entry, and a real `openSettings` keybinding
+(`⌘,`/`Ctrl+,`) handled in the webview. `menu_accelerator` therefore returns `None` for
+`settings.open` off macOS, and `use-shortcuts.ts` only defers that chord to the native
+menu when the platform is `mac` (`MAC_ONLY_NATIVE_MENU_ACTIONS`) — otherwise the two would
+both claim it.
 
 ## Deep links (`pragma://open`)
 
@@ -841,6 +862,19 @@ event. `workspace-context` parses it with `parseNewSessionDeepLink` (`lib/deep-l
 auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new-session`
 window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
 deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
+
+**On Linux and Windows a deep link only reaches a _running_ app through
+`tauri-plugin-single-instance`.** macOS hands the URL to the app that already owns the
+scheme; the other two just execute the binary again, so without that plugin every
+`pragma://` link cold-starts a **second** Pragma — which shows an empty duplicate window,
+loses the link, and collides with the running instance over the server lock
+(`pragma-server is already running (lock held at ...)`). It is registered **first** in the
+builder chain (it decides primacy before anything else initialises) and gated
+`#[cfg(any(target_os = "linux", windows))]`, because on macOS a single-instance guard would
+be the bug rather than the fix. Its `deep-link` feature re-emits the forwarded URL through
+the deep-link plugin's own `on_open_url`, so all three platforms converge on one code path
+— which is why the single-instance callback only raises the window and must **not** emit
+`DEEP_LINK_EVENT` itself, or every link is handled twice.
 
 `pragma://install-plugin?package=<npm-name>` opens install review. Package name is only a
 selector: app resolves exact version, integrity, cached manifest, and command from official

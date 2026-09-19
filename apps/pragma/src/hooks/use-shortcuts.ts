@@ -51,6 +51,8 @@ interface UseShortcutsOptions {
   onOpenCommandPalette: () => void;
   /** Opens project command palette directly in command mode. */
   onOpenCommandMode: () => void;
+  /** Opens the full-frame Settings view. */
+  onOpenSettings: () => void;
 }
 
 interface ShortcutState {
@@ -80,6 +82,7 @@ const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
   scrollTerminalBottom: "onScrollTerminalBottom",
   openCommandPalette: "onOpenCommandPalette",
   openCommandMode: "onOpenCommandMode",
+  openSettings: "onOpenSettings",
 };
 
 const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
@@ -88,6 +91,13 @@ const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
   "openCommandPalette",
   "openCommandMode",
 ]);
+
+/**
+ * Actions the native menu only owns on macOS. Elsewhere the menu bar is drawn
+ * inside the window and some Linux desktops hide it, so the webview handles the
+ * chord itself — the Rust side leaves those menu items without an accelerator.
+ */
+const MAC_ONLY_NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set(["openSettings"]);
 
 /**
  * Registers window-level keyboard shortcuts driven by the effective keybindings:
@@ -184,11 +194,19 @@ function shouldIgnoreShortcut(
   action: KeybindingAction,
   state: ShortcutState,
 ): boolean {
-  // Plugin bindings own their chords; native menus own unchanged default chords.
+  if (hasPluginCommandForEvent(event)) return true;
+  // `openSettings` on macOS is always native menu-owned: the Rust side keeps
+  // that menu item's accelerator in sync with this same keybindings config
+  // (`sync_settings_menu_accelerator` in src-tauri/src/lib.rs), so whichever
+  // chord resolves to `openSettings` here is exactly what the OS routes to
+  // the native menu — remapping it fully replaces the old chord rather than
+  // leaving both live. The other native-owned actions never change their
+  // accelerator, so they only cede a keystroke that still matches their
+  // unchanged default chord.
+  if (state.platform === "mac" && MAC_ONLY_NATIVE_MENU_ACTIONS.has(action)) return true;
   return (
-    hasPluginCommandForEvent(event) ||
-    (NATIVE_MENU_ACTIONS.has(action) &&
-      actionForEvent(event, defaultKeybindingsConfig, state.platform) === action)
+    NATIVE_MENU_ACTIONS.has(action) &&
+    actionForEvent(event, defaultKeybindingsConfig, state.platform) === action
   );
 }
 

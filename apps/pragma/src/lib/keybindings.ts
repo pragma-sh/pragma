@@ -68,6 +68,7 @@ export const defaultKeybindingsConfig: KeybindingsConfig = {
     scrollTerminalBottom: primaryChord("end"),
     openCommandPalette: primaryChord("p"),
     openCommandMode: primaryChord("p", true),
+    openSettings: primaryChord(","),
     switchToWorkspace1: workspaceChord("1"),
     switchToWorkspace2: workspaceChord("2"),
     switchToWorkspace3: workspaceChord("3"),

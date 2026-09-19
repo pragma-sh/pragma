@@ -51,6 +51,7 @@ function useWorkspaceShortcuts(
   requestClose: (tab: Tab) => void,
   onOpenCommandPalette: () => void,
   onOpenCommandMode: () => void,
+  onOpenSettings: () => void,
 ): ShortcutHints {
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
@@ -104,6 +105,7 @@ function useWorkspaceShortcuts(
     },
     onOpenCommandPalette,
     onOpenCommandMode,
+    onOpenSettings,
   });
 }
 
@@ -277,6 +279,7 @@ export function WorkspaceShell() {
     requestClose,
     () => openCommandPalette("search"),
     () => openCommandPalette("command"),
+    () => kanban.openSettings(),
   );
   useNativeMenuActions(
     workspace,

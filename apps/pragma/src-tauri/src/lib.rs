@@ -48,6 +48,8 @@ use pragma_constants::{
 };
 use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
 use tauri::ipc::{Channel, InvokeResponseBody};
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::PredefinedMenuItem;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -90,17 +92,34 @@ const MENU_ACCELERATORS: [(&str, &str); 5] = [
     (MENU_OPEN_COMMAND_MODE, "CmdOrCtrl+Shift+P"),
 ];
 
-/// Returns the accelerator registered for a workspace menu item id.
-fn menu_accelerator(id: &str) -> &'static str {
+/// Returns the accelerator registered for a workspace menu item id, or `None`
+/// when the webview owns that chord on this platform.
+///
+/// Settings is the one exception: outside macOS the menu bar is drawn inside the
+/// window, and several Linux desktops hide it entirely, so its chord is handled
+/// by the in-app keybinding (`openSettings` in `use-shortcuts.ts`) instead of a
+/// menu item the user may never see.
+fn menu_accelerator(id: &str) -> Option<&'static str> {
+    if id == MENU_OPEN_SETTINGS && !cfg!(target_os = "macos") {
+        return None;
+    }
     MENU_ACCELERATORS
         .iter()
         .find(|(item_id, _)| *item_id == id)
-        .map_or("", |(_, accelerator)| *accelerator)
+        .map(|(_, accelerator)| *accelerator)
 }
 
 /// The workspace menu items whose accelerators Settings can suspend while
 /// recording a keyboard shortcut.
 struct WorkspaceAccelerators(Vec<MenuItem<tauri::Wry>>);
+
+/// The Settings menu item's live accelerator, kept in sync with the user's
+/// current `openSettings` keybinding by [`sync_settings_menu_accelerator`].
+/// `None` until the first `load_keybindings` call resolves, so
+/// [`set_menu_accelerators_enabled`] falls back to the built-in default
+/// (`CmdOrCtrl+,`) until then.
+#[derive(Default)]
+struct SettingsMenuAccelerator(std::sync::Mutex<Option<String>>);
 
 /// The Pragma-owned menu items, built once and then placed by the per-platform
 /// installer that knows which submenu each platform actually exposes.
@@ -249,35 +268,35 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         MENU_OPEN_SETTINGS,
         "Settings…",
         true,
-        Some(menu_accelerator(MENU_OPEN_SETTINGS)),
+        menu_accelerator(MENU_OPEN_SETTINGS),
     )?;
     let new_terminal_tab = MenuItem::with_id(
         app,
         MENU_NEW_TERMINAL_TAB,
         "New Terminal Tab",
         true,
-        Some(menu_accelerator(MENU_NEW_TERMINAL_TAB)),
+        menu_accelerator(MENU_NEW_TERMINAL_TAB),
     )?;
     let close_active_tab = MenuItem::with_id(
         app,
         MENU_CLOSE_ACTIVE_TAB,
         "Close Tab",
         true,
-        Some(menu_accelerator(MENU_CLOSE_ACTIVE_TAB)),
+        menu_accelerator(MENU_CLOSE_ACTIVE_TAB),
     )?;
     let open_command_palette = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_PALETTE,
         "Open Command Palette",
         true,
-        Some(menu_accelerator(MENU_OPEN_COMMAND_PALETTE)),
+        menu_accelerator(MENU_OPEN_COMMAND_PALETTE),
     )?;
     let open_command_mode = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_MODE,
         "Open Command Mode",
         true,
-        Some(menu_accelerator(MENU_OPEN_COMMAND_MODE)),
+        menu_accelerator(MENU_OPEN_COMMAND_MODE),
     )?;
     // No accelerator: replaying the tour is a rare, deliberate action, and an
     // unregistered chord here would shadow one the workspace already owns.
@@ -289,6 +308,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         open_command_palette.clone(),
         open_command_mode.clone(),
     ]));
+    app.manage(SettingsMenuAccelerator::default());
 
     let items = WorkspaceMenuItems {
         open_settings,
@@ -301,7 +321,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
     #[cfg(target_os = "macos")]
     install_macos_workspace_menu(app, menu, &items)?;
     #[cfg(not(target_os = "macos"))]
-    install_non_macos_workspace_menu(menu, &items)?;
+    install_non_macos_workspace_menu(app, menu, &items)?;
     Ok(())
 }
 
@@ -349,27 +369,34 @@ fn install_macos_workspace_menu(
 }
 
 /// Installs the workspace actions on Linux and Windows, which share Ctrl-based
-/// accelerators. Both append to the `window` submenu: it is the only submenu
-/// `Menu::default` gives a stable id, so it is the only one `menu.get` can
-/// resolve (Windows' File menu carries a generated id, and Linux has none).
+/// accelerators. Neither platform gets the macOS app menu, and `Menu::default`
+/// gives Linux no File submenu at all, so Pragma's own actions go in a dedicated
+/// leading submenu rather than tucked under `Window` — the previous placement
+/// left "Settings…" as the last item of an unrelated menu, which on Linux read
+/// as "there is no way to open settings".
 #[cfg(not(target_os = "macos"))]
 fn install_non_macos_workspace_menu(
+    app: &tauri::AppHandle,
     menu: &Menu<tauri::Wry>,
     items: &WorkspaceMenuItems,
 ) -> tauri::Result<()> {
-    if let Some(window_menu) = menu
-        .get("window")
-        .and_then(|item| item.as_submenu().cloned())
-    {
-        // Neither platform offers a reachable File menu, so surface Pragma tab
-        // actions here.
-        window_menu.append(&items.open_settings)?;
-        window_menu.append(&items.start_tour)?;
-        window_menu.append(&items.new_terminal_tab)?;
-        window_menu.append(&items.close_active_tab)?;
-        window_menu.append(&items.open_command_palette)?;
-        window_menu.append(&items.open_command_mode)?;
-    }
+    let separator = PredefinedMenuItem::separator(app)?;
+    let pragma_menu = Submenu::with_id_and_items(
+        app,
+        "pragma",
+        "Pragma",
+        true,
+        &[
+            &items.open_settings,
+            &items.start_tour,
+            &separator,
+            &items.new_terminal_tab,
+            &items.close_active_tab,
+            &items.open_command_palette,
+            &items.open_command_mode,
+        ],
+    )?;
+    menu.insert(&pragma_menu, 0)?;
     Ok(())
 }
 
@@ -403,12 +430,14 @@ async fn load_keybindings(
 ) -> AppResult<KeybindingsConfig> {
     let global = keybindings::read_or_ensure_text(app_handle.path().home_dir()?)?;
     let Some(project_id) = project_id else {
-        return keybindings::effective(&global, None);
+        let config = keybindings::effective(&global, None)?;
+        sync_settings_menu_accelerator(&app_handle, &config);
+        return Ok(config);
     };
     // A project without readable bindings (e.g. an unreachable remote host) must
     // still get working shortcuts, so fall back to the global layer alone.
     let project = match config_file::read_scoped(
-        app_handle,
+        app_handle.clone(),
         &db,
         &hosts,
         config_file::ConfigScope::Project,
@@ -423,19 +452,75 @@ async fn load_keybindings(
             String::new()
         }
     };
-    keybindings::effective(&global, Some(&project))
+    let config = keybindings::effective(&global, Some(&project))?;
+    sync_settings_menu_accelerator(&app_handle, &config);
+    Ok(config)
+}
+
+/// Keeps the native macOS "Settings…" menu accelerator in sync with the
+/// current `openSettings` keybinding, so remapping it in Settings actually
+/// replaces the default Cmd+, instead of leaving both chords live (the
+/// webview handles every other platform's chord itself; see
+/// `MAC_ONLY_NATIVE_MENU_ACTIONS` in `use-shortcuts.ts`). Runs every time
+/// `load_keybindings` resolves — on startup, on project switch, and after
+/// Settings saves a binding (which reloads keybindings via
+/// `KEYBINDINGS_CHANGED_EVENT`) — so it never drifts from what the webview
+/// honors. Best-effort: an unparsable accelerator is logged and left as-is
+/// rather than failing keybindings loading entirely.
+fn sync_settings_menu_accelerator(app: &tauri::AppHandle, config: &KeybindingsConfig) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Some(accelerators) = app.try_state::<WorkspaceAccelerators>() else {
+        return;
+    };
+    let Some(item) = accelerators
+        .0
+        .iter()
+        .find(|item| item.id().as_ref() == MENU_OPEN_SETTINGS)
+    else {
+        return;
+    };
+    let accelerator = keybindings::mac_accelerator(&config.bindings.open_settings.mac);
+    if let Err(error) = item.set_accelerator(Some(accelerator.as_str())) {
+        log::warn!("failed to sync Settings menu accelerator to {accelerator:?}: {error}");
+        return;
+    }
+    if let Some(current) = app.try_state::<SettingsMenuAccelerator>() {
+        if let Ok(mut guard) = current.0.lock() {
+            *guard = Some(accelerator);
+        }
+    }
 }
 
 /// Suspends or restores the native menu accelerators while Settings records a
 /// shortcut. Without this, recording Cmd+W would close a tab before the webview
-/// ever sees the chord.
+/// ever sees the chord. Settings' own accelerator restores to whatever
+/// [`sync_settings_menu_accelerator`] last synced — not the static default —
+/// so recording an unrelated shortcut can't momentarily revert a remapped
+/// `openSettings` chord back to Cmd+,.
 #[tauri::command]
 fn set_menu_accelerators_enabled(
     accelerators: tauri::State<'_, WorkspaceAccelerators>,
+    settings_accelerator: tauri::State<'_, SettingsMenuAccelerator>,
     enabled: bool,
 ) -> AppResult<()> {
     for item in &accelerators.0 {
-        let accelerator = enabled.then(|| menu_accelerator(item.id().as_ref()));
+        let id = item.id().as_ref();
+        let accelerator: Option<String> = if enabled {
+            if id == MENU_OPEN_SETTINGS {
+                settings_accelerator
+                    .0
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.clone())
+                    .or_else(|| menu_accelerator(id).map(str::to_string))
+            } else {
+                menu_accelerator(id).map(str::to_string)
+            }
+        } else {
+            None
+        };
         item.set_accelerator(accelerator)?;
     }
     Ok(())
@@ -1163,7 +1248,57 @@ pub fn run() {
         Ok(limit) => log::info!("open-file soft limit: {limit}"),
         Err(error) => log::warn!("could not raise the open-file limit: {error}"),
     }
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    let builder = tauri::Builder::default();
+    // Must be the first plugin: it decides whether this process is the primary
+    // instance before anything else initialises. On Linux and Windows a
+    // `pragma://` URL otherwise launches a *second* Pragma, which then fights the
+    // running one for the server lock and never delivers the link; the
+    // `deep-link` feature forwards the URL to the primary instance's
+    // `on_open_url` handler instead. macOS routes URLs to the running app itself.
+    //
+    // The plugin's own uniqueness key must not be the bare `identifier` from
+    // tauri.conf.json: that is shared by production and every "Pragma Dev"
+    // worktree, so a second dev checkout would redirect into the first
+    // instance instead of starting its own isolated one (see the "instance
+    // channel" isolation in `pty::instance_channel`/apps/pragma/AGENTS.md).
+    // On Linux the D-Bus service id can be scoped per channel directly. On
+    // Windows `tauri-plugin-single-instance` hardcodes its named mutex to
+    // `Config::identifier` with no override, so there we only install the
+    // guard for the production channel and let every dev worktree run
+    // unguarded, exactly as it did before this plugin existed.
+    #[cfg(target_os = "linux")]
+    let builder = {
+        let channel = pty::instance_channel(context.config().product_name.as_deref());
+        builder.plugin(
+            tauri_plugin_single_instance::Builder::new()
+                .dbus_id(format!("{}.{channel}", context.config().identifier))
+                .callback(|app, _argv, _cwd| {
+                    // Only raise the window here. The `deep-link` feature hands the URL
+                    // to the deep-link plugin's `on_open_url` handler, which already
+                    // emits `DEEP_LINK_EVENT`; emitting it here too would open the link
+                    // twice.
+                    focus_main_window(app);
+                })
+                .build(),
+        )
+    };
+    #[cfg(windows)]
+    let builder = {
+        let channel = pty::instance_channel(context.config().product_name.as_deref());
+        if channel == pragma_protocol::PROD_CHANNEL {
+            builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                // Only raise the window here. The `deep-link` feature hands the URL
+                // to the deep-link plugin's `on_open_url` handler, which already
+                // emits `DEEP_LINK_EVENT`; emitting it here too would open the link
+                // twice.
+                focus_main_window(app);
+            }))
+        } else {
+            builder
+        }
+    };
+    builder
         .register_uri_scheme_protocol("pragma-ui", |context, request| {
             updates::ui_overlay_response(context.app_handle(), request.uri().path())
         })
@@ -1378,7 +1513,7 @@ pub fn run() {
             browser::browser_snapshot,
             dev_bridge::__dev_bridge_result
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(|app_handle, event| {
             let _ = (app_handle, event);

@@ -72,3 +72,11 @@ window-vibrancy = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Deep links only reach a *running* app on Linux and Windows through the
+# single-instance plugin; its `deep-link` feature re-emits the forwarded URL
+# through `on_open_url`, so those platforms take the same code path macOS
+# gets from the OS. macOS must NOT load it: launchd already routes URLs to
+# the running app, and a second instance there would be the bug, not the fix.
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

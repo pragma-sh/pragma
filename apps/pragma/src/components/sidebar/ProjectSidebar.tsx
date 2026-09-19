@@ -7,6 +7,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Settings,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
@@ -31,6 +33,7 @@ import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { startWindowDrag } from "@/lib/window-drag";
 import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
+import { useKanban } from "@/state/kanban-context";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { useWorktreeCreation } from "@/state/worktree-creation-context";
@@ -232,6 +235,7 @@ function ExpandedProjectSidebar({
           <div className="min-w-0 flex-1">
             <ProjectSwitcher />
           </div>
+          <SettingsButton />
           <AddMenu
             worktreeDisabled={!mainWorktreeId}
             onAddProject={onAddProject}
@@ -240,6 +244,25 @@ function ExpandedProjectSidebar({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Opens the full-frame Settings view. The native menu also offers this, but on
+ * Linux the in-window menu bar is hidden on several desktops, so Settings needs
+ * an affordance that does not depend on it.
+ */
+function SettingsButton() {
+  const kanban = useKanban();
+  return (
+    <IconButton
+      label="Settings"
+      size="icon-sm"
+      variant="ghost"
+      onClick={() => kanban.openSettings()}
+    >
+      <Settings />
+    </IconButton>
   );
 }
 

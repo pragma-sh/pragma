@@ -114,6 +114,7 @@ fn default_config() -> KeybindingsConfig {
             scroll_terminal_bottom: chord("cmd", "end", "ctrl", "end"),
             open_command_palette: chord("cmd", "p", "ctrl", "p"),
             open_command_mode: chord("cmd+shift", "p", "ctrl+shift", "p"),
+            open_settings: chord("cmd", ",", "ctrl", ","),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),
@@ -167,6 +168,26 @@ fn parse_modifier(modifier: &str) -> KeybindingChordModifiersItem {
         "shift" => KeybindingChordModifiersItem::Shift,
         _ => panic!("unknown modifier: {modifier}"),
     }
+}
+
+/// Renders a chord as a Tauri/muda accelerator string (e.g. `"CmdOrCtrl+Shift+,"`).
+///
+/// Muda's parser uppercases the key token before matching it against `Code`
+/// names, so the stored lowercase key (`"end"`, `"arrowup"`, `","`, `"p"`, …)
+/// can be passed through unchanged.
+pub fn mac_accelerator(chord: &KeybindingChord) -> String {
+    let mut parts: Vec<&str> = chord
+        .modifiers
+        .iter()
+        .map(|modifier| match modifier {
+            KeybindingChordModifiersItem::Cmd => "CmdOrCtrl",
+            KeybindingChordModifiersItem::Ctrl => "Ctrl",
+            KeybindingChordModifiersItem::Alt => "Alt",
+            KeybindingChordModifiersItem::Shift => "Shift",
+        })
+        .collect();
+    parts.push(&chord.key);
+    parts.join("+")
 }
 
 #[cfg(test)]
@@ -279,6 +300,18 @@ mod tests {
         )
         .is_err());
         assert!(validate_overrides("{}").is_ok());
+    }
+
+    #[test]
+    fn mac_accelerator_renders_modifiers_and_key() {
+        assert_eq!(
+            mac_accelerator(&default_config().bindings.open_settings.mac),
+            "CmdOrCtrl+,"
+        );
+        assert_eq!(
+            mac_accelerator(&parse_chord("cmd+shift", "p")),
+            "CmdOrCtrl+Shift+p"
+        );
     }
 
     #[test]
