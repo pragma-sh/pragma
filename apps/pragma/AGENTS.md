@@ -820,12 +820,23 @@ Mode) **must** be real menu items — the webview otherwise swallows chords like
 `install_workspace_menu` builds them once into a `WorkspaceMenuItems` struct (one struct,
 not a growing argument list — clippy's `too_many_arguments` caps it at seven), then hands
 that to `install_macos_workspace_menu` or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
-share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
-it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
-generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated
+share Ctrl-based chords. The non-macOS arm builds its **own leading `Pragma` submenu**
+rather than appending to `Menu::default`'s `window` one: `Menu::default` gives Linux no
+File submenu at all and Windows' carries a generated id, and appending left "Settings…"
+as the last entry of an unrelated menu — which on Linux reads as "there is no way to open
+settings". Keep that arm gated
 `#[cfg(not(target_os = "macos"))]`, never `#[cfg(target_os = "linux")]`: the latter
 silently drops every accelerator on Windows _and_ trips `-D warnings` there, since all
 five bindings then go unused.
+
+**Settings must never depend on the native menu alone.** Outside macOS the menu bar is
+drawn inside the window and several Linux desktops (and any GTK build with the menu bar
+hidden) never show it, so Settings also has a gear button in the project-sidebar footer,
+an "Open settings" command-palette entry, and a real `openSettings` keybinding
+(`⌘,`/`Ctrl+,`) handled in the webview. `menu_accelerator` therefore returns `None` for
+`settings.open` off macOS, and `use-shortcuts.ts` only defers that chord to the native
+menu when the platform is `mac` (`MAC_ONLY_NATIVE_MENU_ACTIONS`) — otherwise the two would
+both claim it.
 
 ## Deep links (`pragma://open`)
 
