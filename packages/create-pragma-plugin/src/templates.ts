@@ -1,5 +1,6 @@
 import type { PackageManager } from "./package-manager";
 import type { ScaffoldCapability } from "./scaffold";
+import { version } from "../package.json";
 
 interface TemplateInput {
   packageName: string;
@@ -41,7 +42,12 @@ function packageJson(input: TemplateInput): string {
         test: "vitest run",
       },
       dependencies: {
-        "@pragma/plugin": "0.0.0",
+        // `create-pragma-plugin` and `@pragma-sh/plugin` are in the same Release
+        // Please linked-versions group, so this package's own version is always
+        // the matching plugin API version — and is baked in when the CLI is
+        // bundled. A hardcoded literal here silently scaffolds a dependency on a
+        // version that was never published.
+        "@pragma-sh/plugin": `^${version}`,
       },
       devDependencies: {
         "@types/react": "^19.2.14",
@@ -81,7 +87,7 @@ function tsconfigJson(): string {
 }
 
 function viteConfig(): string {
-  return `import react from "@vitejs/plugin-react";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({\n  plugins: [react()],\n  resolve: {\n    alias: {\n      "react/jsx-runtime": "@pragma/plugin/jsx-runtime",\n      "react-dom": "@pragma/plugin/react-dom",\n      react: "@pragma/plugin/react",\n    },\n  },\n  build: {\n    lib: {\n      entry: "src/index.tsx",\n      formats: ["es"],\n      fileName: "index",\n    },\n    rollupOptions: {\n      output: {\n        inlineDynamicImports: true,\n      },\n    },\n  },\n});\n`;
+  return `import react from "@vitejs/plugin-react";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({\n  plugins: [react()],\n  resolve: {\n    alias: {\n      "react/jsx-runtime": "@pragma-sh/plugin/jsx-runtime",\n      "react-dom": "@pragma-sh/plugin/react-dom",\n      react: "@pragma-sh/plugin/react",\n    },\n  },\n  build: {\n    lib: {\n      entry: "src/index.tsx",\n      formats: ["es"],\n      fileName: "index",\n    },\n    rollupOptions: {\n      output: {\n        inlineDynamicImports: true,\n      },\n    },\n  },\n});\n`;
 }
 
 function source(input: TemplateInput): string {
@@ -90,7 +96,7 @@ function source(input: TemplateInput): string {
   const commandContribution = hasCommand
     ? `,\n  commands: [\n    defineCommand({\n      id: "${input.packageName}.hello",\n      title: "Show ${input.displayName} greeting",\n      run: (ctx) => ctx.notify("Hello from ${input.displayName}", { variant: "success" }),\n    }),\n  ]`
     : "";
-  return `import { definePlugin, defineSidebarTab, useProject${commandImport} } from "@pragma/plugin";\nimport { Button, Kbd } from "@pragma/plugin/ui";\n\nfunction OverviewTab() {\n  const project = useProject();\n  return (\n    <div style={{ padding: 12 }}>\n      <h2>${input.displayName}</h2>\n      <p>Active project: {project?.name ?? "None"}</p>\n      <Button variant="secondary" size="sm">\n        Press <Kbd>⌘K</Kbd>\n      </Button>\n    </div>\n  );\n}\n\nexport default definePlugin({\n  name: "${input.displayName}",\n  description: "A Pragma plugin scaffolded with create-pragma-plugin.",\n  ui: {\n    sidebarTabs: [\n      defineSidebarTab({\n        id: "overview",\n        title: "${input.displayName}",\n        component: OverviewTab,\n      }),\n    ],\n  }${commandContribution},\n});\n`;
+  return `import { definePlugin, defineSidebarTab, useProject${commandImport} } from "@pragma-sh/plugin";\nimport { Button, Kbd } from "@pragma-sh/plugin/ui";\n\nfunction OverviewTab() {\n  const project = useProject();\n  return (\n    <div style={{ padding: 12 }}>\n      <h2>${input.displayName}</h2>\n      <p>Active project: {project?.name ?? "None"}</p>\n      <Button variant="secondary" size="sm">\n        Press <Kbd>⌘K</Kbd>\n      </Button>\n    </div>\n  );\n}\n\nexport default definePlugin({\n  name: "${input.displayName}",\n  description: "A Pragma plugin scaffolded with create-pragma-plugin.",\n  ui: {\n    sidebarTabs: [\n      defineSidebarTab({\n        id: "overview",\n        title: "${input.displayName}",\n        component: OverviewTab,\n      }),\n    ],\n  }${commandContribution},\n});\n`;
 }
 
 function testSource(): string {

@@ -8,6 +8,14 @@ on:
         required: true
         type: choice
         options: [publish, refresh-lock]
+      dist-tag:
+        description: >-
+          npm dist-tag. `alpha` leaves `latest` where it is, so a prerelease never
+          becomes the default install; `latest` is what a stable release needs.
+        required: true
+        default: alpha
+        type: choice
+        options: [alpha, latest]
       package:
         description: npm package to publish
         required: false
@@ -53,9 +61,11 @@ jobs:
         run: |
           bun -e 'const list = await Bun.file("packages/plugin-registry/official.json").json(); if (!list.packages.includes(process.env.PACKAGE)) throw new Error("package is not official"); const name = process.env.PACKAGE; console.log(`dir=packages/${name.split("/").at(-1)}`); console.log(`name=${name}`)' >> "$GITHUB_OUTPUT"
       - run: bunx turbo run build --filter="${{ steps.package.outputs.name }}"
-      - run: npm pack "${{ steps.package.outputs.dir }}" --dry-run
-      - name: Publish alpha with provenance
-        run: npm publish "${{ steps.package.outputs.dir }}" --access public --tag alpha --provenance
+      - run: npm pack "./${{ steps.package.outputs.dir }}" --dry-run
+      - name: Publish with provenance
+        run: |
+          npm publish "./${{ steps.package.outputs.dir }}" \
+            --access public --tag "${{ inputs.dist-tag }}" --provenance
 
   refresh-lock:
     if: always() && (inputs.operation == 'refresh-lock' || needs.publish.result == 'success')
@@ -70,8 +80,8 @@ jobs:
       - name: Wait for npm propagation
         if: needs.publish.result == 'success'
         run: sleep 20
-      - run: bun run --filter @pragma/plugin-registry lock
-      - run: bun run --filter @pragma/plugin-registry validate
+      - run: bun run --filter @pragma-sh/plugin-registry lock
+      - run: bun run --filter @pragma-sh/plugin-registry validate
       - uses: peter-evans/create-pull-request@v7
         with:
           add-paths: packages/plugin-registry/official.lock.json

@@ -18,22 +18,17 @@
     "apps/www/src/lib/*.test.ts",
     // Desktop plugin installation executes this through `pragma-plugin.json`.
     "packages/opencode-plugin/scripts/install.mjs",
+    // Vercel runs this as the project's Ignored Build Step (`vercel.json`'s
+    // `ignoreCommand`), so it is an entry point with no importer.
+    "apps/www/scripts/should-deploy.ts",
+    // Run by the `publish-packages` job in the release workflow.
+    "scripts/publish-packages.ts",
   ],
-  // Staged sidecar bundles under `src-tauri/resources/plugins/**` are build
-  // artifacts (bunup output copied from analyzed source packages by
-  // `stage-daemon-sidecar.sh`), not hand-written code. Analyzing them for
-  // complexity double-counts the source and always estimates ~0 coverage
-  // (bundling strips comments, so inline `fallow-ignore` never reaches them),
-  // producing spurious CRAP findings. The source packages are analyzed directly.
-  "ignorePatterns": ["apps/pragma/src-tauri/resources/plugins/**"],
   // `test-fixtures/**` plugin bundles are loaded at runtime (blob-URL dynamic
   // import by the plugin loader; path resolution by Rust tests), never
   // statically imported — they are not dead files.
   "dynamicallyLoaded": [
     "**/test-fixtures/**",
-    // Plugin resource bundles loaded at runtime by the Rust sidecar launcher
-    // (plugins.rs), never statically imported by any entry point.
-    "**/resources/plugins/**",
     // `packages/bench/src/runner.js` is pulled in via Rust `include_str!`
     // (scenarios.rs) and injected into the webview at runtime — never
     // statically imported by any JS/TS entry point.
@@ -116,15 +111,15 @@
     "expo-system-ui",
     "react-native-web",
   ],
-  // `@pragma/constants` imports generated TS types that may not exist before
+  // `@pragma-sh/constants` imports generated TS types that may not exist before
   // `bun run generate`; don't report that intentional generated edge.
-  // `@pragma/scratchpad/ui/primitives` is a real export in that package's
+  // `@pragma-sh/scratchpad/ui/primitives` is a real export in that package's
   // `exports` map (and resolves for tsc, Vite and Vitest); fallow's resolver
   // only handles single-segment subpaths, so it reports the nested one as
   // unresolved. Drop this entry once fallow resolves multi-segment subpaths.
   "ignoreUnresolvedImports": [
     "./generated/constants",
-    "@pragma/scratchpad/ui/primitives",
+    "@pragma-sh/scratchpad/ui/primitives",
     // Fumadocs resolves these package CSS entry points through Next's bundler,
     // but fallow's TypeScript resolver has no CSS package-resolution support.
     "fumadocs-ui/css/shadcn.css",
