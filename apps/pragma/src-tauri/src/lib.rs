@@ -1161,7 +1161,21 @@ pub fn run() {
         Ok(limit) => log::info!("open-file soft limit: {limit}"),
         Err(error) => log::warn!("could not raise the open-file limit: {error}"),
     }
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Must be the first plugin: it decides whether this process is the primary
+    // instance before anything else initialises. On Linux and Windows a
+    // `pragma://` URL otherwise launches a *second* Pragma, which then fights the
+    // running one for the server lock and never delivers the link; the
+    // `deep-link` feature forwards the URL to the primary instance's
+    // `on_open_url` handler instead. macOS routes URLs to the running app itself.
+    #[cfg(any(target_os = "linux", windows))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        // Only raise the window here. The `deep-link` feature hands the URL to
+        // the deep-link plugin's `on_open_url` handler, which already emits
+        // `DEEP_LINK_EVENT`; emitting it here too would open the link twice.
+        focus_main_window(app);
+    }));
+    builder
         .register_uri_scheme_protocol("pragma-ui", |context, request| {
             updates::ui_overlay_response(context.app_handle(), request.uri().path())
         })
