@@ -787,6 +787,16 @@ release-built dev app keeps its own per-worktree instance.
   `<app_data_dir>/<channel>`. The app hands the channel to the server via
   `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
   `daemon.sock` for SSH streamlocal compatibility.
+- **The OS-level single-instance guard must key off the channel too, not the bare
+  bundle identifier.** `tauri-plugin-single-instance` (Linux + Windows only, wired in
+  `run()` in `lib.rs`) defaults to deduping on `Config::identifier` alone
+  (`com.pragma.app`), which every dev worktree shares with production — a second dev
+  checkout would redirect into the first instead of starting its own. On Linux,
+  `Builder::dbus_id` lets us scope the D-Bus service name to
+  `"{identifier}.{channel}"`. On Windows the plugin hardcodes its named mutex to
+  `Config::identifier` with **no** override in its public API, so there the guard is
+  only installed when the channel is `pragma_protocol::PROD_CHANNEL`; every dev
+  worktree runs unguarded on Windows rather than colliding.
 
 **Remote projects use the same host-server protocol through an SSH streamlocal
 bridge.** `ssh_host::connect_remote_project` probes the remote project, ensures a
