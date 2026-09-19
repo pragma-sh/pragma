@@ -1251,6 +1251,17 @@ resending the stale `expectedVersion` would stall every later save; and deleting
 worktree fails rather than logs when the `DeleteForWorktree` RPC fails, since nothing
 garbage-collects host-side scenes and the checkout removal it follows is idempotent.
 
+**The crate builds no `cdylib`, and cannot.** `pragma-core` reaches whiteboard rendering
+through `excalidraw-image` -> `deno_core` -> `v8`, and v8's prebuilt objects carry TLS
+relocations a Linux shared object may not have: linking one dies with
+`relocation R_X86_64_TPOFF32 against v8::internal::g_current_isolate_ cannot be used with
+-shared`. macOS links it happily, so this only ever shows up in Linux CI — as a
+`cargo test --workspace` failure, since cargo builds every declared crate-type of the lib.
+The `cdylib` in the Tauri template exists for Tauri's mobile targets, which Pragma does
+not ship (the phone client is `apps/pragma-go`), so `crate-type` is `["staticlib",
+"rlib"]` and `main.rs` links the rlib. Do not add `cdylib` back without first getting v8
+out of this crate's dependency graph.
+
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
 dispatch; the `TabKind` stays `editor`). It is a **viewer**, not an editor: no dirty
