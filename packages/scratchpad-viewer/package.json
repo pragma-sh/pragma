@@ -1,9 +1,15 @@
 {
-  "name": "@pragma/scratchpad-viewer",
+  "name": "@pragma-sh/scratchpad-viewer",
   "version": "0.0.0",
-  "private": true,
-  "description": "Read-only scratchpad renderer: one self-contained HTML document that evaluates scratchpad MDX with live @pragma/scratchpad components and a touch comment layer.",
+  "description": "Read-only scratchpad renderer: one self-contained HTML document that evaluates scratchpad MDX with live @pragma-sh/scratchpad components and a touch comment layer.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/scratchpad-viewer"
+  },
   "files": [
     "dist"
   ],
@@ -18,6 +24,9 @@
       "require": "./dist/index.cjs"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun scripts/build.ts",
     "pretypecheck": "bun scripts/build.ts --runtime-only",
@@ -27,11 +36,11 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/scratchpad-contract": "workspace:*"
+    "@pragma-sh/scratchpad-contract": "^0.0.0"
   },
   "devDependencies": {
     "@mdx-js/mdx": "^3.1.1",
-    "@pragma/scratchpad": "workspace:*",
+    "@pragma-sh/scratchpad": "workspace:*",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

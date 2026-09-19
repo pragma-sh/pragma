@@ -1,12 +1,25 @@
 {
-  "name": "@pragma/scratchpad-contract",
+  "name": "@pragma-sh/scratchpad-contract",
   "version": "0.0.0",
-  "private": true,
   "description": "The scratchpad file contract: managed frontmatter, agent attachment, and the sibling comment-thread file. Source of truth shared by the desktop, the SDK, and the read-only viewer.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/scratchpad-contract"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,7 +27,7 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/constants": "workspace:*"
+    "@pragma-sh/constants": "^0.0.0"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

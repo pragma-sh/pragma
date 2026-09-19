@@ -1,9 +1,15 @@
 {
-  "name": "@pragma/plugin",
+  "name": "@pragma-sh/plugin",
   "version": "0.0.0",
-  "private": true,
   "description": "Public TypeScript API for building Pragma plugins.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/plugin"
+  },
   "files": [
     "dist"
   ],
@@ -54,6 +60,9 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "generate": "bun scripts/generate-version.ts",
     "prebuild": "bun run generate",
@@ -65,8 +74,8 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/constants": "workspace:*",
-    "@pragma/sdk": "workspace:*",
+    "@pragma-sh/constants": "^0.0.0",
+    "@pragma-sh/sdk": "^0.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

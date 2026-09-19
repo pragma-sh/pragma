@@ -177,3 +177,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+
+  publish-packages:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.desktop-created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm provenance; the token below still does the authenticating.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.desktop-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@latest
+      - run: bun install --frozen-lockfile
+      - name: Build the packages that ship a bundle
+        run: bunx turbo run build --filter="./packages/*"
+      - name: Publish every public package with provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Dependency order, so a fresh scope never has a dangling reference.
+        # A version that is already on the registry is skipped rather than
+        # failing the job, which is what makes a re-run safe.
+        run: bun scripts/publish-packages.ts --publish

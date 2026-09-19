@@ -1,11 +1,17 @@
 {
   "name": "create-pragma-plugin",
   "version": "0.0.0",
-  "private": true,
   "description": "Scaffolder CLI for pure TypeScript Pragma plugins.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/create-pragma-plugin"
+  },
   "bin": {
-    "create-pragma-plugin": "./dist/cli.js"
+    "create-pragma-plugin": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -21,6 +27,9 @@
       "require": "./dist/index.cjs"
     },
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "bunup src/index.ts src/cli.ts --format esm,cjs --target node --dts",

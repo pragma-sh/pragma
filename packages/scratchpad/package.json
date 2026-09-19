@@ -1,9 +1,15 @@
 {
-  "name": "@pragma/scratchpad",
+  "name": "@pragma-sh/scratchpad",
   "version": "0.0.0",
-  "private": true,
   "description": "Interactive runtime and UI components for Pragma scratchpads.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/scratchpad"
+  },
   "files": [
     "dist"
   ],
@@ -28,6 +34,9 @@
       "require": "./dist/primitives.cjs"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun scripts/build.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
@@ -35,7 +44,7 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/sdk": "workspace:*"
+    "@pragma-sh/sdk": "^0.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",
