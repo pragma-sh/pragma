@@ -1,11 +1,11 @@
 ---
 title: Core
-description: pragma-core — pure host business logic for git, filesystem, exec, scratchpads, and fanout rules.
+description: pragma-core — pure host business logic for git, filesystem, exec, scratchpads, whiteboards, and fanout rules.
 ---
 
 `crates/pragma-core` is the host's business-logic boundary: synchronous, no Tauri, no
-I/O surprises. `Core::handle_rpc` implements exactly four RPC domains — `filesystem`,
-`git`, `exec`, `scratchpads` — and returns `UnsupportedMethod` for everything else
+I/O surprises. `Core::handle_rpc` implements exactly five RPC domains — `filesystem`,
+`git`, `exec`, `scratchpads`, `whiteboards` — and returns `UnsupportedMethod` for everything else
 (server- or desktop-owned). `rpc.rs` maps `CoreError` onto protocol error codes.
 
 ## git (git.rs)
@@ -58,6 +58,18 @@ The host-side parser the desktop, gateway, and CLI all agree on:
 - `comments_path(file)` is the sibling `<file>.mdx.comments.json`.
 - `detach_agent` nulls the attachment fields — used by fanout promotion before attempt
   worktrees are deleted.
+
+## whiteboards (whiteboards.rs)
+
+Durable, worktree-scoped Excalidraw boards, owned by the host rather than the checkout:
+
+- SQLite storage (`whiteboards.db` in the server directory) with create, get, list,
+  search (title **and** text elements), edit, and delete.
+- Scene JSON is stored **losslessly** — unknown Excalidraw fields survive a round trip —
+  and edits carry the version they read, so a concurrent writer is rejected instead of
+  overwritten.
+- `view` renders a PNG natively here, never through a canvas in a webview, which is what
+  lets scratchpad embeds and the mobile client show the same diagram.
 
 ## fanout (fanout.rs)
 

@@ -83,6 +83,11 @@ apps/www/
 
 ## Rules
 
+- **This site trails the product by nothing.** When a feature ships in the app, the CLI,
+  the SDK, or the host, its docs page lands here in the same change — including the
+  `meta.json` entry that puts it in the sidebar, the cross-links from the pages it makes
+  incomplete, and a landing-page tile when it is worth announcing. Check the root
+  `AGENTS.md` rule before calling a feature done.
 - **`DESIGN.md` is the source of truth for the theme, and it is edited first.** The
   marketing design system — palette, type scale, radii, spacing, component specs — is
   specified in `apps/www/DESIGN.md`. Any change to the look of the landing page changes

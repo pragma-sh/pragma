@@ -1,0 +1,67 @@
+---
+title: Whiteboards
+description: Create, search, edit, and render durable Excalidraw boards through client.whiteboards.
+---
+
+`client.whiteboards` is the typed namespace over the host's `whiteboards` RPC — the same
+boards the desktop tab, the CLI, and scratchpad embeds use. See
+[Whiteboards](/docs/user-guide/whiteboards) for the user-facing tour.
+
+## Create, read, search
+
+```ts
+const board = await client.whiteboards.create({
+  worktreeId,
+  title: "Request flow",
+  scene: { type: "excalidraw", version: 2, elements: [], appState: {}, files: {} },
+});
+// Whiteboard { id, worktreeId, title, scene, version, createdAt, updatedAt }
+
+const boards = await client.whiteboards.list({ worktreeId });
+const hits = await client.whiteboards.search({ worktreeId, query: "gateway" });
+const one = await client.whiteboards.get({ worktreeId, id: board.id });
+```
+
+`search` matches titles and the scene's text elements. Every id-based call also takes the
+`worktreeId` — boards are worktree-scoped and a mismatched pair is rejected.
+
+## Edit
+
+```ts
+const next = await client.whiteboards.edit({
+  worktreeId,
+  id: board.id,
+  title: "Request flow v2",
+  scene: revisedScene,
+  version: board.version,
+});
+```
+
+Edits are optimistic: the `version` you pass must still be the stored one, so a concurrent
+writer fails the call instead of losing work. Re-`get`, reconcile, retry. Scenes are
+stored losslessly — preserve fields you don't understand rather than dropping them.
+
+## Render
+
+```ts
+const png: Uint8Array = await client.whiteboards.view({
+  worktreeId,
+  id: board.id,
+  dark: true, // Excalidraw's dark export palette
+});
+```
+
+The host renders natively and the client decodes the response's base64 `data` into PNG
+bytes for you.
+
+## Delete
+
+```ts
+await client.whiteboards.delete({ worktreeId, id: board.id });
+```
+
+Nothing warns you that a scratchpad embeds the board, so check before deleting one.
+
+Scene and input types (`Whiteboard`, `ExcalidrawScene`, `WhiteboardCreateInput`, …) come
+from `@pragma/constants` and are re-exported by the SDK, so TypeScript and Rust agree by
+construction.

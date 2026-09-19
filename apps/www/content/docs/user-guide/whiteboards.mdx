@@ -1,0 +1,71 @@
+---
+title: Whiteboards
+description: Durable Excalidraw canvases per worktree — drawn by you, created and revised by agents, embedded in scratchpads.
+---
+
+A whiteboard is a **durable Excalidraw canvas scoped to a worktree**. It is not a file in
+your checkout: the host owns it, so an agent can create one from its terminal, you can
+edit it in a tab, and a scratchpad can embed it as a live diagram — all of them looking at
+the same board.
+
+Reach for one when the answer is spatial: architecture, request flow, topology, a
+sequence, a dependency graph, a process you want to redraw together.
+
+## Opening one
+
+- **New tab menu → Whiteboard**, or <Keys mac="⌘⇧W" other="Ctrl+⇧W" />, creates a board
+  and opens it.
+- The sidebar's **Whiteboards** card lists the selected worktree's boards — click to open
+  (the tab is deduplicated, so a board already open is focused rather than duplicated),
+  right-click to delete. The card is inventory only, and stays hidden until the worktree
+  actually has a board.
+- Renaming the tab renames the board, and an agent renaming the board renames the tab.
+
+Edits save themselves: the canvas debounces writes back to the host. If another
+writer — the CLI, the SDK, a second window — changed the board while you were drawing,
+Pragma re-reads the newer version and re-applies your edits on top rather than silently
+overwriting them.
+
+## Agents and whiteboards
+
+Agents work with the same boards through
+[`pragma-cli whiteboard`](/docs/cli/whiteboard):
+
+```sh
+pragma-cli --json whiteboard create --title "Request flow" scene.excalidraw
+pragma-cli --json whiteboard search "gateway"
+pragma-cli whiteboard view <id> /tmp/request-flow.png
+```
+
+The scene is complete Excalidraw JSON, stored losslessly, so a board an agent drew stays
+fully editable by hand and a board you drew stays readable by the agent. The shipped
+`pragma` skill teaches agents the scene contract and the create/edit/verify workflow, so
+asking one for "a diagram of this" is usually enough.
+
+## Inside a scratchpad
+
+A [scratchpad](/docs/user-guide/scratchpads) embeds a board by id:
+
+```mdx
+import { Whiteboard } from "@pragma/scratchpad/ui";
+
+<Whiteboard id="whiteboard-id-from-create" />
+```
+
+The embed is a live, theme-matched PNG rendered by the host — it refreshes when the
+board's version changes, and it renders the same on the desktop, on the phone, and in the
+browser build. Clicking it in the desktop app opens the interactive board in its own tab.
+The board and the scratchpad must belong to the same worktree.
+
+<Callout title="Prefer a whiteboard over a Mermaid fence">
+  For spatial or flow diagrams, a whiteboard beats a text-diagram fence: you and the agent can both
+  revise the same canvas. Mermaid is still the right answer when you need text-only source or
+  rendering outside Pragma.
+</Callout>
+
+## Where they live
+
+Boards live in the host server's own SQLite database (`whiteboards.db` in the
+[per-instance server directory](/docs/wiki/disk-layout)), keyed by worktree — never in the
+repository, so nothing lands in a diff or a commit. Deleting a worktree deletes its
+boards; deleting a board a scratchpad embeds leaves that embed with nothing to render.

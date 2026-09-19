@@ -9,6 +9,7 @@ import {
   Globe,
   Keyboard,
   NotebookPen,
+  PencilRuler,
   Server,
   TerminalSquare,
   Workflow,
@@ -73,11 +74,18 @@ const ITEMS: readonly BentoItem[] = [
     span: "sm:col-span-6 lg:col-span-7",
   },
   {
+    icon: PencilRuler,
+    title: "Whiteboards",
+    description:
+      "Durable Excalidraw canvases per worktree. Agents create and revise them from the CLI, you edit them in a tab, and scratchpads embed them as live diagrams.",
+    span: "sm:col-span-6 lg:col-span-5",
+  },
+  {
     icon: Server,
     title: "Persistent app server",
     description:
       "Like tmux, but for your agents: close the desktop app and your sessions, automations, and phone link all keep running.",
-    span: "sm:col-span-6 lg:col-span-5",
+    span: "sm:col-span-6 lg:col-span-4",
   },
   {
     icon: Compass,
@@ -91,28 +99,28 @@ const ITEMS: readonly BentoItem[] = [
     title: "Splits and tabs",
     description:
       "Terminals, editors, diffs, and native browser views split any direction, persist per worktree, and reattach after a restart.",
-    span: "sm:col-span-6 lg:col-span-4",
+    span: "sm:col-span-12 lg:col-span-3",
   },
   {
     icon: Bell,
     title: "Agent alerts",
     description:
       "A chime, a system notification, and a status dot the moment an agent finishes or needs a decision — with your own sound clips per project.",
-    span: "sm:col-span-12 lg:col-span-3",
+    span: "sm:col-span-6 lg:col-span-4",
   },
   {
     icon: Keyboard,
     title: "Keybindings",
     description:
       "Every action is rebindable per platform, globally or per project, validated on write so a bad chord can never lock you out.",
-    span: "sm:col-span-6 lg:col-span-6",
+    span: "sm:col-span-6 lg:col-span-4",
   },
   {
     icon: Gauge,
     title: "Usage limits",
     description:
       "Plugins report provider quota, so the remaining window for each agent subscription is one click away in the tab bar.",
-    span: "sm:col-span-6 lg:col-span-6",
+    span: "sm:col-span-12 lg:col-span-4",
   },
 ];
 
@@ -122,7 +130,7 @@ const ITEMS: readonly BentoItem[] = [
  * This is the page's band of charcoal cards — the rhythm break comes from what
  * stands on the canvas, not from tinting the canvas, so the section ground is
  * the same near-black as its neighbours. Every tile is the same card: no
- * featured tile, no spotlight tile. Twelve items with one of them singled out
+ * featured tile, no spotlight tile. Thirteen items with one of them singled out
  * asserted a ranking the list does not have, and it spent the page's gradient
  * allowance on a footnote — the closing call to action is the one spotlight now.
  */

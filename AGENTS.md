@@ -61,6 +61,11 @@ than no guide.
   change a workflow here, update the relevant skill (`pragma-architecture`,
   `shared-constants`, `tauri-command`, `code-quality`, `pragma`) too, and
   add a new skill when you add a substantial new workflow.
+- **Ship the website with the feature.** A user-visible change is not done until
+  `apps/www` matches it: add or update the `/docs` page (and its `meta.json` entry), the
+  landing-page copy or bento card when the feature is worth announcing, and any page the
+  change makes wrong — wiki, CLI, SDK, keybindings, disk layout. Same change, same commit,
+  exactly like the AGENTS.md rule above. A feature nobody can read about does not exist.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
   AGENTS.md) so the next person (or agent) doesn't rediscover it.
