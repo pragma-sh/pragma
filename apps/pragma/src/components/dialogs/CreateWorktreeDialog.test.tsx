@@ -31,11 +31,17 @@ vi.mock("@/state/fanouts-context", () => ({
   }),
 }));
 
+const clearDraftMock = vi.fn();
+/** The failed-run request the provider republishes for "Try again"; null by default. */
+let publishedDraft: unknown = null;
+
 vi.mock("@/state/worktree-creation-context", () => ({
   useWorktreeCreation: () => ({
     creation: null,
+    draft: publishedDraft,
     startCreation: startCreationMock,
     dismiss: vi.fn(),
+    clearDraft: clearDraftMock,
   }),
 }));
 
@@ -124,6 +130,7 @@ describe("CreateWorktreeDialog", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    publishedDraft = null;
   });
 
   it("names the parent worktree in the heading and keeps the fields in order", async () => {
@@ -227,6 +234,33 @@ describe("CreateWorktreeDialog", () => {
         expect.objectContaining({ syncWorktreeId: "main" }),
       ),
     );
+  });
+
+  it("restores a failed run's input when its draft is published", async () => {
+    publishedDraft = {
+      projectId: "p",
+      parentWorktreeId: "main",
+      branch: "feature",
+      title: "Feature",
+      prompt: "Do the thing",
+      agent: { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
+      modelSelection: { modelId: null, reasoningId: null },
+      syncWorktreeId: null,
+    };
+    listPluginAgentsMock.mockReturnValue([
+      { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
+      { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
+    ]);
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.getByLabelText("Branch name")).toHaveValue("feature");
+    expect(screen.getByLabelText("Display title")).toHaveValue("Feature");
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Do the thing");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("OpenCode"),
+    );
+    // Consumed once, so reopening the dialog later starts from a clean form.
+    expect(clearDraftMock).toHaveBeenCalled();
   });
 
   it("skips the sync when the user creates without syncing", async () => {

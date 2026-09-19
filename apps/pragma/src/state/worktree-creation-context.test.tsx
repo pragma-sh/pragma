@@ -109,7 +109,7 @@ function Harness({
   prompt?: string;
   agent?: AgentConfig | null;
 }) {
-  const { startCreation, creation, viewCreation } = useWorktreeCreation();
+  const { startCreation, creation, viewCreation, draft } = useWorktreeCreation();
   return (
     <>
       <button
@@ -136,6 +136,7 @@ function Harness({
       <button type="button" onClick={viewCreation}>
         view
       </button>
+      <span data-testid="draft">{draft ? `${draft.branch}|${draft.prompt ?? ""}` : "none"}</span>
       <span data-testid="idle">{creation ? "busy" : "idle"}</span>
       <span data-testid="viewing">{creation?.viewing ? "viewing" : "background"}</span>
       {creation?.viewing ? <WorktreeCreationScreen /> : null}
@@ -245,6 +246,32 @@ describe("WorktreeCreationProvider", () => {
     expect(await screen.findByText("branch already exists")).toBeInTheDocument();
     screen.getByRole("button", { name: "Dismiss" }).click();
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("republishes the failed request as a draft when the user tries again", async () => {
+    createWorktreeMock.mockRejectedValue(new Error("branch already exists"));
+    renderHarness(null, "Fix the bug", testAgent);
+
+    expect(await screen.findByText("branch already exists")).toBeInTheDocument();
+    // Nothing was created, so the only way forward is editing the input.
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Try again" }).click();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("draft")).toHaveTextContent("feature|Fix the bug"),
+    );
+    // The screen goes away with it: the dialog owns the flow from here.
+    expect(screen.getByTestId("idle")).toHaveTextContent("idle");
+  });
+
+  it("offers only Retry when the worktree exists but opening it failed", async () => {
+    refreshProjectMock.mockRejectedValueOnce(new Error("refresh failed"));
+    renderHarness();
+
+    expect(await screen.findByText("refresh failed")).toBeInTheDocument();
+    // Re-running the dialog here would create a second worktree.
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("keeps the owner project when the selected project changes during creation", async () => {
