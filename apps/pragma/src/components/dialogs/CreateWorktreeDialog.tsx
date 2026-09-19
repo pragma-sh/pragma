@@ -1,5 +1,5 @@
 import type { FanoutParentSpec } from "@pragma/constants";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgentSelection, type AgentSelection } from "@/hooks/use-agent-selection";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
-import { rememberModelSelection } from "@/lib/agent-model-selection";
+import { EMPTY_MODEL_SELECTION, rememberModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
 import { isMacPlatform } from "@/lib/platform";
 import { type AgentConfig, type AgentModelSelection } from "@/lib/tauri";
@@ -93,6 +93,33 @@ function useWorktreeSubmission(): {
 }
 
 /**
+ * Everything the form itself owns: its text fields, its submission gates, and
+ * restoring a failed run's input when the provider republishes it as a draft.
+ */
+function useWorktreeForm({
+  fanout,
+  selection,
+}: {
+  fanout: FanoutMode;
+  selection: Pick<AgentSelection, "agentId" | "modelSelection" | "handleAgentChange">;
+}): ReturnType<typeof useWorktreeFormFields> & ReturnType<typeof useWorktreeSubmission> {
+  const fields = useWorktreeFormFields();
+  const submission = useWorktreeSubmission();
+  const { draft, clearDraft } = useWorktreeCreation();
+  useDraftRestore({
+    draft,
+    clearDraft,
+    fanout,
+    selection,
+    setBranch: fields.setBranch,
+    setError: submission.setError,
+    setMessage: fields.setMessage,
+    setTitle: fields.setTitle,
+  });
+  return { ...fields, ...submission };
+}
+
+/**
  * Fanout submission: turns the picker rows into the shared create request and
  * hands it to the host.
  *
@@ -170,11 +197,27 @@ export function CreateWorktreeDialog({
     loadModels,
     handleAgentChange,
   } = useAgentSelection(isOpen);
-  const { branch, setBranch, title, setTitle, message, setMessage } = useWorktreeFormFields();
   const fanoutMode = useFanoutMode();
   const submitFanout = useFanoutSubmit();
-  const { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId } =
-    useWorktreeSubmission();
+  const {
+    branch,
+    setBranch,
+    title,
+    setTitle,
+    message,
+    setMessage,
+    error,
+    setError,
+    busy,
+    setBusy,
+    behind,
+    setBehind,
+    mainWorktreeId,
+    setMainWorktreeId,
+  } = useWorktreeForm({
+    fanout: fanoutMode,
+    selection: { agentId, modelSelection, handleAgentChange },
+  });
   useEscapeToClose(isOpen && !busy, () => onOpenChange(false));
 
   const isFanout = fanoutMode.isFanout;
@@ -269,6 +312,51 @@ export function CreateWorktreeDialog({
       ) : null}
     </AnimatePresence>
   );
+}
+
+/**
+ * Restores a failed run's input when the provider republishes it as a draft.
+ *
+ * "Try again" on the creation-failure screen reopens this dialog, and the user
+ * came here to fix one thing — so the branch, title, prompt, and agent + model
+ * come back exactly as they were submitted rather than being retyped.
+ */
+function useDraftRestore({
+  draft,
+  clearDraft,
+  fanout,
+  selection,
+  setBranch,
+  setError,
+  setMessage,
+  setTitle,
+}: {
+  draft: ReturnType<typeof useWorktreeCreation>["draft"];
+  clearDraft: () => void;
+  fanout: FanoutMode;
+  selection: Pick<AgentSelection, "agentId" | "modelSelection" | "handleAgentChange">;
+  setBranch: (value: string) => void;
+  setError: (value: string | null) => void;
+  setMessage: (value: string) => void;
+  setTitle: (value: string) => void;
+}): void {
+  useEffect(() => {
+    if (!draft) return;
+    clearDraft();
+    setBranch(draft.branch);
+    setTitle(draft.title ?? "");
+    setMessage(draft.prompt ?? "");
+    setError(null);
+    // A draft only ever comes from the single-worktree path.
+    fanout.switchMode("single", newFanoutRow(selection.agentId, selection.modelSelection));
+    if (draft.agent) {
+      // Also re-remembers the selection, which is what the picker falls back to
+      // once the agent's models resolve.
+      selection.handleAgentChange(draft.agent.id, draft.modelSelection ?? EMPTY_MODEL_SELECTION);
+    }
+    // Restoring runs once per published draft; the setters are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
 }
 
 /** Modal heading: the parent it branches from, and the Single | Fan out switch. */

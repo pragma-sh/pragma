@@ -7,6 +7,12 @@ const sidebarMocks = vi.hoisted(() => ({
     open: boolean;
     parentWorktreeId?: string;
   },
+  /** The failed-run request the provider republishes for "Try again". */
+  draft: null as null | { parentWorktreeId: string },
+}));
+
+vi.mock("@/state/worktree-creation-context", () => ({
+  useWorktreeCreation: () => ({ draft: sidebarMocks.draft }),
 }));
 
 vi.mock("@/state/kanban-context", () => ({
@@ -79,6 +85,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   sidebarMocks.createWorktreeDialogProps = null;
+  sidebarMocks.draft = null;
 });
 
 describe("ProjectSidebar", () => {
@@ -110,6 +117,16 @@ describe("ProjectSidebar", () => {
     expect(sidebarMocks.createWorktreeDialogProps).toMatchObject({
       open: true,
       parentWorktreeId: "main-1",
+    });
+  });
+
+  it("reopens the dialog on the failed run's parent when a draft is published", () => {
+    sidebarMocks.draft = { parentWorktreeId: "child-1" };
+    renderSidebar();
+
+    expect(sidebarMocks.createWorktreeDialogProps).toMatchObject({
+      open: true,
+      parentWorktreeId: "child-1",
     });
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   ChevronDown,
@@ -32,6 +32,7 @@ import { startWindowDrag } from "@/lib/window-drag";
 import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 import { cn } from "@/lib/utils";
 import { instantTransition, motionTransition, useMotionTransition } from "@/lib/motion";
 
@@ -39,11 +40,9 @@ import { instantTransition, motionTransition, useMotionTransition } from "@/lib/
 const COLLAPSED_WIDTH = 36;
 
 export function ProjectSidebar() {
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
-  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
+  const dialogs = useSidebarDialogs();
   const cycle = useProjectCycle();
   const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
   // Dragging the handle must track the pointer exactly, so the spring is
@@ -56,14 +55,6 @@ export function ProjectSidebar() {
   const mainWorktreeId = projectId
     ? ((workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain)?.id ?? null)
     : null;
-
-  useEffect(() => {
-    function openDialog() {
-      setProjectDialogOpen(true);
-    }
-    window.addEventListener("pragma:create-project", openDialog);
-    return () => window.removeEventListener("pragma:create-project", openDialog);
-  }, []);
 
   return (
     // One element whose width animates, rather than two components swapped at
@@ -84,32 +75,85 @@ export function ProjectSidebar() {
       ) : (
         <ExpandedProjectSidebar
           mainWorktreeId={mainWorktreeId}
-          onAddProject={() => setProjectDialogOpen(true)}
-          onCreateChild={(parentId) => {
-            setWorktreeParentId(parentId);
-            setWorktreeDialogOpen(true);
-          }}
-          onNewWorktree={() => {
-            setWorktreeParentId(mainWorktreeId);
-            setWorktreeDialogOpen(true);
-          }}
+          onAddProject={dialogs.openProjectDialog}
+          onCreateChild={dialogs.openWorktreeDialog}
+          onNewWorktree={() => dialogs.openWorktreeDialog(mainWorktreeId)}
           onResize={setWidth}
           onResizeEnd={() => setResizing(false)}
           onResizeStart={() => setResizing(true)}
           onToggleCollapsed={toggleCollapsed}
         />
       )}
-      <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
+      <CreateProjectDialog
+        open={dialogs.projectDialogOpen}
+        onOpenChange={dialogs.setProjectDialogOpen}
+      />
       <CreateWorktreeDialog
-        open={worktreeDialogOpen}
-        onOpenChange={(open) => {
-          setWorktreeDialogOpen(open);
-          if (!open) setWorktreeParentId(null);
-        }}
-        parentWorktreeId={worktreeParentId ?? mainWorktreeId ?? undefined}
+        open={dialogs.worktreeDialogOpen}
+        onOpenChange={dialogs.setWorktreeDialogOpen}
+        parentWorktreeId={dialogs.worktreeParentId ?? mainWorktreeId ?? undefined}
       />
     </motion.aside>
   );
+}
+
+/**
+ * The sidebar's two creation dialogs: which is open, and which worktree a new
+ * one branches from.
+ *
+ * Both are opened from more than one place — the titlebar, the plus menu, a
+ * worktree row, the `pragma:create-project` event the welcome screen fires, and
+ * the draft a failed creation republishes — so the wiring lives here rather
+ * than in the component's body.
+ */
+function useSidebarDialogs(): {
+  projectDialogOpen: boolean;
+  setProjectDialogOpen: (open: boolean) => void;
+  openProjectDialog: () => void;
+  worktreeDialogOpen: boolean;
+  worktreeParentId: string | null;
+  /** Opens the create dialog branching from `parentWorktreeId`. */
+  openWorktreeDialog: (parentWorktreeId: string | null) => void;
+  setWorktreeDialogOpen: (open: boolean) => void;
+} {
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
+  const { draft } = useWorktreeCreation();
+
+  const openWorktreeDialog = useCallback((parentWorktreeId: string | null) => {
+    setWorktreeParentId(parentWorktreeId);
+    setWorktreeDialogOpen(true);
+  }, []);
+
+  useEffect(() => {
+    function openDialog() {
+      setProjectDialogOpen(true);
+    }
+    window.addEventListener("pragma:create-project", openDialog);
+    return () => window.removeEventListener("pragma:create-project", openDialog);
+  }, []);
+
+  // "Try again" on a failed creation republishes its request as a draft: reopen
+  // the dialog on the same parent so the user can fix the input and resubmit.
+  // The dialog itself consumes the draft to seed its fields.
+  useEffect(() => {
+    if (!draft) return;
+    openWorktreeDialog(draft.parentWorktreeId);
+  }, [draft, openWorktreeDialog]);
+
+  return {
+    projectDialogOpen,
+    setProjectDialogOpen,
+    openProjectDialog: () => setProjectDialogOpen(true),
+    worktreeDialogOpen,
+    worktreeParentId,
+    openWorktreeDialog,
+    setWorktreeDialogOpen: (open: boolean) => {
+      setWorktreeDialogOpen(open);
+      if (!open) setWorktreeParentId(null);
+    },
+  };
 }
 
 /** The expanded sidebar body: resize handle, titlebar, worktree tree, and cards. */
