@@ -5,7 +5,6 @@ export type {
   Constants,
   AppInfo,
   WindowDefaults,
-  Links,
   EditorLaunchers,
   EditorLauncher,
   Scripts,

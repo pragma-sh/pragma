@@ -6,6 +6,7 @@
     "logFile": "server.log"
   },
   "gateway": {
+    "apiVersion": "0.0.0",
     "discoveryFile": "gateway.json",
     "tokenFile": "gateway-token",
     "devicesFile": "gateway-devices.json",
@@ -75,7 +76,7 @@
       "questionTitle": "{agent} is waiting for an answer",
       "commandTitle": "{agent} wants to run a command",
       "locationSeparator": " / ",
-      "tabSuffix": " · tab \"{tab}\"",
+      "tabSuffix": " \u00b7 tab \"{tab}\"",
       "unknownLocation": "Open Pragma to continue."
     }
   },
@@ -218,8 +219,16 @@
     "skill": {
       "id": "pragma",
       "targets": [
-        { "id": "all-agents", "directory": ".agents/skills", "label": "All agents" },
-        { "id": "claude-code", "directory": ".claude/skills", "label": "Claude Code" }
+        {
+          "id": "all-agents",
+          "directory": ".agents/skills",
+          "label": "All agents"
+        },
+        {
+          "id": "claude-code",
+          "directory": ".claude/skills",
+          "label": "Claude Code"
+        }
       ]
     }
   },
@@ -254,10 +263,6 @@
     "minHeight": 480,
     "titlebarHeight": 38,
     "trafficLightInset": 12
-  },
-  "links": {
-    "homepage": "https://pragma.example.com",
-    "support": "https://pragma.example.com/support"
   },
   "editorLaunchers": {
     "defaultEditorId": "system",

@@ -1,4 +1,4 @@
-import { constants, type PairingPayload } from "@pragma/constants";
+import { constants, type PairingPayload } from "@pragma-sh/constants";
 
 // Pure, RN-free pairing helpers. The QR code a desktop shows encodes a
 // PairingPayload as JSON; the pair screen scans it, validates it here, and (on
@@ -6,8 +6,16 @@ import { constants, type PairingPayload } from "@pragma/constants";
 // in the pair screen because they need the SDK client; everything shape- and
 // version-related is pure and unit tested.
 
-/** Protocol version this mobile build speaks; a host must match to pair. */
-export const EXPECTED_PROTOCOL_VERSION = constants.daemon.protocolVersion;
+/**
+ * Gateway API version this build speaks; a host must match to pair.
+ *
+ * This is `gateway.apiVersion`, not `daemon.protocolVersion`. The daemon's wire
+ * protocol is bumped by every desktop release and is only ever compared between
+ * processes from one bundle. This build embeds its copy at compile time and
+ * reaches the store on its own cadence, so gating on that number would refuse
+ * every host the moment the desktop shipped a patch.
+ */
+export const EXPECTED_PROTOCOL_VERSION = constants.gateway.apiVersion;
 
 /** Persisted connection config the whole app talks to a host through. */
 export interface ConnectionConfig {
@@ -34,7 +42,7 @@ export function parsePairingPayload(raw: string): PairingPayload | null {
   return parsed;
 }
 
-/** True when the host's protocol version matches this build's. */
+/** True when the host's gateway API version matches this build's. */
 function isProtocolCompatible(version: string): boolean {
   return version === EXPECTED_PROTOCOL_VERSION;
 }

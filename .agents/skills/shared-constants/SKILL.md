@@ -18,7 +18,7 @@ parses `values.json` at startup and panics if it drifts from the schema — inte
 3. Run `bun run generate` (regenerates TS types into `src/generated/`, including
    unreferenced definitions; Rust regenerates on next `cargo build`).
 4. Consume it:
-   - **TS:** `import { constants } from "@pragma/constants"` → `constants.app.name`
+   - **TS:** `import { constants } from "@pragma-sh/constants"` → `constants.app.name`
    - **Rust:** `pragma_constants::CONSTANTS.app.name`
 5. If you exported a new top-level type, add it to the `export type { ... }` list in
    `packages/constants/src/index.ts` and the `pub use generated::{...}` in `src/lib.rs`.
@@ -34,3 +34,9 @@ parses `values.json` at startup and panics if it drifts from the schema — inte
   to them when you add structure.
 - `daemon.protocolVersion` is copied from `crates/pragma-protocol`'s Cargo version by
   `bun run generate`. Do not edit it by hand.
+- **A value an independently-shipped client embeds must be hand-owned, not release-driven.**
+  `gateway.apiVersion` is the worked example: Pragma Go compiles its copy in and reaches
+  users through a store review, so a release-please extra-file or a `generate` sync would
+  invalidate every installed client on the next desktop patch. If a new constant is
+  compared across two artifacts that ship on different cadences, keep the release train
+  away from it and add a guard to `scripts/release-config.test.ts`.
