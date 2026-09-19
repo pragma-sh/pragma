@@ -853,6 +853,19 @@ auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new
 window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
 deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
 
+**On Linux and Windows a deep link only reaches a _running_ app through
+`tauri-plugin-single-instance`.** macOS hands the URL to the app that already owns the
+scheme; the other two just execute the binary again, so without that plugin every
+`pragma://` link cold-starts a **second** Pragma — which shows an empty duplicate window,
+loses the link, and collides with the running instance over the server lock
+(`pragma-server is already running (lock held at ...)`). It is registered **first** in the
+builder chain (it decides primacy before anything else initialises) and gated
+`#[cfg(any(target_os = "linux", windows))]`, because on macOS a single-instance guard would
+be the bug rather than the fix. Its `deep-link` feature re-emits the forwarded URL through
+the deep-link plugin's own `on_open_url`, so all three platforms converge on one code path
+— which is why the single-instance callback only raises the window and must **not** emit
+`DEEP_LINK_EVENT` itself, or every link is handled twice.
+
 `pragma://install-plugin?package=<npm-name>` opens install review. Package name is only a
 selector: app resolves exact version, integrity, cached manifest, and command from official
 GitHub lock. Native installer runs `npm pack` / `npm install --ignore-scripts` in private
