@@ -2,8 +2,8 @@
 
 Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
 plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
-app. Its `@pragma/*` dependencies are data-only `@pragma/plugin-registry` and render-only
-`@pragma/brand`; nothing in desktop app may import from website.
+app. Its `@pragma-sh/*` dependencies are data-only `@pragma-sh/plugin-registry` and render-only
+`@pragma-sh/brand`; nothing in desktop app may import from website.
 
 ## Stack
 
@@ -46,7 +46,7 @@ apps/www/
     │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
-    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
+    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma-sh/*`)
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
     │   └── global.css       # Tailwind + shadcn tokens + the `.artboard` palette + Fumadocs preset
@@ -54,7 +54,7 @@ apps/www/
     │   ├── ui/              # shadcn primitives — do not hand-edit, re-add via the CLI
     │   ├── mdx.tsx          # MDX component map exposed to docs authors
     │   ├── site-navbar.tsx  # shared floating marketing/docs nav + docs mobile sidebar trigger
-    │   ├── brand-favicon.tsx # compact mark rendered from @pragma/brand geometry
+    │   ├── brand-favicon.tsx # compact mark rendered from @pragma-sh/brand geometry
     │   ├── github-mark.tsx  # shared GitHub brand glyph
     │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
     │   ├── support/         # the support request form (client) posting to the route's action
@@ -74,6 +74,7 @@ apps/www/
         ├── support.ts       # support route, address, reply window, topics + the pure request validator
         ├── support-rate-limit.ts # per-connection submission cap the support action checks first
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
+        ├── deploy.ts        # pure Ignored-Build-Step decision (production = release commits only)
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
         ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
@@ -83,6 +84,23 @@ apps/www/
 
 ## Rules
 
+- **Production deploys only on a release; previews are untouched.** `vercel.json`'s
+  `ignoreCommand` runs `scripts/should-deploy.ts`, whose decision lives in the unit-tested
+  `lib/deploy.ts`: any non-production deployment builds, and a production deployment builds
+  only for a Release Please commit (the squashed `chore(main): release …` subject, or a
+  merge commit naming the `release-please--branches--*` source branch). The site is the
+  update endpoint and the docs contract for whatever desktop build is current, so it should
+  change when a release changes it — not on every merge to `main`. Both failure modes are
+  deliberately "build": an unreadable commit message, and a broken script (Vercel treats a
+  failing Ignored Build Step as build). Override a skip by redeploying from the dashboard.
+  This assumes the Vercel project's Root Directory is `apps/www`, which is where
+  `vercel.json` has to live for it to be read at all.
+- **Two environment variables are required in production, and neither fails loudly.**
+  `NEXT_PUBLIC_SITE_URL` (or `siteUrl` falls back to `http://localhost:3000` and every OG
+  image URL breaks) and `GITHUB_TOKEN` — `/api/updates` fetches the releases list plus two
+  assets per manifest behind only a 60s in-process cache, and unauthenticated GitHub is 60
+  requests/hour per IP shared across serverless instances, so without it the endpoint
+  starts answering `{ available: false }` from its own `catch` under real polling load.
 - **This site trails the product by nothing.** When a feature ships in the app, the CLI,
   the SDK, or the host, its docs page lands here in the same change — including the
   `meta.json` entry that puts it in the sidebar, the cross-links from the pages it makes
@@ -118,7 +136,7 @@ apps/www/
   are republished (`plugins.yml` publish → refresh-lock); never commit `lock:local`
   output — its tarball integrity hashes describe locally-packed bytes, not the npm
   releases the desktop verifies against.
-- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
+- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma-sh/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
   In development a local fixture stands in for that file; production fetches signed
@@ -264,7 +282,7 @@ apps/www/
 - **Shadow strength is theme-dependent.** `--shadow-raised`/`--shadow-floating` resolve
   through per-theme `*-value` custom properties, because a drop that reads on a near-black
   surface is a smear on a white one.
-- **Agent marks are copies, not imports.** `@pragma/brand` supplies only Pragma's own mark;
+- **Agent marks are copies, not imports.** `@pragma-sh/brand` supplies only Pragma's own mark;
   official agent marks in `public/agents/` remain copies from each
   `packages/*-plugin/assets/` directory. Adding an agent plugin means copying its mark here
   and adding a row to `components/home/agents.ts`.
