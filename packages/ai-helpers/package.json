@@ -1,6 +1,6 @@
 {
   "name": "@pragma/ai-helpers",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Lightweight AI helpers for Pragma — wraps the pi coding-agent SDK (auth, model selection, prompts).",
   "license": "AGPL-3.0-only",

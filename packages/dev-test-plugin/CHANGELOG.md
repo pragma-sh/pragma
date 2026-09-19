@@ -1,0 +1,15 @@
+# Changelog
+
+## 1.0.0 (2026-09-19)
+
+
+### Features
+
+* **dev-test-plugin:** add diagnostics settings page ([995fdf3](https://github.com/pragma-sh/pragma/commit/995fdf3f6e7df9f5dd0b4b8d690442aa39126e7b))
+* **plugin:** add settings pages, themes, and runtime hooks ([1ee17f2](https://github.com/pragma-sh/pragma/commit/1ee17f2944dd7f3c7f123b18d4947246e105afd5))
+* **pragma:** nest plugin settings pages under the Plugins list ([e43b0c0](https://github.com/pragma-sh/pragma/commit/e43b0c0e020b4ac95ff58af12128fac2e9346ef3))
+
+
+### Bug Fixes
+
+* **dev-test-plugin:** hydrate diagnostics count from stored state ([037d8bd](https://github.com/pragma-sh/pragma/commit/037d8bdc16a659f2e04e7d7f8b73b6d901d7a9bd))
