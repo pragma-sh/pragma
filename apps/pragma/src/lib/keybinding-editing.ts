@@ -12,6 +12,7 @@ import {
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   newTerminalTab: "New terminal tab",
   newBrowserTab: "New browser tab",
+  newWhiteboard: "New whiteboard",
   closeTopTab: "Close tab",
   nextTab: "Next tab",
   previousTab: "Previous tab",

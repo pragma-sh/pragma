@@ -8,6 +8,7 @@ Suggest (or just create) a scratchpad when the answer is more than linear text:
 
 - **Plan / design / architecture writeup** the user will read, edit, and comment on.
 - **Complex comparison, matrix, table, checklist, chart** — anything with structure.
+- **Architecture, topology, sequence, or flow diagram** — create a whiteboard and embed it; prefer this over a Mermaid fence so the user and agent can revise the visual canvas together.
 - **Long-running multi-tab work** — use `AgentProgress` for live status.
 - **Anything the user will keep and revisit.** Terminal scrollback is disposable; a scratchpad is a file with a tab.
 
@@ -41,13 +42,14 @@ The frame bundles the document at open time (esbuild-wasm, MDX + GFM). Rules:
 - No Node APIs, no Tauri APIs, no `window.parent` — the frame is sandboxed.
 - Styling comes from desktop theme variables (`var(--card)`, `var(--primary)`, `var(--radius-md)`). Prefer the shipped components over hand-rolled markup so the document follows the user's theme.
 - Every imported component is wrapped in an error boundary, so one bad component does not blank the document.
+- Prefer `<Whiteboard id="..." />` over a Mermaid diagram for spatial or flow content. Use Mermaid only when the user explicitly asks for Mermaid/text-only source, the document must render outside Pragma, or no Pragma whiteboard environment is available. Read `whiteboards.md` for scene syntax and the create/edit/verify workflow.
 
 ## Component API
 
 `@pragma/scratchpad/ui` — interactive, agent-bound:
 
 ```mdx
-import { AskQuestion, DiffReview, AgentProgress } from "@pragma/scratchpad/ui";
+import { AskQuestion, DiffReview, AgentProgress, Whiteboard } from "@pragma/scratchpad/ui";
 
 <AskQuestion
   question="Which auth strategy?"
@@ -59,11 +61,16 @@ import { AskQuestion, DiffReview, AgentProgress } from "@pragma/scratchpad/ui";
 <DiffReview file="src/auth.ts" before={oldText} after={newText} />
 
 <AgentProgress tabIds={["tab-1", "tab-2"]} />
+
+<Whiteboard id="whiteboard-id" />
 ```
 
 - `AskQuestion` — `question`, `type`: `"options" | "yes-no" | "multi-select" | "text"`(default `options`), `options[]` (`{ label, value? }`), `allowOpenResponse` (adds an "Other" choice with an inline text field), `submitLabel`, `onAnswer`. Choice shapes submit on the button, not on click. Answer is sent to the attached agent tab as `Answer to scratchpad question "...": <value>`.
 - `DiffReview` — `title`, `before`, `after`, `file`, `onDecision(accepted)`. Renders a side-by-side merge view with word-level highlights; accept/reject is reported back.
 - `AgentProgress` — `tabIds`, `title`. Live `running | attention | done | cleared` per tab, via the host bridge.
+- `Whiteboard` — `id`, optional `refreshIntervalMs` (default 3000; zero disables polling). Shows a live, theme-matched host-rendered PNG and refreshes only when board version changes. In desktop Pragma, click the diagram or **Open** to edit the same board in its interactive Excalidraw tab. Board must belong to the scratchpad's worktree.
+
+Create the whiteboard first, capture its returned `id`, then place that id in the MDX. Do not paste Excalidraw JSON into the scratchpad and do not substitute a rendered PNG: the component keeps the durable board live.
 
 `@pragma/scratchpad/ui/primitives` — presentational, theme-matched: `Button` (`variant`: `primary | secondary | outline | ghost | danger`, `size`), `Input`, `Textarea`, `Progress` (`tone`), `Card`, `Badge` (`tone`: `neutral | primary | success | warning | danger`).
 

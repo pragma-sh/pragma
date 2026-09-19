@@ -4,6 +4,7 @@ import {
   unresolvedCommentsPrompt,
 } from "@pragma/scratchpad-viewer";
 import type { ScratchpadBlock, ScratchpadFile } from "@pragma/sdk";
+import { PragmaGatewayError } from "@pragma/sdk";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, View, type ColorValue } from "react-native";
@@ -18,11 +19,13 @@ import { ScratchpadWebView } from "@/components/scratchpad/ScratchpadWebView";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { hapticImpact, hapticSelection, hapticSuccess, hapticWarning } from "@/lib/haptics";
+import { useConnection } from "@/lib/connection-context";
 import { useScratchpadAgent } from "@/lib/use-scratchpad-agent";
 import { useScratchpadComments } from "@/lib/use-scratchpad-comments";
 import { useScratchpad } from "@/lib/use-scratchpads";
 import { errorText } from "@/lib/utils";
 import { useThemeColors } from "@/lib/theme";
+import { getWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
 
 /**
  * One scratchpad, read-only, with a touch comment layer.
@@ -93,11 +96,26 @@ function ScratchpadContent({
 }) {
   const insets = useSafeAreaInsets();
   const { foreground } = useThemeColors();
+  const { client, handleUnauthorized } = useConnection();
   const { add, comments, loaded, save } = useScratchpadComments(root, scratchpad.filePath);
   const agent = useScratchpadAgent(scratchpad, worktreeId, root, onReload);
   const [commentMode, setCommentMode] = useState(false);
   const [picked, setPicked] = useState<ScratchpadBlock | null>(null);
   const [sending, setSending] = useState(false);
+
+  const loadWhiteboardSnapshot = useCallback(
+    // fallow-ignore-next-line complexity -- gateway request must preserve the 401 unpair side effect while rethrowing every host failure to the viewer.
+    async (id: string, knownVersion?: number, dark?: boolean) => {
+      if (!client) throw new Error("Host is unavailable");
+      try {
+        return await getWhiteboardSnapshot(client.whiteboards, worktreeId, id, knownVersion, dark);
+      } catch (cause) {
+        if (cause instanceof PragmaGatewayError && cause.httpStatus === 401) handleUnauthorized();
+        throw cause;
+      }
+    },
+    [client, handleUnauthorized, worktreeId],
+  );
 
   const open = unresolvedComments(comments);
 
@@ -169,6 +187,7 @@ function ScratchpadContent({
           commentMode={commentMode}
           comments={comments}
           onError={() => undefined}
+          onGetWhiteboardSnapshot={loadWhiteboardSnapshot}
           onPreview={previewFeedback}
           onPromptAgent={agent.promptAgent}
           onRequestAttachment={agent.requestAttachment}

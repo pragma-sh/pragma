@@ -10,7 +10,12 @@ publish = false
 
 [lib]
 name = "pragma_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop-only: `main.rs` links the rlib, and Pragma ships no Tauri mobile target
+# (the phone client is `apps/pragma-go`). The Tauri template's `cdylib` is for
+# mobile, and it cannot be produced here: `pragma-core` pulls in `excalidraw-image`
+# -> `deno_core` -> `v8`, whose prebuilt objects use TLS relocations that Linux
+# rejects in a shared object (`R_X86_64_TPOFF32 ... cannot be used with -shared`).
+crate-type = ["staticlib", "rlib"]
 
 [lints]
 workspace = true
@@ -39,7 +44,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { workspace = true }
 scopeguard = "1"
 semver = "1"
 tauri = { version = "2.11.2", features = [

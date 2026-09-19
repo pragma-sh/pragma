@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use pragma_constants::{TabKind, Worktree, WorktreeStatus};
+use pragma_constants::{ProtocolRpcMethod, TabKind, Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
+use pragma_core::whiteboards::WhiteboardsRequest;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::browser;
@@ -214,6 +215,18 @@ pub fn delete_worktree(
             worktree_path: worktree.path.clone(),
             force,
         },
+    )?;
+
+    // Whiteboard scenes are durable user content the host keys by worktree id,
+    // and nothing garbage-collects them: swallowing this failure would strand
+    // them forever, still readable through the whiteboards RPC. Fail the delete
+    // instead — the checkout removal above is idempotent, so retrying the delete
+    // re-runs this cleanup rather than leaving the record half-removed.
+    pty.rpc(
+        ProtocolRpcMethod::Whiteboards,
+        serde_json::to_value(WhiteboardsRequest::DeleteForWorktree {
+            worktree_id: worktree_id.clone(),
+        })?,
     )?;
 
     if delete_branch {

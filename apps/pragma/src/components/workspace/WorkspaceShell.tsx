@@ -73,6 +73,7 @@ function useWorkspaceShortcuts(
     },
     onNewTerminalTab: () => void workspace.createTerminalTab(),
     onNewBrowserTab: () => void workspace.createBrowserTab(),
+    onNewWhiteboard: () => void workspace.createWhiteboard(),
     onClearTerminal: () => {
       if (workspace.activeTabId) terminalManager.clear(workspace.activeTabId);
     },

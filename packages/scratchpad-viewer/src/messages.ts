@@ -27,6 +27,14 @@ export type ScratchpadViewerMessage =
   | { type: "promptAgent"; requestId: string; text: string }
   /** A rendered component asked the host to attach an agent tab. */
   | { type: "requestAgentAttachment"; requestId: string }
+  /** A rendered component requested a fresh whiteboard PNG when its version changed. */
+  | {
+      type: "getWhiteboardSnapshot";
+      requestId: string;
+      whiteboardId: string;
+      knownVersion?: number;
+      dark?: boolean;
+    }
   /** A rendered component subscribed to attached-agent progress. */
   | { type: "subscribeAgentProgress"; requestId: string; tabIds: string[] }
   /** The component's progress subscription was torn down. */

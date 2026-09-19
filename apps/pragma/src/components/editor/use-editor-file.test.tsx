@@ -32,6 +32,7 @@ function tab(): Tab {
     title: "Pad",
     url: null,
     filePath: ".pragma/scratchpads/pad.mdx",
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

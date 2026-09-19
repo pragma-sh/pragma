@@ -37,6 +37,9 @@ import type {
   OpenPort,
   ScratchpadSummary,
   ShellProfile,
+  ExcalidrawScene,
+  Whiteboard,
+  WhiteboardViewResult,
   WslDistroList,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
@@ -887,6 +890,61 @@ export function openScratchpadTab(
   title: string,
 ): Promise<Tab> {
   return invoke<Tab>("open_scratchpad_tab", { worktreeId, filePath, title });
+}
+
+/** Creates a host-owned whiteboard. */
+export function createWhiteboard(
+  worktreeId: string,
+  title: string,
+  scene: ExcalidrawScene,
+): Promise<Whiteboard> {
+  return invoke<Whiteboard>("create_whiteboard", { worktreeId, title, scene });
+}
+
+/** Gets one host-owned whiteboard. */
+export function getWhiteboard(worktreeId: string, id: string): Promise<Whiteboard> {
+  return invoke<Whiteboard>("get_whiteboard", { worktreeId, id });
+}
+
+/** Lists or searches whiteboards in one worktree. */
+export function listWhiteboards(worktreeId: string, query?: string): Promise<Whiteboard[]> {
+  return invoke<Whiteboard[]>("list_whiteboards", { worktreeId, query });
+}
+
+/** Replaces a whiteboard after an optimistic version check. */
+export function editWhiteboard(
+  worktreeId: string,
+  id: string,
+  title: string,
+  scene: ExcalidrawScene,
+  expectedVersion: number,
+): Promise<Whiteboard> {
+  return invoke<Whiteboard>("edit_whiteboard", {
+    input: { worktreeId, id, title, scene, expectedVersion },
+  });
+}
+
+/** Deletes one host-owned whiteboard. */
+export function deleteWhiteboard(worktreeId: string, id: string): Promise<void> {
+  return invoke("delete_whiteboard", { worktreeId, id });
+}
+
+/** Renders one host-owned whiteboard as a base64 PNG. */
+export function viewWhiteboard(
+  worktreeId: string,
+  id: string,
+  dark = false,
+): Promise<WhiteboardViewResult> {
+  return invoke<WhiteboardViewResult>("view_whiteboard", { worktreeId, id, dark });
+}
+
+/** Opens one whiteboard in a deduplicated desktop tab. */
+export function openWhiteboardTab(
+  worktreeId: string,
+  whiteboardId: string,
+  title: string,
+): Promise<Tab> {
+  return invoke<Tab>("open_whiteboard_tab", { worktreeId, whiteboardId, title });
 }
 
 /**

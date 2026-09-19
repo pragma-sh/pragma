@@ -26,6 +26,7 @@
     "bench",
     "files",
     "scratchpads",
+    "whiteboards",
     "fanout",
     "updates",
     "onboarding"
@@ -94,6 +95,9 @@
     "scratchpads": {
       "$ref": "#/definitions/Scratchpads"
     },
+    "whiteboards": {
+      "$ref": "#/definitions/WhiteboardDefaults"
+    },
     "fanout": {
       "$ref": "#/definitions/FanoutDefaults"
     },
@@ -126,6 +130,7 @@
         "tunnel",
         "ports",
         "scratchpads",
+        "whiteboards",
         "wsl",
         "fanouts"
       ]
@@ -1727,13 +1732,22 @@
         "defaultTitles": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["fallback", "browser", "log", "scratchpad", "prReview", "pluginWebview"],
+          "required": [
+            "fallback",
+            "browser",
+            "log",
+            "scratchpad",
+            "whiteboard",
+            "prReview",
+            "pluginWebview"
+          ],
           "description": "Fallback title per tab kind, used for a tab whose shell or page has not named itself. A tab still carrying its default title has no name worth showing in a notification, so both languages compare against these.",
           "properties": {
             "fallback": { "type": "string" },
             "browser": { "type": "string" },
             "log": { "type": "string" },
             "scratchpad": { "type": "string" },
+            "whiteboard": { "type": "string" },
             "prReview": { "type": "string" },
             "pluginWebview": { "type": "string" }
           }
@@ -2701,13 +2715,14 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a scratchpad, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a scratchpad, a whiteboard, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
       "type": "string",
       "enum": [
         "terminal",
         "browser",
         "editor",
         "scratchpad",
+        "whiteboard",
         "diff",
         "log",
         "pr-review",
@@ -2788,6 +2803,122 @@
           "type": "number",
           "description": "Epoch milliseconds the scratchpad was created, from its managed frontmatter."
         }
+      }
+    },
+    "WhiteboardDefaults": {
+      "title": "WhiteboardDefaults",
+      "description": "Host persistence and validation limits for worktree-scoped whiteboards.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "databaseFile",
+        "defaultTitle",
+        "maxTitleChars",
+        "maxSceneBytes",
+        "maxRenderDimension"
+      ],
+      "properties": {
+        "databaseFile": { "type": "string" },
+        "defaultTitle": { "type": "string" },
+        "maxTitleChars": { "type": "integer", "minimum": 1 },
+        "maxSceneBytes": { "type": "integer", "minimum": 1 },
+        "maxRenderDimension": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ExcalidrawScene": {
+      "title": "ExcalidrawScene",
+      "description": "Serializable Excalidraw scene. Core fields are validated while element, app-state, and binary-file extensions remain forward compatible with Excalidraw releases.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "elements", "appState", "files"],
+      "properties": {
+        "type": { "type": "string", "enum": ["excalidraw"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string" },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["id", "type"],
+            "properties": {
+              "id": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          }
+        },
+        "appState": { "type": "object", "additionalProperties": true },
+        "files": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "Whiteboard": {
+      "title": "Whiteboard",
+      "description": "One durable worktree-scoped Excalidraw document.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "worktreeId", "title", "scene", "version", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "title": { "type": "string" },
+        "scene": { "$ref": "#/definitions/ExcalidrawScene" },
+        "version": { "type": "integer", "minimum": 1 },
+        "createdAt": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "WhiteboardCreateInput": {
+      "title": "WhiteboardCreateInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "title", "scene"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "title": { "type": "string" },
+        "scene": { "$ref": "#/definitions/ExcalidrawScene" }
+      }
+    },
+    "WhiteboardEditInput": {
+      "title": "WhiteboardEditInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "id", "title", "scene", "expectedVersion"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "scene": { "$ref": "#/definitions/ExcalidrawScene" },
+        "expectedVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "WhiteboardListInput": {
+      "title": "WhiteboardListInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "query": { "type": "string" }
+      }
+    },
+    "WhiteboardIdInput": {
+      "title": "WhiteboardIdInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "id"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "WhiteboardViewResult": {
+      "title": "WhiteboardViewResult",
+      "description": "Base64-encoded PNG rendering of one whiteboard.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": { "type": "string" }
       }
     },
     "AgentStatus": {
@@ -3229,6 +3360,7 @@
         "title",
         "url",
         "filePath",
+        "whiteboardId",
         "diffSide",
         "diffCommit",
         "prNumber",
@@ -3264,6 +3396,10 @@
         "filePath": {
           "type": ["string", "null"],
           "description": "Worktree-relative path for editor/diff tabs; null for terminal/browser tabs."
+        },
+        "whiteboardId": {
+          "type": ["string", "null"],
+          "description": "Durable whiteboard id for whiteboard tabs; null for every other tab kind."
         },
         "diffSide": {
           "description": "Which diff side a diff tab shows; null for non-diff tabs.",
@@ -3853,6 +3989,7 @@
         "closeTopTab",
         "newTerminalTab",
         "newBrowserTab",
+        "newWhiteboard",
         "clearTerminal",
         "browserReload",
         "browserDevtools",
@@ -3905,6 +4042,9 @@
           "$ref": "#/definitions/PlatformChord"
         },
         "newBrowserTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "newWhiteboard": {
           "$ref": "#/definitions/PlatformChord"
         },
         "clearTerminal": {

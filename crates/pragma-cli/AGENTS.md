@@ -8,6 +8,9 @@ crate's debug binary).
 
 ```sh
 pragma-cli scratchpad create --title "Architecture" result.mdx
+pragma-cli whiteboard create --title "Architecture" scene.excalidraw
+pragma-cli whiteboard search "auth flow"
+pragma-cli whiteboard view <id> architecture.png
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 # Session name: status-less report that renames the hosting tab (user renames win).
 pragma-cli agent report --agent <id> session-name --name "<name>"
@@ -33,6 +36,10 @@ the current worktree's `.pragma/scratchpads/`, attaches `$PRAGMA_TAB_ID`, and op
 scratchpad tab. It requires the current tab to be a registered agent tab and the desktop
 controller to be connected. Scratchpad frontmatter is created by this command; agents do
 not write managed files directly.
+
+`whiteboard` talks directly to `pragma-server`. Scenes are full Excalidraw JSON from a file
+or stdin; preserve unknown fields. `delete` confirms unless `--yes`, and `view` writes
+native-rendered PNG bytes to requested path.
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
 publishes the matching `AgentDecision`, then prints `allow`/`deny` (exit 0). On timeout it

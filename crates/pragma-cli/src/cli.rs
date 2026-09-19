@@ -82,6 +82,107 @@ pub enum TopCommand {
         #[command(subcommand)]
         fanout: FanoutCommand,
     },
+    /// Worktree-scoped Excalidraw whiteboards.
+    Whiteboard {
+        #[command(subcommand)]
+        whiteboard: WhiteboardCommand,
+    },
+}
+
+// -------------------------- whiteboard --------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum WhiteboardCommand {
+    /// Create a whiteboard from an Excalidraw scene JSON file or stdin.
+    Create(WhiteboardCreateArgs),
+    /// List every whiteboard in one worktree.
+    List(WhiteboardListArgs),
+    /// Search whiteboard titles and text elements in one worktree.
+    Search(WhiteboardSearchArgs),
+    /// Get one whiteboard, including its scene JSON.
+    Get(WhiteboardIdArgs),
+    /// Replace one whiteboard's title and scene.
+    Edit(WhiteboardEditArgs),
+    /// Delete one whiteboard. Requires confirmation unless `--yes` is passed.
+    Delete(WhiteboardDeleteArgs),
+    /// Render one whiteboard to a PNG file.
+    View(WhiteboardViewArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardCreateArgs {
+    /// Whiteboard title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Excalidraw scene JSON file, or `-` for stdin.
+    #[arg(value_name = "SCENE|-", default_value = "-")]
+    pub scene: String,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardListArgs {
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardSearchArgs {
+    /// Case-insensitive query matched against title and text elements.
+    pub query: String,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardIdArgs {
+    /// Durable whiteboard id.
+    pub id: String,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardEditArgs {
+    /// Durable whiteboard id.
+    pub id: String,
+    /// Replacement whiteboard title.
+    #[arg(long)]
+    pub title: String,
+    /// Replacement Excalidraw scene JSON file, or `-` for stdin.
+    #[arg(value_name = "SCENE|-", default_value = "-")]
+    pub scene: String,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardDeleteArgs {
+    /// Durable whiteboard id.
+    pub id: String,
+    /// Skip interactive confirmation. Required for non-interactive use.
+    #[arg(long)]
+    pub yes: bool,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct WhiteboardViewArgs {
+    /// Durable whiteboard id.
+    pub id: String,
+    /// PNG output path.
+    pub output: String,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
 }
 
 // -------------------------- fanout --------------------------

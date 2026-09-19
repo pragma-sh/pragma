@@ -4,7 +4,7 @@ import type { Tab } from "@pragma/constants";
 import type { ScratchpadAgentProgress } from "@pragma/scratchpad";
 
 import { scratchpadTheme } from "@/lib/scratchpad-theme";
-import { scratchpadPromptAgent } from "@/lib/tauri";
+import { getWhiteboard, scratchpadPromptAgent, viewWhiteboard } from "@/lib/tauri";
 import { THEME_CHANGED_EVENT } from "@/lib/theme";
 import { isNumber, isOneOf, isString, matchesShape } from "@/lib/type-guards";
 import { useAgentStatusSnapshot, type AgentStatusEntry } from "@/state/agent-status-store";
@@ -23,10 +23,15 @@ interface FrameRequest {
   method:
     | "promptAgent"
     | "requestAgentAttachment"
+    | "getWhiteboardSnapshot"
+    | "openWhiteboard"
     | "subscribeAgentProgress"
     | "unsubscribeAgentProgress";
   text?: string;
   tabIds?: string[];
+  whiteboardId?: string;
+  knownVersion?: number;
+  dark?: boolean;
 }
 
 export interface ScratchpadFrameBridgeOptions {
@@ -105,10 +110,44 @@ export function useScratchpadFrameBridge({
     return false;
   };
 
+  // fallow-ignore-next-line complexity -- protocol dispatcher keeps validation, same-worktree authorization, and one response/error envelope together for every request variant.
   const handleRequest = async (request: FrameRequest): Promise<void> => {
     try {
       if (request.method === "requestAgentAttachment") {
         post({ type: "response", id: request.id, value: await onRequestAgentAttachment() });
+        return;
+      }
+      if (request.method === "getWhiteboardSnapshot") {
+        const id = request.whiteboardId;
+        if (!id) throw new Error("Whiteboard id is required");
+        const board = await getWhiteboard(worktreeId, id);
+        if (board.worktreeId !== worktreeId)
+          throw new Error("Whiteboard belongs to another worktree");
+        if (board.version === request.knownVersion) {
+          post({ type: "response", id: request.id, value: null });
+          return;
+        }
+        const rendered = await viewWhiteboard(worktreeId, id, request.dark);
+        post({
+          type: "response",
+          id: request.id,
+          value: {
+            id: board.id,
+            title: board.title,
+            version: board.version,
+            dataUrl: `data:image/png;base64,${rendered.data}`,
+          },
+        });
+        return;
+      }
+      if (request.method === "openWhiteboard") {
+        const id = request.whiteboardId;
+        if (!id) throw new Error("Whiteboard id is required");
+        const board = await getWhiteboard(worktreeId, id);
+        if (board.worktreeId !== worktreeId)
+          throw new Error("Whiteboard belongs to another worktree");
+        await workspace.openWhiteboard(board.id, board.title);
+        post({ type: "response", id: request.id, value: null });
         return;
       }
       const tabId = getAttachedRef.current();
@@ -203,6 +242,8 @@ function isFrameRequest(value: unknown, token: string): value is FrameRequest {
     method: isOneOf(
       "promptAgent",
       "requestAgentAttachment",
+      "getWhiteboardSnapshot",
+      "openWhiteboard",
       "subscribeAgentProgress",
       "unsubscribeAgentProgress",
     ),

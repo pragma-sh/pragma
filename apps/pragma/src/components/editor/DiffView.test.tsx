@@ -47,6 +47,7 @@ function diffTab(): Tab {
     title: "app.ts",
     url: null,
     filePath: "src/app.ts",
+    whiteboardId: null,
     diffSide: "committed",
     diffCommit: null,
     prNumber: null,

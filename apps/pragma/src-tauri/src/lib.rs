@@ -35,6 +35,7 @@ mod script_migration;
 mod scripts;
 mod ssh_host;
 mod updates;
+mod whiteboards;
 mod window_chrome;
 mod workspace_mirror;
 mod worktrees;
@@ -915,7 +916,8 @@ fn close_tab(
         | TabKind::PrReview
         | TabKind::Log
         | TabKind::PluginWebview
-        | TabKind::Scratchpad => {}
+        | TabKind::Scratchpad
+        | TabKind::Whiteboard => {}
     }
     db.delete_tab(&tab_id)?;
     publisher.trigger();
@@ -1247,6 +1249,13 @@ pub fn run() {
             scratchpads::scratchpad_prompt_agent,
             scratchpads::list_scratchpads,
             scratchpads::open_scratchpad_tab,
+            whiteboards::create_whiteboard,
+            whiteboards::get_whiteboard,
+            whiteboards::list_whiteboards,
+            whiteboards::edit_whiteboard,
+            whiteboards::delete_whiteboard,
+            whiteboards::view_whiteboard,
+            whiteboards::open_whiteboard_tab,
             project_icon,
             list_tabs,
             create_tab,

@@ -17,6 +17,7 @@ import { constants } from "@pragma/constants";
 import type {
   AgentReportPayload,
   DiffSide,
+  ExcalidrawScene,
   Project,
   ProjectIcon,
   ProjectScriptsConfig,
@@ -69,6 +70,7 @@ import {
   closeTab as closeTabCommand,
   createPluginWebViewTab,
   createTab as createTabCommand,
+  createWhiteboard as createWhiteboardCommand,
   deleteWorktree as deleteWorktreeCommand,
   getActiveSelection,
   listProjects,
@@ -91,6 +93,7 @@ import {
   onWorktreeChanged,
   takePendingDeepLink,
   openScratchpadTab as openScratchpadTabCommand,
+  openWhiteboardTab as openWhiteboardTabCommand,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
@@ -282,6 +285,8 @@ interface WorkspaceContextValue extends WorkspaceState {
    */
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
+  /** Creates a blank whiteboard in the active worktree and opens it. */
+  createWhiteboard: (paneId?: string) => Promise<void>;
   /**
    * Launches an agent thread in a worktree: switches to it, opens a terminal
    * tab, starts the agent, and optionally prefills its TUI with `message`.
@@ -311,6 +316,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   /** Opens (or focuses) a managed scratchpad tab for a worktree-relative MDX file. */
   openScratchpadFile: (filePath: string, title: string) => Promise<void>;
+  /** Opens (or focuses) a host-owned whiteboard by id. */
+  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
@@ -377,6 +384,14 @@ const TERMINAL_TITLE_FLUSH_MS = 100;
 /** Wait after script tabs mount before injecting commands so the PTY shell is ready. */
 const INTERACTIVE_SCRIPT_START_DELAY_MS = 2000;
 const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
+const EMPTY_WHITEBOARD_SCENE: ExcalidrawScene = {
+  type: "excalidraw",
+  version: 2,
+  source: "pragma",
+  elements: [],
+  appState: { viewBackgroundColor: "#ffffff" },
+  files: {},
+};
 const AGENT_BACK_TTL_MS = 10 * 60 * 1000;
 
 interface AgentBackLocation {
@@ -3078,6 +3093,8 @@ function useTabOpeners(
   openDaemonLogTab: () => Promise<void>;
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   openScratchpadFile: (filePath: string, title: string) => Promise<void>;
+  createWhiteboard: (paneId?: string) => Promise<void>;
+  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
 } {
   const openDedupedTab = useOpenDedupedTab(state, dispatch);
 
@@ -3190,6 +3207,35 @@ function useTabOpeners(
     [openDedupedTab],
   );
 
+  const createWhiteboard = useCallback(
+    (paneId?: string) =>
+      openDedupedTab({
+        paneId,
+        match: () => false,
+        create: async ({ worktreeId }) => {
+          const board = await createWhiteboardCommand(
+            worktreeId,
+            constants.whiteboards.defaultTitle,
+            EMPTY_WHITEBOARD_SCENE,
+          );
+          return openWhiteboardTabCommand(worktreeId, board.id, board.title);
+        },
+      }),
+    [openDedupedTab],
+  );
+
+  const openWhiteboard = useCallback(
+    (whiteboardId: string, title: string) =>
+      openDedupedTab({
+        match: (tab, { worktreeId }) =>
+          tab.kind === "whiteboard" &&
+          tab.worktreeId === worktreeId &&
+          tab.whiteboardId === whiteboardId,
+        create: ({ worktreeId }) => openWhiteboardTabCommand(worktreeId, whiteboardId, title),
+      }),
+    [openDedupedTab],
+  );
+
   return {
     openFileTab,
     openDiffTab,
@@ -3197,6 +3243,8 @@ function useTabOpeners(
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
   };
 }
 
@@ -4337,6 +4385,8 @@ function useTabManagement({
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
   } = useTabOpeners(state, dispatch);
   const terminalTabIdsKey = useMemo(
     () =>
@@ -4357,6 +4407,8 @@ function useTabManagement({
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4763,6 +4815,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4801,6 +4855,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      createWhiteboard,
       startSession,
       createTabInPane,
       openFileTab,
@@ -4809,6 +4864,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDaemonLogTab,
       openPluginWebView,
       openScratchpadFile,
+      openWhiteboard,
       closeTab,
       renameTerminalTab,
       markTabAgent,
@@ -4833,6 +4889,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      createWhiteboard,
       startSession,
       createTabInPane,
       openFileTab,
@@ -4841,6 +4898,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDaemonLogTab,
       openPluginWebView,
       openScratchpadFile,
+      openWhiteboard,
       closeTab,
       renameTerminalTab,
       markTabAgent,

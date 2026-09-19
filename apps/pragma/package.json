@@ -43,6 +43,7 @@
     "@embedpdf/plugin-selection": "^2.14.4",
     "@embedpdf/plugin-viewport": "^2.14.4",
     "@embedpdf/plugin-zoom": "^2.14.4",
+    "@excalidraw/excalidraw": "0.18.1",
     "@iconify-json/vscode-icons": "^1.2.57",
     "@iconify/react": "^6.0.2",
     "@lezer/highlight": "^1.2.3",

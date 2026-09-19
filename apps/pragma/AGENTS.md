@@ -1277,6 +1277,32 @@ TSX/JavaScript transforms are sufficient there. The frame bootstrap still define
 no-op `$RefreshReg$` / `$RefreshSig$` hooks because Vite's optimized development build of
 `react-dom/client` contains signature calls even though the frame itself does not use HMR.
 
+**Whiteboard tabs** — worktree-scoped Excalidraw scenes are host-owned, not files in the
+checkout. `WhiteboardView` lazy-loads `@excalidraw/excalidraw`, serializes complete scene
+JSON, and debounces optimistic writes through typed Tauri adapters. Sidebar and new-tab
+menus create/open deduplicated `whiteboard` tabs. Scratchpad `<Whiteboard id="…" />` embeds
+a host-rendered PNG through the token-scoped frame bridge and rejects cross-worktree ids;
+unchanged version polls do not rerender, while theme changes request the matching Excalidraw
+export palette. Clicking the preview opens the same board in its deduplicated interactive tab.
+Native PNG output comes from `pragma-core`, never canvas APIs in the webview.
+Three invariants are load-bearing: tab dedupe holds one `Db` lock across the lookup and
+the insert, so concurrent opens of one board cannot both insert; a save that loses the
+optimistic version race re-reads the head version and retries on top of it, because
+resending the stale `expectedVersion` would stall every later save; and deleting a
+worktree fails rather than logs when the `DeleteForWorktree` RPC fails, since nothing
+garbage-collects host-side scenes and the checkout removal it follows is idempotent.
+
+**The crate builds no `cdylib`, and cannot.** `pragma-core` reaches whiteboard rendering
+through `excalidraw-image` -> `deno_core` -> `v8`, and v8's prebuilt objects carry TLS
+relocations a Linux shared object may not have: linking one dies with
+`relocation R_X86_64_TPOFF32 against v8::internal::g_current_isolate_ cannot be used with
+-shared`. macOS links it happily, so this only ever shows up in Linux CI — as a
+`cargo test --workspace` failure, since cargo builds every declared crate-type of the lib.
+The `cdylib` in the Tauri template exists for Tauri's mobile targets, which Pragma does
+not ship (the phone client is `apps/pragma-go`), so `crate-type` is `["staticlib",
+"rlib"]` and `main.rs` links the rlib. Do not add `cdylib` back without first getting v8
+out of this crate's dependency graph.
+
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
 dispatch; the `TabKind` stays `editor`). It is a **viewer**, not an editor: no dirty

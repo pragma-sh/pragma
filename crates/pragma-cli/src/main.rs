@@ -20,6 +20,7 @@ mod fanout;
 mod output;
 mod scrollback;
 mod server;
+mod whiteboard;
 
 use cli::{AgentCommand, Cli, ScratchpadCommand, TabCommand, TopCommand};
 use server::CliError;
@@ -72,6 +73,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Verify(args) => agent_verify::run(args, out),
         },
         TopCommand::Fanout { fanout } => fanout::run(fanout, out),
+        TopCommand::Whiteboard { whiteboard } => whiteboard::run(whiteboard, out),
         TopCommand::Scratchpad { scratchpad } => match scratchpad {
             ScratchpadCommand::Create(args) => commands::scratchpad_create(args, out),
         },

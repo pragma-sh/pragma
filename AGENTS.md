@@ -61,6 +61,11 @@ than no guide.
   change a workflow here, update the relevant skill (`pragma-architecture`,
   `shared-constants`, `tauri-command`, `code-quality`, `pragma`) too, and
   add a new skill when you add a substantial new workflow.
+- **Ship the website with the feature.** A user-visible change is not done until
+  `apps/www` matches it: add or update the `/docs` page (and its `meta.json` entry), the
+  landing-page copy or bento card when the feature is worth announcing, and any page the
+  change makes wrong — wiki, CLI, SDK, keybindings, disk layout. Same change, same commit,
+  exactly like the AGENTS.md rule above. A feature nobody can read about does not exist.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
   AGENTS.md) so the next person (or agent) doesn't rediscover it.
@@ -222,6 +227,9 @@ than no guide.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
+- Worktree-scoped whiteboards live on the host: SQLite CRUD/search and native PNG rendering
+  in `crates/pragma-core/src/whiteboards.rs`, with `whiteboards` RPC callers in CLI, SDK,
+  desktop, and scratchpad bridge. Scene JSON stays lossless; edits use optimistic versions.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).

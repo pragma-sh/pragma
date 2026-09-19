@@ -145,6 +145,7 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onCloseTopTab: vi.fn(),
     onNewTerminalTab: vi.fn(),
     onNewBrowserTab: vi.fn(),
+    onNewWhiteboard: vi.fn(),
     onClearTerminal: vi.fn(),
     onBrowserReload: vi.fn(),
     onBrowserDevtools: vi.fn(),
@@ -191,6 +192,19 @@ describe("useShortcuts", () => {
 
     expect(onNewTerminalTab).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("creates a whiteboard for cmd+shift+w", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onNewWhiteboard = vi.fn();
+    renderHook(() => useShortcuts(options({ onNewWhiteboard })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "w" });
+
+    expect(onNewWhiteboard).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("handles a remapped command palette chord in the webview", async () => {

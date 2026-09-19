@@ -59,6 +59,7 @@ function browserTab(url = "https://example.com"): Tab {
     title: "Browser",
     url,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

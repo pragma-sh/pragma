@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         paths.dir.clone(),
         workspace_root(),
     ));
-    let core = Arc::new(Core);
+    let core = Arc::new(Core::new(&paths.dir)?);
     start_watcher_reconciler(&registry);
     start_dropped_files_sweeper();
     loop {

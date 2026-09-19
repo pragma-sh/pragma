@@ -1,6 +1,6 @@
 ---
 title: "@pragma/sdk"
-description: A typed TypeScript client for a running Pragma host — sessions, agent events, fanouts, scratchpads, and the workspace.
+description: A typed TypeScript client for a running Pragma host — sessions, agent events, fanouts, scratchpads, whiteboards, and the workspace.
 ---
 
 `@pragma/sdk` is a TypeScript client for the **Pragma gateway** — the HTTP/JSON surface a
@@ -44,6 +44,11 @@ for await (const event of client.workspace.subscribe()) {
     title="Scratchpads"
     description="Read, comment on, and send prompts through agent-authored MDX documents."
     href="/docs/sdk/scratchpads"
+  />
+  <Card
+    title="Whiteboards"
+    description="Create, search, edit, and render durable Excalidraw boards."
+    href="/docs/sdk/whiteboards"
   />
   <Card
     title="Workspace & more"

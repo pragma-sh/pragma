@@ -103,6 +103,7 @@ fn default_config() -> KeybindingsConfig {
             close_top_tab: chord("cmd", "w", "ctrl", "w"),
             new_terminal_tab: chord("cmd", "t", "ctrl", "t"),
             new_browser_tab: chord("cmd", "b", "ctrl", "b"),
+            new_whiteboard: chord("cmd+shift", "w", "ctrl+shift", "w"),
             clear_terminal: chord("cmd", "k", "ctrl", "k"),
             browser_reload: chord("cmd", "r", "ctrl", "r"),
             browser_devtools: chord("cmd+shift", "i", "ctrl+shift", "i"),

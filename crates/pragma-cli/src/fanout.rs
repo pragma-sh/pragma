@@ -14,7 +14,7 @@ use std::io::{IsTerminal, Write};
 use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
     read_json_frame, write_json_frame, EventFrame, RequestFrame, RequestKind, ResponseFrame,
-    RpcRequest, RpcResponseFrame, ServerFrame, SubscriptionRequest,
+    ServerFrame, SubscriptionRequest,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -493,55 +493,7 @@ fn member_id(explicit: Option<String>, required: bool) -> Result<Option<String>,
 
 /// Sends one `fanouts` RPC and returns its payload.
 fn rpc(payload: Value) -> Result<Value, CliError> {
-    let Server { mut stream } = server::connect()?;
-    let request_id = Uuid::new_v4().to_string();
-    let request = RequestFrame {
-        request_id: request_id.clone(),
-        kind: RequestKind::Rpc,
-        session_id: None,
-        worktree_id: None,
-        cwd: None,
-        cols: None,
-        rows: None,
-        data: None,
-        shell: None,
-        rpc: Some(RpcRequest {
-            method: ProtocolRpcMethod::Fanouts,
-            payload,
-        }),
-        subscription: None,
-        control: None,
-        control_result: None,
-    };
-    write_json_frame(&mut stream, &request)?;
-    // Provisioning creates worktrees, runs setup scripts, and starts TUIs; none
-    // of that fits inside the connect-time read timeout.
-    let _ = stream.set_read_timeout(None);
-    loop {
-        match read_json_frame::<ServerFrame>(&mut stream)? {
-            ServerFrame::Rpc(RpcResponseFrame {
-                request_id: id,
-                ok,
-                payload,
-                error,
-            }) if id == request_id => {
-                if ok {
-                    return Ok(payload.unwrap_or(Value::Null));
-                }
-                let error = error.ok_or_else(|| CliError::server("fanout request failed"))?;
-                return Err(CliError::server(format!(
-                    "{} ({})",
-                    error.message,
-                    error
-                        .details
-                        .as_ref()
-                        .and_then(|details| details["code"].as_str())
-                        .unwrap_or("error")
-                )));
-            }
-            _ => {}
-        }
-    }
+    server::rpc(ProtocolRpcMethod::Fanouts, payload)
 }
 
 /// Renders a fanout as an aligned member table, or the whole durable object

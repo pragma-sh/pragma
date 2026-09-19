@@ -49,6 +49,7 @@ function makeTab(overrides: Partial<Tab>): Tab {
     title: null,
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

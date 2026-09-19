@@ -1,0 +1,110 @@
+/*
+ * Whiteboard feature CSS — scopes every @excalidraw/excalidraw override to
+ * `.pragma-whiteboard` (set by WhiteboardView on its root element).
+ *
+ * Two jobs, both version-sensitive, so each documents the pinned release it
+ * was verified against:
+ *
+ * 1. Theme inheritance. Excalidraw 0.18.1 defines its own flat color
+ *    variables on `.excalidraw` (light) and `.excalidraw.theme--dark` (dark).
+ *    Instead of restating a palette here, the block below re-points those
+ *    variables at Pragma's semantic tokens from `index.css`. Because the
+ *    tokens themselves are re-defined per root class (`:root` light, `.dark`
+ *    dark) and re-resolved live when `.pragma/theme.json` overrides apply,
+ *    the canvas tracks the app theme with no hardcoded colors in this file.
+ *    Excalidraw's own `--theme-filter` is left to the component: it inverts
+ *    color-picker swatches specifically for its dark palette and follows the
+ *    `theme` prop WhiteboardView already passes.
+ *
+ * 2. Disabling the Libraries feature. 0.18.1 has no supported UIOptions
+ *    switch for the library (verified against the pinned version's types and
+ *    bundle: `UIOptions` exposes only `canvasActions`, `tools`, and a
+ *    deprecated `welcomeScreen`). The library is Excalidraw's *default
+ *    sidebar*, so its entry points are the toolbar trigger rendered through
+ *    the `DefaultSidebarTriggerTunnel` (class `default-sidebar-trigger`) and
+ *    the open/docked panel itself (class `default-sidebar`, content root
+ *    `.layer-ui__library`). Both are hidden under the wrapper; hiding the
+ *    panel as well keeps a library that was somehow opened from rendering.
+ *    If this file stops matching a future Excalidraw upgrade, re-derive the
+ *    class names from the new bundle's `dist/prod` output rather than guessing.
+ */
+
+/* A `:root` prefix buys one specificity step over `.excalidraw.theme--dark`
+   (0,3,0 vs 0,2,0), so this wins regardless of stylesheet order. */
+:root .pragma-whiteboard .excalidraw {
+  /* UI voice: Excalidraw's default stack leads with its bundled Assistant
+     face; Pragma's two-voice rule keeps the canvas chrome on the app face. */
+  --ui-font: var(--font-sans);
+
+  /* Surfaces. */
+  --default-bg-color: var(--background);
+  --island-bg-color: var(--card);
+  --input-bg-color: var(--background);
+  --input-hover-bg-color: var(--accent);
+  --popup-secondary-bg-color: var(--muted);
+  --overlay-bg-color: var(--overlay);
+  --color-surface-high: var(--elevated);
+  --color-surface-mid: var(--muted);
+  --color-surface-low: var(--muted);
+  --color-surface-lowest: var(--background);
+  --button-gray-1: var(--elevated);
+  --button-gray-2: var(--card);
+  --button-gray-3: var(--secondary);
+
+  /* Text and icons. */
+  --text-primary-color: var(--foreground);
+  --icon-fill-color: var(--foreground);
+  --color-on-surface: var(--foreground);
+  --popup-text-color: var(--foreground);
+  --popup-text-inverted-color: var(--background);
+  --input-label-color: var(--foreground);
+  --keybinding-color: var(--muted-foreground);
+
+  /* Lines and focus. */
+  --default-border-color: var(--border);
+  --input-border-color: var(--input);
+  --dialog-border-color: var(--border);
+  --avatar-border-color: var(--border);
+  --color-border-outline: var(--border);
+  --color-border-outline-variant: var(--input);
+  --focus-highlight-color: var(--ring);
+  --select-highlight-color: var(--ring);
+  --color-selection: var(--primary);
+
+  /* Sliders use a separate palette from buttons. */
+  --color-slider-track: var(--muted);
+  --color-slider-thumb: var(--primary);
+
+  /* Accent. Excalidraw's brand purple drives selection/primary controls;
+     Pragma's own accent takes over so the only saturated color on the
+     surface is the one the app reserves for interactive elements. */
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-darker: var(--primary-hover);
+  --color-primary-darkest: var(--primary-hover);
+  --color-primary-light: var(--accent);
+  --color-primary-light-darker: var(--muted);
+  --color-surface-primary-container: var(--accent);
+  --color-on-primary-container: var(--accent-foreground);
+  --color-brand-hover: var(--primary-hover);
+  --color-brand-active: var(--primary-hover);
+  --color-logo-text: var(--foreground);
+  --link-color: var(--primary);
+
+  /* Scrollbars and destructive actions. */
+  --scrollbar-thumb: var(--border);
+  --scrollbar-thumb-hover: var(--input);
+  --button-destructive-bg-color: var(--destructive);
+  --button-destructive-color: var(--destructive-foreground);
+}
+
+/*
+ * The Libraries feature of @excalidraw/excalidraw 0.18.1 (see above — no
+ * supported prop switch exists). `!important` is deliberate: this is a hard
+ * hide of third-party chrome that may carry its own display rules for the
+ * docked state, and a soft override here would leak the sidebar back in.
+ */
+.pragma-whiteboard .default-sidebar-trigger,
+.pragma-whiteboard .default-sidebar {
+  display: none !important;
+}
