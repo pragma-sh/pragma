@@ -7,13 +7,22 @@
  * because reviewing a docs change is exactly what they are for.
  */
 
-/** Release Please's own commits, in both shapes this repo can produce. */
+/**
+ * Release Please's own commits, in both shapes this repo can produce.
+ *
+ * Every pattern is anchored and matched against the **subject line only**. An
+ * unanchored search over the whole message would let any commit whose body
+ * happens to quote a release branch — a PR description, a revert, a changelog
+ * paste — deploy production without a release behind it.
+ */
 const RELEASE_COMMIT_PATTERNS = [
   // Squash or rebase merge: the PR title, `chore${scope}: release${component} ${version}`.
   /^chore(\([^)]*\))?: release\b/,
   // Merge commit: GitHub's default subject names the source branch, and Release
   // Please always pushes to `release-please--branches--<target>`.
-  /release-please--branches--/,
+  /^Merge pull request #\d+ from [^\s/]+\/release-please--branches--/,
+  // A local `git merge` of the same branch, with or without a remote prefix.
+  /^Merge branch '(?:[^'/]+\/)?release-please--branches--/,
 ] as const;
 
 /** Inputs the Ignored Build Step reads from Vercel's environment. */
@@ -36,5 +45,6 @@ export interface DeployContext {
 export function shouldDeploy({ env, commitMessage }: DeployContext): boolean {
   if (env !== "production") return true;
   if (commitMessage === undefined) return true;
-  return RELEASE_COMMIT_PATTERNS.some((pattern) => pattern.test(commitMessage.trimStart()));
+  const subject = commitMessage.trimStart().split("\n", 1)[0] ?? "";
+  return RELEASE_COMMIT_PATTERNS.some((pattern) => pattern.test(subject));
 }

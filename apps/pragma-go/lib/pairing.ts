@@ -47,6 +47,24 @@ function isProtocolCompatible(version: string): boolean {
   return version === EXPECTED_PROTOCOL_VERSION;
 }
 
+/** The message shown when a host speaks a different `/v1` contract. */
+function incompatibleReason(version: string): string {
+  return `Host speaks protocol v${version}; this app expects v${EXPECTED_PROTOCOL_VERSION}. Update both to the same version.`;
+}
+
+/**
+ * Why a host's advertised gateway API version is unusable, or null.
+ *
+ * `undefined` passes: a host older than the release that added `apiVersion` to
+ * `/v1/health` advertises nothing there, and refusing every such host would
+ * break pairing with desktops that are otherwise perfectly compatible. Only an
+ * explicit mismatch is a rejection.
+ */
+export function apiVersionProblem(version: string | undefined): string | null {
+  if (version === undefined) return null;
+  return isProtocolCompatible(version) ? null : incompatibleReason(version);
+}
+
 /**
  * Validates a scanned payload's shape and protocol version, returning a
  * ready-to-persist {@link ConnectionConfig} on success. Reachability and token
@@ -54,18 +72,16 @@ function isProtocolCompatible(version: string): boolean {
  */
 export function validatePairingPayload(payload: PairingPayload): PairingValidation {
   if (!isProtocolCompatible(payload.protocolVersion)) {
-    return {
-      ok: false,
-      reason: `Host speaks protocol v${payload.protocolVersion}; this app expects v${EXPECTED_PROTOCOL_VERSION}. Update both to the same version.`,
-    };
+    return { ok: false, reason: incompatibleReason(payload.protocolVersion) };
   }
   return validateManualEntry(payload.url, payload.token);
 }
 
 /**
- * Validates hand-typed URL + token fallback fields. The protocol version is
- * unknown for manual entry, so only shape is checked here; the live
- * `agents.catalog()` probe in the pair screen confirms reachability + token.
+ * Validates hand-typed URL + token fallback fields. A typed host advertises no
+ * payload, so only shape is checked here; the live probe in the pair screen
+ * confirms reachability, token, **and** the gateway API version the host
+ * reports on `/v1/health` — the same check the scanned path makes up front.
  */
 export function validateManualEntry(url: string, token: string): PairingValidation {
   const trimmedUrl = url.trim();

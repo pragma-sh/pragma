@@ -29,9 +29,14 @@ from the desktop.
 - **Pairing** (`app/pair.tsx`): QR scan (`expo-camera`) or manual URL/token.
   Pure shape + version validation lives in `lib/pairing.ts`
   (`EXPECTED_PROTOCOL_VERSION` = `constants.gateway.apiVersion`); the live
-  reachability/token probe is `probeConnection()` (an authed `agents.catalog()`
-  call). QR carries the version; manual entry can't, so it's checked by
-  the probe only.
+  probe is `probeConnection()` — unauthenticated `/v1/health` for the host's
+  `apiVersion`, then an authed `agents.catalog()` for reachability and token.
+  A QR payload carries the version and is rejected up front; a hand-typed host
+  carries nothing, so the probe is where it is caught. Every stored connection
+  goes through that probe — scan, manual entry, `#t=` handoff, and launch
+  restore — so a host that upgrades under a paired device is caught too. A host
+  that reports no `apiVersion` (older than the release that added it to
+  `/v1/health`) passes: only an explicit mismatch is a rejection.
   - **Gate on `gateway.apiVersion`, never on `daemon.protocolVersion`.** The
     daemon's wire protocol is bumped by every desktop release, and this build
     embeds its copy at compile time and reaches users through a store review. A

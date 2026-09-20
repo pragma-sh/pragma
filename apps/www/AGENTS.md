@@ -88,7 +88,10 @@ apps/www/
   `ignoreCommand` runs `scripts/should-deploy.ts`, whose decision lives in the unit-tested
   `lib/deploy.ts`: any non-production deployment builds, and a production deployment builds
   only for a Release Please commit (the squashed `chore(main): release …` subject, or a
-  merge commit naming the `release-please--branches--*` source branch). The site is the
+  merge commit whose subject names the `release-please--branches--*` source branch).
+  Every pattern is anchored and read against the **subject line only** — an unanchored
+  search over the whole message lets any commit that merely quotes a release branch in
+  its body deploy production. The site is the
   update endpoint and the docs contract for whatever desktop build is current, so it should
   change when a release changes it — not on every merge to `main`. Both failure modes are
   deliberately "build": an unreadable commit message, and a broken script (Vercel treats a

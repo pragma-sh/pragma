@@ -119,41 +119,59 @@ function actionLabel(live: boolean): string {
   return live ? "publish" : "check";
 }
 
-/** Publishes one package, returning the reasons it should not have been. */
-function releasePackage(name: string, versions: Map<string, string>, live: boolean): string[] {
-  const directory = join("packages", name);
-  const pkg = manifest(directory);
-  if (pkg.private) return [`${pkg.name} is still marked private`];
+/** One package in the release: where it lives and what it declares. */
+interface Release {
+  directory: string;
+  pkg: Manifest;
+}
 
-  const problems = badInternalRanges(pkg, versions);
+/** Every reason one package must not be released, or an empty list. */
+function packageProblems({ pkg }: Release, versions: Map<string, string>): string[] {
+  if (pkg.private) return [`${pkg.name} is still marked private`];
+  return badInternalRanges(pkg, versions);
+}
+
+/** Publishes one package that has already passed validation. */
+function releasePackage({ directory, pkg }: Release, live: boolean): void {
   if (alreadyDone(pkg, live)) {
     console.log(`skip ${pkg.name}@${pkg.version} (already on the registry)`);
-    return problems;
+    return;
   }
   console.log(`${actionLabel(live)} ${pkg.name}@${pkg.version}`);
   publish(directory, live);
-  return problems;
 }
 
 /** The version each package in this release publishes, keyed by package name. */
-function publishedVersions(): Map<string, string> {
-  return new Map(
-    PACKAGES.map((name) => {
-      const pkg = manifest(join("packages", name));
-      return [pkg.name, pkg.version] as const;
-    }),
-  );
+function publishedVersions(all: Release[]): Map<string, string> {
+  return new Map(all.map(({ pkg }) => [pkg.name, pkg.version] as const));
 }
 
+/** Every package in the release, in publish order. */
+function releases(): Release[] {
+  return PACKAGES.map((name) => {
+    const directory = join("packages", name);
+    return { directory, pkg: manifest(directory) };
+  });
+}
+
+/**
+ * Validation runs to completion before the first `npm publish`.
+ *
+ * Publishing is irreversible, so a manifest problem found in the ninth package
+ * must not arrive after the first eight tarballs are already on the registry:
+ * every manifest is checked, and only an entirely clean release publishes.
+ */
 function main(): void {
   const live = process.argv.includes("--publish");
   if (!live) console.log("dry run — pass --publish to release for real\n");
 
-  const versions = publishedVersions();
-  const problems = PACKAGES.flatMap((name) => releasePackage(name, versions, live));
+  const all = releases();
+  const versions = publishedVersions(all);
+  const problems = all.flatMap((release) => packageProblems(release, versions));
   if (problems.length > 0) {
     throw new Error(`refusing to release:\n  ${problems.join("\n  ")}`);
   }
+  for (const release of all) releasePackage(release, live);
 }
 
 if (import.meta.main) main();

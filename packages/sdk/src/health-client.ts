@@ -6,6 +6,14 @@ export interface GatewayHealth {
   status: string;
   protocolVersion: string;
   gatewayVersion: string;
+  /**
+   * `gateway.apiVersion` — the client-facing `/v1` contract this host speaks.
+   *
+   * Optional because a host older than the release that added it answers
+   * without the field; a remote client treats that as "unknown", not
+   * "incompatible".
+   */
+  apiVersion?: string;
 }
 
 /**

@@ -33,6 +33,37 @@ describe("shouldDeploy", () => {
     expect(shouldDeploy({ env: "production", commitMessage: "docs: fix a typo" })).toBe(false);
   });
 
+  test("skips production when only the body mentions a release branch", () => {
+    expect(
+      shouldDeploy({
+        env: "production",
+        commitMessage:
+          "fix(www): correct the deploy gate\n\nReverts release-please--branches--main, which deployed by mistake.",
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeploy({
+        env: "production",
+        commitMessage: "Merge pull request #131 from pragma-sh/docs-release-please--branches--main",
+      }),
+    ).toBe(false);
+  });
+
+  test("builds production for a local merge of the release branch", () => {
+    expect(
+      shouldDeploy({
+        env: "production",
+        commitMessage: "Merge branch 'release-please--branches--main' into main",
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeploy({
+        env: "production",
+        commitMessage: "Merge branch 'origin/release-please--branches--main'",
+      }),
+    ).toBe(true);
+  });
+
   test("builds when provenance is unreadable rather than skipping silently", () => {
     expect(shouldDeploy({ env: "production", commitMessage: undefined })).toBe(true);
   });
