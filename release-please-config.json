@@ -13,6 +13,7 @@
       "groupName": "desktop",
       "components": [
         "pragma",
+        "pragma-desktop",
         "pragma-protocol",
         "pragma-server",
         "pragma-gateway",
@@ -34,7 +35,8 @@
         "watcher",
         "watcher-kit",
         "create-pragma-plugin"
-      ]
+      ],
+      "merge": false
     },
     {
       "type": "node-workspace",
@@ -50,13 +52,14 @@
           "type": "json",
           "path": "src-tauri/tauri.conf.json",
           "jsonpath": "$.version"
-        },
-        {
-          "type": "toml",
-          "path": "src-tauri/Cargo.toml",
-          "jsonpath": "$.package.version"
         }
       ]
+    },
+    "apps/pragma/src-tauri": {
+      "release-type": "rust",
+      "component": "pragma-desktop",
+      "skip-github-release": true,
+      "skip-changelog": true
     },
     "apps/pragma-go": {
       "release-type": "node",
@@ -210,5 +213,6 @@
       "release-type": "node",
       "component": "dev-test-plugin"
     }
-  }
+  },
+  "initial-version": "0.1.0"
 }

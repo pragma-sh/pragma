@@ -391,7 +391,22 @@ them with a signed `release.json`. That manifest is `reload` only when every sub
 previous desktop tag is under `apps/pragma/src/`; any native/server/tooling change is
 `restart`. Desktop-shipped crates/packages use Release Please's `linked-versions` group,
 so changing one also creates a desktop release instead of shipping under an unrelated
-component version. Release Please rejects `..` in `extra-files`; shared version fields in
+component version. **That group must be configured `"merge": false`.** Its default
+collapses the whole group into one extra candidate that carries no version of its own,
+and the `node-workspace` plugin drops every versionless candidate outright — so with the
+default the app, all seven crates and every published package silently disappear from
+the release PR and no `pragma-v*` tag is ever cut. Two more traps live in the same file:
+a `0.0.0` manifest entry is _not_ a previous release, so `bump-minor-pre-major` never
+runs and the first release falls through to `initial-version` (default `1.0.0`, hence
+the explicit `0.1.0`); and `apps/pragma/src-tauri` is a Cargo workspace member whose
+crate is named `pragma`, so `cargo-workspace` invents a candidate that shadows the real
+desktop component — it has its own entry with component `pragma-desktop` and
+`skip-github-release`, which is also what writes `src-tauri/Cargo.toml` (an `extra-files`
+entry for it would be a second writer). `scripts/release-config.test.ts` guards all
+three. Verify a config change without merging anything:
+`npx release-please release-pr --token=$(gh auth token) --repo-url=pragma-sh/pragma
+--target-branch=<your pushed branch> --dry-run --trace` — it reads the config from the
+_branch_, never your working tree, so the branch has to be pushed first. Release Please rejects `..` in `extra-files`; shared version fields in
 `packages/constants/values.json` therefore belong to the linked `constants` component,
 not to cross-component paths from the app or protocol crate. **A version an
 independently-shipped artifact embeds must stay out of the release train entirely** —
