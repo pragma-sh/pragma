@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { join as joinConfigPath } from "node:path/posix";
 import { describe, expect, test } from "bun:test";
 
 import goApp from "../apps/pragma-go/app.json";
@@ -20,6 +21,20 @@ const ROOT = join(import.meta.dir, "..");
 
 function read(path: string): string {
   return readFileSync(join(ROOT, path), "utf8");
+}
+
+const plugins: Array<Record<string, unknown>> = config.plugins;
+const linkedVersions = plugins.find((plugin) => plugin.type === "linked-versions") as
+  | { components?: string[]; merge?: boolean }
+  | undefined;
+
+/**
+ * Resolve an `extra-files` entry to the repo-relative file it writes. These are config
+ * strings Release Please parses itself, not host paths — always `/`-separated, never
+ * touched by the local filesystem — so they join under `path/posix` on every OS.
+ */
+function resolveExtraFile(packagePath: string, file: ExtraFile): string {
+  return joinConfigPath(packagePath, file.path);
 }
 
 /** Every `extra-files` entry across the config, tagged with its component. */
@@ -61,9 +76,6 @@ describe("gateway.apiVersion is hand-owned", () => {
 });
 
 describe("the desktop group reaches the release PR", () => {
-  const plugins: Array<Record<string, unknown>> = config.plugins;
-  const linked = plugins.find((plugin) => plugin.type === "linked-versions");
-
   // `linked-versions` defaults to merging its group into one extra candidate that
   // carries no version of its own. `node-workspace` drops any versionless candidate
   // outright (`WorkspacePlugin.run`), so with the default the entire desktop group —
@@ -71,7 +83,7 @@ describe("the desktop group reaches the release PR", () => {
   // PR and no `pragma-v*` tag is ever cut.
   test("linked-versions does not merge while node-workspace is enabled", () => {
     expect(plugins.some((plugin) => plugin.type === "node-workspace")).toBe(true);
-    expect(linked?.merge).toBe(false);
+    expect(linkedVersions?.merge).toBe(false);
   });
 
   test("the group version starts at the beta, not 1.0.0", () => {
@@ -99,9 +111,19 @@ describe("the Tauri crate does not shadow the desktop component", () => {
     expect(crate?.["skip-github-release"]).toBe(true);
   });
 
+  test("it stays pinned to the desktop group", () => {
+    // Without this the `cargo-workspace` candidate is free to drift to its own patch
+    // version again while every other assertion here still passes.
+    expect(linkedVersions?.components).toContain(crate?.component);
+  });
+
   test("its version is written by the rust strategy, not a duplicate extra-file", () => {
-    expect(extraFiles().filter(({ file }) => file.path.endsWith("src-tauri/Cargo.toml"))).toEqual(
-      [],
-    );
+    // The rust strategy owns `apps/pragma/src-tauri/Cargo.toml`. An `extra-files` entry
+    // resolving to the same file — as `apps/pragma` used to carry — is a second writer.
+    const owned = "apps/pragma/src-tauri/Cargo.toml";
+    const collisions = extraFiles()
+      .map(({ component, file }) => ({ component, path: resolveExtraFile(component, file) }))
+      .filter((entry) => entry.path === owned);
+    expect(collisions).toEqual([]);
   });
 });
