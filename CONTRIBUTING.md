@@ -16,6 +16,7 @@ Thanks for wanting to help. Please read this page before you write code — it w
 - [Style guidelines](#style-guidelines)
 - [Testing](#testing)
 - [Quality gates](#quality-gates)
+- [Release secrets](#release-secrets)
 - [Working with coding agents](#working-with-coding-agents)
 - [Commit style](#commit-style)
 - [Opening a pull request](#opening-a-pull-request)
@@ -271,6 +272,78 @@ Git hooks do some of this for you:
 - **pre-push** — typecheck, `cargo fmt --check`, sidecar staging, `cargo check`, and `fallow:check`.
 
 CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.** The one exception is the fallow audit, which lives in `.github/workflows/fallow.yml` because it posts a PR comment and only GitHub Actions can hand it a token allowed to write one.
+
+## Release secrets
+
+You need none of this to contribute — it applies only to maintainers cutting a release.
+`.github/workflows/release.yml` reads every one of these as a **repository** secret, by the
+exact names below.
+
+| Secret | Required for | Where it comes from |
+| ------ | ------------ | ------------------- |
+| `RELEASE_PLEASE_TOKEN` | Release PRs that trigger ordinary CI | A PAT with contents + pull-request write |
+| `TAURI_SIGNING_PRIVATE_KEY` | The update signature on every installer and UI overlay | `bunx tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Unlocking that key | Chosen when generating it |
+| `TAURI_SIGNING_PUBLIC_KEY` | The key clients verify against | Printed beside the private key |
+| `NPM_TOKEN` | Publishing the nine npm packages | npmjs.com granular access token |
+| `APPLE_CERTIFICATE` | Code-signing the macOS app | Base64 of an exported `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | Opening that `.p12` | Chosen during the Keychain Access export |
+| `APPLE_SIGNING_IDENTITY` | Selecting which identity to sign with | `security find-identity -v -p codesigning` |
+| `APPLE_ID` | Notarization | Apple account on the signing team |
+| `APPLE_PASSWORD` | Notarization | An **app-specific** password, not the account password |
+| `APPLE_TEAM_ID` | Notarization | The parenthetical in the Developer ID certificate name |
+
+**The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
+makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
+Neither substitutes for the other.
+
+### Apple signing
+
+Sign with a **Developer ID Application** certificate. An *Apple Development* certificate
+also shows up in `security find-identity` and is the one most people already have, but it
+cannot sign for distribution and notarization rejects it. Creating one needs a paid
+membership and the Account Holder role: Xcode → Settings → Accounts → Manage
+Certificates → **+** → Developer ID Application.
+
+Export it from Keychain Access (**login** keychain, **My Certificates** category,
+right-click the certificate → Export) as a `.p12`, then upload it flattened to one line:
+
+```bash
+base64 -i Certificates.p12 | tr -d '\n' | gh secret set APPLE_CERTIFICATE --repo pragma-sh/pragma
+```
+
+- **`tr -d '\n'` is not optional.** A base64 blob with embedded newlines fails at
+  `security import` with `SecKeychainItemImport: One or more parameters passed to a
+  function were not valid` — the same error a wrong `APPLE_CERTIFICATE_PASSWORD` gives.
+- **`APPLE_SIGNING_IDENTITY` must match the identity string exactly**, including the
+  parenthesized Team ID: `Developer ID Application: Name (TEAMID)`.
+- **`APPLE_ID` must belong to the team that owns the certificate.** Notarization
+  authenticates separately from signing, so a mismatch signs fine and then fails upload.
+- **`APPLE_PASSWORD` is an app-specific password** from
+  [account.apple.com](https://account.apple.com) → Sign-In and Security. Apple's notary
+  service rejects real account passwords.
+
+**All six or none.** A missing secret is not absent at runtime — GitHub defines the
+variable as an empty string, and the bundler gates on `var_os`, which returns `Some("")`
+for a set-but-empty variable. Half a configuration therefore attempts to sign with a
+zero-byte certificate and fails the build eight minutes in, rather than producing an
+unsigned one.
+
+### npm
+
+`NPM_TOKEN` is a granular access token with **read and write on the `@pragma-sh` scope** —
+the scope, not a list of packages. A token limited to the packages that already exist
+authenticates fine and still fails every first publish with
+`npm error 404 ... PUT https://registry.npmjs.org/@pragma-sh%2f<name>`; 404, not 403, is
+what npm returns for "you may not create this". Because `scripts/publish-packages.ts`
+publishes in dependency order, that lands on the first package and none of the nine ship.
+
+Tick **Bypass two-factor authentication (2FA)** on the token — write tokens enforce 2FA by
+default and CI cannot answer an OTP prompt. npm caps write tokens at a **90-day lifetime**,
+so this secret expires on a schedule; the agent plugins avoid the treadmill by using
+trusted publishing in `.github/workflows/plugins.yml`, which needs no token at all. Trusted
+publishing cannot bootstrap a package that has never been published, which is why the token
+still exists.
 
 ## Working with coding agents
 

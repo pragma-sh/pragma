@@ -460,7 +460,13 @@ failure lands on the first package and none of the nine ship. Configure
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require
 `TAURI_SIGNING_PRIVATE_KEY`, its password, and `TAURI_SIGNING_PUBLIC_KEY`; every installer
-and UI overlay is signed, and production clients reject a missing/invalid signature. Linux
+and UI overlay is signed, and production clients reject a missing/invalid signature. The
+macOS bundles additionally need the six `APPLE_*` secrets (see _Release secrets_ in
+`CONTRIBUTING.md`), and that set is **all or nothing**: an unset secret still reaches the
+build as an empty string, the bundler gates on `var_os` — which returns `Some("")` for a
+set-but-empty variable — and the job dies at `security import` with
+`SecKeychainItemImport: One or more parameters passed to a function were not valid` after
+a full release compile, instead of producing an unsigned bundle. Linux
 package-manager installs select `.deb` or `.rpm`; AppImage sessions receive no automatic
 restart offer until in-place replacement is supported. The website update API scans recent
 releases through the newest restart manifest, because another monorepo component may be
