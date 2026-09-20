@@ -48,9 +48,11 @@ jobs:
           - runner: ubuntu-24.04
             platform: linux-x86_64
             formats: deb rpm
+            bundles: -- --bundles deb,rpm
           - runner: ubuntu-24.04-arm
             platform: linux-aarch64
             formats: deb rpm
+            bundles: -- --bundles deb,rpm
           - runner: windows-latest
             platform: windows-x86_64
             source: target/release/bundle/nsis/*-setup.exe
@@ -90,7 +92,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PRAGMA_UPDATE_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-        run: bun run --filter pragma tauri build
+        # Linux restricts the bundle list to what this job uploads. `tauri.conf.json`
+        # also targets AppImage, whose linuxdeploy step needs FUSE and fails on the
+        # ubuntu-24.04 runners — and nothing downstream ships an AppImage: the matrix
+        # collects deb/rpm and the release manifest never names one.
+        run: bun run --filter pragma tauri build ${{ matrix.bundles }}
       - name: Normalize installer name
         shell: bash
         env:
