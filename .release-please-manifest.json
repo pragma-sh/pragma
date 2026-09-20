@@ -1,5 +1,6 @@
 {
   "apps/pragma": "0.0.0",
+  "apps/pragma/src-tauri": "0.0.0",
   "apps/pragma-go": "0.0.0",
   "apps/www": "0.0.0",
   "crates/pragma-protocol": "0.0.0",
