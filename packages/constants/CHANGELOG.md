@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/pragma-sh/pragma/compare/constants-v0.1.0...constants-v0.2.0) (2026-09-20)
+
+
+### Miscellaneous Chores
+
+* **constants:** Synchronize desktop versions
+
 ## 0.1.0 (2026-09-20)
 
 

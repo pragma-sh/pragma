@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v0.1.0...pragma-server-v0.2.0) (2026-09-20)
+
+
+### Bug Fixes
+
+* **server:** drain the output subscriber in the PTY grid test ([7fe04f3](https://github.com/pragma-sh/pragma/commit/7fe04f3d3ba24dd992ce21e958cc4a6caa399a98))
+
 ## 0.1.0 (2026-09-20)
 
 
