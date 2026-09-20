@@ -4,6 +4,9 @@
     "**/src-tauri/gen/**",
     "**/.next/**",
     "**/.source/**",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "**/CHANGELOG.md",
+    "packages/constants/values.json",
+    "apps/pragma/src-tauri/tauri.conf.json"
   ]
 }
