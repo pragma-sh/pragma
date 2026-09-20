@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.1-alpha.0](https://github.com/pragma-sh/pragma/compare/pi-plugin-v0.2.0-alpha.0...pi-plugin-v0.2.1-alpha.0) (2026-09-20)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 0.2.0
+    * @pragma-sh/sdk bumped to 0.2.0
+    * @pragma-sh/watcher-kit bumped to 0.2.0
+
 ## [0.2.0-alpha.0](https://github.com/pragma-sh/pragma/compare/pi-plugin-v0.1.0-alpha.0...pi-plugin-v0.2.0-alpha.0) (2026-09-20)
 
 

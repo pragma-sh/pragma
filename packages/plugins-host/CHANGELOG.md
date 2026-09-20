@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/pragma-sh/pragma/compare/plugins-host-v0.1.0...plugins-host-v0.2.0) (2026-09-20)
+
+
+### Miscellaneous Chores
+
+* **plugins-host:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 0.2.0
+    * @pragma-sh/plugin bumped to 0.2.0
+    * @pragma-sh/sdk bumped to 0.2.0
+    * @pragma-sh/sidecar-kit bumped to 0.2.0
+
 ## 0.1.0 (2026-09-20)
 
 
