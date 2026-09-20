@@ -100,11 +100,20 @@ function badInternalRanges(pkg: Manifest, versions: Map<string, string>): string
     .filter((problem): problem is string => problem !== null);
 }
 
-function publish(directory: string, live: boolean): void {
+/**
+ * Provenance is a CI-only capability: it is signed from the Actions OIDC token,
+ * and npm fails outright with "Provenance generation in ... environment is not
+ * supported" anywhere else. Asking for it off-CI would make the one-time local
+ * bootstrap of a new package impossible, so it is requested only where it works.
+ */
+function publishArgs(directory: string, live: boolean): string[] {
   const args = ["publish", folderSpec(directory), "--access", "public"];
-  execFileSync("npm", live ? [...args, "--provenance"] : [...args, "--dry-run"], {
-    stdio: "inherit",
-  });
+  if (!live) return [...args, "--dry-run"];
+  return process.env.GITHUB_ACTIONS === "true" ? [...args, "--provenance"] : args;
+}
+
+function publish(directory: string, live: boolean): void {
+  execFileSync("npm", publishArgs(directory, live), { stdio: "inherit" });
 }
 
 /**
