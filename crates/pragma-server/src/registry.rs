@@ -1869,6 +1869,7 @@ impl Default for Registry {
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+    use std::sync::mpsc::RecvTimeoutError;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -2665,7 +2666,7 @@ mod tests {
         #[cfg(windows)]
         let query = "\"$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)\"\r";
         let mut output = String::new();
-        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(10);
         let mut next_query = Instant::now();
         while Instant::now() < deadline {
             if Instant::now() >= next_query {
@@ -2673,15 +2674,30 @@ mod tests {
                 // ConPTY may consume input while PowerShell is still painting
                 // its initial prompt after the resize. Keep probing rather
                 // than making shell startup timing part of this assertion.
-                next_query = Instant::now() + std::time::Duration::from_millis(500);
+                next_query = Instant::now() + Duration::from_millis(500);
             }
-            if let Ok(EventFrame::Output { data, .. }) =
-                rx.recv_timeout(std::time::Duration::from_millis(200))
-            {
-                output.push_str(&String::from_utf8_lossy(&data));
-                if output.contains("40 120") {
-                    return;
+            // Drain every frame that is already queued before waiting again.
+            // The subscriber channel is bounded and a full one is dropped as
+            // stalled, so taking one frame per 200ms wait loses the stream
+            // outright when the shell repaints in a burst (PowerShell does,
+            // right after the resize above).
+            let frame = match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(frame) => Some(frame),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("output subscriber was dropped; output so far was: {output:?}")
                 }
+            };
+            for frame in frame
+                .into_iter()
+                .chain(std::iter::from_fn(|| rx.try_recv().ok()))
+            {
+                if let EventFrame::Output { data, .. } = frame {
+                    output.push_str(&String::from_utf8_lossy(&data));
+                }
+            }
+            if output.contains("40 120") {
+                return;
             }
         }
         panic!("expected shell to report 40 120 (rows cols); output was: {output:?}");

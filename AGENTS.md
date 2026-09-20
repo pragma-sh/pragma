@@ -448,9 +448,14 @@ moves them to one version. Three rules hold that together:
 - **A folder spec needs a leading `./`.** `npm publish packages/sdk` resolves as the GitHub shorthand `github:packages/sdk` and dies in `git ls-remote`; `./packages/sdk` is a directory. The same applies to `npm pack`.
 - **Publishing is irreversible**, so `scripts/publish-packages.ts` is a dry run unless passed `--publish`, and it skips a version already on the registry so a partially-failed job can be re-run.
 
-It needs an `NPM_TOKEN` secret with publish rights on the `@pragma` scope (the agent
-plugins under `@pragma-sh` publish separately from `.github/workflows/plugins.yml`, which
-uses trusted publishing). Configure
+It needs an `NPM_TOKEN` secret that may **create new packages** in the `@pragma-sh`
+scope — every published package lives there, including the agent plugins, which publish
+separately from `.github/workflows/plugins.yml` using trusted publishing instead of the
+token. A granular token limited to the packages that already exist authenticates fine
+and still dies on a first publish with `npm error 404 ... PUT
+https://registry.npmjs.org/@pragma-sh%2f<name>`; 404, not 403, is what npm returns for
+"no permission to create this". Because the script publishes in dependency order, that
+failure lands on the first package and none of the nine ship. Configure
 `RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require
@@ -679,6 +684,12 @@ Defaults live in `@pragma-sh/constants` under `platform` and `terminalDefaults`.
     something the shell cannot reformat — e.g. `cat` a marker file that only resolves from
     the intended cwd. Likewise, `stty` is unavailable in the Windows PowerShell shell;
     query `$Host.UI.RawUI.WindowSize` when a test needs the active PTY dimensions.
+  - **A bounded subscriber channel drops a slow test.** A session disconnects an output
+    subscriber whose channel is full (`fan_out` in `pragma-server/src/session.rs`), so a
+    test that takes one frame per `recv_timeout` loses the stream outright when the shell
+    repaints in a burst — PowerShell does exactly that after a resize. Drain everything
+    already queued each pass with `try_recv`, and treat `Disconnected` as a failure rather
+    than spinning to the deadline.
   - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when
