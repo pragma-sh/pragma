@@ -9,7 +9,7 @@ import {
 } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { DirEntry } from "@pragma/constants";
+import type { DirEntry } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 

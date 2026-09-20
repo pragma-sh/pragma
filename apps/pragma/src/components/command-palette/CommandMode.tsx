@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants, type Worktree } from "@pragma/constants";
+import { constants, type Worktree } from "@pragma-sh/constants";
 
 import { paletteItemLabel, paletteItemMeta } from "@/components/command-palette/palette-item";
 import { CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";

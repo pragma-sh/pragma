@@ -4,7 +4,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import * as lucideIcons from "lucide-react";
 import { z } from "zod";
 
-import type { PragmaBridge } from "@pragma/plugin";
+import type { PragmaBridge } from "@pragma-sh/plugin";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";

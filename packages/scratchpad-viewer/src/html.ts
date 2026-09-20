@@ -15,7 +15,7 @@ export interface ScratchpadViewerHtmlOptions {
   /**
    * Host theme overrides as CSS declarations (`--card: oklch(...);`).
    *
-   * Only overrides belong here. Every `@pragma/scratchpad` rule already carries
+   * Only overrides belong here. Every `@pragma-sh/scratchpad` rule already carries
    * a literal fallback after its `var()`, which is what a scratchpad rendered
    * outside the desktop uses — restating those defaults here would fork the
    * palette. Build this with {@link scratchpadThemeCss}.
@@ -108,7 +108,7 @@ function isSafeValue(value: string): boolean {
 /**
  * The document's own chrome: page frame, and the comment picker's four block
  * states (idle, previewing under a long press, selected, already commented).
- * Component styling comes from `@pragma/scratchpad`'s injected stylesheet.
+ * Component styling comes from `@pragma-sh/scratchpad`'s injected stylesheet.
  */
 const VIEWER_STYLES = `
 *{box-sizing:border-box}

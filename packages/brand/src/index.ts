@@ -1,4 +1,4 @@
-// `@pragma/brand` — the Pragma mark, and the colours it is painted in.
+// `@pragma-sh/brand` — the Pragma mark, and the colours it is painted in.
 
 export { CANVAS, markMarkup, type MarkPalette, placedMark } from "./mark";
 export { faviconLayer, faviconSvg } from "./favicon";

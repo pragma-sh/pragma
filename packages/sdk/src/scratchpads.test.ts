@@ -1,4 +1,4 @@
-import { parseScratchpadComments, parseScratchpadDocument } from "@pragma/scratchpad-contract";
+import { parseScratchpadComments, parseScratchpadDocument } from "@pragma-sh/scratchpad-contract";
 import { describe, expect, it } from "vitest";
 
 import { PragmaClient } from "./client";

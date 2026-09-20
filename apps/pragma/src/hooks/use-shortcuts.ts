@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { KeybindingsConfig } from "@pragma/constants";
+import type { KeybindingsConfig } from "@pragma-sh/constants";
 
 import type { KeybindingPlatform, KeybindingAction } from "@/lib/keybindings";
 import {

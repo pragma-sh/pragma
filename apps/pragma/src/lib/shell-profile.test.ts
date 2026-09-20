@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { constants, type WslDistro } from "@pragma/constants";
+import { constants, type WslDistro } from "@pragma-sh/constants";
 
 import {
   NATIVE_PROFILE,

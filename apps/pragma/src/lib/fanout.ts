@@ -1,4 +1,4 @@
-import type { Fanout, FanoutMember, FanoutStatus, ScratchpadFile } from "@pragma/constants";
+import type { Fanout, FanoutMember, FanoutStatus, ScratchpadFile } from "@pragma-sh/constants";
 
 /** Fanout statuses that still occupy their parent worktree. */
 const TERMINAL_STATUSES: ReadonlySet<FanoutStatus> = new Set<FanoutStatus>([

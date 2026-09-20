@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 
-import type { AgentStatus } from "@pragma/constants";
+import type { AgentStatus } from "@pragma-sh/constants";
 
 import { motionTransition } from "@/lib/motion";
 import { cn } from "@/lib/utils";

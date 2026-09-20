@@ -8,7 +8,7 @@ import {
   type MarkPalette,
   ON_DARK,
   ON_LIGHT,
-} from "@pragma/brand";
+} from "@pragma-sh/brand";
 
 /** Corner radius on the 1024 canvas, matching `faviconLayer`'s plate. */
 const PLATE_RADIUS = 224;

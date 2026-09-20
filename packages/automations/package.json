@@ -1,12 +1,22 @@
 {
-  "name": "@pragma/automations",
+  "name": "@pragma-sh/automations",
   "version": "0.0.0",
-  "private": true,
   "description": "Pragma automation authoring API and host sidecar runtime.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
-  "bin": {
-    "pragma-automations": "./src/cli.ts"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/automations"
   },
+  "bin": {
+    "pragma-automations": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -15,6 +25,9 @@
     ".": "./src/index.ts",
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
@@ -22,7 +35,7 @@
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-automations"
   },
   "dependencies": {
-    "@pragma/sidecar-kit": "workspace:*"
+    "@pragma-sh/sidecar-kit": "^0.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -22,10 +22,10 @@ across TypeScript and Rust**. When you write code:
   first. Lift duplicated logic into a shared location the moment it appears twice.
 - **Do not be afraid to create a new package or directory.** If something is shared,
   or _could_ be shared, give it a home (`packages/*`). If a value is referenced in
-  more than one place, it belongs in `@pragma/constants`, not inline. Small,
+  more than one place, it belongs in `@pragma-sh/constants`, not inline. Small,
   single-purpose packages are encouraged.
 - **One source of truth.** Never copy a value across the TS/Rust boundary by hand —
-  put it in `@pragma/constants` (see `packages/constants/AGENTS.md`).
+  put it in `@pragma-sh/constants` (see `packages/constants/AGENTS.md`).
 - **Keep the two languages in lockstep.** The same concept should be named, layered,
   and error-handled the same way in TypeScript and Rust. See _Code standards_ below.
 - **Suggest sweeping changes.** This project is early. If you see a cleaner structure,
@@ -37,7 +37,7 @@ across TypeScript and Rust**. When you write code:
   (`crates/pragma-server`), the UI, the CLI (`crates/pragma-cli`), or the SDK
   (`packages/sdk`) **without explicit owner permission**. A host-tool plugin installs
   itself through its host tool's own plugin mechanism, never through per-plugin Pragma
-  code. Launchable Pragma agents are contributed through the `@pragma/plugin`
+  code. Launchable Pragma agents are contributed through the `@pragma-sh/plugin`
   `defineAgent` API (or the built-in Pragma plugin), not per-tool JSON files copied by
   core. There are deliberately **no** per-tool core installers: the old
   `opencode_plugin.rs` / `claude_plugin.rs` installers were **removed**. The generic
@@ -75,28 +75,28 @@ than no guide.
 
 ## Tech stack
 
-| Concern           | Choice                                                                                                                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Monorepo / tasks  | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
-| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS, Linux, Windows**)                                                                                           |
-| Frontend          | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
-| Styling / UI      | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
-| Backend           | Rust (Tauri commands)                                                                                                                                           |
-| PDF viewing       | [EmbedPDF](https://www.embedpdf.com) headless React plugins + the `@embedpdf/pdfium` wasm, bundled locally (never CDN-fetched)                                  |
-| GitHub            | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
-| AI                | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
-| Automations       | `@pragma/automations` authoring API + Bun-compiled `pragma-automations` sidecar, supervised by `pragma-server`                                                  |
-| Shared constants  | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
-| SDK bundling      | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
-| Lint (TS)         | [oxlint](https://oxc.rs)                                                                                                                                        |
-| Format (TS)       | [oxfmt](https://oxc.rs)                                                                                                                                         |
-| Lint (Rust)       | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                      |
-| Format (Rust)     | rustfmt                                                                                                                                                         |
-| Tests             | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
-| Commits           | Conventional Commits (commitlint)                                                                                                                               |
-| Git hooks         | Husky + lint-staged                                                                                                                                             |
-| CI                | [RWX](https://www.rwx.com) for Linux (`.rwx/ci.yml`) + GitHub Actions for macOS/Windows (`.github/workflows/ci.yml`)                                            |
-| Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                           |
+| Concern           | Choice                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Monorepo / tasks  | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                                |
+| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS, Linux, Windows**)                                                                                              |
+| Frontend          | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                              |
+| Styling / UI      | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                              |
+| Backend           | Rust (Tauri commands)                                                                                                                                              |
+| PDF viewing       | [EmbedPDF](https://www.embedpdf.com) headless React plugins + the `@embedpdf/pdfium` wasm, bundled locally (never CDN-fetched)                                     |
+| GitHub            | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                            |
+| AI                | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma-sh/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
+| Automations       | `@pragma-sh/automations` authoring API + Bun-compiled `pragma-automations` sidecar, supervised by `pragma-server`                                                  |
+| Shared constants  | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                             |
+| SDK bundling      | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                               |
+| Lint (TS)         | [oxlint](https://oxc.rs)                                                                                                                                           |
+| Format (TS)       | [oxfmt](https://oxc.rs)                                                                                                                                            |
+| Lint (Rust)       | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                         |
+| Format (Rust)     | rustfmt                                                                                                                                                            |
+| Tests             | Vitest (TS) + `cargo test` (Rust)                                                                                                                                  |
+| Commits           | Conventional Commits (commitlint)                                                                                                                                  |
+| Git hooks         | Husky + lint-staged                                                                                                                                                |
+| CI                | [RWX](https://www.rwx.com) for Linux (`.rwx/ci.yml`) + GitHub Actions for macOS/Windows (`.github/workflows/ci.yml`)                                               |
+| Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                              |
 
 ## Repository structure
 
@@ -117,17 +117,17 @@ than no guide.
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
-│   ├── brand/                   # `@pragma/brand` the Pragma mark as vector geometry + palettes → see packages/brand/AGENTS.md
-│   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
+│   ├── brand/                   # `@pragma-sh/brand` the Pragma mark as vector geometry + palettes → see packages/brand/AGENTS.md
+│   ├── sdk/                     # `@pragma-sh/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
 │   ├── scratchpad-viewer/       # read-only scratchpad web-view document → see packages/scratchpad-viewer/AGENTS.md
-│   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
+│   ├── plugin/                  # `@pragma-sh/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── plugin-registry/         # official npm list + generated manifest lock → see packages/plugin-registry/AGENTS.md
-│   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
+│   ├── automations/             # `@pragma-sh/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
-│   ├── sidecar-kit/             # `@pragma/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
+│   ├── sidecar-kit/             # `@pragma-sh/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
@@ -138,15 +138,15 @@ than no guide.
 │   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
 │   ├── junie-plugin/            # JetBrains Junie CLI integration → see packages/junie-plugin/AGENTS.md
 │   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
-│   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
-│   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
+│   ├── plugins-host/            # `@pragma-sh/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
+│   └── dev-test-plugin/         # `@pragma-sh/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
-│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-cli`
-│   ├── automations/             # `@pragma/automations` API + `pragma-automations` host sidecar
-│   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
-│   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
+│   ├── sdk/                     # `@pragma-sh/sdk` typed Node/Bun wrapper around `pragma-cli`
+│   ├── automations/             # `@pragma-sh/automations` API + `pragma-automations` host sidecar
+│   ├── ai-helpers/              # `@pragma-sh/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
+│   ├── github-helpers/          # `@pragma-sh/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma-sh/opencode-plugin` ESM opencode status plugin
-│   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
+│   └── plugins-host/            # `@pragma-sh/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
 ├── launch-video/                 # Remotion source for the README launch film → see skills/launch-video/SKILL.md
 ├── remotion.config.ts            # Render settings; website public assets provide source media
 ├── skills/                       # Canonical user-facing skills; symlinked into `.agents/skills`
@@ -169,7 +169,7 @@ than no guide.
   pull-request footer under `github` = `{ prSignature }`, desktop auto-update overrides
   under `updates` = `{ checkUrl, autoDownload }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
-  belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
+  belong in `@pragma-sh/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
   so Rust and TS agree, never hard-coded in one language.
 - First-run onboarding is **one** flow (`apps/pragma/src/components/onboarding`), not a
   stack of setup modals: a progress-bar dialog whose every step is skippable, followed by
@@ -196,26 +196,26 @@ than no guide.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
-- A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
+- A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma-sh/sdk`).
 - The Pragma mark itself — its geometry, or the colours it is painted in →
-  `packages/brand` (`@pragma/brand`), which emits SVG strings and knows nothing
+  `packages/brand` (`@pragma-sh/brand`), which emits SVG strings and knows nothing
   about platforms. Which icon slots exist and what each demands stays with the
   app that ships them (`apps/pragma-go/scripts/icon-variants.ts`). Never
   hand-draw the mark a second time.
-- Agent-authored scratchpad runtime and UI components → `packages/scratchpad` (`@pragma/scratchpad`).
+- Agent-authored scratchpad runtime and UI components → `packages/scratchpad` (`@pragma-sh/scratchpad`).
 - The scratchpad **file contract** (managed frontmatter, agent attachment, the
   sibling comment-thread file) → `packages/scratchpad-contract`
-  (`@pragma/scratchpad-contract`); the read-only web-view renderer native clients
-  embed → `packages/scratchpad-viewer` (`@pragma/scratchpad-viewer`), which
+  (`@pragma-sh/scratchpad-contract`); the read-only web-view renderer native clients
+  embed → `packages/scratchpad-viewer` (`@pragma-sh/scratchpad-viewer`), which
   re-exports the contract. The desktop, the SDK, and the mobile client all import
   it — do not re-implement frontmatter parsing or comment serialization.
 - Anything a client does _with_ a scratchpad over the gateway (comment on one,
   attach an agent, prompt the attached agent) → `client.scratchpads` in
   `packages/sdk`, not a per-client reimplementation.
-- Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma/plugin`).
+- Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma-sh/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
-  `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
+  `packages/dev-test-plugin` (`@pragma-sh/dev-test-plugin`).
 - Fanout orchestration (one prompt into several isolated attempts, then keeping
   one) lives on the host: the durable record and the state machine in
   `crates/pragma-server/src/fanouts.rs`, the side effects behind its
@@ -348,7 +348,7 @@ Shared rules:
 - **Errors are values, surfaced explicitly.** TS: prefer returning/throwing typed
   errors and narrowing with `instanceof`; never swallow. Rust: return `Result`, use
   `?`; reserve `expect`/`panic!` for genuinely-unrecoverable startup invariants.
-- **No magic values.** Cross-boundary values live in `@pragma/constants`. Frontend-only
+- **No magic values.** Cross-boundary values live in `@pragma-sh/constants`. Frontend-only
   shared values live in `src/lib/`.
 - **Imports are grouped** (oxfmt/rustfmt enforce ordering): external deps, then
   workspace packages, then local/relative.
@@ -393,7 +393,29 @@ previous desktop tag is under `apps/pragma/src/`; any native/server/tooling chan
 so changing one also creates a desktop release instead of shipping under an unrelated
 component version. Release Please rejects `..` in `extra-files`; shared version fields in
 `packages/constants/values.json` therefore belong to the linked `constants` component,
-not to cross-component paths from the app or protocol crate. Configure
+not to cross-component paths from the app or protocol crate. **A version an
+independently-shipped artifact embeds must stay out of the release train entirely** —
+`apps/pragma-go` has no `extra-files` (rewriting `expo.version` changes the Expo
+fingerprint and cuts every shipped build off from OTA updates) and `gateway.apiVersion`
+has no writer at all; `scripts/release-config.test.ts` fails if either regresses.
+Merging the release PR is also what deploys the website: production Vercel builds are
+gated on a Release Please commit (see `apps/www/AGENTS.md`), so a merge to `main` that is
+not a release only produces previews.
+
+**Nine packages are published to npm on every desktop release** — `@pragma-sh/sdk`,
+`@pragma-sh/plugin`, `@pragma-sh/automations`, `@pragma-sh/scratchpad`,
+`@pragma-sh/scratchpad-contract`, `@pragma-sh/scratchpad-viewer`, `@pragma-sh/constants`,
+`@pragma-sh/sidecar-kit` and `create-pragma-plugin` — by the `publish-packages` job through
+`scripts/publish-packages.ts`. They are all in the linked `desktop` group, so one release
+moves them to one version. Three rules hold that together:
+
+- **`node-workspace` rewrites the internal ranges, and `workspace:*` must never reach a manifest here.** npm does **not** substitute the `workspace:` protocol at pack or publish time — verified: both `npm pack` and `npm pack -w` emit `"workspace:*"` verbatim, which no consumer can install. Internal dependencies are therefore plain `^<version>` ranges, which bun still resolves to the workspace package locally, and `publish-packages.ts` fails the release if any range stops naming the version its sibling is publishing.
+- **A folder spec needs a leading `./`.** `npm publish packages/sdk` resolves as the GitHub shorthand `github:packages/sdk` and dies in `git ls-remote`; `./packages/sdk` is a directory. The same applies to `npm pack`.
+- **Publishing is irreversible**, so `scripts/publish-packages.ts` is a dry run unless passed `--publish`, and it skips a version already on the registry so a partially-failed job can be re-run.
+
+It needs an `NPM_TOKEN` secret with publish rights on the `@pragma` scope (the agent
+plugins under `@pragma-sh` publish separately from `.github/workflows/plugins.yml`, which
+uses trusted publishing). Configure
 `RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require
@@ -568,7 +590,7 @@ Windows runs terminals in one of two worlds, and they are served differently:
 session are separate problems, and only the first is wired up today:
 
 - **Shell selection (built).** A session can launch `wsl.exe -d <distro>` on the host's
-  own ConPTY. The chosen shell travels as a `ShellProfile` (`@pragma/constants`) on the
+  own ConPTY. The chosen shell travels as a `ShellProfile` (`@pragma-sh/constants`) on the
   `Spawn` request, is resolved by `pragma_platform::shell::resolve_profile_launch`, and
   is persisted on the tab (`tabs.shell_backend` / `shell_distro`) so a respawn after a
   server restart returns to the same shell. The user picks it in the new-tab menu, or as
@@ -585,7 +607,7 @@ native program, `backend`/`distro` choose the world it runs in, and `hiddenDistr
 trims the picker. Both Settings scopes are honoured — the project's file wins and the one
 under the home directory is the global default behind it — and each field falls back
 independently, so a project that pins only `shell` still inherits the global `backend`.
-Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
+Defaults live in `@pragma-sh/constants` under `platform` and `terminalDefaults`.
 
 ## Testing
 

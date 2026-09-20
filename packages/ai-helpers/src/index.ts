@@ -1,5 +1,5 @@
 /**
- * `@pragma/ai-helpers` — Pragma's lightweight AI layer over the pi coding-agent
+ * `@pragma-sh/ai-helpers` — Pragma's lightweight AI layer over the pi coding-agent
  * SDK. Centralizes authentication, model selection, prompts, and the built-in
  * AI features (currently: commit-message and pull-request generation).
  */

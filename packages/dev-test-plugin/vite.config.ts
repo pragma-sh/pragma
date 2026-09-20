@@ -5,9 +5,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "react/jsx-runtime": "@pragma/plugin/jsx-runtime",
-      "react-dom": "@pragma/plugin/react-dom",
-      react: "@pragma/plugin/react",
+      "react/jsx-runtime": "@pragma-sh/plugin/jsx-runtime",
+      "react-dom": "@pragma-sh/plugin/react-dom",
+      react: "@pragma-sh/plugin/react",
     },
   },
   build: {

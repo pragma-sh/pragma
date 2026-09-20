@@ -1,4 +1,4 @@
-import type { FileDiff } from "@pragma/constants";
+import type { FileDiff } from "@pragma-sh/constants";
 import { useEffect, useState } from "react";
 
 import { UnifiedDiff } from "@/components/editor/UnifiedDiff";

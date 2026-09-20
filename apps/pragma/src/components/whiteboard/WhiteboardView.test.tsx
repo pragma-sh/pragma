@@ -1,4 +1,4 @@
-import type { Tab, Whiteboard } from "@pragma/constants";
+import type { Tab, Whiteboard } from "@pragma-sh/constants";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,4 +1,4 @@
-import type { PragmaClientConfig } from "@pragma/sdk";
+import type { PragmaClientConfig } from "@pragma-sh/sdk";
 
 /**
  * Web counterpart of `gateway-fetch.ts`. Browsers give `fetch` a real

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Blocks, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";

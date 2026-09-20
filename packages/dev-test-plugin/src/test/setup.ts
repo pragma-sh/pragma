@@ -5,7 +5,7 @@ import { afterEach, beforeEach } from "vitest";
 
 import { createBridge, setBridge } from "./bridge";
 
-// `@pragma/plugin/ui` and `@pragma/plugin/jsx-runtime` call `getBridge()` at
+// `@pragma-sh/plugin/ui` and `@pragma-sh/plugin/jsx-runtime` call `getBridge()` at
 // module-load time, so a bridge must be installed before any plugin module is
 // imported. Vitest runs setupFiles before importing the test files, so install
 // a default bridge at the top level here.

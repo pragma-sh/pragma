@@ -1,4 +1,4 @@
-# `@pragma/github-helpers` - GitHub Sidecar
+# `@pragma-sh/github-helpers` - GitHub Sidecar
 
 Host-side GitHub helper package compiled to the `pragma-github` Bun sidecar.
 

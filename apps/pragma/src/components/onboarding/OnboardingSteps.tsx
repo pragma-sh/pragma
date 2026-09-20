@@ -4,8 +4,8 @@ import { Icon } from "@iconify/react";
 import { Blocks, BookOpen, Check, FolderPlus, Palette, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants } from "@pragma/constants";
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import { constants } from "@pragma-sh/constants";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";

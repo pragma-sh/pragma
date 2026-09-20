@@ -1,6 +1,6 @@
 import { type ComponentType, type ReactNode, useMemo, useState } from "react";
 
-import type { ChangedFile, ChangeStatus } from "@pragma/constants";
+import type { ChangedFile, ChangeStatus } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 

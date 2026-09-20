@@ -1,4 +1,4 @@
-# `@pragma/ai-helpers` — Agent Guide
+# `@pragma-sh/ai-helpers` — Agent Guide
 
 > Pragma's lightweight AI layer over the **pi coding-agent SDK**
 > (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`). It owns
@@ -176,10 +176,10 @@ unknown model is not a bad one.
 
 ## Conventions
 
-- **Constants live here, not in `@pragma/constants`.** Model-selection knobs
+- **Constants live here, not in `@pragma-sh/constants`.** Model-selection knobs
   (`PICK_MODEL`, `MODEL_INSIGHTS`) never cross the TS/Rust boundary — they run
   entirely inside this JS sidecar — so they stay local. Anything that _is_
-  shared with Rust still belongs in `@pragma/constants` per the root guide.
+  shared with Rust still belongs in `@pragma-sh/constants` per the root guide.
 - **The credential store is shared with the `pi` CLI, not Pragma's own.**
   `createAuthStorage()` resolves to `~/.pi/agent/auth.json`, so a `pi` login
   shows up in Pragma as a connected provider and model selection will route work

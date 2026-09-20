@@ -1,4 +1,4 @@
-import type { Whiteboard, WhiteboardsClient } from "@pragma/sdk";
+import type { Whiteboard, WhiteboardsClient } from "@pragma-sh/sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import { getWhiteboardSnapshot } from "./whiteboard-snapshot";

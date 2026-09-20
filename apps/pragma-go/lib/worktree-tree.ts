@@ -1,4 +1,4 @@
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 /** A worktree plus its nested children — mirrors the desktop sidebar tree. */
 export interface WorktreeNode {

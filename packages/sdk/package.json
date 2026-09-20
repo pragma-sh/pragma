@@ -1,9 +1,15 @@
 {
-  "name": "@pragma/sdk",
+  "name": "@pragma-sh/sdk",
   "version": "0.0.0",
-  "private": true,
   "description": "Typed TypeScript wrapper SDK for the Pragma CLI.",
+  "homepage": "https://github.com/pragma-sh/pragma#readme",
+  "bugs": "https://github.com/pragma-sh/pragma/issues",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/sdk"
+  },
   "files": [
     "dist"
   ],
@@ -19,6 +25,9 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bunup src/index.ts --format esm,cjs --target node --dts",
     "typecheck": "tsc --noEmit",
@@ -26,8 +35,8 @@
     "lint": "oxlint ."
   },
   "devDependencies": {
-    "@pragma/constants": "workspace:*",
-    "@pragma/scratchpad-contract": "workspace:*",
+    "@pragma-sh/constants": "workspace:*",
+    "@pragma-sh/scratchpad-contract": "workspace:*",
     "@types/node": "^24.10.1",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",

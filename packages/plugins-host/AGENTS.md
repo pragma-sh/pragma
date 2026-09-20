@@ -1,4 +1,4 @@
-# packages/plugins-host — @pragma/plugins-host
+# packages/plugins-host — @pragma-sh/plugins-host
 
 Bun-compiled `pragma-plugins` host sidecar: resolves the agent catalog from plugin
 contributions and serves icon assets to `pragma-server`. Mirrors the `pragma-automations`
@@ -63,8 +63,8 @@ duplicate their metadata here.
 ## Catalog wire types
 
 `AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `AgentIcon` are
-promoted into `@pragma/constants` (`schema.json`) so the wire type has one source of
-truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
+promoted into `@pragma-sh/constants` (`schema.json`) so the wire type has one source of
+truth, shared with `@pragma-sh/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
 agents include resolved launch commands for each model/reasoning selection plus terminal
 input timing, allowing `pragma-server` to launch agents without desktop webview.
 

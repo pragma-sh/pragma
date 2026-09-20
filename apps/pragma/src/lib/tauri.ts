@@ -41,12 +41,12 @@ import type {
   Whiteboard,
   WhiteboardViewResult,
   WslDistroList,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
-export type { OpenPort, ShellProfile, WslDistroList } from "@pragma/constants";
+export type { OpenPort, ShellProfile, WslDistroList } from "@pragma-sh/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -2077,7 +2077,7 @@ export function pluginStorageDelete(pluginId: string, key: string): Promise<void
  * Sends one `fanouts` RPC to the host that owns the project.
  *
  * `payload` is the shared discriminated request (`{ action, … }`) `pragma-cli`
- * and `@pragma/sdk` send, so the desktop stays one caller of one contract
+ * and `@pragma-sh/sdk` send, so the desktop stays one caller of one contract
  * rather than a second implementation of it.
  */
 export function fanoutRpc<T>(projectId: string, payload: Record<string, unknown>): Promise<T> {

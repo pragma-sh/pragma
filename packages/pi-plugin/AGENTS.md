@@ -5,7 +5,7 @@ catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pra
 
 ## Files
 
-- `src/index.ts` — Pi extension entry point using `@pragma/sdk`.
+- `src/index.ts` — Pi extension entry point using `@pragma-sh/sdk`.
 - `src/extension-factory.ts` — reusable lifecycle extension factory for Pi-derived agents.
 - `src/reporter.ts` — serialized lifecycle state machine.
 - `src/pragma-plugin.ts` — `defineAgent` launcher and interjection watcher.

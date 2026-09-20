@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { useNotify, useProject, useStoredState } from "@pragma/plugin";
-import { Button, Kbd } from "@pragma/plugin/ui";
+import { useNotify, useProject, useStoredState } from "@pragma-sh/plugin";
+import { Button, Kbd } from "@pragma-sh/plugin/ui";
 
 import { FORTUNES, pickFortune } from "./fortunes";
 

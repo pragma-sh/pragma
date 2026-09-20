@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { KeybindingsConfig } from "@pragma/constants";
+import type { KeybindingsConfig } from "@pragma-sh/constants";
 
 const loadKeybindingsMock = vi.fn();
 const getPlatformMock = vi.fn();

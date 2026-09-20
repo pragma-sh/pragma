@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { UsageLimit, UsageLimitProviderDefinition, UsageLimitsResult } from "@pragma/plugin";
+import type {
+  UsageLimit,
+  UsageLimitProviderDefinition,
+  UsageLimitsResult,
+} from "@pragma-sh/plugin";
 import { ArrowUpRight, CircleGauge, Gauge } from "lucide-react";
 
 import {

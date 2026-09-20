@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { bundledOfficialPluginLock } from "@/lib/plugin-registry";
 import { availablePluginBinaries } from "@/lib/tauri";

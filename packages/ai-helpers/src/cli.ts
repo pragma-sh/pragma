@@ -19,7 +19,7 @@
  *   ask --cwd <path>              (JSON context on stdin) → streams delta/reset; → { type: "result", text } | error
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
  */
-import { readStdinLines } from "@pragma/sidecar-kit";
+import { readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import {
   type AiAuthMethod,

@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { EditorContent } from "@tiptap/react";
 import { MessageSquarePlus, MessagesSquare, RefreshCw } from "lucide-react";
 import { toast } from "sonner";

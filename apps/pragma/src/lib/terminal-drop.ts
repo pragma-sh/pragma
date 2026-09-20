@@ -1,4 +1,4 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { fileBase64, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
 import { saveDroppedFile } from "@/lib/tauri";

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { Clock, Play, ShieldCheck, ShieldQuestion, X } from "lucide-react";
 
-import type { AutomationInfo, FileContents } from "@pragma/constants";
+import type { AutomationInfo, FileContents } from "@pragma-sh/constants";
 import { type Extension, Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";

@@ -7,7 +7,6 @@
   "required": [
     "app",
     "window",
-    "links",
     "editorLaunchers",
     "scripts",
     "agents",
@@ -37,9 +36,6 @@
     },
     "window": {
       "$ref": "#/definitions/WindowDefaults"
-    },
-    "links": {
-      "$ref": "#/definitions/Links"
     },
     "editorLaunchers": {
       "$ref": "#/definitions/EditorLaunchers"
@@ -318,7 +314,7 @@
     },
     "FanoutMemberSelector": {
       "title": "FanoutMemberSelector",
-      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid — sampling one model twice is a supported use.",
+      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid \u2014 sampling one model twice is a supported use.",
       "type": "object",
       "additionalProperties": false,
       "required": ["selector"],
@@ -376,7 +372,7 @@
         },
         "runtimeAgentId": {
           "type": "string",
-          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site — the host resolves it from the plugin's watcher metadata."
+          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site \u2014 the host resolves it from the plugin's watcher metadata."
         },
         "modelId": {
           "type": ["string", "null"]
@@ -778,7 +774,7 @@
     },
     "FanoutMemberRequest": {
       "title": "FanoutMemberRequest",
-      "description": "Addresses one member of one fanout — used by retry and pick.",
+      "description": "Addresses one member of one fanout \u2014 used by retry and pick.",
       "type": "object",
       "additionalProperties": false,
       "required": ["memberId"],
@@ -1421,7 +1417,9 @@
         "windows": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Windows shell candidates, probed in order and resolved against `PATH`. PowerShell 7+ (`pwsh.exe`) is preferred over the in-box Windows PowerShell (`powershell.exe`) because it ships the modern ConPTY behaviour; the last entry must be a shell that is present on every Windows install so resolution cannot fail."
         }
       }
@@ -1439,7 +1437,9 @@
         },
         "listArgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Arguments that list installed distributions with their state and WSL version. The output is UTF-16LE encoded, which the parser has to decode before splitting."
         },
         "serverBinary": {
@@ -1457,7 +1457,7 @@
       "properties": {
         "protocolVersion": {
           "type": "string",
-          "description": "Wire-protocol SemVer the host speaks on Hello, gateway.json, health, and pairing. Mirrored from crates/pragma-protocol's package version by `bun run generate`; do not edit by hand. Comparison is exact equality."
+          "description": "Internal daemon wire-protocol SemVer, spoken on Hello, `gateway.json` and `/v1/health`. Mirrored from crates/pragma-protocol's package version by `bun run generate`; do not edit by hand. Comparison is exact equality, and that is load-bearing: every peer here ships in one bundle, so a version that no longer matches is a stale process to evict, not a peer to negotiate with. Remote clients use `gateway.apiVersion` instead."
         },
         "socketFile": {
           "type": "string",
@@ -1504,7 +1504,7 @@
       "properties": {
         "fileName": {
           "type": "string",
-          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme — the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
+          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme \u2014 the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
         },
         "modes": {
           "type": "array",
@@ -1522,6 +1522,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "apiVersion",
         "discoveryFile",
         "tokenFile",
         "devicesFile",
@@ -1532,6 +1533,10 @@
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
+        "apiVersion": {
+          "type": "string",
+          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value \u2014 a client that never launches cannot be updated first."
+        },
         "discoveryFile": {
           "type": "string",
           "description": "Filename written beside daemon.sock with gateway port, token, pid, and protocol version."
@@ -1553,10 +1558,18 @@
           "additionalProperties": false,
           "required": ["id", "name", "platform", "appVersion"],
           "properties": {
-            "id": { "type": "string" },
-            "name": { "type": "string" },
-            "platform": { "type": "string" },
-            "appVersion": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "appVersion": {
+              "type": "string"
+            }
           },
           "description": "HTTP headers carrying installation-scoped mobile device metadata."
         },
@@ -1612,11 +1625,13 @@
         "presenceTtlMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed — the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
+          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed \u2014 the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
         },
         "tokenPrefixes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true,
           "description": "Accepted Expo push token prefixes. A token that matches none is rejected at registration rather than failing later inside Expo."
         }
@@ -1657,7 +1672,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["hookGlobal", "runnerGlobal", "markerPrefix", "tabTitle"],
-      "description": "Names the terminal benchmark (`@pragma/bench`) and the desktop app agree on. The app installs the hook global in dev builds only; the benchmark's injected runner reads it back by the same name.",
+      "description": "Names the terminal benchmark (`@pragma-sh/bench`) and the desktop app agree on. The app installs the hook global in dev builds only; the benchmark's injected runner reads it back by the same name.",
       "properties": {
         "hookGlobal": {
           "type": "string",
@@ -1743,13 +1758,27 @@
           ],
           "description": "Fallback title per tab kind, used for a tab whose shell or page has not named itself. A tab still carrying its default title has no name worth showing in a notification, so both languages compare against these.",
           "properties": {
-            "fallback": { "type": "string" },
-            "browser": { "type": "string" },
-            "log": { "type": "string" },
-            "scratchpad": { "type": "string" },
-            "whiteboard": { "type": "string" },
-            "prReview": { "type": "string" },
-            "pluginWebview": { "type": "string" }
+            "fallback": {
+              "type": "string"
+            },
+            "browser": {
+              "type": "string"
+            },
+            "log": {
+              "type": "string"
+            },
+            "scratchpad": {
+              "type": "string"
+            },
+            "whiteboard": {
+              "type": "string"
+            },
+            "prReview": {
+              "type": "string"
+            },
+            "pluginWebview": {
+              "type": "string"
+            }
           }
         }
       }
@@ -1795,7 +1824,7 @@
         },
         "unknownLocation": {
           "type": "string",
-          "description": "Body used when neither the project nor the worktree could be resolved — a report can arrive for a worktree the client has not loaded yet."
+          "description": "Body used when neither the project nor the worktree could be resolved \u2014 a report can arrive for a worktree the client has not loaded yet."
         }
       }
     },
@@ -1830,7 +1859,9 @@
       "properties": {
         "hiddenDistros": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true,
           "description": "WSL distribution names hidden from the shell picker by default because they back other tools rather than interactive shells (Docker Desktop's VM distros)."
         },
@@ -1875,7 +1906,9 @@
         },
         "hiddenDistros": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "WSL distribution names omitted from the shell picker. Replaces the shipped TerminalDefaults list rather than merging with it."
         },
         "rememberLastShell": {
@@ -1915,7 +1948,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["isWindows", "distros"],
-      "description": "Result of probing WSL availability on the host that owns a worktree — the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
+      "description": "Result of probing WSL availability on the host that owns a worktree \u2014 the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
       "properties": {
         "isWindows": {
           "type": "boolean",
@@ -1923,7 +1956,9 @@
         },
         "distros": {
           "type": "array",
-          "items": { "$ref": "#/definitions/WslDistro" },
+          "items": {
+            "$ref": "#/definitions/WslDistro"
+          },
           "description": "Installed WSL distributions, before any user-configured hiding."
         }
       }
@@ -1975,7 +2010,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
-      "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma/plugin so the catalog wire type has one source of truth.",
+      "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma-sh/plugin so the catalog wire type has one source of truth.",
       "properties": {
         "id": {
           "type": "string"
@@ -2268,22 +2303,6 @@
         }
       }
     },
-    "Links": {
-      "title": "Links",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["homepage", "support"],
-      "properties": {
-        "homepage": {
-          "type": "string",
-          "format": "uri"
-        },
-        "support": {
-          "type": "string",
-          "format": "uri"
-        }
-      }
-    },
     "EditorLaunchers": {
       "title": "EditorLaunchers",
       "type": "object",
@@ -2391,7 +2410,6 @@
         }
       }
     },
-
     "Agents": {
       "title": "Agents",
       "type": "object",
@@ -2818,11 +2836,24 @@
         "maxRenderDimension"
       ],
       "properties": {
-        "databaseFile": { "type": "string" },
-        "defaultTitle": { "type": "string" },
-        "maxTitleChars": { "type": "integer", "minimum": 1 },
-        "maxSceneBytes": { "type": "integer", "minimum": 1 },
-        "maxRenderDimension": { "type": "integer", "minimum": 1 }
+        "databaseFile": {
+          "type": "string"
+        },
+        "defaultTitle": {
+          "type": "string"
+        },
+        "maxTitleChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxSceneBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxRenderDimension": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "ExcalidrawScene": {
@@ -2832,9 +2863,17 @@
       "additionalProperties": false,
       "required": ["type", "version", "elements", "appState", "files"],
       "properties": {
-        "type": { "type": "string", "enum": ["excalidraw"] },
-        "version": { "type": "integer", "minimum": 1 },
-        "source": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["excalidraw"]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string"
+        },
         "elements": {
           "type": "array",
           "items": {
@@ -2842,13 +2881,23 @@
             "additionalProperties": true,
             "required": ["id", "type"],
             "properties": {
-              "id": { "type": "string" },
-              "type": { "type": "string" }
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
             }
           }
         },
-        "appState": { "type": "object", "additionalProperties": true },
-        "files": { "type": "object", "additionalProperties": true }
+        "appState": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": true
+        }
       }
     },
     "Whiteboard": {
@@ -2858,13 +2907,30 @@
       "additionalProperties": false,
       "required": ["id", "worktreeId", "title", "scene", "version", "createdAt", "updatedAt"],
       "properties": {
-        "id": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "title": { "type": "string" },
-        "scene": { "$ref": "#/definitions/ExcalidrawScene" },
-        "version": { "type": "integer", "minimum": 1 },
-        "createdAt": { "type": "integer", "minimum": 0 },
-        "updatedAt": { "type": "integer", "minimum": 0 }
+        "id": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "WhiteboardCreateInput": {
@@ -2873,9 +2939,15 @@
       "additionalProperties": false,
       "required": ["worktreeId", "title", "scene"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "title": { "type": "string" },
-        "scene": { "$ref": "#/definitions/ExcalidrawScene" }
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        }
       }
     },
     "WhiteboardEditInput": {
@@ -2884,11 +2956,22 @@
       "additionalProperties": false,
       "required": ["worktreeId", "id", "title", "scene", "expectedVersion"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "scene": { "$ref": "#/definitions/ExcalidrawScene" },
-        "expectedVersion": { "type": "integer", "minimum": 1 }
+        "worktreeId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "WhiteboardListInput": {
@@ -2897,8 +2980,12 @@
       "additionalProperties": false,
       "required": ["worktreeId"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "query": { "type": "string" }
+        "worktreeId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
       }
     },
     "WhiteboardIdInput": {
@@ -2907,8 +2994,12 @@
       "additionalProperties": false,
       "required": ["worktreeId", "id"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "id": { "type": "string" }
+        "worktreeId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
       }
     },
     "WhiteboardViewResult": {
@@ -2918,7 +3009,9 @@
       "additionalProperties": false,
       "required": ["data"],
       "properties": {
-        "data": { "type": "string" }
+        "data": {
+          "type": "string"
+        }
       }
     },
     "AgentStatus": {
@@ -3414,7 +3507,7 @@
         },
         "diffCommit": {
           "type": ["string", "null"],
-          "description": "Commit hash a commit-scoped diff tab shows (first parent → commit); null for range diffs and non-diff tabs."
+          "description": "Commit hash a commit-scoped diff tab shows (first parent \u2192 commit); null for range diffs and non-diff tabs."
         },
         "prNumber": {
           "type": ["integer", "null"],
@@ -3742,7 +3835,9 @@
       "additionalProperties": false,
       "required": ["worktreeId", "path", "kind", "score"],
       "properties": {
-        "worktreeId": { "type": "string" },
+        "worktreeId": {
+          "type": "string"
+        },
         "path": {
           "type": "string",
           "description": "Worktree-relative POSIX path."
@@ -3778,9 +3873,13 @@
       "properties": {
         "matches": {
           "type": "array",
-          "items": { "$ref": "#/definitions/PaletteSearchMatch" }
+          "items": {
+            "$ref": "#/definitions/PaletteSearchMatch"
+          }
         },
-        "truncated": { "type": "boolean" }
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "ProjectIcon": {
@@ -4231,7 +4330,9 @@
         "targets": {
           "type": "array",
           "description": "Install destinations offered by the skills step.",
-          "items": { "$ref": "#/definitions/OnboardingSkillTarget" }
+          "items": {
+            "$ref": "#/definitions/OnboardingSkillTarget"
+          }
         }
       }
     },
@@ -4242,12 +4343,18 @@
       "description": "One skill install destination. The frontend sends `id` over IPC; the backend resolves `directory` against the home directory.",
       "required": ["id", "directory", "label"],
       "properties": {
-        "id": { "type": "string", "description": "Stable identifier sent over IPC." },
+        "id": {
+          "type": "string",
+          "description": "Stable identifier sent over IPC."
+        },
         "directory": {
           "type": "string",
           "description": "Directory holding the skill, relative to the user's home directory."
         },
-        "label": { "type": "string", "description": "Button label shown in onboarding." }
+        "label": {
+          "type": "string",
+          "description": "Button label shown in onboarding."
+        }
       }
     },
     "Updates": {

@@ -1,4 +1,4 @@
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 import type { GitHubPrLifecycle } from "@/lib/github-cache";
 

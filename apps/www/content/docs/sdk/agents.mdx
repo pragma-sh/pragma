@@ -27,7 +27,7 @@ import {
   reportCleared, // status: "cleared"
   reportSessionName,
   reportMessage,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 ```
 
 `reportSessionName({ agent, sessionName })` names the hosting tab (a user rename always
@@ -39,7 +39,7 @@ An attention report can carry a **question** with options, or a **command approv
 the agent blocks until the user answers:
 
 ```ts
-import { reportAttention, awaitAgentAnswer, awaitAgentDecision } from "@pragma/sdk";
+import { reportAttention, awaitAgentAnswer, awaitAgentDecision } from "@pragma-sh/sdk";
 
 // A question with tappable options
 const requestId = "q-1";

@@ -1,4 +1,4 @@
-import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma/constants";
+import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma-sh/constants";
 
 import { statusRank } from "../agent-status";
 import { runtimeAgentId } from "../launch-form";

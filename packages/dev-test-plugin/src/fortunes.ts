@@ -6,7 +6,7 @@ export const FORTUNES: readonly string[] = [
   "Render output bypasses React state for a reason.",
   "When in doubt, route through the owning host.",
   "Lint is non-negotiable; so is the formatter.",
-  "Shared values belong in @pragma/constants.",
+  "Shared values belong in @pragma-sh/constants.",
 ];
 
 /**

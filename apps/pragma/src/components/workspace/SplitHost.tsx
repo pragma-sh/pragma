@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { Bot, Globe, Pencil, PencilRuler, Plus, SquareTerminal, X } from "lucide-react";
 
 import { BrowserView } from "@/components/browser/BrowserView";

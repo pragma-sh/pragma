@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { Icon } from "@iconify/react";
-import type { Fanout, Worktree } from "@pragma/constants";
+import type { Fanout, Worktree } from "@pragma-sh/constants";
 import {
   ChevronRight,
   Copy,

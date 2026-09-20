@@ -1,4 +1,4 @@
-import type { ScratchpadBlock, ScratchpadComment } from "@pragma/sdk";
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma-sh/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";

@@ -1,5 +1,5 @@
-import { useNotify, useProject, useStoredState, useTheme } from "@pragma/plugin";
-import { Button } from "@pragma/plugin/ui";
+import { useNotify, useProject, useStoredState, useTheme } from "@pragma-sh/plugin";
+import { Button } from "@pragma-sh/plugin/ui";
 
 const rowStyle = { display: "flex", gap: 8, justifyContent: "space-between" } as const;
 

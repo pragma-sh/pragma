@@ -6,7 +6,7 @@ actionable inbox, and — once paired with a desktop — streams live agent chat
 launches new sessions. The name is the point: it is Pragma for when you are away
 from the desktop.
 
-> **Paired vs. unpaired.** The app talks to a host desktop through `@pragma/sdk`
+> **Paired vs. unpaired.** The app talks to a host desktop through `@pragma-sh/sdk`
 > (the local HTTP gateway over the remote-access tunnel). It renders workspace data
 > and agent chat only after verifying a saved or newly paired connection. Without a
 > verified connection, `app/pair.tsx` replaces the app until pairing succeeds. The seam
@@ -20,18 +20,31 @@ from the desktop.
   (`expo-secure-store`) and, for development only, falls back to
   `EXPO_PUBLIC_PRAGMA_GATEWAY_URL` / `EXPO_PUBLIC_PRAGMA_GATEWAY_TOKEN`. A failed
   startup probe or mid-session **401** clears state and shows the full pairing screen
-  (the host may have regenerated its token). Everything gateway-facing goes through `@pragma/sdk`; never
+  (the host may have regenerated its token). Everything gateway-facing goes through `@pragma-sh/sdk`; never
   hand-build gateway routes or a second client.
 - **Streaming fetch.** The client is wired to `expo/fetch` (a real
   `ReadableStream` body) so the SDK's NDJSON reader works on device — RN's global
   `fetch` does not stream reliably. If NDJSON streaming misbehaves, this is the
   first thing to check.
 - **Pairing** (`app/pair.tsx`): QR scan (`expo-camera`) or manual URL/token.
-  Pure shape + protocol-version validation lives in `lib/pairing.ts`
-  (`EXPECTED_PROTOCOL_VERSION` = `constants.daemon.protocolVersion`); the live
-  reachability/token probe is `probeConnection()` (an authed `agents.catalog()`
-  call). QR carries the protocol version; manual entry can't, so it's checked by
-  the probe only.
+  Pure shape + version validation lives in `lib/pairing.ts`
+  (`EXPECTED_PROTOCOL_VERSION` = `constants.gateway.apiVersion`); the live
+  probe is `probeConnection()` — unauthenticated `/v1/health` for the host's
+  `apiVersion`, then an authed `agents.catalog()` for reachability and token.
+  A QR payload carries the version and is rejected up front; a hand-typed host
+  carries nothing, so the probe is where it is caught. Every stored connection
+  goes through that probe — scan, manual entry, `#t=` handoff, and launch
+  restore — so a host that upgrades under a paired device is caught too. A host
+  that reports no `apiVersion` (older than the release that added it to
+  `/v1/health`) passes: only an explicit mismatch is a rejection.
+  - **Gate on `gateway.apiVersion`, never on `daemon.protocolVersion`.** The
+    daemon's wire protocol is bumped by every desktop release, and this build
+    embeds its copy at compile time and reaches users through a store review. A
+    comparison against that number refuses every host the moment the desktop
+    ships a patch — and no OTA can fix it in time, because a fresh install runs
+    the embedded bundle on its _first_ launch (see _Over-the-air updates_), which
+    is exactly when pairing happens. `scripts/release-config.test.ts` asserts this
+    file does not reference `constants.daemon.protocolVersion`.
   - **The scanner highlights and then freezes.** Every detection is reduced to
     one padded, clamped rectangle by the pure `lib/scan-frame.ts`, drawn over
     the preview; `expo-camera` already reports corner points in the camera
@@ -103,7 +116,7 @@ from the desktop.
   (`lib/scratchpad-agent.ts`). Opening one shows `ScratchpadLoading` while the host
   serves the file and again (as an overlay) until the web view's MDX is ready, then
   renders the document **read-only** in a `react-native-webview` fed by
-  `@pragma/scratchpad-viewer`, so interactive `@pragma/scratchpad` components behave as
+  `@pragma-sh/scratchpad-viewer`, so interactive `@pragma-sh/scratchpad` components behave as
   they do on the desktop. Comment mode (header toggle) turns the document into a
   picker: tap a block to comment, or press and hold to preview where the comment lands
   and drag before releasing. Comments are written to the desktop's own sibling
@@ -144,7 +157,7 @@ from the desktop.
   a separate effort menu for reasoning-capable models. Do not nest effort under model:
   Android does not support that depth and it conflicts with modal stacking on iOS. It's
   a native module: adding/removing it requires a **dev-client rebuild** (`expo run:ios`).
-- **Gateway SDK** via `@pragma/sdk` (`PragmaClient`) — the only way this app talks to a
+- **Gateway SDK** via `@pragma-sh/sdk` (`PragmaClient`) — the only way this app talks to a
   host. Pure JS (no dev-client rebuild).
 - **Agent markdown** via `react-native-marked`'s `useMarkdown` hook. Use the hook inside
   chat rows rather than its `FlatList` component so streamed message replacements reparse
@@ -155,8 +168,8 @@ from the desktop.
 - **Native modules needing a dev-client rebuild** (`expo run:ios`): `expo-camera` (QR
   pairing), `expo-secure-store` (persisted connection config), `react-native-svg`
   (agent icons), `expo-widgets` (the widget extension target), `react-native-webview`
-  (the scratchpad viewer). Pure-JS additions (`@pragma/sdk`,
-  `@pragma/scratchpad-viewer`) do not.
+  (the scratchpad viewer). Pure-JS additions (`@pragma-sh/sdk`,
+  `@pragma-sh/scratchpad-viewer`) do not.
 - **Tests**: pure logic (transcript store, pairing, workspace mapping, launch form) is
   Vitest-covered under `lib/**/*.test.ts` (`bun run --filter pragma-go test`, node
   env, RN-free). Screens/streaming are verified manually in the dev client.
@@ -202,7 +215,7 @@ lib/
   use-scratchpad-comments.ts     # the desktop's sibling comment file, read + serialized writes
   scratchpad-agent.ts            # pure: attached-tab resolution, tab → scratchpads, row label (Vitest)
   data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest)
-  types.ts                       # re-exports @pragma/constants domain types + view shapes
+  types.ts                       # re-exports @pragma-sh/constants domain types + view shapes
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop
   agent-status.ts                # status rollup priority
   haptics.ts                     # haptic intent wrappers
@@ -223,7 +236,7 @@ assets/AppIcon.icon/             # generated layered iOS Liquid Glass icon
 assets/images/                   # generated Android/store icons + favicon source (never hand-edited)
 public/                          # copied verbatim into the web export: index.html, favicon.svg
 scripts/
-  icon-variants.ts               # which icon slots exist + the SVG behind each (mark from @pragma/brand)
+  icon-variants.ts               # which icon slots exist + the SVG behind each (mark from @pragma-sh/brand)
   generate-icons.ts              # rasterises them into assets/images + public (`bun run icons`)
   icons.test.ts                  # appearance/transparency + Android safe-zone invariants (Vitest)
 ```
@@ -298,9 +311,9 @@ implemented in `lib/widgets/`:
 ## Rules
 
 - **One source of truth for the domain.** `Project`, `Worktree`, `AgentStatus`, and
-  `AgentAttentionKind` are imported (type-only) from `@pragma/constants`; wire event
+  `AgentAttentionKind` are imported (type-only) from `@pragma-sh/constants`; wire event
   types (`AgentStreamEvent`, `AgentMessage`, `AgentReportPayload`, …) come from
-  `@pragma/sdk`. Do not redefine them here. View-only shapes (`AgentTab`, `InboxItem`,
+  `@pragma-sh/sdk`. Do not redefine them here. View-only shapes (`AgentTab`, `InboxItem`,
   `AttentionRequest`, `TranscriptRow`) live in `lib/types.ts`.
 - **Keep logic pure and tested.** Any non-trivial derivation (transcript folding,
   pairing validation, workspace→view mapping, launch payload) goes in an RN-free `lib/*`
@@ -465,7 +478,7 @@ Local Expo config plugins live in `plugins/` and are registered by path in
 
 ## App icons and favicon (`assets/`, `scripts/`)
 
-Every icon is rendered from one vector source — `@pragma/brand`, a redraw of
+Every icon is rendered from one vector source — `@pragma-sh/brand`, a redraw of
 the desktop app's mark (`apps/pragma/src-tauri/icons`, which ships only raster
 files). That package owns geometry, palettes, and the shared compact favicon
 treatment; `scripts/icon-variants.ts` owns the Expo- and platform-shaped
@@ -547,8 +560,8 @@ eas submit --platform ios --latest
 ```
 
 - **`eas-build-post-install` builds the workspace dependencies, and the build
-  fails without it.** `@pragma/sdk` and `@pragma/scratchpad-viewer` resolve
-  through `./dist/*`, and `@pragma/constants` needs its `src/generated/**` —
+  fails without it.** `@pragma-sh/sdk` and `@pragma-sh/scratchpad-viewer` resolve
+  through `./dist/*`, and `@pragma-sh/constants` needs its `src/generated/**` —
   all three are gitignored, so on an EAS worker they do not exist and the
   Bundle JavaScript phase dies with an unhelpful `Unknown error`. The hook runs
   the same `turbo run build --filter=pragma-go^...` that `preexport:web` uses
@@ -559,6 +572,18 @@ eas submit --platform ios --latest
   `android.versionCode` and `autoIncrement` on the production profile bumps them
   server-side; `app.json`'s `version` (the marketing version, `1.0.0`) stays the
   source of truth for the store listing. Do not hand-bump the build number.
+- **Release Please must never write `app.json`, and `apps/pragma-go` deliberately has
+  no `extra-files` entry in `release-please-config.json`.** `expo.version` is inside the
+  hashed `expoConfig`, so rewriting it changes the fingerprint — and therefore the
+  runtime version — which silently cuts every shipped build off from all future OTA
+  updates, on top of pushing the store version below builds already in TestFlight.
+  Measured on this tree: `expo.version` `1.0.0` → `271fba10…`, `0.1.0` → `ebb4fe66…`,
+  while a JS-only change to `@pragma-sh/constants` and `lib/pairing.ts` left the hash
+  untouched. `scripts/release-config.test.ts` asserts no extra-file targets `app.json`.
+  Only **6** of the ~116 fingerprint inputs live outside `node_modules` —
+  `.gitignore`, `eas.json`, `assets/images/icon.png`, `assets/AppIcon.icon`, and the two
+  config plugins — plus the resolved `expoConfig`. Touch one of those and the next OTA
+  needs a new binary; touch anything else and it does not.
 - **The repo root has an `.easignore`, and it is load-bearing.** eas-cli builds the
   upload archive from `.gitignore` files only — it never reads `.git/info/exclude`,
   which is where `.pragma/worktrees/` (whole extra checkouts of this repo, tens of
@@ -652,5 +677,5 @@ false`; an unused permission string is a rejection on its own.
   page first, and re-answering App Store Connect's App Privacy questionnaire,
   which today declares "Data Not Collected".
 
-Typecheck needs `@pragma/sdk`'s built `dist` (`bun run --filter @pragma/sdk build`);
+Typecheck needs `@pragma-sh/sdk`'s built `dist` (`bun run --filter @pragma-sh/sdk build`);
 `turbo typecheck`/`test` build it via `^build`.

@@ -11,7 +11,7 @@ import { Text } from "@/components/ui/text";
 import { hapticSelection } from "@/lib/haptics";
 import { useThemeColors } from "@/lib/theme";
 import type { AttentionRequest } from "@/lib/types";
-import type { QuestionOption } from "@pragma/constants";
+import type { QuestionOption } from "@pragma-sh/constants";
 
 const OTHER = "__other__";
 /**

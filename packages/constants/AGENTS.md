@@ -1,6 +1,6 @@
 # packages/constants — Shared Source of Truth
 
-`@pragma/constants` is consumed by **both** the React frontend and the Rust backend.
+`@pragma-sh/constants` is consumed by **both** the React frontend and the Rust backend.
 It is the single authoritative location for any value that crosses the TS/Rust boundary.
 
 ## File map
@@ -21,19 +21,46 @@ packages/constants/
 3. Run `bun run generate` from the repo root (regenerates TS types; Rust regenerates on
    next `cargo build`).
 4. Use it:
-   - **TS:** `import { constants } from "@pragma/constants"` → `constants.app.name`
+   - **TS:** `import { constants } from "@pragma-sh/constants"` → `constants.app.name`
    - **Rust:** `pragma_constants::CONSTANTS.app.name`
 
 The Rust side parses `values.json` against the schema-generated types at startup and
 **panics loudly** if they ever drift apart — that's intentional.
 
+## Publishing
+
+This package is published to npm as **TypeScript source** (`exports` points at
+`src/index.ts`), so consumers need a bundler or Bun — which every real consumer
+has, since they reach it through `@pragma-sh/plugin`, `@pragma-sh/automations` or a
+scratchpad frame.
+
+Two things that break the tarball if changed carelessly:
+
+- **`src/generated/constants.ts` is gitignored but must ship.** The `files`
+  allowlist in `package.json` is what overrides `.gitignore` at pack time. Verify
+  with `npm pack --dry-run` after touching `files` — a tarball without the
+  generated module imports a path that does not exist.
+- **`files` deliberately excludes `src/lib.rs` and the tests.** `lib.rs` is the
+  Rust half of this package and has no business in an npm tarball.
+
 ## Key values
 
 - `app.name` / `app.identifier` — mirror in `src-tauri/tauri.conf.json` (Tauri reads
   its config statically; keep the two in sync if you change window defaults here).
-- `daemon.protocolVersion` — SemVer string mirrored from `crates/pragma-protocol`'s
-  Cargo version by `bun run generate`. Exact equality on Hello / pairing / health.
-  Do not edit it by hand.
+- `daemon.protocolVersion` — the **internal** daemon wire protocol. SemVer string
+  mirrored from `crates/pragma-protocol`'s Cargo version by `bun run generate`.
+  Exact equality on Hello, `gateway.json`, and `/v1/health`. Do not edit it by hand.
+  Because `pragma-protocol` is in the linked desktop release group, this moves on
+  every desktop release — which is deliberate: every peer that compares it ships in
+  one bundle, so a mismatch is a stale process to evict, not a peer to negotiate with.
+- `gateway.apiVersion` — the **client-facing** gateway HTTP contract, advertised in the
+  pairing payload. **Hand-owned**: no release-please extra-file writes it and
+  `bun run generate` does not sync it, and `scripts/release-config.test.ts` fails if
+  either ever starts to. It must not be conflated with `daemon.protocolVersion`: Pragma
+  Go and the web build embed their copy at build time and reach users on their own
+  cadence, so a per-release bump would refuse every installed client the moment the
+  desktop shipped a patch. Bump it only on a breaking `/v1` change, and only in the same
+  release as a client build that embeds the new value.
 - `updates.*` — shipped desktop auto-update defaults (production/dev check URLs,
   poll interval, apply-mode labels, installer platform ids). User overrides live in
   global `.pragma/config.json` `other` block (`OtherSettings`).

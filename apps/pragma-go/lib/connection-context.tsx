@@ -1,4 +1,4 @@
-import { PragmaClient, PragmaGatewayError } from "@pragma/sdk";
+import { PragmaClient, PragmaGatewayError } from "@pragma-sh/sdk";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { Platform } from "react-native";
@@ -13,11 +13,11 @@ import {
 } from "react";
 
 import { streamingFetch } from "./gateway-fetch";
-import type { ConnectionConfig } from "./pairing";
+import { apiVersionProblem, type ConnectionConfig } from "./pairing";
 import { flushPendingRevocations, forgetPendingRevocations, unregisterFromPush } from "./push";
 import * as SecureStore from "./secret-store";
 import { takeTokenFromUrl } from "./web-handoff";
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 // App-wide owner of the single PragmaClient. The chat hook and the live data
 // layer both consume the client from here, so pairing state lives in exactly
@@ -108,15 +108,24 @@ async function clientFor(config: ConnectionConfig): Promise<PragmaClient> {
 export type ProbeResult = { ok: true; hostName?: string } | { ok: false; reason: string };
 
 /**
- * Verifies a candidate config is reachable and its token is accepted, by
- * calling an authed gateway endpoint through the SDK. Distinguishes an
- * unreachable host from a rejected token so the pair screen can explain which.
+ * Verifies a candidate config is reachable, speaks a `/v1` contract this build
+ * understands, and has its token accepted. Distinguishes an unreachable host
+ * from a rejected token so the pair screen can explain which.
+ *
+ * The version check lives here rather than only in the QR payload, because
+ * every path that stores a connection comes through this probe: a scanned
+ * code, a hand-typed URL, a `#t=` web handoff, and a host restored on launch
+ * after the desktop upgraded underneath it.
  */
 export async function probeConnection(config: ConnectionConfig): Promise<ProbeResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
-    await (await clientFor(config)).agents.catalog({ signal: controller.signal });
+    const client = await clientFor(config);
+    const health = await client.health.check({ signal: controller.signal });
+    const problem = apiVersionProblem(health.apiVersion);
+    if (problem !== null) return { ok: false, reason: problem };
+    await client.agents.catalog({ signal: controller.signal });
     return { ok: true };
   } catch (error) {
     return probeFailure(error, controller.signal.aborted);

@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import { MediaDocument } from "@/components/media/MediaDocument";
 import { MediaStatus } from "@/components/media/MediaStatus";

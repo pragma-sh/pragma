@@ -1,5 +1,5 @@
-import type { PluginDefinition } from "@pragma/plugin";
-import { PLUGIN_API_VERSION } from "@pragma/plugin/version";
+import type { PluginDefinition } from "@pragma-sh/plugin";
+import { PLUGIN_API_VERSION } from "@pragma-sh/plugin/version";
 
 import { errorMessage } from "@/lib/errors";
 import { readPluginBundle, type PluginEntryResult } from "@/lib/tauri";
@@ -16,7 +16,7 @@ import { checkPluginCompatibility } from "./semver";
 
 /** Injectable seams so the load pipeline is unit-testable without Tauri/blob imports. */
 export interface PluginLoadContext {
-  /** The `@pragma/plugin` version this host supports. Defaults to the real one. */
+  /** The `@pragma-sh/plugin` version this host supports. Defaults to the real one. */
   hostApiVersion?: string;
   /** Maps a project root path to its project id for tagging project-scope records. */
   projectIdByPath?: (projectPath: string) => string | undefined;

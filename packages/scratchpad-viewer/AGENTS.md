@@ -1,11 +1,11 @@
-# packages/scratchpad-viewer — @pragma/scratchpad-viewer
+# packages/scratchpad-viewer — @pragma-sh/scratchpad-viewer
 
 Renders a managed scratchpad **read-only** in any web view.
 
 The scratchpad **file contract** (frontmatter, agent attachment, comment
-threads) lives in `@pragma/scratchpad-contract` — the SDK needs it and cannot
+threads) lives in `@pragma-sh/scratchpad-contract` — the SDK needs it and cannot
 depend on this package. It is re-exported from this package's index, so an
-existing `@pragma/scratchpad-viewer` import of `parseScratchpadDocument`,
+existing `@pragma-sh/scratchpad-viewer` import of `parseScratchpadDocument`,
 `attachScratchpadAgent`, or the comment helpers keeps working.
 
 `buildScratchpadViewerHtml({ source, comments, mode, themeCss })` returns one
@@ -18,7 +18,7 @@ contract helpers.
 - **The document is self-contained, always.** A web view loading HTML from a
   string has no origin to resolve a relative URL against, and a phone reading a
   scratchpad over a tunnel should not need a second round trip to paint. The
-  runtime — React, the MDX compiler, and every `@pragma/scratchpad` component —
+  runtime — React, the MDX compiler, and every `@pragma-sh/scratchpad` component —
   is bundled by `scripts/build.ts` into `src/generated/runtime-script.ts` and
   inlined. Nothing is fetched.
 - **esbuild bundles the runtime, not `Bun.build`.** Bun's Windows bundler panics
@@ -32,7 +32,7 @@ contract helpers.
   a function body where `useState` is a free variable resolved against global
   scope — which is why dropping the import alone failed with
   "Can't find variable: useState". `installGlobalScope()` therefore publishes
-  React (hooks included) and every `@pragma/scratchpad` export as globals before
+  React (hooks included) and every `@pragma-sh/scratchpad` export as globals before
   evaluating, minus a small reserved list (`location`, `top`, `name`, …) that a
   module export must never shadow. Add a new importable module to that function,
   not just to `componentScope()`.
@@ -44,7 +44,7 @@ contract helpers.
   shipped library renders exactly as it does on the desktop; one that imports a
   worktree file gets MDX's "Expected component X to be defined" error rendered
   in place by the error boundary, not a blank screen.
-- **Do not restate the palette.** Every `@pragma/scratchpad` rule already carries
+- **Do not restate the palette.** Every `@pragma-sh/scratchpad` rule already carries
   a literal fallback after its `var()`. The host passes **overrides only**,
   through `scratchpadThemeCss`, and they are declared in one `:root` block the
   host can rewrite in place (`#pragma-scratchpad-theme`).
@@ -71,7 +71,7 @@ contract helpers.
 ## Commands
 
 ```bash
-bun run --filter @pragma/scratchpad-viewer build      # runtime bundle + dist
-bun run --filter @pragma/scratchpad-viewer typecheck
-bun run --filter @pragma/scratchpad-viewer test
+bun run --filter @pragma-sh/scratchpad-viewer build      # runtime bundle + dist
+bun run --filter @pragma-sh/scratchpad-viewer typecheck
+bun run --filter @pragma-sh/scratchpad-viewer test
 ```

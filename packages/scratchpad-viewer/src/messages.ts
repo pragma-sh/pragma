@@ -4,10 +4,10 @@
  * to one end fails to typecheck at the other.
  *
  * The shapes that also exist on disk (a block anchor, a comment) come from
- * `@pragma/scratchpad-contract` and are re-exported here so a host importing
+ * `@pragma-sh/scratchpad-contract` and are re-exported here so a host importing
  * the viewer still gets the whole vocabulary from one place.
  */
-import type { ScratchpadBlock, ScratchpadComment } from "@pragma/scratchpad-contract";
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma-sh/scratchpad-contract";
 
 export type { ScratchpadBlock, ScratchpadComment };
 

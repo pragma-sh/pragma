@@ -9,7 +9,7 @@ board, fanouts, and phones — with your icon, your models, and status reporting
 ## defineAgent
 
 ```tsx
-import { definePlugin, defineAgent } from "@pragma/plugin";
+import { definePlugin, defineAgent } from "@pragma-sh/plugin";
 
 const myAgent = defineAgent({
   id: "my-agent",
@@ -44,7 +44,7 @@ A watcher attaches to a launched session, reads its output, and reports status t
 the [SDK](/docs/sdk/agents):
 
 ```tsx
-import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma/plugin";
+import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma-sh/plugin";
 
 watchers: [
   defineWatcher({

@@ -16,7 +16,7 @@ import type {
   AgentStatus,
   CatalogAgent,
   WorkspaceSnapshot,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 export type {
   AgentAnswer,

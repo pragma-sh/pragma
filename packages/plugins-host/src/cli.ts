@@ -2,9 +2,9 @@
 import { stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-import type { PluginContext, PluginDefinition } from "@pragma/plugin";
-import { PragmaClient } from "@pragma/sdk";
-import { readStdinLines } from "@pragma/sidecar-kit";
+import type { PluginContext, PluginDefinition } from "@pragma-sh/plugin";
+import { PragmaClient } from "@pragma-sh/sdk";
+import { readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import {
   assembleCatalog,

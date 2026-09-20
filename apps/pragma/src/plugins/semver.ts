@@ -1,6 +1,6 @@
 /**
  * Minimal semver handling for plugin API compatibility. Plugins stamp the
- * `@pragma/plugin` version they were compiled against (`__apiVersion`); the
+ * `@pragma-sh/plugin` version they were compiled against (`__apiVersion`); the
  * host compares it with its own supported version before loading.
  */
 
@@ -31,7 +31,7 @@ export type PluginCompatibility =
   | { kind: "refuse"; message: string };
 
 /**
- * Checks a plugin's `__apiVersion` against the host's `@pragma/plugin` version.
+ * Checks a plugin's `__apiVersion` against the host's `@pragma-sh/plugin` version.
  *
  * - Different major → refuse (breaking API differences).
  * - Same major, plugin minor greater than host → load with a logged warning
@@ -47,20 +47,20 @@ export function checkPluginCompatibility(
   if (!plugin) {
     return {
       kind: "refuse",
-      message: `plugin has an invalid @pragma/plugin API version "${pluginApiVersion}"`,
+      message: `plugin has an invalid @pragma-sh/plugin API version "${pluginApiVersion}"`,
     };
   }
   if (!host) {
     return {
       kind: "refuse",
-      message: `host has an invalid @pragma/plugin API version "${hostApiVersion}"`,
+      message: `host has an invalid @pragma-sh/plugin API version "${hostApiVersion}"`,
     };
   }
   if (plugin.major !== host.major) {
     return {
       kind: "refuse",
       message:
-        `built against @pragma/plugin ${pluginApiVersion}, ` +
+        `built against @pragma-sh/plugin ${pluginApiVersion}, ` +
         `this Pragma supports ${host.major}.x`,
     };
   }
@@ -68,7 +68,7 @@ export function checkPluginCompatibility(
     return {
       kind: "warn",
       message:
-        `built against @pragma/plugin ${pluginApiVersion}, newer than this ` +
+        `built against @pragma-sh/plugin ${pluginApiVersion}, newer than this ` +
         `Pragma's ${hostApiVersion} — some APIs may be unavailable`,
     };
   }

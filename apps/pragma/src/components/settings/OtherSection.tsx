@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { constants, type OtherSettings } from "@pragma/constants";
+import { constants, type OtherSettings } from "@pragma-sh/constants";
 import { toast } from "sonner";
 
 import { SettingsCard } from "@/components/settings/SettingsCard";

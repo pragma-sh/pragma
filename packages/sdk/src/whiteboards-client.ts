@@ -5,7 +5,7 @@ import type {
   WhiteboardIdInput,
   WhiteboardListInput,
   WhiteboardViewResult,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { base64ToBytes } from "./encoding";
 import { routes } from "./routes";

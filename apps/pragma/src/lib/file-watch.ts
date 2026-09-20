@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import type { FileChange } from "@pragma/constants";
+import type { FileChange } from "@pragma-sh/constants";
 
 import {
   stopWatchingWorktreeFiles,

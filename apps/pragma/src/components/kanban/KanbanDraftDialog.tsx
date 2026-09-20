@@ -3,7 +3,7 @@ import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Check, ChevronsUpDown } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 
-import type { KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma-sh/constants";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";

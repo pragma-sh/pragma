@@ -1,4 +1,4 @@
-import { bytesToBase64, type WhiteboardsClient } from "@pragma/sdk";
+import { bytesToBase64, type WhiteboardsClient } from "@pragma-sh/sdk";
 
 /** Read-only whiteboard payload consumed by the scratchpad viewer. */
 export interface ScratchpadWhiteboardSnapshot {

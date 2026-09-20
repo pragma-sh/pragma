@@ -8,7 +8,7 @@ import type {
   AgentMessage,
   AgentReportPayload,
   AgentSessionLaunchPayload,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 import { routes } from "./routes";

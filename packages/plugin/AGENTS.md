@@ -1,4 +1,4 @@
-# packages/plugin — @pragma/plugin
+# packages/plugin — @pragma-sh/plugin
 
 Public TypeScript API for authoring Pragma plugins. This package is a compile-time stub:
 runtime imports delegate to `globalThis.__PRAGMA__`, which the Pragma host installs before
@@ -29,7 +29,7 @@ packages/plugin/
 
 - Keep this package browser-safe and side-effect-light. It must not import app internals.
 - `definePlugin` is the only place the baked `PLUGIN_API_VERSION` is stamped. Server-side
-  `onInstall` / `onPragmaLoad` execution belongs to `@pragma/plugins-host`.
+  `onInstall` / `onPragmaLoad` execution belongs to `@pragma-sh/plugins-host`.
 - Runtime shims must fail loudly when `globalThis.__PRAGMA__` is absent.
 - Storage reaches plugins only through a host-bound `PluginContext.storage`; never expose
   a bridge or helper that accepts a plugin ID from plugin code.
@@ -42,15 +42,15 @@ packages/plugin/
   (`globalThis.process?.…`, `await import("node:…")`), or off the entry's import graph
   entirely.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
-  `react/jsx-runtime` to `@pragma/plugin` subpaths.
+  `react/jsx-runtime` to `@pragma-sh/plugin` subpaths.
 - Add exported API with JSDoc and tests. Breaking API changes require a major version bump;
   additive changes require a minor bump.
 
 ## Commands
 
 ```bash
-bun run --filter @pragma/plugin generate
-bun run --filter @pragma/plugin typecheck
-bun run --filter @pragma/plugin test
-bun run --filter @pragma/plugin build
+bun run --filter @pragma-sh/plugin generate
+bun run --filter @pragma-sh/plugin typecheck
+bun run --filter @pragma-sh/plugin test
+bun run --filter @pragma-sh/plugin build
 ```

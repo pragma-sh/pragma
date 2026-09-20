@@ -4,7 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type IDisposable } from "@xterm/xterm";
 import { toast } from "sonner";
 
-import { constants, type Tab } from "@pragma/constants";
+import { constants, type Tab } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
@@ -1616,7 +1616,7 @@ export class TerminalManager {
   /**
    * Installs the dev-only benchmark hook and returns whether it was installed.
    *
-   * `@pragma/bench` measures the terminal from inside the webview, and the
+   * `@pragma-sh/bench` measures the terminal from inside the webview, and the
    * WebGL renderer leaves nothing in the DOM to read — no `.xterm-rows`, and a
    * canvas whose pixels are not retrievable. So the benchmark needs the xterm
    * instance itself, which lives only in this registry.
@@ -1643,7 +1643,7 @@ export class TerminalManager {
 
 /**
  * Read-only view of the live terminals, exposed on `window` in dev builds only.
- * The property name is shared with the benchmark through `@pragma/constants`.
+ * The property name is shared with the benchmark through `@pragma-sh/constants`.
  */
 interface TerminalBenchHook {
   version: 1;

@@ -17,7 +17,7 @@ use crate::error::{BenchError, BenchResult};
 use crate::stats::Summary;
 
 /// The injected runner, with its two shared globals substituted in from
-/// `@pragma/constants` so the page and this crate cannot drift apart.
+/// `@pragma-sh/constants` so the page and this crate cannot drift apart.
 const RUNNER_JS: &str = include_str!("runner.js");
 const CONFIG_PLACEHOLDER: &str = "__PRAGMA_BENCH_CONFIG__";
 

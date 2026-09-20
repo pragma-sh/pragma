@@ -1,4 +1,4 @@
-import { constants, type TabKind } from "@pragma/constants";
+import { constants, type TabKind } from "@pragma-sh/constants";
 
 /**
  * The fallback title for a tab whose shell/page hasn't named it — or that

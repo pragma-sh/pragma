@@ -63,7 +63,7 @@ const ITEMS: readonly BentoItem[] = [
     icon: Braces,
     title: "TypeScript SDK",
     description:
-      "@pragma/sdk is a typed client for the local gateway: sessions, files, git, agents, scratchpads, and a duplex channel to a running agent.",
+      "@pragma-sh/sdk is a typed client for the local gateway: sessions, files, git, agents, scratchpads, and a duplex channel to a running agent.",
     span: "sm:col-span-12 lg:col-span-4",
   },
   {

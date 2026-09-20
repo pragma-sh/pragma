@@ -19,7 +19,7 @@ import {
   Terminal,
 } from "lucide-react";
 
-import type { AgentStatus, PaletteSearchMatch, Tab, Worktree } from "@pragma/constants";
+import type { AgentStatus, PaletteSearchMatch, Tab, Worktree } from "@pragma-sh/constants";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { paletteItemLabel, paletteItemMeta } from "@/components/command-palette/palette-item";

@@ -1,8 +1,8 @@
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { PragmaClient } from "@pragma/sdk";
-import type { Tab, Worktree } from "@pragma/constants";
+import { PragmaClient } from "@pragma-sh/sdk";
+import type { Tab, Worktree } from "@pragma-sh/constants";
 
 import { PLUGIN_DEEP_LINK_EVENT, type PluginDeepLinkDetail } from "@/lib/deep-link";
 import { onAgentReport, readPluginManifests, gatewayConnectionInfo } from "@/lib/tauri";

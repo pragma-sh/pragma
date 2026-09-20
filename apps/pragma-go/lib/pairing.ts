@@ -1,4 +1,4 @@
-import { constants, type PairingPayload } from "@pragma/constants";
+import { constants, type PairingPayload } from "@pragma-sh/constants";
 
 // Pure, RN-free pairing helpers. The QR code a desktop shows encodes a
 // PairingPayload as JSON; the pair screen scans it, validates it here, and (on
@@ -6,8 +6,16 @@ import { constants, type PairingPayload } from "@pragma/constants";
 // in the pair screen because they need the SDK client; everything shape- and
 // version-related is pure and unit tested.
 
-/** Protocol version this mobile build speaks; a host must match to pair. */
-export const EXPECTED_PROTOCOL_VERSION = constants.daemon.protocolVersion;
+/**
+ * Gateway API version this build speaks; a host must match to pair.
+ *
+ * This is `gateway.apiVersion`, not `daemon.protocolVersion`. The daemon's wire
+ * protocol is bumped by every desktop release and is only ever compared between
+ * processes from one bundle. This build embeds its copy at compile time and
+ * reaches the store on its own cadence, so gating on that number would refuse
+ * every host the moment the desktop shipped a patch.
+ */
+export const EXPECTED_PROTOCOL_VERSION = constants.gateway.apiVersion;
 
 /** Persisted connection config the whole app talks to a host through. */
 export interface ConnectionConfig {
@@ -34,9 +42,27 @@ export function parsePairingPayload(raw: string): PairingPayload | null {
   return parsed;
 }
 
-/** True when the host's protocol version matches this build's. */
+/** True when the host's gateway API version matches this build's. */
 function isProtocolCompatible(version: string): boolean {
   return version === EXPECTED_PROTOCOL_VERSION;
+}
+
+/** The message shown when a host speaks a different `/v1` contract. */
+function incompatibleReason(version: string): string {
+  return `Host speaks protocol v${version}; this app expects v${EXPECTED_PROTOCOL_VERSION}. Update both to the same version.`;
+}
+
+/**
+ * Why a host's advertised gateway API version is unusable, or null.
+ *
+ * `undefined` passes: a host older than the release that added `apiVersion` to
+ * `/v1/health` advertises nothing there, and refusing every such host would
+ * break pairing with desktops that are otherwise perfectly compatible. Only an
+ * explicit mismatch is a rejection.
+ */
+export function apiVersionProblem(version: string | undefined): string | null {
+  if (version === undefined) return null;
+  return isProtocolCompatible(version) ? null : incompatibleReason(version);
 }
 
 /**
@@ -46,18 +72,16 @@ function isProtocolCompatible(version: string): boolean {
  */
 export function validatePairingPayload(payload: PairingPayload): PairingValidation {
   if (!isProtocolCompatible(payload.protocolVersion)) {
-    return {
-      ok: false,
-      reason: `Host speaks protocol v${payload.protocolVersion}; this app expects v${EXPECTED_PROTOCOL_VERSION}. Update both to the same version.`,
-    };
+    return { ok: false, reason: incompatibleReason(payload.protocolVersion) };
   }
   return validateManualEntry(payload.url, payload.token);
 }
 
 /**
- * Validates hand-typed URL + token fallback fields. The protocol version is
- * unknown for manual entry, so only shape is checked here; the live
- * `agents.catalog()` probe in the pair screen confirms reachability + token.
+ * Validates hand-typed URL + token fallback fields. A typed host advertises no
+ * payload, so only shape is checked here; the live probe in the pair screen
+ * confirms reachability, token, **and** the gateway API version the host
+ * reports on `/v1/health` — the same check the scanned path makes up front.
  */
 export function validateManualEntry(url: string, token: string): PairingValidation {
   const trimmedUrl = url.trim();

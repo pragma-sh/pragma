@@ -3,7 +3,7 @@ import {
   scratchpadThemeCss,
   type ScratchpadViewerCommand,
   type ScratchpadViewerMessage,
-} from "@pragma/scratchpad-viewer";
+} from "@pragma-sh/scratchpad-viewer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 

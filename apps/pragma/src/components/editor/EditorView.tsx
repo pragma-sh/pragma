@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { type Extension, Prec } from "@codemirror/state";
 import { EditorView as CodeMirrorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";

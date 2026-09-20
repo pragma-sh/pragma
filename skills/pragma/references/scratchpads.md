@@ -35,7 +35,7 @@ The attached agent tab is what every interactive component talks back to — a u
 The frame bundles the document at open time (esbuild-wasm, MDX + GFM). Rules:
 
 - Markdown is markdown; GFM tables, task lists, footnotes work.
-- Import components from `@pragma/scratchpad/ui`, primitives from `@pragma/scratchpad/ui/primitives`, host bindings from `@pragma/scratchpad`.
+- Import components from `@pragma-sh/scratchpad/ui`, primitives from `@pragma-sh/scratchpad/ui/primitives`, host bindings from `@pragma-sh/scratchpad`.
 - `react`, `react/jsx-runtime`, `react-dom/client` are provided by the frame.
 - Relative imports resolve against files in the worktree.
 - Bare specifiers resolve to a worktree `node_modules` package if present, else fetch from `https://esm.sh/<pkg>?bundle`. Plain `https:` imports work; `http:`, `file:`, `node:`, and absolute paths are rejected.
@@ -46,10 +46,10 @@ The frame bundles the document at open time (esbuild-wasm, MDX + GFM). Rules:
 
 ## Component API
 
-`@pragma/scratchpad/ui` — interactive, agent-bound:
+`@pragma-sh/scratchpad/ui` — interactive, agent-bound:
 
 ```mdx
-import { AskQuestion, DiffReview, AgentProgress, Whiteboard } from "@pragma/scratchpad/ui";
+import { AskQuestion, DiffReview, AgentProgress, Whiteboard } from "@pragma-sh/scratchpad/ui";
 
 <AskQuestion
   question="Which auth strategy?"
@@ -72,12 +72,12 @@ import { AskQuestion, DiffReview, AgentProgress, Whiteboard } from "@pragma/scra
 
 Create the whiteboard first, capture its returned `id`, then place that id in the MDX. Do not paste Excalidraw JSON into the scratchpad and do not substitute a rendered PNG: the component keeps the durable board live.
 
-`@pragma/scratchpad/ui/primitives` — presentational, theme-matched: `Button` (`variant`: `primary | secondary | outline | ghost | danger`, `size`), `Input`, `Textarea`, `Progress` (`tone`), `Card`, `Badge` (`tone`: `neutral | primary | success | warning | danger`).
+`@pragma-sh/scratchpad/ui/primitives` — presentational, theme-matched: `Button` (`variant`: `primary | secondary | outline | ghost | danger`, `size`), `Input`, `Textarea`, `Progress` (`tone`), `Card`, `Badge` (`tone`: `neutral | primary | success | warning | danger`).
 
-`@pragma/scratchpad` root — host bridge plus a re-export of `@pragma/sdk`:
+`@pragma-sh/scratchpad` root — host bridge plus a re-export of `@pragma-sh/sdk`:
 
 ```ts
-import { promptAgent, scratchpadBridge } from "@pragma/scratchpad";
+import { promptAgent, scratchpadBridge } from "@pragma-sh/scratchpad";
 
 await promptAgent("User picked JWT; continue."); // → boolean
 ```

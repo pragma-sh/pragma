@@ -7,8 +7,8 @@ import type {
   AgentLaunchCommand,
   AgentModelEntry,
   CatalogAgent,
-} from "@pragma/constants";
-import type { AgentDefinition, PluginContext, PluginDefinition } from "@pragma/plugin";
+} from "@pragma-sh/constants";
+import type { AgentDefinition, PluginContext, PluginDefinition } from "@pragma-sh/plugin";
 
 /** Maximum icon size the catalog will serve, in bytes. */
 export const ICON_MAX_BYTES = 256 * 1024;

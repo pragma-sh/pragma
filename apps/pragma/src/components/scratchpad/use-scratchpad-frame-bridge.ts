@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 
-import type { Tab } from "@pragma/constants";
-import type { ScratchpadAgentProgress } from "@pragma/scratchpad";
+import type { Tab } from "@pragma-sh/constants";
+import type { ScratchpadAgentProgress } from "@pragma-sh/scratchpad";
 
 import { scratchpadTheme } from "@/lib/scratchpad-theme";
 import { getWhiteboard, scratchpadPromptAgent, viewWhiteboard } from "@/lib/tauri";

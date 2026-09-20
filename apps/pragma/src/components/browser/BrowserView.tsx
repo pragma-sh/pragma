@@ -13,7 +13,7 @@ import {
   Search,
 } from "lucide-react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import {
   DropdownMenu,

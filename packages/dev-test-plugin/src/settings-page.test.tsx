@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { PragmaClient } from "@pragma/sdk";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import { DevTestSettingsPage } from "./settings-page";
 import { createBridge, setBridge } from "./test/bridge";

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FileCog } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";

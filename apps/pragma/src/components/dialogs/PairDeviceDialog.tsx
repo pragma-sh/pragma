@@ -3,7 +3,7 @@ import { ChevronDown, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { renderSVG } from "uqr";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -228,7 +228,10 @@ function PairingQr({ url, token, hostName }: PairingQrProps) {
     encodePairingPayload({
       url,
       token,
-      protocolVersion: constants.daemon.protocolVersion,
+      // The gateway's client-facing API version, not the daemon wire protocol:
+      // a paired phone embeds its copy at build time and ships on its own
+      // cadence, so it must not be invalidated by every desktop release.
+      protocolVersion: constants.gateway.apiVersion,
       hostName,
     }),
   );

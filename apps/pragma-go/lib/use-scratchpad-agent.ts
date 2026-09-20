@@ -1,4 +1,4 @@
-import type { PragmaClient, ScratchpadFile } from "@pragma/sdk";
+import type { PragmaClient, ScratchpadFile } from "@pragma-sh/sdk";
 import { useCallback, useRef, useState } from "react";
 import { Alert } from "react-native";
 

@@ -213,7 +213,7 @@ export const COMPETITORS: readonly Competitor[] = [
       },
       {
         title: "Rewrite Orca CLI scripts as `pragma-cli`",
-        body: "`orca worktree create` / `snapshot` map to `pragma-cli`'s worktree and fanout commands, or to `@pragma/sdk` if the script runs from Node — see the CLI and SDK docs for the closest equivalent to each Orca command you rely on.",
+        body: "`orca worktree create` / `snapshot` map to `pragma-cli`'s worktree and fanout commands, or to `@pragma-sh/sdk` if the script runs from Node — see the CLI and SDK docs for the closest equivalent to each Orca command you rely on.",
       },
       {
         title: "SSH hosts carry over as-is",
@@ -251,7 +251,7 @@ export const COMPETITORS: readonly Competitor[] = [
       },
       {
         title: "Automations become event-driven, not just scheduled",
-        body: "Superset's scheduled automations (nightly triage, weekly changelog) can be rebuilt as `@pragma/automations` scripts — the schedule still works, but you can also react to host events instead of only a cron.",
+        body: "Superset's scheduled automations (nightly triage, weekly changelog) can be rebuilt as `@pragma-sh/automations` scripts — the schedule still works, but you can also react to host events instead of only a cron.",
       },
     ],
   },

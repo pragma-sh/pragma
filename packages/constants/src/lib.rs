@@ -46,15 +46,15 @@ pub use generated::{
     FileChunk, FileContents, FileDiff, FileReadLimits, Gateway, GitHub, GitHubAuthMethod,
     GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
     KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
-    Keybindings, KeybindingsConfig, KeybindingsFiles, Links, NewWorktreeSpec, OpenPort,
-    OtherSettings, PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind,
-    PaletteSearchResponse, Platform, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
-    Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
-    RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource,
-    ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit,
-    SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings,
-    Tunnel, UpdateApplyMode, UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput,
+    Keybindings, KeybindingsConfig, KeybindingsFiles, NewWorktreeSpec, OpenPort, OtherSettings,
+    PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, Platform,
+    PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode,
+    ProtocolEventKind, ProtocolRpcMethod, QuestionOption, RunScriptDefinition, RunScriptEntry,
+    RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
+    ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource, ScriptRunStatus,
+    Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
+    SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel,
+    UpdateApplyMode, UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput,
     WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput, WhiteboardListInput,
     WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
     WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro, WslDistroList,
@@ -108,6 +108,14 @@ mod tests {
         assert!(
             CONSTANTS.daemon.protocol_version.contains('.'),
             "protocolVersion must be a SemVer string mirrored from pragma-protocol"
+        );
+    }
+
+    #[test]
+    fn gateway_api_version_is_a_semver_string() {
+        assert!(
+            CONSTANTS.gateway.api_version.contains('.'),
+            "gateway.apiVersion must be a hand-owned SemVer string"
         );
     }
 

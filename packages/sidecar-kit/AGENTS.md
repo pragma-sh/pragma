@@ -1,4 +1,4 @@
-# `@pragma/sidecar-kit` - Shared Sidecar Stdin Helpers
+# `@pragma-sh/sidecar-kit` - Shared Sidecar Stdin Helpers
 
 Tiny shared library for the Bun-compiled host sidecars (`pragma-ai`,
 `pragma-automations`, `pragma-plugins`, ...). Holds cross-sidecar plumbing that
@@ -10,7 +10,7 @@ would otherwise be copy-pasted per package.
 
 ## Rules
 
-- Keep this package dependency-free (no `@pragma/sdk`, no Node-only APIs beyond
+- Keep this package dependency-free (no `@pragma-sh/sdk`, no Node-only APIs beyond
   `process.stdin`) so any sidecar can depend on it without pulling in unrelated
   surface.
 - Only add a helper here once it is duplicated verbatim across two or more

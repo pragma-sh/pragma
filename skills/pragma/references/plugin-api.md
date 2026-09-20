@@ -1,8 +1,8 @@
 # Pragma Plugin API Reference
 
-`@pragma/plugin` is public TypeScript API for trusted extensions rendered and run by Pragma.
+`@pragma-sh/plugin` is public TypeScript API for trusted extensions rendered and run by Pragma.
 Use plugin for persistent UI, command-palette actions, launchable agents, usage limits, themes,
-or event-driven integration. Use `@pragma/automations` instead for UI-free scheduled tasks.
+or event-driven integration. Use `@pragma-sh/automations` instead for UI-free scheduled tasks.
 
 Installed TypeScript declarations remain authority for exact fields.
 
@@ -30,8 +30,8 @@ Only load code user trusts. Plugin runs with access to local Pragma context and 
 Plugin bundle must default-export one `definePlugin(...)` result:
 
 ```tsx
-import { defineCommand, definePlugin, defineSidebarTab, useProject } from "@pragma/plugin";
-import { Button } from "@pragma/plugin/ui";
+import { defineCommand, definePlugin, defineSidebarTab, useProject } from "@pragma-sh/plugin";
+import { Button } from "@pragma-sh/plugin/ui";
 
 function ProjectOverview() {
   const project = useProject();
@@ -118,7 +118,7 @@ Callbacks receive `PluginContext<TConfig>`:
 | `pluginDir` | Package directory when runtime exposes it.              |
 | `config`    | User config parsed by plugin Zod schema.                |
 | `project`   | Active project or `null`.                               |
-| `sdk`       | Typed `@pragma/sdk` client. Read `sdk.md`.              |
+| `sdk`       | Typed `@pragma-sh/sdk` client. Read `sdk.md`.           |
 | `notify`    | In-app notification; can request native notification.   |
 | `storage`   | Optional durable JSON storage scoped to current plugin. |
 
@@ -139,13 +139,13 @@ Plugin components can use:
 Query hooks return `{ data, error, loading, refetch }`. Components must render loading,
 empty, and error states. Pass stable dependency arrays to `useSdkQuery`.
 
-Use host-provided UI primitives from `@pragma/plugin/ui` (`Button`, `Kbd`) and host icons
-from `@pragma/plugin/icons`. Do not import UI from `apps/pragma`.
+Use host-provided UI primitives from `@pragma-sh/plugin/ui` (`Button`, `Kbd`) and host icons
+from `@pragma-sh/plugin/icons`. Do not import UI from `apps/pragma`.
 
 ## Web Views
 
 ```tsx
-import { defineWebView, useWebViewPayload } from "@pragma/plugin";
+import { defineWebView, useWebViewPayload } from "@pragma-sh/plugin";
 
 interface ReportPayload {
   path: string;
@@ -171,8 +171,8 @@ opening duplicates.
 ## Launchable Agents
 
 ```ts
-import { defineAgent } from "@pragma/plugin";
-import icons from "@pragma/plugin/icons";
+import { defineAgent } from "@pragma-sh/plugin";
+import icons from "@pragma-sh/plugin/icons";
 
 const agent = defineAgent({
   id: "example",
@@ -196,7 +196,7 @@ does not support. Read `agent-plugin.md` before implementing lifecycle/status in
 ## Constraints
 
 - Bundle one browser-safe ESM entry. Avoid static `node:` imports and module-scope `process`.
-- Do not bundle React. Use scaffolded aliases to `@pragma/plugin/react`, `react-dom`, and
+- Do not bundle React. Use scaffolded aliases to `@pragma-sh/plugin/react`, `react-dom`, and
   `jsx-runtime`.
 - Import only public package exports; never app, server, or private bridge internals.
 - Keep ids stable and unique within plugin. Prefix command ids with plugin/package name.

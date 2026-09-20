@@ -150,13 +150,13 @@ parse helpers are python3-based, like the transcript helpers above).
 
 **Interjections** (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are
 **not** handled by these hooks. They are delivered by this plugin's shared
-`@pragma/watcher-kit` watcher, which writes the text into the live terminal followed by a
+`@pragma-sh/watcher-kit` watcher, which writes the text into the live terminal followed by a
 submit key. These hooks stay status/approval-only.
 
 Claude Code is paste-aware: bracketed-paste text and Enter must be separate PTY writes,
 with a short delay between them. Sending both in one write leaves the reply staged in the
 composer instead of submitting it. Keep `interjectSubmitDelayMs` on the Claude watcher and
-the separate paste/submit writes in `@pragma/watcher-kit`.
+the separate paste/submit writes in `@pragma-sh/watcher-kit`.
 
 `Elicitation` stays observe-only (`attention` dot, no decision).
 

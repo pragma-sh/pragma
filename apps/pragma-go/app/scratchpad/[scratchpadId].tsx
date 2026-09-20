@@ -2,9 +2,9 @@ import {
   markAllResolved,
   unresolvedComments,
   unresolvedCommentsPrompt,
-} from "@pragma/scratchpad-viewer";
-import type { ScratchpadBlock, ScratchpadFile } from "@pragma/sdk";
-import { PragmaGatewayError } from "@pragma/sdk";
+} from "@pragma-sh/scratchpad-viewer";
+import type { ScratchpadBlock, ScratchpadFile } from "@pragma-sh/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, View, type ColorValue } from "react-native";
@@ -30,7 +30,7 @@ import { getWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
 /**
  * One scratchpad, read-only, with a touch comment layer.
  *
- * The document renders in a web view (`@pragma/scratchpad-viewer`), so
+ * The document renders in a web view (`@pragma-sh/scratchpad-viewer`), so
  * interactive blocks behave as they do on the desktop. Everything around it is
  * native: tap or press and hold a block to comment on it, then submit the open
  * comments to the attached agent in one message — the same handoff the desktop's

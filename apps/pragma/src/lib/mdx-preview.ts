@@ -3,9 +3,9 @@ import * as ReactDomClient from "react-dom/client";
 import * as ReactJsxRuntime from "react/jsx-runtime";
 
 import { compile } from "@mdx-js/mdx";
-import * as Scratchpad from "@pragma/scratchpad";
-import * as ScratchpadPrimitives from "@pragma/scratchpad/ui/primitives";
-import * as ScratchpadUi from "@pragma/scratchpad/ui";
+import * as Scratchpad from "@pragma-sh/scratchpad";
+import * as ScratchpadPrimitives from "@pragma-sh/scratchpad/ui/primitives";
+import * as ScratchpadUi from "@pragma-sh/scratchpad/ui";
 import { build, initialize, type Loader, type Plugin } from "esbuild-wasm";
 import wasmUrl from "esbuild-wasm/esbuild.wasm?url";
 import { legacy, resolve, type Package } from "resolve.exports";
@@ -85,10 +85,10 @@ function scratchpadModules(options: PreviewBuildOptions, documentSource: string)
     ["react/jsx-runtime", globalModule("ReactJsxRuntime", ReactJsxRuntime)],
     ["react/jsx-dev-runtime", globalModule("ReactJsxRuntime", ReactJsxRuntime)],
     ["react-dom/client", globalModule("ReactDomClient", ReactDomClient)],
-    ["@pragma/scratchpad", globalModule("Scratchpad", Scratchpad)],
-    ["@pragma/scratchpad/ui", globalModule("ScratchpadUi", ScratchpadUi)],
+    ["@pragma-sh/scratchpad", globalModule("Scratchpad", Scratchpad)],
+    ["@pragma-sh/scratchpad/ui", globalModule("ScratchpadUi", ScratchpadUi)],
     [
-      "@pragma/scratchpad/ui/primitives",
+      "@pragma-sh/scratchpad/ui/primitives",
       globalModule("ScratchpadPrimitives", ScratchpadPrimitives),
     ],
     [

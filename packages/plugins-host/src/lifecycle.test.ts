@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { PluginDefinition } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import type { ResolvedPlugin } from "./catalog";
 import { runPluginLifecycles } from "./lifecycle";

@@ -1,4 +1,4 @@
-# @pragma/bench — terminal lag benchmark
+# @pragma-sh/bench — terminal lag benchmark
 
 Measures what a user actually feels in a Pragma terminal: how long a keystroke
 takes to appear, and how long a scroll takes to move. It does this by launching a
@@ -183,7 +183,7 @@ production bundles. It resolves tab ids against the live map on every call and
 holds no references, so terminal disposal and WebGL eviction are unaffected.
 
 The three names the app and this package share (`hookGlobal`, `runnerGlobal`,
-`markerPrefix`, plus `tabTitle`) live in `@pragma/constants` under `bench`. Never
+`markerPrefix`, plus `tabTitle`) live in `@pragma-sh/constants` under `bench`. Never
 spell any of them literally in a second place.
 
 ## Reading the output

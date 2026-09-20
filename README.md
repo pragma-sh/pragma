@@ -108,7 +108,7 @@ Run on your machine, over SSH, or inside WSL. Desktop app on macOS, Linux, and W
 
 ### 🧩 Extensible
 
-Plugins add UI, commands, agents, and themes. Automations run scheduled and event-driven host tasks. The CLI and the typed `@pragma/sdk` drive all of it from scripts.
+Plugins add UI, commands, agents, and themes. Automations run scheduled and event-driven host tasks. The CLI and the typed `@pragma-sh/sdk` drive all of it from scripts.
 
 [**▶ Watch the feature tour →**](https://pragma-app.sh)
 
@@ -138,7 +138,7 @@ The newest build lives at the [latest release link](https://github.com/pragma-sh
 | [Documentation](https://pragma-app.sh/docs)                 | Main documentation hub                                 |
 | [User guide](https://pragma-app.sh/docs/user-guide)         | Projects, worktrees, agents, review, and settings      |
 | [CLI reference](https://pragma-app.sh/docs/cli)             | Control Pragma and report agent status from a terminal |
-| [TypeScript SDK](https://pragma-app.sh/docs/sdk)            | Build typed integrations with `@pragma/sdk`            |
+| [TypeScript SDK](https://pragma-app.sh/docs/sdk)            | Build typed integrations with `@pragma-sh/sdk`         |
 | [Plugin development](https://pragma-app.sh/docs/plugins)    | Add UI, commands, agents, themes, and integrations     |
 | [Plugin gallery](https://pragma-app.sh/plugins)             | Browse available Pragma plugins                        |
 | [Automations](https://pragma-app.sh/docs/automations)       | Run scheduled and event-driven host tasks              |

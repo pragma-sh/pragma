@@ -1,5 +1,5 @@
 // Metro config for the Pragma Mobile Expo app inside the Bun monorepo.
-// Watches the repo root so workspace packages (e.g. @pragma/constants) resolve,
+// Watches the repo root so workspace packages (e.g. @pragma-sh/constants) resolve,
 // and wires NativeWind's Tailwind pipeline for `global.css`.
 const path = require("node:path");
 const { getDefaultConfig } = require("expo/metro-config");

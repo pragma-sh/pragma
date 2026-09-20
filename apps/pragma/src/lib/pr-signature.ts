@@ -7,7 +7,7 @@
  * marketing block inside the app — only people reading the PR on GitHub do.
  */
 
-import { constants, type GitHubSettings } from "@pragma/constants";
+import { constants, type GitHubSettings } from "@pragma-sh/constants";
 
 import { readConfig } from "@/lib/tauri";
 

@@ -1,13 +1,13 @@
 # Pragma TypeScript SDK Reference
 
-`@pragma/sdk` provides typed, fetch-based access to local Pragma HTTP gateway. Use it from
+`@pragma-sh/sdk` provides typed, fetch-based access to local Pragma HTTP gateway. Use it from
 JavaScript or TypeScript instead of shelling out or hand-building routes. Installed `.d.ts`
 declarations remain authority for exact payloads.
 
 ## Client Configuration
 
 ```ts
-import { PragmaClient } from "@pragma/sdk";
+import { PragmaClient } from "@pragma-sh/sdk";
 
 const client = new PragmaClient();
 ```
@@ -57,7 +57,7 @@ import {
   reportSessionName,
   reportStarted,
   reportStopped,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 
 if (hasPragmaEnvironment()) {
   await reportStarted({ agent: "my-agent" });
@@ -198,7 +198,7 @@ See `whiteboards.md` for the scene contract, a complete authoring example, and s
 ## Errors
 
 ```ts
-import { PragmaGatewayError, PragmaTransportError } from "@pragma/sdk";
+import { PragmaGatewayError, PragmaTransportError } from "@pragma-sh/sdk";
 
 try {
   await client.health.check();

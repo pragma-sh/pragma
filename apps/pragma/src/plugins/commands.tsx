@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-import type { CommandDefinition, PluginContext } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { CommandDefinition, PluginContext } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import { isTerminalEditingContext, isTextEditingContext } from "@/lib/native-editing";
 

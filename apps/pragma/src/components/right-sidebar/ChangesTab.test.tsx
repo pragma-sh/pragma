@@ -4,7 +4,7 @@ import type {
   DiffSide,
   Worktree,
   WorktreeChanges,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

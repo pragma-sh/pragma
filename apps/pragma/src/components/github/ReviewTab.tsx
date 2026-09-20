@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { FileDiff, GitHubRepoRef, Tab } from "@pragma/constants";
+import type { FileDiff, GitHubRepoRef, Tab } from "@pragma-sh/constants";
 import {
   Check,
   CheckCircle2,

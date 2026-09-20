@@ -1,5 +1,5 @@
 {
-  "name": "@pragma/ai-helpers",
+  "name": "@pragma-sh/ai-helpers",
   "version": "0.0.0",
   "private": true,
   "description": "Lightweight AI helpers for Pragma — wraps the pi coding-agent SDK (auth, model selection, prompts).",
@@ -24,7 +24,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.79.10",
     "@earendil-works/pi-coding-agent": "0.79.10",
-    "@pragma/sidecar-kit": "workspace:*"
+    "@pragma-sh/sidecar-kit": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

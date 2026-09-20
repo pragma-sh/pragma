@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma/constants";
+import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
 import {
   Check,

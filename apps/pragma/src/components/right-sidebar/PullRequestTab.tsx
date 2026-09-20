@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
 
 import { CreatePullRequestView } from "@/components/github/CreatePullRequestView";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";

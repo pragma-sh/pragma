@@ -1,4 +1,4 @@
-import type { PragmaClient } from "@pragma/sdk";
+import type { PragmaClient } from "@pragma-sh/sdk";
 import type { PluginStorage } from "./storage";
 
 /** The active project a plugin is rendered against, or `null` when none is selected. */

@@ -4,7 +4,7 @@ import {
   defineSettingsPage,
   defineSidebarCard,
   defineSidebarTab,
-} from "@pragma/plugin";
+} from "@pragma-sh/plugin";
 
 import { AgentPulseCard } from "./agent-pulse-card";
 import { DevTestDiagnosticsPage } from "./diagnostics-page";

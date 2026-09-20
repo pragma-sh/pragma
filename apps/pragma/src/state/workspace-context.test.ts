@@ -1,4 +1,4 @@
-import type { Project, Tab, Worktree } from "@pragma/constants";
+import type { Project, Tab, Worktree } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import { type SplitLayoutNode, workspaceReducer } from "./workspace-context";

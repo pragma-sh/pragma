@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
-import type { AgentDefinition, PluginContext } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { AgentDefinition, PluginContext } from "@pragma-sh/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 import type { AgentConfig, AgentModel, AgentModelSelection, RawAgentModel } from "@/lib/tauri";
 

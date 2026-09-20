@@ -1,4 +1,4 @@
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import type { PluginRecord } from "@/plugins/registry";
 

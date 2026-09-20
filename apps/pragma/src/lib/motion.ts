@@ -4,7 +4,7 @@ import { useReducedMotion, type Transition, type Variants } from "motion/react";
  * Shared motion vocabulary for the desktop UI. Every animated component pulls
  * its timing from here so the app moves as one system rather than as a pile of
  * one-off durations — the same reason colors live in `index.css` and
- * cross-boundary values live in `@pragma/constants`.
+ * cross-boundary values live in `@pragma-sh/constants`.
  *
  * OS-level "reduce motion" is honoured in two places, and both are required:
  * `<MotionConfig reducedMotion="user">` in `App.tsx` strips transform and layout

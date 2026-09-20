@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {

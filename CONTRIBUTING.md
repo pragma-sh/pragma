@@ -99,7 +99,7 @@ bun run dev:go           # Metro dev server, once the dev client is installed
 bun run --filter pragma-go web   # Metro dev server for the browser build
 ```
 
-The app is useless until it is **paired** with a running desktop: it talks to the host's local HTTP gateway through `@pragma/sdk`, and without a verified connection `app/pair.tsx`replaces the whole app. Pair by QR from the desktop's pairing panel, or set `EXPO_PUBLIC_PRAGMA_GATEWAY_URL` and `EXPO_PUBLIC_PRAGMA_GATEWAY_TOKEN` for development.
+The app is useless until it is **paired** with a running desktop: it talks to the host's local HTTP gateway through `@pragma-sh/sdk`, and without a verified connection `app/pair.tsx`replaces the whole app. Pair by QR from the desktop's pairing panel, or set `EXPO_PUBLIC_PRAGMA_GATEWAY_URL` and `EXPO_PUBLIC_PRAGMA_GATEWAY_TOKEN` for development.
 
 For the browser build the desktop serves a staged export, not a dev server:
 
@@ -189,9 +189,9 @@ crates/
   pragma-cli/       `pragma-cli` — agent status reporting and scripting
 packages/
   constants/        Dual TS + Rust shared constants (schema.json + values.json)
-  sdk/              `@pragma/sdk` — typed Node/Bun wrapper over the gateway
-  plugin/           `@pragma/plugin` — public plugin API
-  automations/      `@pragma/automations` — authoring API + host sidecar
+  sdk/              `@pragma-sh/sdk` — typed Node/Bun wrapper over the gateway
+  plugin/           `@pragma-sh/plugin` — public plugin API
+  automations/      `@pragma-sh/automations` — authoring API + host sidecar
   scratchpad*/      Scratchpad runtime, file contract, and read-only viewer
   *-plugin/         Agent integrations: claude-code, codex, cursor, opencode, pi, grok, …
   …                 brand, bench, sidecar-kit, github-helpers, ai-helpers, plugins-host
@@ -232,7 +232,7 @@ Formatting is automated and non-negotiable — **oxfmt** for TypeScript, **rustf
 
 - **Strictness is on everywhere.** TS runs `strict` with `noUncheckedIndexedAccess` and `noUnusedLocals`/`noUnusedParameters`; Rust runs clippy `all` + `pedantic` as `-D warnings` with `unsafe_code = "forbid"`. Never silence a lint without a comment saying why.
 - **Errors are values, surfaced explicitly.** TS: throw or return typed errors, narrow with `instanceof`, never swallow. Rust: return `Result` and use `?`; reserve `expect`/`panic!` for genuinely unrecoverable startup invariants.
-- **No magic values.** Cross-boundary values live in `@pragma/constants`.
+- **No magic values.** Cross-boundary values live in `@pragma-sh/constants`.
 - **One responsibility per file/module.** Imports are grouped: external deps, then workspace packages, then relative.
 - **Public items are documented** — a JSDoc line on exported TS, a `///` comment on public Rust.
 - **Keep the IPC surface typed and centralized.** Every Tauri command has a matching wrapper in `src/lib/tauri.ts` and a `#[tauri::command]` of the same name.

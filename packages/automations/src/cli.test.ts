@@ -77,7 +77,7 @@ describe("automation sidecar lifecycle", () => {
     await writeFile(
       sourcePath,
       `import { writeFileSync } from "node:fs";
-import { defineAutomation } from "@pragma/automations";
+import { defineAutomation } from "@pragma-sh/automations";
 export default defineAutomation({
   name: "EOF cleanup",
   description: "verifies supervisor cleanup",

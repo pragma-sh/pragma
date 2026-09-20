@@ -5,7 +5,7 @@
 //! found by probing a candidate list against `PATH`: PowerShell 7 (`pwsh.exe`)
 //! when it is installed, and the in-box Windows PowerShell otherwise.
 //!
-//! Every default here comes from `@pragma/constants`, because the Settings UI
+//! Every default here comes from `@pragma-sh/constants`, because the Settings UI
 //! shows the same list the session layer launches from.
 
 use std::ffi::OsStr;

@@ -3,7 +3,7 @@
  * inlined into the document `buildScratchpadViewerHtml` produces.
  *
  * It does three things: evaluate the scratchpad's MDX at run time with the real
- * `@pragma/scratchpad` components, expose the same `globalThis.pragmaScratchpad`
+ * `@pragma-sh/scratchpad` components, expose the same `globalThis.pragmaScratchpad`
  * bridge those components expect (relayed to the native host instead of a parent
  * frame), and run the touch comment picker — tap to select a block, press and
  * hold to preview where a comment would land before committing it.
@@ -12,10 +12,10 @@
  * must never assume a bundler, a network, or a parent window.
  */
 import { evaluate } from "@mdx-js/mdx";
-import * as Scratchpad from "@pragma/scratchpad";
-import type { ScratchpadBridge, ScratchpadWhiteboardSnapshot } from "@pragma/scratchpad";
-import * as ScratchpadPrimitives from "@pragma/scratchpad/ui/primitives";
-import * as ScratchpadUi from "@pragma/scratchpad/ui";
+import * as Scratchpad from "@pragma-sh/scratchpad";
+import type { ScratchpadBridge, ScratchpadWhiteboardSnapshot } from "@pragma-sh/scratchpad";
+import * as ScratchpadPrimitives from "@pragma-sh/scratchpad/ui/primitives";
+import * as ScratchpadUi from "@pragma-sh/scratchpad/ui";
 import * as React from "react";
 import { Component, type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -41,7 +41,7 @@ declare global {
   var pragmaScratchpadSource: string;
   var pragmaScratchpadComments: ScratchpadComment[];
   /**
-   * The bridge `@pragma/scratchpad` components reach for. Declared here because
+   * The bridge `@pragma-sh/scratchpad` components reach for. Declared here because
    * the package ships it as an ambient global only in its source, not its types.
    */
   var pragmaScratchpad: ScratchpadBridge | undefined;
@@ -447,7 +447,7 @@ const RESERVED_GLOBALS = new Set([
  * is then a free variable resolved against the global scope — which is why a
  * document like that used to die with "Can't find variable: useState". Since
  * that scope is the only one the compiled body can see, the imports' exports go
- * there: React (hooks included) and every `@pragma/scratchpad` entry point.
+ * there: React (hooks included) and every `@pragma-sh/scratchpad` entry point.
  */
 function installGlobalScope(): void {
   const globals = globalThis as unknown as Record<string, unknown>;

@@ -71,7 +71,7 @@ apps/pragma/
 
 1. **Rust** (`src-tauri/src/lib.rs`): write `#[tauri::command] fn my_command(...) -> T`
    and register it in `tauri::generate_handler![...]`. Prefer payload/return types from
-   `@pragma/constants` so the contract is shared.
+   `@pragma-sh/constants` so the contract is shared.
 2. **TS** (`src/lib/tauri.ts`): add a typed wrapper
    `export function myCommand(...): Promise<T> { return invoke<T>("my_command", ...) }`.
 3. **Components** import the wrapper — never call `invoke()` directly.
@@ -281,7 +281,7 @@ secret/PKCE), `gh` CLI detection/adoption, `origin`→`owner/repo`, fetch+ahead/
 conflict-aborting pull/sync, push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
 GitHub git operations must run through the owning host's `git` RPC so remote project
 paths are evaluated on the remote host, not the desktop client. The
-`oauthClientId`, scopes, and endpoint URLs are in `@pragma/constants` (`github` block);
+`oauthClientId`, scopes, and endpoint URLs are in `@pragma-sh/constants` (`github` block);
 the setup-skip flag persists in the `settings` table (`github.setupDismissed`).
 
 Auth state is held by `state/github-context.tsx` (`useGitHub`) and gates both the
@@ -362,7 +362,7 @@ re-notifying. **Viewing a tab latches every `done`/`attention` status it current
 shows as seen** — the `visibleTabIds` effect reads `agentStatusesForTab` and latches
 them before `clearDoneStatusForTab` when a tab comes on screen.
 
-**Alert wording is templated in `@pragma/constants`, not written inline.**
+**Alert wording is templated in `@pragma-sh/constants`, not written inline.**
 `lib/agent-notification-text.ts` renders `agentStatus.notificationText` into a title
 (agent name + what it wants) and a body naming the project, worktree, and tab the report
 came from — `workspace-context` resolves those names with `describeAgentLocation` and
@@ -386,7 +386,7 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
-plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
+plugins use `@pragma-sh/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
 Copilot CLI agent definitions live in their host-tool plugin packages as the single source
 of truth. None ships as an active Pragma plugin: onboarding offers integrations for agent
 CLIs found on the machine, and only user-approved installs register global plugin paths.
@@ -1199,7 +1199,7 @@ keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
 - **The buffer is the source of truth, not the file.** The request carries the live
   (often unsaved) document and the model gets **read-only** tools (`read`, `grep`,
   `find`, `ls`) so it can search the repo but cannot write it — see
-  `INLINE_EDIT_TOOLS` in `@pragma/ai-helpers`. Nothing reaches disk until the user
+  `INLINE_EDIT_TOOLS` in `@pragma-sh/ai-helpers`. Nothing reaches disk until the user
   accepts a hunk and saves.
 - **Local worktrees only (for now).** `ai_inline_edit` (and the other worktree-scoped
   AI commands) spawn `pragma-ai` on the desktop client with a local `--cwd`. Remote
@@ -1267,7 +1267,7 @@ components and document root render under error boundaries. Range comments persi
 sibling JSON and submit as one prompt to attached agent; missing attachment opens
 same-worktree agent-tab picker. Renderer bridge requests are token-scoped and can only
 prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/components
-live in `@pragma/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
+live in `@pragma-sh/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
 document contains MDX regions.
 
 **A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
@@ -1298,7 +1298,7 @@ live `<html>` element and hands the frame one `:root` block in a
 components for free. Theme edits (`THEME_CHANGED_EVENT`) and root class changes rewrite
 that block through a `theme` bridge message rather than rebuilding the bundle — a rebuild
 would discard the component state the scratchpad is holding. Never hard-code a hex value
-in the preview document or in `@pragma/scratchpad`.
+in the preview document or in `@pragma-sh/scratchpad`.
 
 Vite must allow CORS from the literal `null` origin in development: sandboxing removes
 the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
@@ -1537,7 +1537,7 @@ generated file and commits it as `scripts.migrationCommitMessage`. The commit ca
 verified email, never to an organization, so a `pragma-sh` credit would render as an
 unlinked name.
 
-- **The sources and their paths live in `@pragma/constants`** (`scripts.migrationSources`),
+- **The sources and their paths live in `@pragma-sh/constants`** (`scripts.migrationSources`),
   in detection priority order. A project carrying several configs is offered exactly one —
   the first that yields commands — because the point is one decision, not a queue of them.
 - **No offer is made when it would be empty or unwanted**: `.pragma/scripts.json` already
@@ -1619,7 +1619,7 @@ Settings menu or `openSettings("automations")`.
 
 Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
 commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The
-shared `KanbanPromptCard` shape lives in `@pragma/constants` (`KanbanPromptStatus` /
+shared `KanbanPromptCard` shape lives in `@pragma-sh/constants` (`KanbanPromptStatus` /
 `KanbanCompletedAction` / `KanbanSchedulingMode`). The board is project-scoped: cards
 load by `selectedProjectId` and reload after every mutation. SDK callers create drafts
 with `client.createBoardDraft`; the brokered desktop controller resolves its worktree to

@@ -15,7 +15,7 @@ worktree navigation and turns agent approvals/questions into a swipeable inbox.
 - **Dev build, not Expo Go.** Native modules (liquid glass, native tabs,
   gesture-handler + reanimated 4) require `expo run:ios` / `expo run:android` or an
   EAS dev client. Expo Go will crash on these.
-- **Domain types come from `@pragma/constants`** (type-only import). Do not redefine
+- **Domain types come from `@pragma-sh/constants`** (type-only import). Do not redefine
   `Project` / `Worktree` / `AgentStatus` / `AgentAttentionKind`. Keep
   `lib/worktree-tree.ts` and `lib/agent-status.ts` in lockstep with the desktop's
   `apps/pragma/src/lib/worktree-tree.ts` + agent-status rollup.
@@ -118,6 +118,6 @@ prebuild, so adding or renaming one needs `expo run:ios`, not just a Metro reloa
   source, caused the failure.
 - Reanimated 4 requires `react-native-worklets` (separate package) + its babel plugin.
 - SF Symbols only render on iOS; always pass an `IconSymbol` `fallback` glyph for Android/web.
-- `@pragma/constants` exports source TS that imports a generated file — run
+- `@pragma-sh/constants` exports source TS that imports a generated file — run
   `bun run generate` (or `bun run typecheck` from root, which generates first) before
   `tsc` in this app will resolve the types.

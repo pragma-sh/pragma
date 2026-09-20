@@ -6,7 +6,7 @@ import brandIcons from "@/lib/brand-icons.json";
  * Editor/launcher brand icons (`lucide:*` + `simple-icons:*`), resolved entirely
  * offline.
  *
- * The `brandIcon` ids in `@pragma/constants` (e.g. `lucide:folder-open`,
+ * The `brandIcon` ids in `@pragma-sh/constants` (e.g. `lucide:folder-open`,
  * `simple-icons:cursor`) would otherwise be fetched from the Iconify API over
  * the network — unacceptable in a desktop app and flaky in tests. Rather than
  * bundle the full multi-megabyte `@iconify-json/*` collections for a handful of

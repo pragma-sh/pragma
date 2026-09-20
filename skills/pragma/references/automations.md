@@ -1,6 +1,6 @@
 # Pragma Automations SDK Reference
 
-`@pragma/automations` defines trusted host-side TypeScript/JavaScript tasks. Use automation
+`@pragma-sh/automations` defines trusted host-side TypeScript/JavaScript tasks. Use automation
 for scheduled jobs, lightweight event polling, and tasks user may also start with **Run now**.
 Use plugin API when capability needs Pragma UI, commands, or launchable agents.
 
@@ -27,7 +27,7 @@ save edits, see load errors, and choose **Run now**.
 Default-export result from `defineAutomation`:
 
 ```ts
-import { defineAutomation } from "@pragma/automations";
+import { defineAutomation } from "@pragma-sh/automations";
 
 export default defineAutomation({
   name: "Daily repository check",

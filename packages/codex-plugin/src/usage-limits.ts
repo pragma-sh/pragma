@@ -1,5 +1,5 @@
-import { runProviderCommand } from "@pragma/plugin/catalog";
-import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
+import { runProviderCommand } from "@pragma-sh/plugin/catalog";
+import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 
 const RATE_LIMITS_REQUEST_ID = 2;
 // Keep stdin open long enough for slower app-server processes to flush their response.

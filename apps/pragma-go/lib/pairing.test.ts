@@ -1,7 +1,8 @@
-import type { PairingPayload } from "@pragma/constants";
+import type { PairingPayload } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import {
+  apiVersionProblem,
   EXPECTED_PROTOCOL_VERSION,
   parsePairingPayload,
   validateManualEntry,
@@ -69,5 +70,20 @@ describe("validateManualEntry", () => {
 
   it("rejects an empty token", () => {
     expect(validateManualEntry("https://host.dev", "  ").ok).toBe(false);
+  });
+});
+
+describe("apiVersionProblem", () => {
+  it("accepts the version this build speaks", () => {
+    expect(apiVersionProblem(EXPECTED_PROTOCOL_VERSION)).toBeNull();
+  });
+
+  it("rejects a host on a different /v1 contract", () => {
+    const problem = apiVersionProblem(`${EXPECTED_PROTOCOL_VERSION}-other`);
+    expect(problem).toContain(EXPECTED_PROTOCOL_VERSION);
+  });
+
+  it("accepts a host that advertises no version", () => {
+    expect(apiVersionProblem(undefined)).toBeNull();
   });
 });

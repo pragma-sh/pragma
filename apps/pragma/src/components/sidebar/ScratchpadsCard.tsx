@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, StickyNote } from "lucide-react";
 
-import { constants, type ScratchpadSummary } from "@pragma/constants";
+import { constants, type ScratchpadSummary } from "@pragma-sh/constants";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useWorktreeFileChange } from "@/lib/file-watch";

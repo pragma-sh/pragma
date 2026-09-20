@@ -379,7 +379,7 @@ pub enum EventFrame {
 
 /// `SemVer` this crate speaks on the wire (`HelloFrame.protocol_version`).
 ///
-/// Mirrored into `@pragma/constants` `daemon.protocolVersion` by `bun run generate`.
+/// Mirrored into `@pragma-sh/constants` `daemon.protocolVersion` by `bun run generate`.
 /// Comparison is exact equality.
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 

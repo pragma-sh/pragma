@@ -1,4 +1,4 @@
-import type { AgentModelEntry, PluginContext } from "@pragma/plugin/catalog";
+import type { AgentModelEntry, PluginContext } from "@pragma-sh/plugin/catalog";
 
 // The official Kimi Code installer puts the CLI in `~/.kimi-code/bin`, which
 // GUI-launched Pragma hosts do not put on the subprocess PATH (see

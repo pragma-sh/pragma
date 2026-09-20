@@ -1,4 +1,4 @@
-import { PragmaGatewayError } from "@pragma/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { router } from "expo-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { View } from "react-native";

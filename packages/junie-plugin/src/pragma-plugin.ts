@@ -5,8 +5,8 @@ import {
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { asRecord, asText, readJunieAcp } from "./acp";
 import { loadJunieUsageLimits, PRIMARY_LIMIT_ID } from "./usage-limits";

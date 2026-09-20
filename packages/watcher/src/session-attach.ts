@@ -1,4 +1,4 @@
-import { PragmaGatewayError, type PragmaClient, type SessionEvent } from "@pragma/sdk";
+import { PragmaGatewayError, type PragmaClient, type SessionEvent } from "@pragma-sh/sdk";
 
 const SESSION_ATTACH_RETRY_MS = 250;
 const SESSION_ATTACH_TIMEOUT_MS = 30_000;

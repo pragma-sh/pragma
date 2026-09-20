@@ -1,6 +1,6 @@
 import { type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";

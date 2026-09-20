@@ -305,7 +305,7 @@ function buildFileTreeController(args: {
 }): FileTreeController {
   const { worktreeId, workspace, state, commitDelete } = args;
   function selectEntry(
-    entry: import("@pragma/constants").DirEntry,
+    entry: import("@pragma-sh/constants").DirEntry,
     event: MouseEvent<HTMLButtonElement>,
   ) {
     const additive = event.metaKey || event.ctrlKey;

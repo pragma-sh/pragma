@@ -1,4 +1,4 @@
-import type { PluginContext } from "@pragma/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 
 /**
  * Working directory for a shell-out that only needs *some* valid cwd.

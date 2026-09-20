@@ -1,4 +1,4 @@
-import type { ProtocolEventKind } from "@pragma/constants";
+import type { ProtocolEventKind } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
 import { ndjsonStream } from "./streaming";
