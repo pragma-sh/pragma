@@ -285,7 +285,6 @@ exact names below.
 | `TAURI_SIGNING_PRIVATE_KEY`          | The update signature on every installer and UI overlay | `bunx tauri signer generate`                           |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Unlocking that key                                     | Chosen when generating it                              |
 | `TAURI_SIGNING_PUBLIC_KEY`           | The key clients verify against                         | Printed beside the private key                         |
-| `NPM_TOKEN`                          | Publishing the nine npm packages                       | npmjs.com granular access token                        |
 | `APPLE_CERTIFICATE`                  | Code-signing the macOS app                             | Base64 of an exported `.p12`                           |
 | `APPLE_CERTIFICATE_PASSWORD`         | Opening that `.p12`                                    | Chosen during the Keychain Access export               |
 | `APPLE_SIGNING_IDENTITY`             | Selecting which identity to sign with                  | `security find-identity -v -p codesigning`             |
@@ -331,19 +330,29 @@ unsigned one.
 
 ### npm
 
-`NPM_TOKEN` is a granular access token with **read and write on the `@pragma-sh` scope** —
-the scope, not a list of packages. A token limited to the packages that already exist
-authenticates fine and still fails every first publish with
-`npm error 404 ... PUT https://registry.npmjs.org/@pragma-sh%2f<name>`; 404, not 403, is
-what npm returns for "you may not create this". Because `scripts/publish-packages.ts`
-publishes in dependency order, that lands on the first package and none of the nine ship.
+**There is no npm token.** The `publish-packages` job authenticates by OIDC: each of the
+nine packages names `pragma-sh/pragma` + `release.yml` as a trusted publisher, and the
+job's `id-token` is both the credential and what signs provenance. Nothing expires and
+there is nothing to rotate.
 
-Tick **Bypass two-factor authentication (2FA)** on the token — write tokens enforce 2FA by
-default and CI cannot answer an OTP prompt. npm caps write tokens at a **90-day lifetime**,
-so this secret expires on a schedule; the agent plugins avoid the treadmill by using
-trusted publishing in `.github/workflows/plugins.yml`, which needs no token at all. Trusted
-publishing cannot bootstrap a package that has never been published, which is why the token
-still exists.
+Inspect or change a package's trust config with the CLI (npm 11.15+), not the website:
+
+```bash
+npx -y npm@latest trust list @pragma-sh/sdk
+npx -y npm@latest trust github @pragma-sh/<name> \
+  --file release.yml --repo pragma-sh/pragma --allow-publish --yes
+```
+
+- **`--allow-publish` is not optional.** Trust configs created after 2026-09-03 default to
+  stage-only, which parks every release awaiting a human 2FA approval.
+- **A new package has to be published once by hand first.** npm will not accept a trusted
+  publisher for a name that does not exist, so a brand-new package is bootstrapped with an
+  interactive `npm publish ./packages/<name> --access public` and trusted afterwards.
+- **`npm trust` requires account 2FA and an interactive session.** It is a sensitive
+  operation: bypass-2FA tokens are refused, and the command answers with a browser
+  challenge, so it cannot run from CI.
+- **Renaming `release.yml` breaks publishing** for all nine at once, because the workflow
+  filename is part of what npm verifies. Re-run `npm trust github` for each package.
 
 ## Working with coding agents
 

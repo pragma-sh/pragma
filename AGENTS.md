@@ -448,14 +448,12 @@ moves them to one version. Three rules hold that together:
 - **A folder spec needs a leading `./`.** `npm publish packages/sdk` resolves as the GitHub shorthand `github:packages/sdk` and dies in `git ls-remote`; `./packages/sdk` is a directory. The same applies to `npm pack`.
 - **Publishing is irreversible**, so `scripts/publish-packages.ts` is a dry run unless passed `--publish`, and it skips a version already on the registry so a partially-failed job can be re-run.
 
-It needs an `NPM_TOKEN` secret that may **create new packages** in the `@pragma-sh`
-scope — every published package lives there, including the agent plugins, which publish
-separately from `.github/workflows/plugins.yml` using trusted publishing instead of the
-token. A granular token limited to the packages that already exist authenticates fine
-and still dies on a first publish with `npm error 404 ... PUT
-https://registry.npmjs.org/@pragma-sh%2f<name>`; 404, not 403, is what npm returns for
-"no permission to create this". Because the script publishes in dependency order, that
-failure lands on the first package and none of the nine ship. Configure
+Publishing needs **no npm token**: every one of the nine names `pragma-sh/pragma` +
+`release.yml` as a trusted publisher, so the job's `id-token` authenticates it and signs
+provenance (the agent plugins under `@pragma-sh` publish the same way from
+`.github/workflows/plugins.yml`). Two consequences: **renaming `release.yml` silently
+breaks all nine**, since npm verifies the workflow filename, and a **brand-new** package
+must be published by hand once before npm will accept a trusted publisher for it. Configure
 `RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require

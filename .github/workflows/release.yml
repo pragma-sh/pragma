@@ -190,7 +190,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Required for npm provenance; the token below still does the authenticating.
+      # npm authenticates this job by OIDC: the id-token is both the credential
+      # (each package trusts pragma-sh/pragma + release.yml) and what signs
+      # provenance. There is no npm token here on purpose — see CONTRIBUTING.md.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -208,8 +210,6 @@ jobs:
       - name: Build the packages that ship a bundle
         run: bunx turbo run build --filter="./packages/*"
       - name: Publish every public package with provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # Dependency order, so a fresh scope never has a dangling reference.
         # A version that is already on the registry is skipped rather than
         # failing the job, which is what makes a re-run safe.
