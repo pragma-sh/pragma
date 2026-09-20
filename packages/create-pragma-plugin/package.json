@@ -1,6 +1,6 @@
 {
   "name": "create-pragma-plugin",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Scaffolder CLI for pure TypeScript Pragma plugins.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",

@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/prime-agent-plugin",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "description": "Prime Agent extension and Pragma launcher built on the shared Pi integration.",
   "license": "AGPL-3.0-only",
   "files": [
