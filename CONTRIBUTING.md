@@ -279,19 +279,19 @@ You need none of this to contribute — it applies only to maintainers cutting a
 `.github/workflows/release.yml` reads every one of these as a **repository** secret, by the
 exact names below.
 
-| Secret | Required for | Where it comes from |
-| ------ | ------------ | ------------------- |
-| `RELEASE_PLEASE_TOKEN` | Release PRs that trigger ordinary CI | A PAT with contents + pull-request write |
-| `TAURI_SIGNING_PRIVATE_KEY` | The update signature on every installer and UI overlay | `bunx tauri signer generate` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Unlocking that key | Chosen when generating it |
-| `TAURI_SIGNING_PUBLIC_KEY` | The key clients verify against | Printed beside the private key |
-| `NPM_TOKEN` | Publishing the nine npm packages | npmjs.com granular access token |
-| `APPLE_CERTIFICATE` | Code-signing the macOS app | Base64 of an exported `.p12` |
-| `APPLE_CERTIFICATE_PASSWORD` | Opening that `.p12` | Chosen during the Keychain Access export |
-| `APPLE_SIGNING_IDENTITY` | Selecting which identity to sign with | `security find-identity -v -p codesigning` |
-| `APPLE_ID` | Notarization | Apple account on the signing team |
-| `APPLE_PASSWORD` | Notarization | An **app-specific** password, not the account password |
-| `APPLE_TEAM_ID` | Notarization | The parenthetical in the Developer ID certificate name |
+| Secret                               | Required for                                           | Where it comes from                                    |
+| ------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------ |
+| `RELEASE_PLEASE_TOKEN`               | Release PRs that trigger ordinary CI                   | A PAT with contents + pull-request write               |
+| `TAURI_SIGNING_PRIVATE_KEY`          | The update signature on every installer and UI overlay | `bunx tauri signer generate`                           |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Unlocking that key                                     | Chosen when generating it                              |
+| `TAURI_SIGNING_PUBLIC_KEY`           | The key clients verify against                         | Printed beside the private key                         |
+| `NPM_TOKEN`                          | Publishing the nine npm packages                       | npmjs.com granular access token                        |
+| `APPLE_CERTIFICATE`                  | Code-signing the macOS app                             | Base64 of an exported `.p12`                           |
+| `APPLE_CERTIFICATE_PASSWORD`         | Opening that `.p12`                                    | Chosen during the Keychain Access export               |
+| `APPLE_SIGNING_IDENTITY`             | Selecting which identity to sign with                  | `security find-identity -v -p codesigning`             |
+| `APPLE_ID`                           | Notarization                                           | Apple account on the signing team                      |
+| `APPLE_PASSWORD`                     | Notarization                                           | An **app-specific** password, not the account password |
+| `APPLE_TEAM_ID`                      | Notarization                                           | The parenthetical in the Developer ID certificate name |
 
 **The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
 makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
@@ -299,7 +299,7 @@ Neither substitutes for the other.
 
 ### Apple signing
 
-Sign with a **Developer ID Application** certificate. An *Apple Development* certificate
+Sign with a **Developer ID Application** certificate. An _Apple Development_ certificate
 also shows up in `security find-identity` and is the one most people already have, but it
 cannot sign for distribution and notarization rejects it. Creating one needs a paid
 membership and the Account Holder role: Xcode → Settings → Accounts → Manage
@@ -314,7 +314,7 @@ base64 -i Certificates.p12 | tr -d '\n' | gh secret set APPLE_CERTIFICATE --repo
 
 - **`tr -d '\n'` is not optional.** A base64 blob with embedded newlines fails at
   `security import` with `SecKeychainItemImport: One or more parameters passed to a
-  function were not valid` — the same error a wrong `APPLE_CERTIFICATE_PASSWORD` gives.
+function were not valid` — the same error a wrong `APPLE_CERTIFICATE_PASSWORD` gives.
 - **`APPLE_SIGNING_IDENTITY` must match the identity string exactly**, including the
   parenthesized Team ID: `Developer ID Application: Name (TEAMID)`.
 - **`APPLE_ID` must belong to the team that owns the certificate.** Notarization

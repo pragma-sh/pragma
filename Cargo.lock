@@ -5972,7 +5972,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-bench"
-version = "0.0.1"
+version = "0.0.0"
 dependencies = [
  "chrono",
  "clap",
