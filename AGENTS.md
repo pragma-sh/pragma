@@ -330,6 +330,26 @@ open the client without installing anything.
 Formatting is **automated and non-negotiable** — oxfmt for TS, rustfmt for Rust. Don't
 argue with the formatter; run it. Both are enforced in CI and auto-applied on commit.
 
+**A file with a machine writer cannot also be oxfmt's.** Anything generated is listed in
+`.oxfmtrc.json`'s `ignorePatterns`, because the generator and the formatter disagree
+forever and CI is the one that loses. Both writers here serialize with
+`JSON.stringify(value, null, 2)`, which puts every array element on its own line, while
+oxfmt collapses short arrays onto one — so each run of the generator re-breaks
+`format:check` for the whole repo, on `main` as much as on the branch:
+
+- `**/CHANGELOG.md`, `packages/constants/values.json` and
+  `apps/pragma/src-tauri/tauri.conf.json` are rewritten by **Release Please** on every
+  release, and those rewrites land on `main` when the release PR merges.
+- `packages/constants/values.json` additionally has a **second** writer:
+  `packages/constants/scripts/generate-types.ts` rewrites it whenever
+  `daemon.protocolVersion` drifts from `crates/pragma-protocol/Cargo.toml`. In CI
+  `format-check` runs downstream of `generate`, so that rewrite happens _before_ the
+  check — it fails on a file nobody edited.
+
+Don't "fix" one of these by reformatting it; the next release or the next `bun run
+generate` undoes it. Add the path to `ignorePatterns` instead, and remember these files
+are no longer covered by `bun run format`.
+
 | Concept            | TypeScript                                        | Rust                                                          |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------- |
 | Variables / fns    | `camelCase`                                       | `snake_case`                                                  |
@@ -444,7 +464,7 @@ GitHub's latest release and a client may have skipped a required native release.
 **CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
 Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
 runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the
-TypeScript checks, the Rust checks, the fallow audit, the Linux app build) lives in
+TypeScript checks, the Rust checks, the Linux app build) lives in
 `.rwx/ci.yml`, and the
 macOS and Windows builds plus the Windows Rust suite stay in
 `.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
@@ -454,30 +474,36 @@ it doesn't read), and the default task timeout is **10 minutes**, so any long ta
 an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
 validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
 
-The **fallow** audit is an RWX task (`fallow` in `.rwx/ci.yml`), not a GitHub Action —
-there is no `fallow-rs/fallow` RWX package, so it runs the CLI directly. It scopes to the
-diff against the base ref and fails on issues the change introduces. The sticky PR summary
-comment is posted by the task itself: `--format pr-comment-github` prefixes the body with
-`<!-- fallow-id: fallow-results -->`, and the task matches that marker to update the
-existing comment instead of adding one per run. **Inline annotations are not reproduced** —
-they came from the action's SARIF upload; the findings live in the task log and the
-comment. The task needs `code-with-history` (fallow diffs against a real base) _and_
-`generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
-modules must exist first).
+The **fallow** audit is the one Linux check that is _not_ an RWX task: it lives in
+`.github/workflows/fallow.yml`. It scopes to the diff against the base ref and fails on
+issues the change introduces. **It runs on GitHub Actions because it is the only check
+that writes back to GitHub.** Posting the sticky PR comment needs `pull_requests: write`,
+and RWX cannot mint a token that has it (see below) — so the job uses GitHub's own
+`GITHUB_TOKEN`, which makes the comment authored by `github-actions[bot]` instead of by
+whichever personal access token happened to be in the RWX vault. `--format
+pr-comment-github` prefixes the body with `<!-- fallow-id: fallow-results -->`, and the
+job matches that marker to update the existing comment instead of adding one per run.
+**Inline annotations are not reproduced** — they came from the action's SARIF upload; the
+findings live in the job log and the comment. The job needs `fetch-depth: 0` (fallow
+diffs against a real base) _and_ `bun run generate` (fallow resolves imports statically,
+so the gitignored `src/generated/**` modules must exist first). It is skipped on
+`release-please--branches--*`, which carry only generated version bumps and CHANGELOGs —
+no hand-written code to audit and no author to advise.
 
 **CI clones and fetches with no token — `pragma-sh/pragma` is public.** RWX's
 `${{ github.token }}` context is not to be relied on: it can vanish mid-run with
 `The context key "github" is not available in this expression`, and it could never write
-to a PR anyway — the GitHub App installation token is scoped to reading repository
-contents, with no `pull_requests` or `issues` permission, so any `gh` call against them
-dies with `Resource not accessible by integration (HTTP 403)` — which is how the fallow
-comment silently stopped appearing while the task still exited 0. Anything that writes to
-GitHub needs its own credential from the RWX default vault: fallow reads
-`${{ secrets.fallow-comment-token }}` into `GH_TOKEN` (a fine-grained token with
-**Pull requests: read and write** on `pragma-sh/pragma`). Set or rotate it with
-`rwx vaults secrets set --vault default fallow-comment-token=<token>`; a run started before
-the secret exists fails to resolve the expression, so add the secret before merging a change
-that references a new one.
+to a PR anyway — the `rwx-integration` App's installation token is scoped to reading
+repository contents, with no `pull_requests` or `issues` permission, so any `gh` call
+against them dies with `Resource not accessible by integration (HTTP 403)` — which is how
+the fallow comment silently stopped appearing while the task still exited 0. Those
+permissions belong to RWX, not to this repo, so they cannot be widened from here; RWX's
+own answer is to register a _private_ GitHub App and mint an installation token per run,
+since those expire hourly. **Anything that needs to write to GitHub therefore belongs in
+`.github/workflows/`, where `GITHUB_TOKEN` grants it directly and the actor is
+`github-actions[bot]`.** That is why no RWX task reads a `*-comment-token` secret any
+more; the former `fallow-comment-token` vault entry is unused and can be deleted with
+`rwx vaults secrets rm --vault default fallow-comment-token`.
 
 ## Platform targets
 

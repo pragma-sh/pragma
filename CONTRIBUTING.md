@@ -270,7 +270,7 @@ Git hooks do some of this for you:
 - **commit-msg** — commitlint validates the message.
 - **pre-push** — typecheck, `cargo fmt --check`, sidecar staging, `cargo check`, and `fallow:check`.
 
-CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.**
+CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.** The one exception is the fallow audit, which lives in `.github/workflows/fallow.yml` because it posts a PR comment and only GitHub Actions can hand it a token allowed to write one.
 
 ## Working with coding agents
 
