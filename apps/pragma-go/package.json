@@ -1,6 +1,6 @@
 {
   "name": "pragma-go",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Pragma Go — Expo client for Pragma worktrees on phone, tablet, and web",
   "license": "AGPL-3.0-only",

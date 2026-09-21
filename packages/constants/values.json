@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": "0.2.0",
+    "protocolVersion": "0.3.0",
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -249,7 +249,7 @@
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "onboarding": {
     "mediaBaseUrl": "https://pragma-app.sh/media",
