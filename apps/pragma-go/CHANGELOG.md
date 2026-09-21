@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.3](https://github.com/pragma-sh/pragma/compare/pragma-go-v0.1.2...pragma-go-v0.1.3) (2026-09-21)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 0.4.0
+    * @pragma-sh/scratchpad-viewer bumped to 0.4.0
+    * @pragma-sh/sdk bumped to 0.4.0
+
 ## [0.1.2](https://github.com/pragma-sh/pragma/compare/pragma-go-v0.1.1...pragma-go-v0.1.2) (2026-09-21)
 
 

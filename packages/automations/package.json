@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/automations",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Pragma automation authoring API and host sidecar runtime.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",
@@ -35,7 +35,7 @@
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-automations"
   },
   "dependencies": {
-    "@pragma-sh/sidecar-kit": "^0.3.0"
+    "@pragma-sh/sidecar-kit": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
