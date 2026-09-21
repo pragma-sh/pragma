@@ -125,7 +125,7 @@ than no guide.
 │   ├── plugin/                  # `@pragma-sh/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── plugin-registry/         # official npm list + generated manifest lock → see packages/plugin-registry/AGENTS.md
 │   ├── automations/             # `@pragma-sh/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
-│   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
+│   ├── create-plugin/           # Plugin scaffolder CLI → see packages/create-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── sidecar-kit/             # `@pragma-sh/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
@@ -213,7 +213,7 @@ than no guide.
   attach an agent, prompt the attached agent) → `client.scratchpads` in
   `packages/sdk`, not a per-client reimplementation.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma-sh/plugin`).
-- Plugin templates/scaffolding → `packages/create-pragma-plugin`.
+- Plugin templates/scaffolding → `packages/create-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma-sh/dev-test-plugin`).
 - Fanout orchestration (one prompt into several isolated attempts, then keeping
@@ -440,7 +440,7 @@ not a release only produces previews.
 **Nine packages are published to npm on every desktop release** — `@pragma-sh/sdk`,
 `@pragma-sh/plugin`, `@pragma-sh/automations`, `@pragma-sh/scratchpad`,
 `@pragma-sh/scratchpad-contract`, `@pragma-sh/scratchpad-viewer`, `@pragma-sh/constants`,
-`@pragma-sh/sidecar-kit` and `create-pragma-plugin` — by the `publish-packages` job through
+`@pragma-sh/sidecar-kit` and `@pragma-sh/create-plugin` — by the `publish-packages` job through
 `scripts/publish-packages.ts`. They are all in the linked `desktop` group, so one release
 moves them to one version. Three rules hold that together:
 
@@ -453,7 +453,12 @@ Publishing needs **no npm token**: every one of the nine names `pragma-sh/pragma
 provenance (the agent plugins under `@pragma-sh` publish the same way from
 `.github/workflows/plugins.yml`). Two consequences: **renaming `release.yml` silently
 breaks all nine**, since npm verifies the workflow filename, and a **brand-new** package
-must be published by hand once before npm will accept a trusted publisher for it. Configure
+must be published by hand once before npm will accept a trusted publisher for it: npm
+rejects an OIDC publish for an unconfigured package with `404 Not Found - PUT`, never a
+403, so the failure reads as if the package did not exist. Configuring one is a CLI step,
+not a web-UI one — `npm trust github <package> --file release.yml --repository
+pragma-sh/pragma --allow-publish`, which needs npm 11.15.0 or newer and prompts for a 2FA
+one-time password. `npm trust list <package>` shows what a package already has. Configure
 `RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require

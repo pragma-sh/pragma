@@ -29,7 +29,7 @@ const PACKAGES = [
   "scratchpad",
   "scratchpad-viewer",
   "automations",
-  "create-pragma-plugin",
+  "create-plugin",
 ] as const;
 
 interface Manifest {

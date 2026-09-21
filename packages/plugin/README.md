@@ -5,11 +5,11 @@ running persistent, worktree-scoped coding agents.
 
 Sidebar tabs, cards, commands, themes, web views and launchable agents, plus the
 React runtime the host provides. Scaffold a project with
-[`create-pragma-plugin`](https://www.npmjs.com/package/create-pragma-plugin)
+[`@pragma-sh/create-plugin`](https://www.npmjs.com/package/@pragma-sh/create-plugin)
 rather than wiring this up by hand.
 
 ```sh
-bun create pragma-plugin my-plugin
+bun create @pragma-sh/plugin my-plugin
 ```
 
 ```ts

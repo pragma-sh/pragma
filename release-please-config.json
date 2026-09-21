@@ -34,7 +34,7 @@
         "plugins-host",
         "watcher",
         "watcher-kit",
-        "create-pragma-plugin"
+        "create-plugin"
       ],
       "merge": false
     },
@@ -153,9 +153,9 @@
       "release-type": "node",
       "component": "plugins-host"
     },
-    "packages/create-pragma-plugin": {
+    "packages/create-plugin": {
       "release-type": "node",
-      "component": "create-pragma-plugin"
+      "component": "create-plugin"
     },
     "packages/bench": {
       "release-type": "node",
