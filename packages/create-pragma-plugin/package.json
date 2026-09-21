@@ -1,5 +1,5 @@
 {
-  "name": "@pragma-sh/create-plugin",
+  "name": "create-pragma-plugin",
   "version": "0.2.0",
   "description": "Scaffolder CLI for pure TypeScript Pragma plugins.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pragma-sh/pragma.git",
-    "directory": "packages/create-plugin"
+    "directory": "packages/create-pragma-plugin"
   },
   "bin": {
     "create-pragma-plugin": "dist/cli.js"

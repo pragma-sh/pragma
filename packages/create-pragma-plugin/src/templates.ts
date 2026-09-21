@@ -42,7 +42,7 @@ function packageJson(input: TemplateInput): string {
         test: "vitest run",
       },
       dependencies: {
-        // `@pragma-sh/create-plugin` and `@pragma-sh/plugin` are in the same Release
+        // `create-pragma-plugin` and `@pragma-sh/plugin` are in the same Release
         // Please linked-versions group, so this package's own version is always
         // the matching plugin API version — and is baked in when the CLI is
         // bundled. A hardcoded literal here silently scaffolds a dependency on a
@@ -96,7 +96,7 @@ function source(input: TemplateInput): string {
   const commandContribution = hasCommand
     ? `,\n  commands: [\n    defineCommand({\n      id: "${input.packageName}.hello",\n      title: "Show ${input.displayName} greeting",\n      run: (ctx) => ctx.notify("Hello from ${input.displayName}", { variant: "success" }),\n    }),\n  ]`
     : "";
-  return `import { definePlugin, defineSidebarTab, useProject${commandImport} } from "@pragma-sh/plugin";\nimport { Button, Kbd } from "@pragma-sh/plugin/ui";\n\nfunction OverviewTab() {\n  const project = useProject();\n  return (\n    <div style={{ padding: 12 }}>\n      <h2>${input.displayName}</h2>\n      <p>Active project: {project?.name ?? "None"}</p>\n      <Button variant="secondary" size="sm">\n        Press <Kbd>⌘K</Kbd>\n      </Button>\n    </div>\n  );\n}\n\nexport default definePlugin({\n  name: "${input.displayName}",\n  description: "A Pragma plugin scaffolded with @pragma-sh/create-plugin.",\n  ui: {\n    sidebarTabs: [\n      defineSidebarTab({\n        id: "overview",\n        title: "${input.displayName}",\n        component: OverviewTab,\n      }),\n    ],\n  }${commandContribution},\n});\n`;
+  return `import { definePlugin, defineSidebarTab, useProject${commandImport} } from "@pragma-sh/plugin";\nimport { Button, Kbd } from "@pragma-sh/plugin/ui";\n\nfunction OverviewTab() {\n  const project = useProject();\n  return (\n    <div style={{ padding: 12 }}>\n      <h2>${input.displayName}</h2>\n      <p>Active project: {project?.name ?? "None"}</p>\n      <Button variant="secondary" size="sm">\n        Press <Kbd>⌘K</Kbd>\n      </Button>\n    </div>\n  );\n}\n\nexport default definePlugin({\n  name: "${input.displayName}",\n  description: "A Pragma plugin scaffolded with create-pragma-plugin.",\n  ui: {\n    sidebarTabs: [\n      defineSidebarTab({\n        id: "overview",\n        title: "${input.displayName}",\n        component: OverviewTab,\n      }),\n    ],\n  }${commandContribution},\n});\n`;
 }
 
 function testSource(): string {
@@ -107,5 +107,5 @@ function readme(input: TemplateInput): string {
   const install =
     input.packageManager === "npm" ? "npm install" : `${input.packageManager} install`;
   const run = input.packageManager === "npm" ? "npm run" : `${input.packageManager} run`;
-  return `# ${input.displayName}\n\nA Pragma plugin scaffolded with \`@pragma-sh/create-plugin\`.\n\n## Quick Start\n\n\`\`\`bash\n${install}\n${run} build\n\`\`\`\n\n## Load In Pragma\n\nAdd this to your project's \`.pragma/config.json\`:\n\n\`\`\`json\n{\n  "plugins": [{ "path": "./${input.directoryName}" }]\n}\n\`\`\`\n\nPragma loads local plugin code from this path. Only add plugins you trust.\n\n## Commands\n\n\`\`\`bash\n${run} dev\n${run} typecheck\n${run} test\n${run} build\n\`\`\`\n`;
+  return `# ${input.displayName}\n\nA Pragma plugin scaffolded with \`create-pragma-plugin\`.\n\n## Quick Start\n\n\`\`\`bash\n${install}\n${run} build\n\`\`\`\n\n## Load In Pragma\n\nAdd this to your project's \`.pragma/config.json\`:\n\n\`\`\`json\n{\n  "plugins": [{ "path": "./${input.directoryName}" }]\n}\n\`\`\`\n\nPragma loads local plugin code from this path. Only add plugins you trust.\n\n## Commands\n\n\`\`\`bash\n${run} dev\n${run} typecheck\n${run} test\n${run} build\n\`\`\`\n`;
 }

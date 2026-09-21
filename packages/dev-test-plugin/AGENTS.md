@@ -3,11 +3,11 @@
 Lightweight dev/test Pragma plugin. Exercises the public `@pragma-sh/plugin`
 surface (sidebar tabs, a sidebar card, a Settings page, a plugin web view, host + SDK event hooks) and ships with
 Vitest + jsdom coverage for those React hooks. It also served as the
-real-world test target for the `@pragma-sh/create-plugin` scaffolder CLI: it was
+real-world test target for the `create-pragma-plugin` scaffolder CLI: it was
 generated non-interactively with
 
 ```bash
-bun packages/create-plugin/dist/cli.js packages/dev-test-plugin \
+bun packages/create-pragma-plugin/dist/cli.js packages/dev-test-plugin \
   --name @pragma-sh/dev-test-plugin --pm bun --capabilities ui,commands,agents --force
 ```
 

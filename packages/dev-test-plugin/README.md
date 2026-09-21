@@ -1,6 +1,6 @@
 # Pragma Dev Test Plugin
 
-A Pragma plugin scaffolded with `@pragma-sh/create-plugin`.
+A Pragma plugin scaffolded with `create-pragma-plugin`.
 
 ## Quick Start
 

@@ -8,7 +8,7 @@ import { normalizePluginName, scaffoldPlugin } from "./index";
 import { detectPackageManager } from "./package-manager";
 import { version } from "../package.json";
 
-describe("@pragma-sh/create-plugin", () => {
+describe("create-pragma-plugin", () => {
   it("normalizes package names", () => {
     expect(normalizePluginName("My Plugin!")).toBe("my-plugin");
     expect(normalizePluginName("@scope/name")).toBe("scope-name");

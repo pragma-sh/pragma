@@ -1,12 +1,11 @@
-# packages/create-plugin — Plugin Scaffolder
+# packages/create-pragma-plugin — Plugin Scaffolder
 
 Scaffolds a pure-TypeScript Pragma plugin project. The generated template
 stays aligned with `@pragma-sh/plugin` and the host loader contract.
 
 ## Publishing
 
-This CLI is published to npm as `@pragma-sh/create-plugin`, which
-`npm create @pragma-sh/plugin` resolves to, as is the
+This CLI is published to npm (`npm create pragma-plugin`), as is the
 `@pragma-sh/plugin` it scaffolds against. Both go out from the `publish-packages`
 job in `.github/workflows/release.yml` — see the root `AGENTS.md`.
 
@@ -18,12 +17,12 @@ published; `src/scaffold.test.ts` asserts against the real one.
 
 ## CLI
 
-The `create-pragma-plugin` binary is fully non-interactive when flags are passed;
+The `create-pragma-plugin` CLI is fully non-interactive when flags are passed;
 it only prompts on a TTY when `--capabilities` is omitted (and defaults to
 `["ui"]` when input isn't a TTY). Run it with bun:
 
 ```bash
-bun packages/create-plugin/dist/cli.js <directory> \
+bun packages/create-pragma-plugin/dist/cli.js <directory> \
   [--name <package-name>] [--pm bun|npm|pnpm|yarn] \
   [--capabilities ui,commands,agents] [--force]
 ```
@@ -62,7 +61,7 @@ bun packages/create-plugin/dist/cli.js <directory> \
 ## Commands
 
 ```bash
-bun run --filter @pragma-sh/create-plugin typecheck
-bun run --filter @pragma-sh/create-plugin test
-bun run --filter @pragma-sh/create-plugin build
+bun run --filter create-pragma-plugin typecheck
+bun run --filter create-pragma-plugin test
+bun run --filter create-pragma-plugin build
 ```

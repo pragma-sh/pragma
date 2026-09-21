@@ -34,7 +34,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   plugins loaded from `.pragma/config.json`.
 - `packages/automations/` — `@pragma-sh/automations`, the authoring API plus
   `pragma-automations` Bun sidecar supervised by `pragma-server`.
-- `packages/create-plugin/` — `@pragma-sh/create-plugin` scaffolder CLI for
+- `packages/create-pragma-plugin/` — `create-pragma-plugin` scaffolder CLI for
   single-bundle plugin projects.
 - `packages/github-helpers/` — `@pragma-sh/github-helpers`, the `pragma-github` host-side sidecar scaffold.
 - `packages/ai-helpers/` — `@pragma-sh/ai-helpers`, the Node-side AI helper package and `pragma-ai`
@@ -58,7 +58,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Scratchpad runtime or first-party MDX component  | `packages/scratchpad` (`@pragma-sh/scratchpad`)                   |
 | Public Pragma plugin authoring API               | `packages/plugin` (`@pragma-sh/plugin`)                           |
 | Automation authoring API / host sidecar          | `packages/automations` (`@pragma-sh/automations`)                 |
-| Pragma plugin scaffolder templates/CLI           | `packages/create-plugin`                                          |
+| Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                                   |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)                       |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                                        |
 | Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                                    |

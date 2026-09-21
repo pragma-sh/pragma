@@ -11,8 +11,8 @@ Installed TypeScript declarations remain authority for exact fields.
 In Pragma repository, scaffold plugin with:
 
 ```sh
-bun run --filter @pragma-sh/create-plugin build
-bun packages/create-plugin/dist/cli.js ./my-plugin \
+bun run --filter create-pragma-plugin build
+bun packages/create-pragma-plugin/dist/cli.js ./my-plugin \
   --name my-plugin --pm bun --capabilities ui,commands,agents
 ```
 
