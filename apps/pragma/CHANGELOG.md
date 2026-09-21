@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.2.0...pragma-v0.3.0) (2026-09-21)
+
+
+### Miscellaneous Chores
+
+* **pragma:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 0.3.0
+    * @pragma-sh/plugin bumped to 0.3.0
+    * @pragma-sh/scratchpad bumped to 0.3.0
+    * @pragma-sh/scratchpad-viewer bumped to 0.3.0
+    * @pragma-sh/sdk bumped to 0.3.0
+
 ## [0.2.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.1.0...pragma-v0.2.0) (2026-09-20)
 
 
