@@ -179,6 +179,10 @@ jobs:
           RELEASE_NOTES: ${{ needs.release-please.outputs.desktop-body }}
           RELEASE_SHA: ${{ needs.release-please.outputs.desktop-sha }}
           RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
+          # Signing release.json needs the same key as the overlay above; without it
+          # `tauri signer sign` dies with "Unable to find the private key".
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           bun scripts/generate-release-manifest.ts
           bunx tauri signer sign release-assets/release.json
