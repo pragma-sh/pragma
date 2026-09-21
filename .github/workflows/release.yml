@@ -48,11 +48,11 @@ jobs:
           - runner: ubuntu-24.04
             platform: linux-x86_64
             formats: deb rpm
-            bundles: -- --bundles deb,rpm
+            bundles: --bundles deb,rpm
           - runner: ubuntu-24.04-arm
             platform: linux-aarch64
             formats: deb rpm
-            bundles: -- --bundles deb,rpm
+            bundles: --bundles deb,rpm
           - runner: windows-latest
             platform: windows-x86_64
             source: target/release/bundle/nsis/*-setup.exe
@@ -96,6 +96,10 @@ jobs:
         # also targets AppImage, whose linuxdeploy step needs FUSE and fails on the
         # ubuntu-24.04 runners — and nothing downstream ships an AppImage: the matrix
         # collects deb/rpm and the release manifest never names one.
+        #
+        # No `--` before the flags: bun already forwards trailing args to the script
+        # verbatim, and tauri treats a literal `--` as "pass the rest to cargo", which
+        # dies with `unexpected argument '--bundles' found`.
         run: bun run --filter pragma tauri build ${{ matrix.bundles }}
       - name: Normalize installer name
         shell: bash
