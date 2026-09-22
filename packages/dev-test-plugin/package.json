@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/dev-test-plugin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Lightweight dev/test Pragma plugin: random sidebar tab, sidebar card, and an SDK event hook.",
   "license": "AGPL-3.0-only",
