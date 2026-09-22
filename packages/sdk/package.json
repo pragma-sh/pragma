@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/sdk",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "description": "Typed TypeScript wrapper SDK for the Pragma CLI.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",
