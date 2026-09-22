@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/pragma-sh/pragma/compare/www-v0.1.0...www-v0.2.0) (2026-09-22)
+
+
+### Features
+
+* **pragma:** install restart updates in place and relaunch ([2b82c6d](https://github.com/pragma-sh/pragma/commit/2b82c6d697e239b5d59d8772bcd74075867c5d94))
+
 ## 0.1.0 (2026-09-20)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v0.5.0...pragma-server-v0.6.0) (2026-09-22)
+
+
+### Features
+
+* **pragma:** install restart updates in place and relaunch ([2b82c6d](https://github.com/pragma-sh/pragma/commit/2b82c6d697e239b5d59d8772bcd74075867c5d94))
+
 ## [0.5.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v0.4.0...pragma-server-v0.5.0) (2026-09-22)
 
 
