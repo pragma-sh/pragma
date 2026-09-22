@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.4.0...pragma-v0.5.0) (2026-09-22)
+
+
+### Bug Fixes
+
+* **pragma:** accept Tauri's base64-wrapped update key and signatures ([22f283f](https://github.com/pragma-sh/pragma/commit/22f283f2eaec08ded458bd08cd3e8b98a9d576f3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 0.5.0
+    * @pragma-sh/plugin bumped to 0.5.0
+    * @pragma-sh/scratchpad bumped to 0.5.0
+    * @pragma-sh/scratchpad-viewer bumped to 0.5.0
+    * @pragma-sh/sdk bumped to 0.5.0
+
 ## [0.4.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.3.0...pragma-v0.4.0) (2026-09-21)
 
 
