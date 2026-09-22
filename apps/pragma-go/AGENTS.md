@@ -608,6 +608,13 @@ eas submit --platform ios --latest
   because the release tag (`package.json`) and the APK's `versionName` (`expo.version`)
   deliberately differ. APKs are on the `preview` update channel, while `bun run update`
   publishes to `production` — APK users get fixes from the next APK, not OTA.
+- **iOS ships to TestFlight from CI.** The `ios-testflight` job in `release.yml` builds
+  the `production` profile on EAS for every `pragma-go-v*` release, then runs
+  `eas submit --id <build>` as a separate step, so a rejected upload fails the job. It
+  depends on credentials stored on EAS: the distribution certificate, the provisioning
+  profile, and an App Store Connect API key for EAS Submit. The API key is the one that
+  gets forgotten, and the job cannot sign in with an Apple ID instead. Setup is in
+  CONTRIBUTING.md → _iOS TestFlight_.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.
