@@ -27,6 +27,7 @@ import {
   confirmUiOverlay,
   getUpdateRuntime,
   readConfig,
+  type UpdateApplyResult,
   type UpdateCheck,
   type UpdateRuntime,
 } from "@/lib/tauri";
@@ -99,41 +100,17 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   }, [loadSettings]);
 
   const applyOffer = useCallback(async (current: UpdateCheck) => {
-    if (
-      !current.apply ||
-      !current.version ||
-      !current.asset ||
-      current.manifestJson === undefined ||
-      current.manifestSignature === undefined
-    ) {
+    const request = applyRequestFor(current);
+    if (!request) {
       toast.error("Update is missing an asset.");
       return;
     }
     setApplying(true);
     try {
-      const result = await applyUpdate({
-        apply: current.apply,
-        version: current.version,
-        asset: current.asset,
-        manifestJson: current.manifestJson,
-        manifestSignature: current.manifestSignature,
-      });
-      if (result.mode === "reload") {
-        toast.success("UI update applied. Reloading…", changelogAction(current.changelogUrl));
-        if (!result.url) throw new Error("UI update did not return its reload URL.");
-        window.location.replace(result.url);
-        return;
+      const result = await applyUpdate(request);
+      if (announceApplyResult(result, current.changelogUrl) === "installer-opened") {
+        setRestartOpen(false);
       }
-      if (result.relaunching) {
-        // The app quits within a second; the helper installs and relaunches it.
-        toast.success("Installing update. Pragma will relaunch…");
-        return;
-      }
-      toast.warning(
-        `Installer opened (${result.fallbackReason ?? "cannot install in place"}). Finish it, then relaunch Pragma.`,
-        changelogAction(current.changelogUrl),
-      );
-      setRestartOpen(false);
     } catch (cause) {
       toast.error(errorMessage(cause));
     } finally {
@@ -217,6 +194,42 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
 /** Access the desktop update poller. */
 export function useUpdates(): UpdatesContextValue {
   return useRequiredContext(UpdatesContext, "UpdatesProvider");
+}
+
+/** The apply request for a checked offer, or null when the offer is incomplete. */
+function applyRequestFor(offer: UpdateCheck): Parameters<typeof applyUpdate>[0] | null {
+  const { apply, version, asset, manifestJson, manifestSignature } = offer;
+  if (!apply || !version || !asset) return null;
+  if (manifestJson === undefined || manifestSignature === undefined) return null;
+  return { apply, version, asset, manifestJson, manifestSignature };
+}
+
+/**
+ * Tells the user what an applied update is doing, and acts on a reload.
+ *
+ * `reloading` navigates to the installed UI overlay; `relaunching` means the app
+ * quits within a second while the helper installs and relaunches it; and
+ * `installer-opened` means it could not install in place, so the user finishes.
+ */
+function announceApplyResult(
+  result: UpdateApplyResult,
+  changelogUrl: string | undefined,
+): "reloading" | "relaunching" | "installer-opened" {
+  if (result.mode === "reload") {
+    toast.success("UI update applied. Reloading…", changelogAction(changelogUrl));
+    if (!result.url) throw new Error("UI update did not return its reload URL.");
+    window.location.replace(result.url);
+    return "reloading";
+  }
+  if (result.relaunching) {
+    toast.success("Installing update. Pragma will relaunch…");
+    return "relaunching";
+  }
+  toast.warning(
+    `Installer opened (${result.fallbackReason ?? "cannot install in place"}). Finish it, then relaunch Pragma.`,
+    changelogAction(changelogUrl),
+  );
+  return "installer-opened";
 }
 
 function changelogAction(url: string | undefined) {
