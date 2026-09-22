@@ -291,7 +291,7 @@ exact names below.
 | `APPLE_ID`                           | Notarization                                           | Apple account on the signing team                      |
 | `APPLE_PASSWORD`                     | Notarization                                           | An **app-specific** password, not the account password |
 | `APPLE_TEAM_ID`                      | Notarization                                           | The parenthetical in the Developer ID certificate name |
-| `EXPO_TOKEN`                         | Building the Pragma Go APK on each `pragma-go` release | An Expo robot access token for the project's account   |
+| `EXPO_TOKEN`                         | Pragma Go's APK and TestFlight build on each release   | An Expo robot access token for the project's account   |
 
 **The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
 makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
@@ -329,6 +329,19 @@ for a set-but-empty variable. Half a configuration therefore attempts to sign wi
 zero-byte certificate and fails the build eight minutes in, rather than producing an
 unsigned one.
 
+### Expo token
+
+Both Pragma Go jobs authenticate to EAS with `EXPO_TOKEN`. Without it they fail at the
+`expo/expo-github-action` step before anything builds. Use a **robot** token, not a
+personal one: it belongs to no human account and can be revoked without logging anyone
+out. On [expo.dev](https://expo.dev), open the `ekrich` account → **Settings → Access
+tokens** → **Add robot**, give it the **Developer** role (building and submitting need
+nothing more), create a token for it, and store it:
+
+```bash
+gh secret set EXPO_TOKEN --repo pragma-sh/pragma   # paste the token when prompted
+```
+
 ### Android APK
 
 The `android-apk` job builds the `preview` EAS profile and attaches
@@ -337,6 +350,29 @@ users track. EAS holds the Android keystore, so the job runs `--non-interactive`
 fails if the project has no Android credentials yet — create them once with
 `eas credentials --platform android`. Losing that keystore means no installed APK can
 upgrade in place again.
+
+### iOS TestFlight
+
+The `ios-testflight` job builds the `production` EAS profile and submits it to App Store
+Connect, where it lands in TestFlight after Apple finishes processing it. Nothing about
+Apple reaches GitHub: both credentials it needs live on EAS, and `--non-interactive`
+fails rather than prompting when one is missing. Set them up once with
+`eas credentials --platform ios` (production profile):
+
+- **Build credentials:** the distribution certificate and the App Store provisioning
+  profile. They already exist if you have ever run `eas build --profile production`
+  for iOS.
+- **App Store Connect API key:** choose _App Store Connect: Manage your API Key_ → _Set up
+  your project to use an API Key for EAS Submit_ and let EAS generate one, which needs
+  your Apple ID once. Without it `eas submit` falls back to an Apple ID sign-in, which is
+  interactive and cannot run in CI. The `appleId`/`ascAppId`/`appleTeamId` fields in
+  `eas.json` only identify the app. They are not a credential.
+
+EAS numbers the build itself (`autoIncrement`), but the marketing version is
+`expo.version` in `app.json`. Once a version is approved on the App Store, Apple rejects
+further uploads under it, so bump `expo.version` by hand before the next release after
+that. See _App Store / Play Store builds_ in `apps/pragma-go/AGENTS.md` for why Release
+Please must not.
 
 ### npm
 
