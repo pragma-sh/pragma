@@ -28,7 +28,7 @@ across TypeScript and Rust**. When you write code:
   put it in `@pragma-sh/constants` (see `packages/constants/AGENTS.md`).
 - **Keep the two languages in lockstep.** The same concept should be named, layered,
   and error-handled the same way in TypeScript and Rust. See _Code standards_ below.
-- **Suggest sweeping changes.** This project is early. If you see a cleaner structure,
+- **Suggest sweeping changes.** If you see a cleaner structure,
   propose and make it — restructuring for clarity is welcome, not discouraged.
 - **Host-tool plugins stay out of core — ask first.** A host-tool plugin/agent package
   (`packages/*-plugin`, such as opencode/Claude/Cursor integrations) is
@@ -432,7 +432,10 @@ crate is named `pragma`, so `cargo-workspace` invents a candidate that shadows t
 desktop component — it has its own entry with component `pragma-desktop` and
 `skip-github-release`, which is also what writes `src-tauri/Cargo.toml` (an `extra-files`
 entry for it would be a second writer). `scripts/release-config.test.ts` guards all
-three. Verify a config change without merging anything:
+three. **A deliberate version jump (the 1.0.0 cut) is a `release-as` on every desktop-group
+package, and it is one-shot:** `release-as` pins every later release too, so delete it
+in the change after that version ships — the same test fails while a pin equals the
+manifest version, and fails if the group is pinned unevenly. Verify a config change without merging anything:
 `npx release-please release-pr --token=$(gh auth token) --repo-url=pragma-sh/pragma
 --target-branch=<your pushed branch> --dry-run --trace` — it reads the config from the
 _branch_, never your working tree, so the branch has to be pushed first. Release Please rejects `..` in `extra-files`; shared version fields in

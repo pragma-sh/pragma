@@ -248,6 +248,8 @@ interface FeatureSectionProps {
   description: ReactNode;
   points: ReactNode;
   media: ReactNode;
+  /** Calls to action under the points, e.g. a store button for the section's product. */
+  actions?: ReactNode;
   /** Optional quiet atmosphere behind section content. */
   background?: ReactNode;
   /** Puts the media on the left instead of the right. */
@@ -255,6 +257,12 @@ interface FeatureSectionProps {
   id?: string;
   /** Applied to the section shell, e.g. to drop the top hairline. */
   className?: string;
+}
+
+/** The row of calls to action under a feature's points; nothing when there are none. */
+function FeatureActions({ children }: { children?: ReactNode }) {
+  if (!children) return null;
+  return <div className="mt-8 flex flex-wrap items-center justify-center gap-3">{children}</div>;
 }
 
 /**
@@ -271,6 +279,7 @@ export function FeatureSection({
   description,
   points,
   media,
+  actions,
   background,
   flip,
   className,
@@ -286,6 +295,7 @@ export function FeatureSection({
         <Reveal className={cn("lg:col-span-5", flip && "lg:order-2 lg:col-start-8")}>
           <SectionHeading title={title} description={description} />
           <ul className="mt-8 space-y-4">{points}</ul>
+          <FeatureActions>{actions}</FeatureActions>
         </Reveal>
         <Reveal
           delay={0.08}

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
+import { AppStoreButton } from "@/components/app-store-button";
 import { Bento } from "@/components/home/bento";
 import { CodeCard } from "@/components/home/code-card";
 import { Comparison } from "@/components/home/comparison";
@@ -11,7 +13,9 @@ import { Hero } from "@/components/home/hero";
 import { FeaturePoint, FeatureSection, MediaImage, MediaVideo } from "@/components/home/section";
 import { SiteFooter } from "@/components/home/site-footer";
 import { TerminalCard, type TerminalLine } from "@/components/home/terminal-card";
-import { appName } from "@/lib/shared";
+import { AndroidMark } from "@/components/platform-marks";
+import { Button } from "@/components/ui/button";
+import { androidInstallRoute, appName } from "@/lib/shared";
 
 export const metadata: Metadata = {
   title: { absolute: `${appName} — run teams of coding agents` },
@@ -337,6 +341,17 @@ export default function HomePage() {
               The same client ships as a web build the gateway serves, so a shared URL is all a
               second device needs.
             </FeaturePoint>
+          </>
+        }
+        actions={
+          <>
+            <AppStoreButton />
+            <Button asChild variant="secondary" className="pill-cta gap-2">
+              <Link href={androidInstallRoute}>
+                <AndroidMark className="size-4" />
+                Android
+              </Link>
+            </Button>
           </>
         }
       />

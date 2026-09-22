@@ -47,6 +47,7 @@ apps/www/
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
     │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma-sh/*`)
+    │   ├── download/[target]/ # redirects to the latest release's installer for one platform
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
     │   └── global.css       # Tailwind + shadcn tokens + the `.artboard` palette + Fumadocs preset
@@ -56,6 +57,9 @@ apps/www/
     │   ├── site-navbar.tsx  # shared floating marketing/docs nav + docs mobile sidebar trigger
     │   ├── brand-favicon.tsx # compact mark rendered from @pragma-sh/brand geometry
     │   ├── github-mark.tsx  # shared GitHub brand glyph
+    │   ├── platform-marks.tsx # Apple / Windows / Tux glyphs (Simple Icons, CC0)
+    │   ├── download-button.tsx # the one Download button: detects the OS, shows its mark
+    │   ├── app-store-button.tsx # Pragma Go App Store pill → dialog with QR code + store link
     │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
     │   ├── support/         # the support request form (client) posting to the route's action
     │   ├── deep-link-forward.tsx  # one pragma:// hand-off page (auto-redirect + fallback pills)
@@ -77,6 +81,8 @@ apps/www/
         ├── deploy.ts        # pure Ignored-Build-Step decision (production = release commits only)
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
+        ├── downloads.ts     # installer targets, OS/CPU detection, latest-release asset lookup
+        ├── github-api.ts    # server-side GitHub REST base + token headers
         ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
@@ -139,6 +145,16 @@ apps/www/
   are republished (`plugins.yml` publish → refresh-lock); never commit `lock:local`
   output — its tarball integrity hashes describe locally-packed bytes, not the npm
   releases the desktop verifies against.
+- **Every Download button is `DownloadButton`, and it links to `/download/{target}`.**
+  Installer asset names carry the version (`Pragma-<version>-<target>.<ext>`, written by
+  `release.yml`), so there is no stable GitHub URL to link to; the route reads the
+  repository's Latest release (pinned to the newest desktop release) and redirects to the
+  matching asset, falling back to the release page on any miss. The button server-renders
+  as a generic link and swaps in the visitor's platform mark after hydration; phones,
+  tablets, and ChromeOS keep the generic link. macOS defaults to Apple silicon because
+  Safari reports every Mac as Intel. The README's download badges and table use the same
+  route, so **renaming a release asset or a `DOWNLOAD_TARGETS` key breaks published
+  links** — keep them in step with `release.yml`.
 - **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma-sh/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.

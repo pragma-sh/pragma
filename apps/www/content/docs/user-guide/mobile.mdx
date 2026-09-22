@@ -9,6 +9,49 @@ Pragma Go is the mobile client (iOS, iPadOS, Android, and the web). It talks to 
 host as the desktop through the **gateway** — a localhost HTTP server the desktop starts
 — exposed over a tunnel you configure.
 
+## Installing Pragma Go
+
+- **iOS** — [download Pragma Go on the App Store](https://apps.apple.com/us/app/pragma-sh-go/id6804842149).
+- **Android** — install the APK with Obtainium, below.
+- **Web** — nothing to install; see [Pragma Go on the web](#pragma-go-on-the-web).
+
+### Android with Obtainium
+
+Pragma Go for Android is not on the Play Store. Every `pragma-go` release on GitHub
+carries a signed APK instead, and [Obtainium](https://github.com/ImranR98/Obtainium)
+installs it straight from there and notifies you when a new one ships.
+
+1. **Install Obtainium** from its
+   [releases page](https://github.com/ImranR98/Obtainium/releases/latest) or F-Droid.
+   Android asks you to allow installs from that source the first time.
+2. In Obtainium, tap **Add app** and enter the source URL:
+
+   ```text
+   https://github.com/pragma-sh/pragma
+   ```
+
+3. **Set the additional options.** The same repository publishes the desktop app and every
+   agent plugin, so Obtainium needs to be told which releases are Pragma Go's:
+
+   | Option                                          | Value                                  |
+   | ----------------------------------------------- | -------------------------------------- |
+   | **Filter release titles by regular expression** | `^pragma-go`                           |
+   | **Filter APKs by regular expression**           | `\.apk$`                               |
+   | **Fallback to older releases**                  | On                                     |
+   | **Version detection**                           | **Use release date as version string** |
+
+4. Tap **Add**, then **Install**, and accept Android's install prompt.
+5. Open Pragma Go and [pair it with your desktop](#pairing-a-device).
+
+<Callout title="Why release date for the version?">
+  A `pragma-go` release tag numbers the mobile release, not the app's own version string, so the two
+  do not match. Tracking by release date means Obtainium offers exactly one update per new release
+  instead of reporting an update that never goes away.
+</Callout>
+
+Updates arrive the same way: Obtainium checks in the background, notifies you, and
+installs the new APK over the old one with your data intact.
+
 ## Pairing a device
 
 Settings → **Pragma Go**:

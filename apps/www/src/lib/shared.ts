@@ -31,3 +31,12 @@ export const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 
 /** Latest desktop release and platform-specific downloads. */
 export const downloadUrl = `${repoUrl}/releases/latest`;
+
+/**
+ * Pragma Go on the App Store. The listing is named "Pragma Sh Go" because App Store
+ * names are globally unique (see `apps/pragma-go/AGENTS.md`); the app is Pragma Go.
+ */
+export const appStoreUrl = "https://apps.apple.com/us/app/pragma-sh-go/id6804842149";
+
+/** Docs section walking through installing the Pragma Go APK with Obtainium. */
+export const androidInstallRoute = `${docsRoute}/user-guide/mobile#android-with-obtainium`;

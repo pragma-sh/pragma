@@ -30,7 +30,8 @@
     "react-dom": "^19.2.6",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "uqr": "^0.1.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

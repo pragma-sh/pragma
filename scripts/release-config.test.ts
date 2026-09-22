@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 
 import goApp from "../apps/pragma-go/app.json";
 import config from "../release-please-config.json";
+import manifest from "../.release-please-manifest.json";
 
 interface ExtraFile {
   type: string;
@@ -14,7 +15,12 @@ interface ExtraFile {
 
 const packages: Record<
   string,
-  { component?: string; "extra-files"?: ExtraFile[]; "skip-github-release"?: boolean }
+  {
+    component?: string;
+    "extra-files"?: ExtraFile[];
+    "release-as"?: string;
+    "skip-github-release"?: boolean;
+  }
 > = config.packages;
 
 const ROOT = join(import.meta.dir, "..");
@@ -52,7 +58,7 @@ describe("Release Please cannot rewrite the mobile runtime version", () => {
     expect(extraFiles().filter(({ file }) => file.path.endsWith("app.json"))).toEqual([]);
   });
 
-  test("the store version stays ahead of a 0.x desktop beta", () => {
+  test("the store version is never behind the desktop major", () => {
     expect(goApp.expo.version).toBe("1.0.0");
   });
 });
@@ -86,7 +92,7 @@ describe("the desktop group reaches the release PR", () => {
     expect(linkedVersions?.merge).toBe(false);
   });
 
-  test("the group version starts at the beta, not 1.0.0", () => {
+  test("a fresh component starts at 0.1.0, not 1.0.0", () => {
     // A `0.0.0` manifest entry is not a previous release, so `bump-minor-pre-major`
     // never runs and Release Please falls through to `initial-version` — which
     // defaults to `1.0.0`.
@@ -125,5 +131,30 @@ describe("the Tauri crate does not shadow the desktop component", () => {
       .map(({ component, file }) => ({ component, path: resolveExtraFile(component, file) }))
       .filter((entry) => entry.path === owned);
     expect(collisions).toEqual([]);
+  });
+});
+
+describe("release-as pins are one-shot", () => {
+  // `release-as` forces the next release to that exact version — and every release
+  // after it, until someone deletes it. Once the manifest reaches the pinned version
+  // the pin has done its job and must go, or the next release PR re-proposes it.
+  const versions: Record<string, string> = manifest;
+  const pinned = Object.entries(packages).filter(([, entry]) => entry["release-as"]);
+
+  test("every pin is still ahead of the released version", () => {
+    const spent = pinned
+      .filter(([path, entry]) => versions[path] === entry["release-as"])
+      .map(([path]) => path);
+    expect(spent).toEqual([]);
+  });
+
+  test("the linked desktop group is pinned all or nothing", () => {
+    const group = new Set(linkedVersions?.components);
+    const pins = new Set(
+      Object.values(packages)
+        .filter((entry) => entry.component && group.has(entry.component))
+        .map((entry) => entry["release-as"] ?? null),
+    );
+    expect(pins.size).toBe(1);
   });
 });
