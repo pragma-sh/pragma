@@ -11,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use std::{collections::HashMap, env};
 
+use base64::Engine;
 use minisign::{PublicKeyBox, SignatureBox};
 use pragma_constants::CONSTANTS;
 use pragma_protocol::PROD_CHANNEL;
@@ -642,13 +643,34 @@ fn verify_asset_signature(public_key: &str, signature: &str, bytes: &[u8]) -> Ap
             "update signing public key is missing".to_string(),
         ));
     }
-    let key = PublicKeyBox::from_string(public_key)
+    let public_key = minisign_box_text(public_key)
+        .map_err(|error| AppError::Update(format!("invalid update public key: {error}")))?;
+    let key = PublicKeyBox::from_string(&public_key)
         .and_then(PublicKeyBox::into_public_key)
         .map_err(|error| AppError::Update(format!("invalid update public key: {error}")))?;
-    let signature = SignatureBox::from_string(signature)
+    let signature = minisign_box_text(signature)
+        .map_err(|error| AppError::Update(format!("invalid update signature: {error}")))?;
+    let signature = SignatureBox::from_string(&signature)
         .map_err(|error| AppError::Update(format!("invalid update signature: {error}")))?;
     minisign::verify(&key, &signature, Cursor::new(bytes), true, false, false)
         .map_err(|error| AppError::Update(format!("update signature verification failed: {error}")))
+}
+
+/// The minisign box text inside a key or signature, however it was written.
+///
+/// `minisign` parses the box itself (`untrusted comment: …` lines), but Tauri's
+/// signer base64-wraps it: the key `tauri signer generate` emits — and so the one
+/// CI embeds — and every `.sig` that `tauri signer sign` writes start
+/// `dW50cnVzdGVk…`. Both forms are accepted so a raw minisign box keeps working.
+fn minisign_box_text(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.starts_with("untrusted comment:") {
+        return Ok(value.to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .map_err(|error| format!("not a minisign box or base64 of one: {error}"))?;
+    String::from_utf8(bytes).map_err(|error| format!("decoded box is not UTF-8: {error}"))
 }
 
 fn fetch_json<T: for<'de> Deserialize<'de>>(url: &str) -> AppResult<T> {
@@ -793,6 +815,20 @@ mod tests {
         let public_key = pk.to_box().expect("public key box").to_string();
         verify_asset_signature(&public_key, &signature, bytes).expect("valid signature");
         assert!(verify_asset_signature(&public_key, &signature, b"tampered").is_err());
+    }
+
+    /// What production actually sees: `tauri signer generate` and `tauri signer
+    /// sign` base64-wrap their minisign boxes, so the embedded key and every
+    /// `.sig` start `dW50cnVzdGVk…` rather than `untrusted comment:`. The fixtures
+    /// are the real 0.4.0 manifest, the signature CI produced for it, and the
+    /// production public key.
+    #[test]
+    fn verifies_a_real_tauri_signed_release_manifest() {
+        let public_key = include_str!("testdata/updates/update-key.pub");
+        let signature = include_str!("testdata/updates/release.json.sig");
+        let manifest = include_bytes!("testdata/updates/release.json");
+        verify_asset_signature(public_key, signature, manifest).expect("CI signature verifies");
+        assert!(verify_asset_signature(public_key, signature, b"tampered").is_err());
     }
 
     #[test]

@@ -346,6 +346,9 @@ oxfmt collapses short arrays onto one — so each run of the generator re-breaks
   `format-check` runs downstream of `generate`, so that rewrite happens _before_ the
   check — it fails on a file nobody edited.
 
+- `apps/pragma/src-tauri/src/testdata/**` holds a real signed `release.json`; one
+  reformatted byte and its CI signature no longer verifies.
+
 Don't "fix" one of these by reformatting it; the next release or the next `bun run
 generate` undoes it. Add the path to `ignorePatterns` instead, and remember these files
 are no longer covered by `bun run format`.

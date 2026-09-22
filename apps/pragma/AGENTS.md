@@ -573,7 +573,16 @@ the installed overlay. A `.pending` marker is removed only after `UpdatesProvide
 an overlay that fails before that point is deleted on next launch so bundled UI recovers.
 Do not broaden that protocol to arbitrary app-data paths. Every production asset and the
 manifest binding its version/apply mode/URL are minisign-verified against
-`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. Linux selects `.deb` vs `.rpm`
+`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. **That key and every `.sig` are
+base64-wrapped minisign boxes** — the form `tauri signer generate` and `tauri signer sign`
+emit, starting `dW50cnVzdGVk…` — and `minisign` parses only the unwrapped
+`untrusted comment:` text, so `minisign_box_text` unwraps both before parsing. 0.4.0
+shipped without that step and rejected every update with `invalid update public key:
+Missing encoded key in public key`; its tests had signed in raw minisign form and never
+met a real key. `verifies_a_real_tauri_signed_release_manifest` pins the real format with
+the 0.4.0 manifest and CI's signature under `src/testdata/updates/`. A local release build
+needs the variable exported, or it compiles in an empty key and refuses every update:
+`PRAGMA_UPDATE_PUBLIC_KEY="$(cat <the .key.pub tauri signer generate wrote>)"`. Linux selects `.deb` vs `.rpm`
 from its package family; AppImage sessions are deliberately not offered a restart update
 until replacement can be atomic. Any change outside `apps/pragma/src/` produces restart
 metadata and platform installers.
