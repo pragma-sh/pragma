@@ -6,6 +6,20 @@
 Agents, terminals, diffs, and pull requests in one workspace.</p>
 
 <p>
+  <a href="https://pragma-app.sh/download/darwin-aarch64"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://pragma-app.sh/download/windows-x86_64"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://pragma-app.sh/download/linux-x86_64-deb"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
+  <a href="https://apps.apple.com/us/app/pragma-sh-go/id6804842149"><img src="https://img.shields.io/badge/Download%20on%20the-App%20Store-0D96F6?style=for-the-badge&logo=appstore&logoColor=white" alt="Download Pragma Go on the App Store" /></a>
+  <a href="#android-with-obtainium"><img src="https://img.shields.io/badge/Get%20it%20on-Obtainium-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Get Pragma Go on Obtainium" /></a>
+</p>
+
+<p>
+  <a href="https://github.com/pragma-sh/pragma/releases/latest"><img src="https://img.shields.io/github/v/release/pragma-sh/pragma?filter=pragma-v*&style=flat-square&label=release&color=0B7285" alt="Latest release" /></a>
+  <a href="https://github.com/pragma-sh/pragma/releases"><img src="https://img.shields.io/github/downloads/pragma-sh/pragma/total?style=flat-square&label=downloads&logo=github&color=0B7285" alt="Total downloads" /></a>
+  <a href="https://github.com/pragma-sh/pragma/releases/latest"><img src="https://img.shields.io/github/downloads/pragma-sh/pragma/latest/total?style=flat-square&label=latest%20downloads&logo=github&color=0B7285" alt="Downloads of the latest release" /></a>
+</p>
+
+<p>
   <a href="./packages/claude-code-plugin"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat-square&logo=claude&logoColor=white" alt="Claude Code plugin" /></a>
   <a href="https://pragma-app.sh/docs/plugins"><img src="https://img.shields.io/badge/OpenCode%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%2B7-agent%20plugins-6C5CE7?style=flat-square&logo=opencode&logoColor=white" alt="10 agent plugins" /></a>
   <a href="./skills"><img src="https://img.shields.io/badge/Agent%20Skills-pragma-8B5CF6?style=flat-square&logo=anthropic&logoColor=white" alt="Agent Skills" /></a>
@@ -82,7 +96,11 @@ Checked against the `generalaction/emdash`, `stablyai/orca`, and `superset-sh/su
 
 ## Quick Start
 
-Download the signed build for macOS, Linux, or Windows from [GitHub Releases](https://github.com/pragma-sh/pragma/releases) — see [Download](#download).
+1. [Download Pragma](#download) for macOS, Windows, or Linux and install it.
+2. Add a project — any git checkout — from the bottom of the sidebar.
+3. Create a worktree, pick an agent, and type a prompt.
+
+The [quick start guide](https://pragma-app.sh/docs/user-guide/quick-start) walks through the full loop from first prompt to merged pull request.
 
 ## Features
 
@@ -120,15 +138,38 @@ Missing yours? Agent plugins are ordinary TypeScript packages — see the [plugi
 
 ## Download
 
-Pragma is in active development. Signed desktop installers are published through [**GitHub Releases**](https://github.com/pragma-sh/pragma/releases). Until the first release lands, use [Build From Source](#build-from-source).
+Signed installers for every platform are attached to each [GitHub Release](https://github.com/pragma-sh/pragma/releases/latest). The links below always fetch the newest one.
 
-| Platform | Packages                   |
-| -------- | -------------------------- |
-| macOS    | Application bundle and DMG |
-| Linux    | DEB, RPM, and AppImage     |
-| Windows  | MSI and NSIS installers    |
+| Platform | Download                                                                                                                                                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS    | [Apple silicon (.dmg)](https://pragma-app.sh/download/darwin-aarch64) · [Intel (.dmg)](https://pragma-app.sh/download/darwin-x86_64)                                                                                                                |
+| Windows  | [x64 installer (.exe)](https://pragma-app.sh/download/windows-x86_64)                                                                                                                                                                               |
+| Linux    | x64: [.deb](https://pragma-app.sh/download/linux-x86_64-deb) · [.rpm](https://pragma-app.sh/download/linux-x86_64-rpm) — ARM64: [.deb](https://pragma-app.sh/download/linux-aarch64-deb) · [.rpm](https://pragma-app.sh/download/linux-aarch64-rpm) |
 
-The newest build lives at the [latest release link](https://github.com/pragma-sh/pragma/releases/latest); release notes and older builds are on the [releases page](https://github.com/pragma-sh/pragma/releases).
+Pragma updates itself in place once installed. Release notes and older builds are on the [releases page](https://github.com/pragma-sh/pragma/releases).
+
+### Pragma Go (mobile)
+
+Pragma Go pairs with your desktop so you can launch agents, watch sessions, and answer their questions from your phone — see the [mobile guide](https://pragma-app.sh/docs/user-guide/mobile).
+
+- **Android** — install and auto-update the APK with [Obtainium](#android-with-obtainium).
+- **iOS** — [download Pragma Go on the App Store](https://apps.apple.com/us/app/pragma-sh-go/id6804842149).
+- **Web** — served by your desktop; turn on **Enable web access** under Settings → Pragma Go.
+
+#### Android with Obtainium
+
+[Obtainium](https://github.com/ImranR98/Obtainium) installs Android apps straight from their GitHub releases and keeps them updated.
+
+1. Install Obtainium from its [releases page](https://github.com/ImranR98/Obtainium/releases/latest) or F-Droid.
+2. Tap **Add app** and enter `https://github.com/pragma-sh/pragma` as the source URL.
+3. This repository also publishes desktop and plugin releases, so set:
+   - **Filter release titles by regular expression** → `^pragma-go`
+   - **Filter APKs by regular expression** → `\.apk$`
+   - **Fallback to older releases** → on
+   - **Version detection** → **Use release date as version string**
+4. Tap **Add**, then **Install**. Obtainium notifies you whenever a new Pragma Go release is published.
+
+The [Android install guide](https://pragma-app.sh/docs/user-guide/mobile#android-with-obtainium) explains each option and why it is needed.
 
 ## Documentation
 

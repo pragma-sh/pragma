@@ -291,6 +291,7 @@ exact names below.
 | `APPLE_ID`                           | Notarization                                           | Apple account on the signing team                      |
 | `APPLE_PASSWORD`                     | Notarization                                           | An **app-specific** password, not the account password |
 | `APPLE_TEAM_ID`                      | Notarization                                           | The parenthetical in the Developer ID certificate name |
+| `EXPO_TOKEN`                         | Building the Pragma Go APK on each `pragma-go` release | An Expo robot access token for the project's account   |
 
 **The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
 makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
@@ -327,6 +328,15 @@ variable as an empty string, and the bundler gates on `var_os`, which returns `S
 for a set-but-empty variable. Half a configuration therefore attempts to sign with a
 zero-byte certificate and fails the build eight minutes in, rather than producing an
 unsigned one.
+
+### Android APK
+
+The `android-apk` job builds the `preview` EAS profile and attaches
+`Pragma-Go-<version>-android.apk` to the `pragma-go-v*` release, which is what Obtainium
+users track. EAS holds the Android keystore, so the job runs `--non-interactive` and
+fails if the project has no Android credentials yet — create them once with
+`eas credentials --platform android`. Losing that keystore means no installed APK can
+upgrade in place again.
 
 ### npm
 

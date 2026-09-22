@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { githubHeaders, repoApiUrl } from "@/lib/github-api";
 import { gitConfig } from "@/lib/shared";
 
 /** How a desktop client should apply this release. */
@@ -278,7 +279,7 @@ function updateVersion(manifest: ReleaseManifest): string {
 export async function loadGithubManifests(now = Date.now()): Promise<ReleaseDocument[]> {
   const existing = cachedManifests(now);
   if (existing) return existing;
-  const headers = githubHeaders();
+  const headers = githubHeaders("pragma-updates");
   const assetUrls = await recentManifestUrls(headers);
   const documents = await fetchRecentManifests(assetUrls, headers);
   if (documents.length > 0) cached = { expires: now + CACHE_MS, documents };
@@ -305,20 +306,10 @@ function cachedManifests(now: number): ReleaseDocument[] | null {
   return cached.expires > now ? cached.documents : null;
 }
 
-function githubHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "pragma-updates",
-  };
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
 async function recentManifestUrls(
   headers: Record<string, string>,
 ): Promise<Array<{ manifest: string; signature: string }>> {
-  const releaseUrl = `https://api.github.com/repos/${gitConfig.user}/${gitConfig.repo}/releases?per_page=100`;
+  const releaseUrl = `${repoApiUrl}/releases?per_page=100`;
   const releaseRes = await fetch(releaseUrl, { headers, cache: "no-store" });
   if (!releaseRes.ok) return [];
   const releases = (await releaseRes.json()) as Array<{

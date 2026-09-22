@@ -513,6 +513,21 @@ the standard floating shadow. It is sticky in the marketing flow and fixed over 
 Fumadocs grid so both surfaces keep the same position; docs also exposes its sidebar
 trigger on mobile.
 
+**`download-cta`** — Every Download action (nav, hero, closing CTA, compare pages) is one
+`.pill-cta` whose leading 16px glyph is the visitor's platform mark — Apple for macOS, the
+four-pane mark for Windows, Tux for Linux — drawn in `currentColor` like the GitHub mark.
+Before the OS is known, and for phones and tablets, it falls back to the generic download
+arrow. The hero label names the platform ("Download for macOS"); the nav keeps the single
+word and collapses to the glyph on small screens.
+
+**`app-store-cta`** — A secondary `.pill-cta` carrying the Apple mark and "App Store".
+It sits centred under the points of the Pragma Go feature section (`#go`), beside a
+matching Android-mark pill linking to the Obtainium install guide in the docs, and beside
+the Download pill in the closing CTA — never in the hero, which keeps one desktop download
+action. It opens a dialog, never navigates: a 192px QR code of the listing on a white tile
+(so it scans in dark mode), and a primary pill linking straight to the App Store for a
+visitor already on an iPhone.
+
 ### Forms
 
 **`form-panel`** — the one form on the artboard, on `/support`. It sits in a

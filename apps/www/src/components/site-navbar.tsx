@@ -5,10 +5,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FullSearchTrigger, SearchTrigger } from "fumadocs-ui/layouts/shared/slots/search-trigger";
-import { ChevronDown, Download, PanelLeft } from "lucide-react";
+import { ChevronDown, PanelLeft } from "lucide-react";
 import { useDocsLayout } from "fumadocs-ui/layouts/docs";
 
 import { BrandIcon } from "@/components/brand-icon";
+import { DownloadButton } from "@/components/download-button";
 import { GithubMark } from "@/components/github-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { compareDetailRoute, COMPETITORS } from "@/lib/compare-data";
-import { appName, compareRoute, docsRoute, downloadUrl, pluginsRoute, repoUrl } from "@/lib/shared";
+import { appName, compareRoute, docsRoute, pluginsRoute, repoUrl } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
@@ -132,12 +133,7 @@ export function SiteNavbar({
             </a>
           </Button>
 
-          <Button asChild className="pill-cta gap-2 max-sm:size-11 max-sm:p-0">
-            <a href={downloadUrl} aria-label="Download Pragma">
-              <Download className="size-4" />
-              <span className="max-sm:hidden">Download</span>
-            </a>
-          </Button>
+          <DownloadButton variant="nav" />
 
           {docsSidebarTrigger}
         </div>

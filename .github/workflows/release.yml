@@ -22,6 +22,9 @@ jobs:
       desktop-sha: ${{ steps.release.outputs['apps/pragma--sha'] }}
       desktop-tag: ${{ steps.release.outputs['apps/pragma--tag_name'] }}
       desktop-version: ${{ steps.release.outputs['apps/pragma--version'] }}
+      go-created: ${{ steps.release.outputs['apps/pragma-go--release_created'] }}
+      go-tag: ${{ steps.release.outputs['apps/pragma-go--tag_name'] }}
+      go-version: ${{ steps.release.outputs['apps/pragma-go--version'] }}
       releases-created: ${{ steps.release.outputs.releases_created }}
     steps:
       - id: release
@@ -219,6 +222,49 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: bun scripts/pin-latest-desktop-release.ts
+
+  # Pragma Go ships to Android outside the Play Store as a sideloadable APK attached
+  # to its own `pragma-go-v*` release, which is what Obtainium watches (see the README).
+  # EAS builds it: the `preview` profile is the store-shaped APK build, and EAS holds the
+  # signing keystore, so every APK is signed with the same key and upgrades in place.
+  android-apk:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.go-created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.go-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build the APK on EAS
+        working-directory: apps/pragma-go
+        env:
+          # The profile sets this on the worker; eas-cli also resolves the app config
+          # locally, and the fingerprint must match the one the worker computes.
+          PRAGMA_STORE_BUILD: "1"
+          VERSION: ${{ needs.release-please.outputs.go-version }}
+        run: |
+          eas build --platform android --profile preview --non-interactive --wait --json > "$RUNNER_TEMP/build.json"
+          url="$(jq -r '.[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl' "$RUNNER_TEMP/build.json")"
+          test -n "$url" && test "$url" != null
+          mkdir -p "$RUNNER_TEMP/apk"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/apk/Pragma-Go-$VERSION-android.apk"
+      - name: Attach the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.go-tag }}
+        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP"/apk/*.apk --clobber
 
   publish-packages:
     needs: release-please

@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download } from "lucide-react";
 
 import { BrandIcon } from "@/components/brand-icon";
+import { DownloadButton } from "@/components/download-button";
 import { SupportCell } from "@/components/compare/support-cell";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -16,7 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { COMPETITORS, FOOTNOTE, getCompetitor, ROWS } from "@/lib/compare-data";
-import { appName, compareRoute, downloadUrl } from "@/lib/shared";
+import { appName, compareRoute } from "@/lib/shared";
 
 /** Pre-renders one `/compare/[slug]` route per competitor at build time. */
 export function generateStaticParams() {
@@ -77,12 +76,7 @@ export default async function CompareDetailPage(props: PageProps<"/compare/[slug
           {competitor.license} · {appName} is AGPL-3.0
         </p>
 
-        <Button asChild className="pill-cta mt-8 gap-2">
-          <a href={downloadUrl}>
-            <Download className="size-4" />
-            Download {appName}
-          </a>
-        </Button>
+        <DownloadButton className="mt-8" />
       </header>
 
       <section className="mx-auto w-full max-w-2xl space-y-4 px-6 pb-16 text-sm leading-relaxed sm:pb-20">
@@ -160,12 +154,7 @@ export default async function CompareDetailPage(props: PageProps<"/compare/[slug
             Bring your {competitor.name} worktrees over — see what changes.
           </h2>
           <div className="mt-8 flex justify-center">
-            <Button asChild className="pill-cta gap-2">
-              <a href={downloadUrl}>
-                <Download className="size-4" />
-                Download {appName}
-              </a>
-            </Button>
+            <DownloadButton />
           </div>
         </div>
       </section>

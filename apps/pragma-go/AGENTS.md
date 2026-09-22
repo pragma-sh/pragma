@@ -601,6 +601,13 @@ eas submit --platform ios --latest
   project. EAS prebuilds itself, so `ios/` and `android/` are now listed in
   `.easignore`. After any local Release run, check the archive size eas-cli prints
   (tracked sources are ~91 MB) before letting a build proceed.
+- **Android ships outside the Play Store as an APK on GitHub.** The `android-apk` job in
+  `release.yml` builds the `preview` profile on EAS for every `pragma-go-v*` release and
+  attaches `Pragma-Go-<version>-android.apk`; users install it with Obtainium (README →
+  _Android with Obtainium_). Obtainium is told to use the release date as the version,
+  because the release tag (`package.json`) and the APK's `versionName` (`expo.version`)
+  deliberately differ. APKs are on the `preview` update channel, while `bun run update`
+  publishes to `production` — APK users get fixes from the next APK, not OTA.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.

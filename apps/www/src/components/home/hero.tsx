@@ -4,9 +4,11 @@ import { useMemo, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowRight, Download } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
+import { DownloadButton } from "@/components/download-button";
 import { Button } from "@/components/ui/button";
+import { downloadUrl } from "@/lib/shared";
 import { AgentChipField } from "./agent-chip-field";
 import { AGENT_BRANDS } from "./agents";
 
@@ -100,10 +102,7 @@ export function Hero() {
           {...riseIn(reduceMotion, 0.16)}
           className="mt-9 flex flex-wrap items-center justify-center gap-3"
         >
-          <Button className="pill-cta gap-2">
-            <Download className="size-4" />
-            Download for macOS
-          </Button>
+          <DownloadButton />
           <Button asChild variant="secondary" className="pill-cta gap-2">
             <Link href="/docs">
               Read the docs
@@ -113,7 +112,10 @@ export function Hero() {
         </motion.div>
 
         <p ref={noteRef} className="text-muted-foreground mt-5 text-xs">
-          macOS, Linux, and Windows. Local, over SSH, or inside WSL.
+          macOS, Linux, and Windows. Local, over SSH, or inside WSL.{" "}
+          <a href={downloadUrl} className="hover:text-foreground underline underline-offset-4">
+            All downloads
+          </a>
         </p>
       </div>
 
