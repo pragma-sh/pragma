@@ -407,7 +407,13 @@ compile-only Tauri build on macOS, Linux, **and** Windows.
 combined release PR from Conventional Commits. Merging it creates component GitHub
 Releases; a desktop (`pragma-v*`) release then builds signed installers for every
 advertised OS/architecture/package format, builds a tarred React UI overlay, and uploads
-them with a signed `release.json`. That manifest is `reload` only when every substantive change since the
+them with a signed `release.json`, then marks that release as the repository's **Latest**.
+That flag is load-bearing: the website's Download button links to `/releases/latest`, and
+Release Please gives _every_ component release GitHub's default `make_latest` — it has no
+option for it — so whichever plugin publishes last would otherwise take it.
+`scripts/pin-latest-desktop-release.ts` hands it back to the newest `pragma-v*` release that
+ships a `release.json` (never an empty tag), both at the end of `publish-desktop` and in
+`pin-latest-desktop` on runs that release no desktop. That manifest is `reload` only when every substantive change since the
 previous desktop tag is under `apps/pragma/src/`; any native/server/tooling change is
 `restart`. Desktop-shipped crates/packages use Release Please's `linked-versions` group,
 so changing one also creates a desktop release instead of shipping under an unrelated
