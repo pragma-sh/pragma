@@ -216,7 +216,9 @@ alive at once.
 
 Deliberate replacement still works because the app kills the old server before
 spawning a new one (`kill_stale_server` in `pragma-client`), so nothing answers the
-probe by then. Replacement kills the server's complete descendant tree, not only its
+probe by then. The app replaces a server whose hello shows a different protocol, or —
+for a bundled release — a different `buildId`, the hash of its own executable taken at
+start-up (`record_build_id`; it must not be deferred, see `crates/pragma-protocol`). Replacement kills the server's complete descendant tree, not only its
 pid: Bun plugin/automation hosts, per-agent watchers, PTYs, and tunnel processes must
 not be reparented as orphans. As a second line of defense, long-lived Bun hosts treat
 supervisor stdin EOF as a cleanup-and-exit signal. The client never unlinks `server.lock`;

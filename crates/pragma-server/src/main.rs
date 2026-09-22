@@ -15,7 +15,7 @@ use std::net::Shutdown;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -113,11 +113,30 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// This binary's [`pragma_protocol::executable_build_id`], advertised in every
+/// hello so the desktop can tell when an update shipped a different server.
+static BUILD_ID: OnceLock<Option<String>> = OnceLock::new();
+
+/// Hashes the executable once, at start-up.
+///
+/// It must be now and not on first use: a desktop update replaces this file
+/// while the process keeps running, and hashing the path later would report the
+/// *new* binary's identity from the old process — the one lie that would stop
+/// the app from ever replacing it.
+fn record_build_id() {
+    let build_id = std::env::current_exe()
+        .and_then(|path| pragma_protocol::executable_build_id(&path))
+        .map_err(|error| eprintln!("could not hash the server executable: {error}"))
+        .ok();
+    let _ = BUILD_ID.set(build_id);
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = server_paths();
     if should_relay() {
         return relay_stdio(&paths.socket);
     }
+    record_build_id();
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
     // Before anything opens an fd, and before any session shell is spawned:
@@ -216,6 +235,7 @@ fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<C
     if let Ok(mut writer_guard) = writer.lock() {
         let hello = ServerFrame::Hello(HelloFrame {
             protocol_version: pragma_protocol::PROTOCOL_VERSION.to_string(),
+            build_id: BUILD_ID.get().cloned().flatten(),
         });
         if write_json_frame(&mut *writer_guard, &hello).is_err() {
             return;
@@ -1044,7 +1064,7 @@ struct ServerPaths {
     lock: PathBuf,
     /// Only read on Unix, where `daemonize` redirects the standard streams into
     /// it. On Windows the spawning client opens this same path itself and hands
-    /// it to the new process — see `detach_spawned` in `pragma-client`.
+    /// it to the new process — see `spawn_server` in `pragma-client`.
     #[cfg_attr(not(unix), allow(dead_code))]
     log: PathBuf,
 }

@@ -52,9 +52,12 @@ pub fn connect() -> Result<Server, CliError> {
         .map_err(|e| CliError::config(format!("connect to {path}: {e}")))?;
     let expected = CONSTANTS.daemon.protocol_version.as_str();
     match read_json_frame::<ServerFrame>(&mut stream) {
-        Ok(ServerFrame::Hello(HelloFrame { protocol_version })) if protocol_version == expected => {
-        }
-        Ok(ServerFrame::Hello(HelloFrame { protocol_version })) => {
+        Ok(ServerFrame::Hello(HelloFrame {
+            protocol_version, ..
+        })) if protocol_version == expected => {}
+        Ok(ServerFrame::Hello(HelloFrame {
+            protocol_version, ..
+        })) => {
             return Err(CliError::Config(format!(
                 "server protocol mismatch: expected {expected}, got {protocol_version}"
             )));

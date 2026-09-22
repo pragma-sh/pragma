@@ -27,7 +27,10 @@ Binary frames never decode UTF-8 on the hot path — output is bytes end to end.
 
 ## Handshake and classes
 
-- Server → client: `Hello { protocolVersion }`, first frame on every connection.
+- Server → client: `Hello { protocolVersion, buildId? }`, first frame on every
+  connection. `buildId` is the SHA-256 of the server executable, taken at start-up; it is
+  optional, so older peers interoperate, and the desktop replaces a server whose build is
+  not the one it bundles.
 - Client → server requests carry a `requestId` plus kind and optional context
   (`sessionId`, `worktreeId`, `cwd`, `cols`/`rows`, `data`, `shell`, `rpc`,
   `subscription`, `control`, `controlResult`).

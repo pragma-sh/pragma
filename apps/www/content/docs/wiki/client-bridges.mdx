@@ -18,7 +18,7 @@ either a **managed local server** or a bare **socket path** backed by a bridge.
   could duplicate an `agentSessionLaunch` that already succeeded.
 - **Input writer**: a dedicated thread with a bounded queue (256 messages / 4 MiB,
   frames split at 64 KiB) and capped backoff, so a saturated PTY never blocks callers.
-- Server bootstrap: `connect_with_spawn` / `connect_compatible` (Hello version probe),
+- Server bootstrap: `connect_with_spawn` / `connect_compatible` (Hello protocol + build-id probe),
   `kill_stale_server` (verified-pid process-tree kill), `spawn_server` (channel + data
   dir + resource dir env; logs to `server.log`), `restart()`, `read_log()`,
   `server_protocol_version()`.

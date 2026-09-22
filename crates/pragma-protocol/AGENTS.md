@@ -21,6 +21,16 @@ Terminal event streams start with JSON `EventFrame::Replay { sessionId, cursor, 
 clients send their last accepted cursor on `Attach`. `reset` means retained scrollback cannot cover
 the requested cursor. Protocol version 21 introduced this contract without changing binary layout.
 
+## Hello
+
+`HelloFrame { protocolVersion, buildId? }` is the first frame on every server
+connection. `buildId` is `executable_build_id` — the SHA-256 of the server binary,
+hashed **at start-up** (hashing later would read the file an update already replaced
+and report the new binary from the old process). It is optional on the wire, so adding
+it did not bump the protocol: older servers omit it and older clients ignore it. The
+desktop uses it to replace a server the protocol check alone would keep (see
+`hello_is_current` in `pragma-client`).
+
 ## Instance channel helpers
 
 `pragma_protocol::dev_channel(workspace_root)` — deterministic hash of the absolute

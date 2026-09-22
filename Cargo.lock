@@ -5972,7 +5972,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-bench"
-version = "0.0.1"
+version = "0.0.0"
 dependencies = [
  "chrono",
  "clap",
@@ -6089,6 +6089,7 @@ dependencies = [
  "rlimit",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.19",
 ]
 

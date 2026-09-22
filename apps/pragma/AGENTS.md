@@ -565,8 +565,21 @@ console for `plugin SDK bridge: gateway unavailable, retrying`.
 `updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default
 to `http://localhost:3000/api/updates`; production uses `https://pragma-app.sh/api/updates`.
 `InstallUpdateButton` sits above the project switcher when a shipped-into-the-app
-component is behind. Reload writes a UI overlay version marker; restart always launches
-the OS installer named by the manifest. Release CI packages `dist/` as a tar archive for
+component is behind. Reload writes a UI overlay version marker; restart installs the
+verified native installer **in place and relaunches** (`install_restart_update` in
+`updates.rs`, OS work in `pragma_platform::install`): macOS stages the `.app` out of the
+read-only, Finder-less mounted DMG next to the bundle the app runs from, then a detached
+helper swaps it in by rename after exit and `open`s it; Windows runs the NSIS setup `/S`
+after exit and relaunches; Linux installs the `.deb`/`.rpm` through `pkexec` before
+quitting and relaunches. The app quits itself ~750ms after returning
+`{ relaunching: true }`; the helper logs to `install.log` beside the downloaded
+installers. When in place is impossible (not a bundle, read-only destination, no
+`pkexec`, prompt cancelled, `.msi`) it falls back to opening the installer and returns
+`fallbackReason`, which the toast shows. Bytes reach the installer only after the sha256
+and minisign checks. The relaunched app replaces the old `pragma-server` only if its
+hello `buildId` differs from the bundled binary's hash (see `crates/pragma-client`).
+Under today's linked release train the protocol version — and so the server binary —
+changes on every desktop release, so in practice every restart update restarts it. Release CI packages `dist/` as a tar archive for
 React-only releases. Rust extracts it under the instance update directory and serves only
 that tree through the private `pragma-ui` protocol; subsequent launches navigate back to
 the installed overlay. A `.pending` marker is removed only after `UpdatesProvider` mounts;

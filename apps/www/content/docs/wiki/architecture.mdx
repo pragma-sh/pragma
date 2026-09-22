@@ -39,8 +39,9 @@ cannot be overwritten.
 
 1. The app resolves its channel, opens its SQLite store.
 2. `PtyClient::connect_with_spawn()` probes the socket: connect, read the `Hello` frame,
-   compare `protocolVersion`.
-3. No server, or a version mismatch → `kill_stale_server()` reads the pid from
+   compare `protocolVersion` and — in a bundled release — `buildId`, the hash of the
+   server binary, against the `pragma-server` the app ships.
+3. No server, or a mismatch (an update installed a different server) → `kill_stale_server()` reads the pid from
    `server.lock`, verifies the process name, and kills the **whole process tree**
    (sidecars, watchers, PTYs, tunnel) — then `spawn_server()` starts a fresh one
    (`--detach`, logs appended to `server.log`).

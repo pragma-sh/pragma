@@ -54,3 +54,9 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# `pragma-server` hashes its own executable at start-up (the hello `buildId`),
+# and a debug server is >100 MB. Unoptimized `sha2` makes that take seconds on
+# every dev start; optimized it is a fraction of one.
+[profile.dev.package.sha2]
+opt-level = 3

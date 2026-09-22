@@ -2,7 +2,8 @@
 //!
 //! The Next.js site owns the check API. This module asks it whether a shipped
 //! component is behind, downloads the named asset, and either records a UI
-//! overlay version (`reload`) or launches the OS installer (`restart`).
+//! overlay version (`reload`) or installs the native build in place and
+//! relaunches (`restart`), falling back to opening the OS installer.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -14,6 +15,7 @@ use std::{collections::HashMap, env};
 use base64::Engine;
 use minisign::{PublicKeyBox, SignatureBox};
 use pragma_constants::CONSTANTS;
+use pragma_platform::install;
 use pragma_protocol::PROD_CHANNEL;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -111,7 +113,19 @@ pub struct ApplyResult {
     pub mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// `restart` only: the update is being installed in place and the app is
+    /// about to quit and relaunch.
+    pub relaunching: bool,
+    /// `restart` only: why the installer was opened instead of installed in place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
+
+/// Appended to by the update helper, beside the downloaded installers.
+const INSTALL_LOG_FILE: &str = "install.log";
+
+/// Long enough for the apply result to reach the UI before the app exits.
+const QUIT_FOR_UPDATE_DELAY: Duration = Duration::from_millis(750);
 
 /// Confirms the newly loaded overlay rendered far enough to mount the app.
 #[tauri::command(async)]
@@ -252,22 +266,87 @@ fn apply_blocking(app: &AppHandle, request: &ApplyRequest) -> AppResult<ApplyRes
             Ok(ApplyResult {
                 mode: "reload".to_string(),
                 url: Some(ui_overlay_url()),
+                relaunching: false,
+                fallback_reason: None,
             })
         }
         "restart" => {
+            // Only bytes that passed the sha256 and minisign checks above reach
+            // the disk, and only those are ever handed to an installer.
             let path = installer_path(app, &request.version, &request.asset.url)?;
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
             fs::write(&path, bytes)?;
-            opener::open(&path).map_err(|error| AppError::Update(error.to_string()))?;
-            Ok(ApplyResult {
-                mode: "restart".to_string(),
-                url: None,
-            })
+            install_restart_update(app, &path)
         }
         other => Err(AppError::Update(format!("unknown apply mode: {other}"))),
     }
+}
+
+/// Installs a verified native installer in place and relaunches, or — when
+/// that is impossible here — opens it for the user and says why.
+///
+/// The OS-specific work lives in `pragma_platform::install`. What happens
+/// before this returns runs while the app is still up, so any failure there is
+/// reported; the rest belongs to a detached helper that waits for this process
+/// to exit. After relaunch, `pragma-client` replaces the old `pragma-server`
+/// only if the update shipped a different binary (the hello `buildId`).
+fn install_restart_update(app: &AppHandle, installer: &Path) -> AppResult<ApplyResult> {
+    // Resolve the executable before anything installs: once a Linux package
+    // replaces it, `/proc/self/exe` reads back as `… (deleted)`.
+    let current_exe = pragma_platform::path::canonicalize(env::current_exe()?)?;
+    let scratch = installer.parent().unwrap_or(installer);
+    let log = scratch.join(INSTALL_LOG_FILE);
+    let prepared = install::prepare(installer, &current_exe, scratch, std::process::id(), &log)
+        .and_then(|helper| match install::spawn_helper(&helper) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                install::discard_staged(&helper);
+                Err(install::InstallFallback::Failed {
+                    step: "starting the update helper",
+                    detail: error.to_string(),
+                })
+            }
+        });
+    match prepared {
+        Ok(()) => {
+            quit_for_update(app);
+            Ok(restart_result(None))
+        }
+        Err(reason) => {
+            eprintln!(
+                "update: installing in place is not possible ({reason}); opening the installer"
+            );
+            opener::open(installer).map_err(|error| {
+                AppError::Update(format!(
+                    "could not install the update ({reason}) or open its installer: {error}"
+                ))
+            })?;
+            Ok(restart_result(Some(reason.to_string())))
+        }
+    }
+}
+
+/// The result of a restart update: relaunching, or the installer was opened.
+fn restart_result(fallback_reason: Option<String>) -> ApplyResult {
+    ApplyResult {
+        mode: "restart".to_string(),
+        url: None,
+        relaunching: fallback_reason.is_none(),
+        fallback_reason,
+    }
+}
+
+/// Exits shortly after the command returns, so the UI receives the result and
+/// can say it is relaunching before the window goes away. The helper is
+/// waiting for exactly this exit.
+fn quit_for_update(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_FOR_UPDATE_DELAY);
+        app.exit(0);
+    });
 }
 
 fn validate_checked_offer(runtime: &UpdateRuntime, check: &UpdateCheck) -> AppResult<()> {
@@ -744,10 +823,31 @@ mod tests {
     use minisign::KeyPair;
 
     use super::{
-        linux_package_format_from_os_release, sha256_hex, unpack_ui_archive, update_platform,
-        urlencoding_lite, validate_offer_with_key, verify_asset_signature, UpdateAsset,
-        UpdateRuntime, UpdateVersions,
+        linux_package_format_from_os_release, restart_result, sha256_hex, unpack_ui_archive,
+        update_platform, urlencoding_lite, validate_offer_with_key, verify_asset_signature,
+        UpdateAsset, UpdateRuntime, UpdateVersions,
     };
+
+    #[test]
+    fn restart_result_reports_relaunch_or_fallback() {
+        let relaunching = serde_json::to_value(restart_result(None)).expect("encode");
+        assert_eq!(
+            relaunching,
+            serde_json::json!({ "mode": "restart", "relaunching": true })
+        );
+        let fallback = serde_json::to_value(restart_result(Some(
+            "/Volumes/Pragma is not writable".into(),
+        )))
+        .expect("encode");
+        assert_eq!(
+            fallback,
+            serde_json::json!({
+                "mode": "restart",
+                "relaunching": false,
+                "fallbackReason": "/Volumes/Pragma is not writable",
+            })
+        );
+    }
 
     #[test]
     fn platform_id_has_os_and_arch() {

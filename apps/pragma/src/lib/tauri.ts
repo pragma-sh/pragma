@@ -1649,6 +1649,10 @@ export interface UpdateCheck {
 export interface UpdateApplyResult {
   mode: "reload" | "restart";
   url?: string;
+  /** Restart only: installing in place; the app quits and relaunches itself. */
+  relaunching: boolean;
+  /** Restart only: why the installer was opened instead of installed in place. */
+  fallbackReason?: string;
 }
 
 /** Runtime identity used to poll and display Settings → Updates. */
@@ -1661,7 +1665,7 @@ export function checkForUpdate(checkUrl?: string | null): Promise<UpdateCheck> {
   return invoke<UpdateCheck>("check_for_update", { checkUrl: checkUrl ?? null });
 }
 
-/** Downloads the offer and applies reload (overlay) or restart (OS installer). */
+/** Downloads the offer and applies reload (overlay) or restart (install in place + relaunch). */
 export function applyUpdate(request: {
   apply: "reload" | "restart";
   version: string;

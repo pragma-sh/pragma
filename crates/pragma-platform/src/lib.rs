@@ -6,8 +6,10 @@
 //! so a platform gap is a missing implementation in one crate rather than a
 //! guarantee that silently evaporates somewhere in the tree.
 //!
-//! Six seams live here:
+//! Seven seams live here:
 //!
+//! - [`install`] — replacing the installed desktop app with a downloaded build
+//!   and relaunching it.
 //! - [`ipc`] — the local socket the server binds and clients connect to.
 //! - [`path`] — canonical paths external programs can read back.
 //! - [`perms`] — owner-only files and directories.
@@ -16,6 +18,7 @@
 //! - [`shell`] — resolving the interactive shell a PTY should launch.
 //! - [`wsl`] — enumerating the WSL distributions a machine has installed.
 
+pub mod install;
 pub mod ipc;
 pub mod path;
 pub mod perms;

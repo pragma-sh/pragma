@@ -124,8 +124,13 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
         window.location.replace(result.url);
         return;
       }
-      toast.success(
-        "Installer opened. Finish it, then relaunch Pragma.",
+      if (result.relaunching) {
+        // The app quits within a second; the helper installs and relaunches it.
+        toast.success("Installing update. Pragma will relaunch…");
+        return;
+      }
+      toast.warning(
+        `Installer opened (${result.fallbackReason ?? "cannot install in place"}). Finish it, then relaunch Pragma.`,
         changelogAction(current.changelogUrl),
       );
       setRestartOpen(false);

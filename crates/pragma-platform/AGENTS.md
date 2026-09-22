@@ -14,7 +14,7 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The six seams
+## The seven seams
 
 | Module    | Unix                                 | Windows                                     |
 | --------- | ------------------------------------ | ------------------------------------------- |
@@ -24,6 +24,7 @@ target, return an `Err` that says so. Do not no-op.
 | `process` | `sysinfo`, `kill`, `pkill`, `ps`     | `sysinfo`, `taskkill`, `tasklist`           |
 | `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`      |
 | `wsl`     | no distributions, ever               | parse `wsl.exe --list --verbose`            |
+| `install` | `hdiutil`/`ditto` swap; `pkexec` pkg | NSIS `-setup.exe /S` via PowerShell helper  |
 
 ### `path` — a canonical path git can read back
 
@@ -53,10 +54,11 @@ exported for spawners that cannot take a `std::process::Command` (tokio's has it
 persistent `sysinfo::System` and refreshes only process identity metadata, so the two-second
 open-port cadence does not spawn `ps` or PowerShell.
 
-This is _not_ the same as the detach flags in `pragma-client`'s server spawn
-(`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`), which additionally cut
-the child loose from this process's console and process group. A short-lived query must
-not do that.
+This is _not_ the same as `process::detach` (`CREATE_NEW_PROCESS_GROUP |
+CREATE_NO_WINDOW`), used for children that must outlive the app — the server spawn in
+`pragma-client` and the update helper in `install`. That additionally cuts the child loose
+from this process's process group. A short-lived query must not do that, and
+`DETACHED_PROCESS` must never be added (it makes Windows ignore `CREATE_NO_WINDOW`).
 
 ### `ipc` — why `AF_UNIX` and not named pipes
 
@@ -127,6 +129,34 @@ has installed: an SSH project's terminals run on the remote machine, so a local 
 hides that host's distributions and offers local ones it cannot launch. The parser is
 plain string handling and the module compiles everywhere, reporting nothing where
 `wsl.exe` is absent, so CI on Linux and macOS exercises it too.
+
+### `install` — replacing the running app with a downloaded build
+
+A restart update is finished by a detached helper that waits for the app's pid to exit,
+because a running app cannot reliably replace and relaunch itself. Which path runs is
+chosen by the **installer file** (`InstallerKind::from_path`), not by `cfg` — the update
+check already picked this platform's asset — so every platform's plan is unit-tested on
+every platform through the `Host` trait:
+
+- **`.dmg` (macOS):** `hdiutil attach -nobrowse -readonly` into a scratch mount point,
+  `ditto` the `.app` to a hidden sibling of the bundle the app actually runs from
+  (`app_bundle_for_executable`, never a hard-coded `/Applications`), detach. That happens
+  _before_ quitting so a failure is reported. After exit the helper renames old → `.previous`,
+  staged → bundle (restoring on failure), and relaunches with `open`. Rename, not an
+  in-place overwrite: overwriting a running signed Mach-O invalidates its code pages, and
+  the old `pragma-server` is still running from that bundle.
+- **`.exe` (Windows NSIS):** after exit, PowerShell runs the setup with `/S`; the
+  `installer-hooks.nsh` hooks stop the sidecars. The MSI is never installed this way.
+- **`.deb`/`.rpm` (Linux):** `pkexec apt-get install -y` / `dnf install -y` / `rpm -U`
+  runs _before_ quitting (package managers replace by rename), so exit 126/127 — a
+  dismissed or refused prompt — is reported as `Cancelled`. The helper only relaunches.
+
+Anything that rules the in-place path out (`.msi`/`.AppImage`, not running from a bundle,
+a read-only destination such as a mounted image or App Translocation, a missing `pkexec`)
+is an `InstallFallback` and the caller opens the installer instead. Helper scripts take
+every path through environment variables, never interpolation, so nothing needs quoting.
+`tests/macos_install_fixture.rs` runs the real macOS path against throwaway bundles
+(`--ignored`); the POSIX helper's swap and restore are unit-tested on every Unix.
 
 ## Adding a seam
 

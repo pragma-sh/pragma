@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub mod limits;
@@ -389,6 +390,35 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct HelloFrame {
     /// Exact `SemVer` of `pragma-protocol` this process speaks.
     pub protocol_version: String,
+    /// [`executable_build_id`] of the server binary, taken when it started.
+    ///
+    /// Optional on the wire so older servers (which omit it) and older clients
+    /// (which ignore it) keep interoperating. The desktop compares it with the
+    /// `pragma-server` it bundles: a desktop update can ship a new server under
+    /// an unchanged protocol, and only this field tells the two apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_id: Option<String>,
+}
+
+/// Content identity of an executable: the lowercase hex SHA-256 of its bytes.
+///
+/// A version string cannot answer "is this the same server binary": every
+/// desktop-shipped crate moves in one linked release version, so the number
+/// changes on releases that did not touch the server. Hashing the file changes
+/// only when the binary does. Both ends call this one function so they agree
+/// on the algorithm.
+pub fn executable_build_id(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        }))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -522,10 +552,10 @@ fn write_session_data_frame(
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, read_json_frame, write_input_frame, write_json_frame, write_output_frame,
-        AgentAnswer, AgentDecision, AgentStatus, ControlEnvelope, ControlMethod, ControlRequest,
-        ControlResult, EventFrame, Frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
-        ServerFrame, PROTOCOL_VERSION,
+        executable_build_id, read_frame, read_json_frame, write_input_frame, write_json_frame,
+        write_output_frame, AgentAnswer, AgentDecision, AgentStatus, ControlEnvelope,
+        ControlMethod, ControlRequest, ControlResult, EventFrame, Frame, HelloFrame, ProtocolError,
+        RequestFrame, RequestKind, ServerFrame, PROTOCOL_VERSION,
     };
     use pragma_constants::CONSTANTS;
 
@@ -665,6 +695,7 @@ mod tests {
     fn server_frame_is_tagged() {
         let frame = ServerFrame::Hello(HelloFrame {
             protocol_version: "0.0.0".to_string(),
+            build_id: None,
         });
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write hello");
@@ -679,6 +710,38 @@ mod tests {
                 panic!("expected hello")
             }
         }
+    }
+
+    #[test]
+    fn hello_build_id_is_optional_on_the_wire() {
+        // An older server's hello has no `buildId`; it must still decode.
+        let legacy: HelloFrame =
+            serde_json::from_str(r#"{"protocolVersion":"1.0.0"}"#).expect("legacy hello");
+        assert_eq!(legacy.build_id, None);
+        let current = HelloFrame {
+            protocol_version: "1.0.0".to_string(),
+            build_id: Some("abc".to_string()),
+        };
+        let json = serde_json::to_string(&current).expect("encode hello");
+        assert_eq!(json, r#"{"protocolVersion":"1.0.0","buildId":"abc"}"#);
+    }
+
+    #[test]
+    fn executable_build_id_is_the_file_sha256() {
+        let dir = std::env::temp_dir().join(format!("pragma-build-id-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("bin");
+        std::fs::write(&path, b"").expect("write empty");
+        assert_eq!(
+            executable_build_id(&path).expect("hash"),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        std::fs::write(&path, b"changed").expect("rewrite");
+        assert_ne!(
+            executable_build_id(&path).expect("hash"),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

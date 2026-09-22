@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -38,10 +38,10 @@ use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, ShellProfile, CONST
 use pragma_platform::ipc::{self, LocalStream};
 use pragma_platform::process;
 use pragma_protocol::{
-    read_json_frame, write_input_frame, write_json_frame, AgentAnswer, AgentDecision, AgentInput,
-    AgentInterrupt, AgentMessage, AgentReportPayload, ControlRequest, ProtocolEventKind,
-    RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame, SubscriptionRequest,
-    WorkspaceSnapshot,
+    executable_build_id, read_json_frame, write_input_frame, write_json_frame, AgentAnswer,
+    AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload, ControlRequest,
+    HelloFrame, ProtocolEventKind, RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame,
+    SubscriptionRequest, WorkspaceSnapshot,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -719,9 +719,11 @@ impl PragmaClient {
         };
         configure_stream(&stream)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        let expected = CONSTANTS.daemon.protocol_version.as_str();
+        let expected_build = self.expected_build_id();
         match read_json_frame::<ServerFrame>(&mut stream) {
-            Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {
+            Ok(ServerFrame::Hello(hello))
+                if hello_is_current(&hello, &CONSTANTS.daemon.protocol_version, expected_build) =>
+            {
                 configure_stream(&stream)?;
                 Ok(Some(stream))
             }
@@ -729,6 +731,19 @@ impl PragmaClient {
                 self.kill_stale_server();
                 Ok(None)
             }
+        }
+    }
+
+    /// The build id a managed server must advertise to be kept, if one applies.
+    ///
+    /// Only a bundled release has a server binary of its own to compare with. A
+    /// debug build runs the server through `cargo run`, rebuilt at will, and a
+    /// socket endpoint is someone else's server to manage — both stay on the
+    /// protocol check alone.
+    fn expected_build_id(&self) -> Option<&'static str> {
+        match &self.endpoint {
+            ClientEndpoint::ManagedLocal(config) if !config.debug => bundled_server_build_id(),
+            ClientEndpoint::ManagedLocal(_) | ClientEndpoint::Socket(_) => None,
         }
     }
 
@@ -798,7 +813,7 @@ impl PragmaClient {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
-        detach_spawned(&mut command);
+        process::detach(&mut command);
         let mut child = command.spawn()?;
         thread::spawn(move || {
             let _ = child.wait();
@@ -807,42 +822,29 @@ impl PragmaClient {
     }
 }
 
-/// Detaches a server process from this one, where the platform needs it.
+/// Whether a server's hello shows it is the one this client should talk to.
 ///
-/// On Unix the server detaches itself after start-up (`daemonize`), so there is
-/// nothing to do here. Windows has no `fork`, so detaching has to happen at
-/// creation time instead:
-///
-/// - `CREATE_NO_WINDOW` gives the child its own console that is never displayed.
-///   That keeps it off *this* process's console — so closing the app's console
-///   delivers no close event — while still leaving it *a* console to inherit
-///   down the chain.
-/// - `CREATE_NEW_PROCESS_GROUP` stops a Ctrl+C in the launching console from
-///   being broadcast to the server.
-///
-/// **`DETACHED_PROCESS` must not be added back.** Win32 documents
-/// `CREATE_NO_WINDOW` as *ignored* when combined with `DETACHED_PROCESS` (or
-/// `CREATE_NEW_CONSOLE`), so the pair left the child with **no** console at all
-/// — and a console grandchild spawned from a consoleless parent gets a brand-new
-/// *visible* one. In a debug build the server and gateway are started via
-/// `cargo run`, so every `cargo`, `rustc`, and `pragma-server.exe` in that chain
-/// popped a console window: the "command prompts launching at random" during
-/// `bun run dev`. The flags below are what the old doc comment already claimed
-/// this function did.
-fn detach_spawned(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
+/// The protocol must match exactly. When `expected_build` is known — a bundled
+/// release that could hash its own `pragma-server` — the server must also be
+/// that binary: a desktop update can replace the server without touching the
+/// protocol, and the still-running old process would otherwise be kept forever.
+/// A server too old to report a build id is, by construction, not the bundled
+/// one, so it is stale too.
+fn hello_is_current(hello: &HelloFrame, protocol: &str, expected_build: Option<&str>) -> bool {
+    hello.protocol_version == protocol
+        && expected_build.is_none_or(|expected| hello.build_id.as_deref() == Some(expected))
+}
 
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-
-        command
-            .creation_flags(CREATE_NEW_PROCESS_GROUP | pragma_platform::process::CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = command;
-    }
+/// Build id of the `pragma-server` shipped beside this binary, hashed once.
+///
+/// Hashed on first use, which is at app start-up: that is the binary the
+/// running app was installed with. `None` when it cannot be read, which falls
+/// back to the protocol check rather than replacing servers blindly.
+fn bundled_server_build_id() -> Option<&'static str> {
+    static BUILD_ID: OnceLock<Option<String>> = OnceLock::new();
+    BUILD_ID
+        .get_or_init(|| executable_build_id(&sidecar_executable("pragma-server")).ok())
+        .as_deref()
 }
 
 /// Resolves the isolation channel for an app product name.
@@ -1440,10 +1442,62 @@ mod tests {
     use std::sync::{mpsc, Arc};
 
     use super::{
-        configure_rpc_stream, configure_stream, instance_data_dir, request_attach,
-        run_input_writer, spawn_wait, ClientError, InputMsg, InputSender, PragmaClient,
-        INPUT_FRAME_DATA_MAX, INPUT_QUEUE_MAX_BYTES,
+        configure_rpc_stream, configure_stream, hello_is_current, instance_data_dir,
+        request_attach, run_input_writer, spawn_wait, ClientError, HelloFrame, InputMsg,
+        InputSender, LocalServerConfig, PragmaClient, INPUT_FRAME_DATA_MAX, INPUT_QUEUE_MAX_BYTES,
     };
+
+    fn hello(protocol: &str, build_id: Option<&str>) -> HelloFrame {
+        HelloFrame {
+            protocol_version: protocol.to_string(),
+            build_id: build_id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn hello_is_current_requires_the_protocol() {
+        assert!(hello_is_current(&hello("1.0.0", None), "1.0.0", None));
+        assert!(!hello_is_current(&hello("0.9.0", None), "1.0.0", None));
+        assert!(!hello_is_current(
+            &hello("0.9.0", Some("a")),
+            "1.0.0",
+            Some("a")
+        ));
+    }
+
+    #[test]
+    fn hello_is_current_replaces_a_different_server_build() {
+        // Same protocol, same binary: keep the server and its sessions.
+        assert!(hello_is_current(
+            &hello("1.0.0", Some("a")),
+            "1.0.0",
+            Some("a")
+        ));
+        // Same protocol, but an update shipped another server binary.
+        assert!(!hello_is_current(
+            &hello("1.0.0", Some("b")),
+            "1.0.0",
+            Some("a")
+        ));
+        // A server from before build ids existed cannot be the bundled one.
+        assert!(!hello_is_current(&hello("1.0.0", None), "1.0.0", Some("a")));
+        // Without a bundled binary to compare with, only the protocol counts.
+        assert!(hello_is_current(&hello("1.0.0", Some("b")), "1.0.0", None));
+    }
+
+    #[test]
+    fn only_bundled_managed_servers_check_the_build() {
+        let debug = PragmaClient::new_local(LocalServerConfig::new(
+            "/tmp/app".into(),
+            "dev".to_string(),
+            "/tmp/workspace".into(),
+            true,
+            None,
+        ));
+        assert_eq!(debug.expected_build_id(), None);
+        let socket = PragmaClient::new_socket("/tmp/bridge.sock".into());
+        assert_eq!(socket.expected_build_id(), None);
+    }
 
     fn input_channel(capacity: usize) -> (InputSender, mpsc::Receiver<InputMsg>) {
         let (tx, rx) = mpsc::sync_channel(capacity);

@@ -1,0 +1,38 @@
+---
+title: Updates
+description: How Pragma finds, verifies, and installs new versions, and when an update restarts your terminal sessions.
+---
+
+Pragma checks for a new version in the background (every few minutes and when the window
+regains focus). When one is available, **Install Update** appears above the project
+switcher. Turn the automatic check off, or point it at another update server, under
+Settings → **Other**.
+
+## Two kinds of update
+
+| Kind        | What changes          | What happens when you install it                                                |
+| ----------- | --------------------- | ------------------------------------------------------------------------------- |
+| **Reload**  | Only the interface    | The window reloads in place. Terminals and agents are untouched.                |
+| **Restart** | The app or its server | Pragma quits, installs the new version over the old one, and relaunches itself. |
+
+A restart update asks first, because it can restart the Pragma server that runs your
+terminals: open terminal sessions stop. After relaunching, Pragma replaces the server
+only if the update shipped a different server binary.
+
+## How a restart update installs
+
+| Platform          | What Pragma does                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| macOS             | Mounts the disk image out of sight, copies the new `Pragma.app` over the one you are running (wherever it lives), and reopens it. |
+| Windows           | Runs the installer silently after Pragma quits, then reopens Pragma.                                                              |
+| Linux (deb / rpm) | Asks for your password with the system prompt, installs the package, then reopens Pragma.                                         |
+
+If Pragma cannot install in place, for example because it runs from a read-only
+location such as the mounted disk image, or you cancel the password prompt, it opens the
+installer instead and tells you why. Finish it, then relaunch Pragma. AppImage builds
+are not offered restart updates.
+
+Every download is checked against a SHA-256 digest and a signature from the Pragma
+release key before anything is installed. The helper that finishes the install writes
+what it did to `install.log`, next to the downloaded installers in the app data
+directory.
