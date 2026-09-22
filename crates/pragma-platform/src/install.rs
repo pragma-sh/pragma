@@ -775,22 +775,24 @@ mod tests {
                 "/Users/me/Apps/Pragma.app"
             ])
         );
+        // Paths compare as `Path`, not text: `join` writes `\\` on Windows, where
+        // this macOS plan is tested too, and `Path` treats both separators alike.
         assert_eq!(helper.env_value(ENV_PID), Some("4242".as_ref()));
         assert_eq!(
-            helper.env_value(ENV_LOG),
-            Some("/data/updates/install.log".as_ref())
+            helper.env_value(ENV_LOG).map(Path::new),
+            Some(Path::new("/data/updates/install.log"))
         );
         assert_eq!(
-            helper.env_value(ENV_TARGET),
-            Some("/Users/me/Apps/Pragma.app".as_ref())
+            helper.env_value(ENV_TARGET).map(Path::new),
+            Some(Path::new("/Users/me/Apps/Pragma.app"))
         );
         assert_eq!(
-            helper.env_value(ENV_STAGED),
-            Some("/Users/me/Apps/.Pragma.app.update".as_ref())
+            helper.env_value(ENV_STAGED).map(Path::new),
+            Some(Path::new("/Users/me/Apps/.Pragma.app.update"))
         );
         assert_eq!(
-            helper.env_value(ENV_BACKUP),
-            Some("/Users/me/Apps/.Pragma.app.previous".as_ref())
+            helper.env_value(ENV_BACKUP).map(Path::new),
+            Some(Path::new("/Users/me/Apps/.Pragma.app.previous"))
         );
     }
 
