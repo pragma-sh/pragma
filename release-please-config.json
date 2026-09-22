@@ -179,8 +179,15 @@
       "release-as": "1.0.0"
     },
     "packages/bench": {
-      "release-type": "node",
-      "component": "bench"
+      "release-type": "rust",
+      "component": "bench",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/watcher": {
       "release-type": "node",

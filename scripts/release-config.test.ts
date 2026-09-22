@@ -158,3 +158,23 @@ describe("release-as pins are one-shot", () => {
     expect(pins.size).toBe(1);
   });
 });
+
+describe("the bench crate does not shadow its own component", () => {
+  // `packages/bench` is a Cargo workspace member that depends on desktop crates. The
+  // `cargo-workspace` plugin only honours `rust` candidates, so under any other release
+  // type it force-bumps the crate from its own `Cargo.toml` (`0.0.0` -> `0.0.1`) and
+  // appends a second, stray release entry next to the real one.
+  const bench = config.packages["packages/bench"];
+
+  test("its version is owned by the rust strategy", () => {
+    expect(bench["release-type"]).toBe("rust");
+  });
+
+  test("its package.json follows the crate version", () => {
+    expect(bench["extra-files"]).toContainEqual({
+      type: "json",
+      path: "package.json",
+      jsonpath: "$.version",
+    });
+  });
+});
