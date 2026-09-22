@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/pi-plugin",
-  "version": "0.2.5-alpha.0",
+  "version": "1.0.0",
   "description": "Pi CLI extension that reports agent status to Pragma.",
   "license": "AGPL-3.0-only",
   "files": [
