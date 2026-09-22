@@ -13,6 +13,20 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="#android-with-obtainium"><img src="https://img.shields.io/badge/Get%20it%20on-Obtainium-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Get Pragma Go on Obtainium" /></a>
 </p>
 
+<video src="https://github.com/user-attachments/assets/9cf9e8cd-8afb-4837-a2b0-ecd5a9ff2511" controls width="100%"></video>
+
+<p>
+  <a href="https://pragma-app.sh">Website</a>
+  &nbsp;·&nbsp;
+  <a href="https://pragma-app.sh/docs">Documentation</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/pragma-sh/pragma/releases/latest">Download</a>
+  &nbsp;·&nbsp;
+  <a href="https://pragma-app.sh/plugins">Plugins</a>
+  &nbsp;·&nbsp;
+  <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
+
 <p>
   <a href="https://github.com/pragma-sh/pragma/releases/latest"><img src="https://img.shields.io/github/v/release/pragma-sh/pragma?filter=pragma-v*&style=flat-square&label=release&color=0B7285" alt="Latest release" /></a>
   <a href="https://github.com/pragma-sh/pragma/releases"><img src="https://img.shields.io/github/downloads/pragma-sh/pragma/total?style=flat-square&label=downloads&logo=github&color=0B7285" alt="Total downloads" /></a>
@@ -32,20 +46,6 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="https://v2.tauri.app"><img src="https://img.shields.io/badge/Tauri%20v2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Built with Tauri v2" /></a>
   <img src="https://img.shields.io/badge/Rust-CE422B?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-000000?style=flat-square&logo=bun&logoColor=white" alt="Bun" /></a>
-</p>
-
-<video src="https://github.com/user-attachments/assets/9cf9e8cd-8afb-4837-a2b0-ecd5a9ff2511" controls width="100%"></video>
-
-<p>
-  <a href="https://pragma-app.sh">Website</a>
-  &nbsp;·&nbsp;
-  <a href="https://pragma-app.sh/docs">Documentation</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/pragma-sh/pragma/releases/latest">Download</a>
-  &nbsp;·&nbsp;
-  <a href="https://pragma-app.sh/plugins">Plugins</a>
-  &nbsp;·&nbsp;
-  <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
 </div>
