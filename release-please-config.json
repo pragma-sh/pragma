@@ -47,7 +47,6 @@
     "apps/pragma": {
       "release-type": "node",
       "component": "pragma",
-      "release-as": "1.0.0",
       "extra-files": [
         {
           "type": "json",
@@ -59,7 +58,6 @@
     "apps/pragma/src-tauri": {
       "release-type": "rust",
       "component": "pragma-desktop",
-      "release-as": "1.0.0",
       "skip-github-release": true,
       "skip-changelog": true
     },
@@ -73,43 +71,35 @@
     },
     "crates/pragma-protocol": {
       "release-type": "rust",
-      "component": "pragma-protocol",
-      "release-as": "1.0.0"
+      "component": "pragma-protocol"
     },
     "crates/pragma-server": {
       "release-type": "rust",
-      "component": "pragma-server",
-      "release-as": "1.0.0"
+      "component": "pragma-server"
     },
     "crates/pragma-gateway": {
       "release-type": "rust",
-      "component": "pragma-gateway",
-      "release-as": "1.0.0"
+      "component": "pragma-gateway"
     },
     "crates/pragma-cli": {
       "release-type": "rust",
-      "component": "pragma-cli",
-      "release-as": "1.0.0"
+      "component": "pragma-cli"
     },
     "crates/pragma-client": {
       "release-type": "rust",
-      "component": "pragma-client",
-      "release-as": "1.0.0"
+      "component": "pragma-client"
     },
     "crates/pragma-core": {
       "release-type": "rust",
-      "component": "pragma-core",
-      "release-as": "1.0.0"
+      "component": "pragma-core"
     },
     "crates/pragma-platform": {
       "release-type": "rust",
-      "component": "pragma-platform",
-      "release-as": "1.0.0"
+      "component": "pragma-platform"
     },
     "packages/constants": {
       "release-type": "node",
       "component": "constants",
-      "release-as": "1.0.0",
       "extra-files": [
         {
           "type": "json",
@@ -125,58 +115,47 @@
     },
     "packages/plugin": {
       "release-type": "node",
-      "component": "plugin",
-      "release-as": "1.0.0"
+      "component": "plugin"
     },
     "packages/sdk": {
       "release-type": "node",
-      "component": "sdk",
-      "release-as": "1.0.0"
+      "component": "sdk"
     },
     "packages/scratchpad": {
       "release-type": "node",
-      "component": "scratchpad",
-      "release-as": "1.0.0"
+      "component": "scratchpad"
     },
     "packages/scratchpad-contract": {
       "release-type": "node",
-      "component": "scratchpad-contract",
-      "release-as": "1.0.0"
+      "component": "scratchpad-contract"
     },
     "packages/scratchpad-viewer": {
       "release-type": "node",
-      "component": "scratchpad-viewer",
-      "release-as": "1.0.0"
+      "component": "scratchpad-viewer"
     },
     "packages/automations": {
       "release-type": "node",
-      "component": "automations",
-      "release-as": "1.0.0"
+      "component": "automations"
     },
     "packages/ai-helpers": {
       "release-type": "node",
-      "component": "ai-helpers",
-      "release-as": "1.0.0"
+      "component": "ai-helpers"
     },
     "packages/github-helpers": {
       "release-type": "node",
-      "component": "github-helpers",
-      "release-as": "1.0.0"
+      "component": "github-helpers"
     },
     "packages/sidecar-kit": {
       "release-type": "node",
-      "component": "sidecar-kit",
-      "release-as": "1.0.0"
+      "component": "sidecar-kit"
     },
     "packages/plugins-host": {
       "release-type": "node",
-      "component": "plugins-host",
-      "release-as": "1.0.0"
+      "component": "plugins-host"
     },
     "packages/create-pragma-plugin": {
       "release-type": "node",
-      "component": "create-pragma-plugin",
-      "release-as": "1.0.0"
+      "component": "create-pragma-plugin"
     },
     "packages/bench": {
       "release-type": "rust",
@@ -191,13 +170,11 @@
     },
     "packages/watcher": {
       "release-type": "node",
-      "component": "watcher",
-      "release-as": "1.0.0"
+      "component": "watcher"
     },
     "packages/watcher-kit": {
       "release-type": "node",
-      "component": "watcher-kit",
-      "release-as": "1.0.0"
+      "component": "watcher-kit"
     },
     "packages/opencode-plugin": {
       "release-type": "node",
