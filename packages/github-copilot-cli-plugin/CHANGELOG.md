@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.4-alpha.0](https://github.com/pragma-sh/pragma/compare/github-copilot-cli-plugin-v0.2.3-alpha.0...github-copilot-cli-plugin-v0.2.4-alpha.0) (2026-09-22)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 0.5.0
+    * @pragma-sh/watcher-kit bumped to 0.5.0
+
 ## [0.2.3-alpha.0](https://github.com/pragma-sh/pragma/compare/github-copilot-cli-plugin-v0.2.2-alpha.0...github-copilot-cli-plugin-v0.2.3-alpha.0) (2026-09-21)
 
 
