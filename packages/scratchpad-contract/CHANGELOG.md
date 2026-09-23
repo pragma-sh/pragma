@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/scratchpad-contract-v1.0.0...scratchpad-contract-v1.0.1) (2026-09-23)
+
+
+### Miscellaneous Chores
+
+* **scratchpad-contract:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.0.0 to ^1.0.1
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/scratchpad-contract-v0.6.0...scratchpad-contract-v1.0.0) (2026-09-22)
 
 

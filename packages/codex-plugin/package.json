@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/codex-plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Codex CLI plugin that reports agent status to Pragma via native hooks.",
   "license": "AGPL-3.0-only",
   "repository": {
