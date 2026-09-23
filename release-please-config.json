@@ -62,7 +62,7 @@
       "skip-changelog": true
     },
     "apps/pragma-go": {
-      "release-type": "node",
+      "release-type": "simple",
       "component": "pragma-go"
     },
     "apps/www": {

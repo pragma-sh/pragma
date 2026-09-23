@@ -445,6 +445,9 @@ independently-shipped artifact embeds must stay out of the release train entirel
 `apps/pragma-go` has no `extra-files` (rewriting `expo.version` changes the Expo
 fingerprint and cuts every shipped build off from OTA updates) and `gateway.apiVersion`
 has no writer at all; `scripts/release-config.test.ts` fails if either regresses.
+`apps/pragma-go` is also `release-type: simple` (versioned by its `version.txt`), which
+keeps it out of `node-workspace`: as a `node` package it was released — with Android and
+iOS store builds — every time the desktop group bumped a package it depends on.
 Merging the release PR is also what deploys the website: production Vercel builds are
 gated on a Release Please commit (see `apps/www/AGENTS.md`), so a merge to `main` that is
 not a release only produces previews.

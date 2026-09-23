@@ -20,6 +20,7 @@ const packages: Record<
     component?: string;
     "extra-files"?: ExtraFile[];
     "release-as"?: string;
+    "release-type"?: string;
     "skip-github-release"?: boolean;
   }
 > = config.packages;
@@ -61,6 +62,12 @@ describe("Release Please cannot rewrite the mobile runtime version", () => {
 
   test("the store version is never behind the desktop major", () => {
     expect(goApp.expo.version).toBe("1.0.0");
+  });
+
+  // `node-workspace` releases every `node` package whose workspace dependency moved, so
+  // each desktop release would otherwise cut an empty Pragma Go release and store builds.
+  test("a dependency bump alone never releases the mobile app", () => {
+    expect(packages["apps/pragma-go"]?.["release-type"]).toBe("simple");
   });
 });
 
