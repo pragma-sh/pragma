@@ -32,12 +32,15 @@ catalog and live watcher behavior.
 **Pragma no longer auto-installs the opencode plugin** — the old
 `src-tauri/src/opencode_plugin.rs` installer was removed. Local development registers built
 `packages/opencode-plugin/dist/index.mjs` absolute path in `plugin` array of
-`~/.config/opencode/opencode.json`; official npm install registers package name.
+`~/.config/opencode/opencode.json`; official npm install registers the pinned
+`@pragma-sh/opencode-plugin@<version>` (`scripts/install.mjs`).
 
 **opencode does NOT auto-load plugins from any directory** (verified against opencode
 1.17.8). Only a `plugin`-array entry loads a plugin. A **file path / `file://` URL**
-entry loads fine and is **not** npm-resolved. Bare `@pragma-sh/opencode-plugin` is npm-resolved
-and is what official installer registers.
+entry loads fine and is **not** npm-resolved. A package entry is npm-resolved **once**: opencode
+caches a bare name as `<name>@latest` under `~/.cache/opencode/packages/` and never re-resolves
+it, so an unpinned entry stays on the first version it fetched forever. The installer therefore
+pins its own version and replaces any earlier `@pragma-sh/opencode-plugin[@…]` entry.
 
 ## State machine (hooks.ts)
 
