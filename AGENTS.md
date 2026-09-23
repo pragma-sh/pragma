@@ -435,7 +435,16 @@ entry for it would be a second writer). `scripts/release-config.test.ts` guards 
 three. **A deliberate version jump (the 1.0.0 cut) is a `release-as` on every desktop-group
 package, and it is one-shot:** `release-as` pins every later release too, so delete it
 in the change after that version ships — the same test fails while a pin equals the
-manifest version, and fails if the group is pinned unevenly. Verify a config change without merging anything:
+manifest version, and fails if the group is pinned unevenly. **Never put a `Release-As:`
+footer in a commit message** — the 1.0.0 cut did, and it resurfaced a release later.
+`pragma-desktop` has no GitHub release to anchor on (`skip-github-release`), so Release
+Please gives it every commit back to the _oldest_ release it is looking for (`www` and
+`pragma-go` rarely release), and a footer found there pins the whole linked group: the
+release PR after 1.0.1 proposed downgrading everything to 1.0.0. The top-level
+`last-release-sha` (the 1.0.1 release commit) is the floor that keeps those footers out of
+the window; move it forward only after checking `git log <old>..<new> -- apps/www
+apps/pragma-go` has no unreleased `feat`/`fix`, since commits below it are invisible to
+every component. Verify a config change without merging anything:
 `npx release-please release-pr --token=$(gh auth token) --repo-url=pragma-sh/pragma
 --target-branch=<your pushed branch> --dry-run --trace` — it reads the config from the
 _branch_, never your working tree, so the branch has to be pushed first. Release Please rejects `..` in `extra-files`; shared version fields in

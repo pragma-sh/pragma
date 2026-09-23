@@ -263,5 +263,6 @@
       "component": "dev-test-plugin"
     }
   },
-  "initial-version": "0.1.0"
+  "initial-version": "0.1.0",
+  "last-release-sha": "c38f7cb61123f6cffba057ca54eb7386d6df8bac"
 }
