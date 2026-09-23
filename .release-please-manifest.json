@@ -25,15 +25,15 @@
   "packages/bench": "1.0.1",
   "packages/watcher": "1.0.1",
   "packages/watcher-kit": "1.0.1",
-  "packages/opencode-plugin": "1.0.1",
-  "packages/claude-code-plugin": "1.0.1",
+  "packages/opencode-plugin": "1.0.2",
+  "packages/claude-code-plugin": "1.0.2",
   "packages/cursor-plugin": "1.0.1",
   "packages/codex-plugin": "1.0.1",
   "packages/pi-plugin": "1.0.1",
   "packages/prime-agent-plugin": "1.0.1",
   "packages/grok-plugin": "1.0.1",
   "packages/kimi-plugin": "1.0.1",
-  "packages/junie-plugin": "1.0.1",
+  "packages/junie-plugin": "1.0.2",
   "packages/github-copilot-cli-plugin": "1.0.1",
   "packages/dev-test-plugin": "1.0.1"
 }
