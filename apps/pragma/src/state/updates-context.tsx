@@ -176,7 +176,11 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
             <AlertDialogTitle>{constants.updates.restartWarningTitle}</AlertDialogTitle>
             <AlertDialogDescription>{constants.updates.restartWarningBody}</AlertDialogDescription>
           </AlertDialogHeader>
-          {offer?.notes ? <p className="text-sm text-muted-foreground">{offer.notes}</p> : null}
+          {offer?.notes ? (
+            <p className="max-h-[min(22rem,40vh)] min-h-0 overflow-y-auto pr-1 text-sm break-words whitespace-pre-wrap text-muted-foreground">
+              {offer.notes}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <Button variant="ghost" onClick={() => setRestartOpen(false)}>
               Cancel

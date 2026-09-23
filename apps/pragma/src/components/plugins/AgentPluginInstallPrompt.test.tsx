@@ -16,9 +16,11 @@ const officialPlugin = {
   version: "1.0.0",
   manifest: { name: "OpenCode", agentBinary: "opencode" },
 } as LockedPlugin;
+const loadLockMock = vi.fn();
 
 vi.mock("@/lib/plugin-registry", () => ({
   bundledOfficialPluginLock: () => [officialPlugin],
+  loadOfficialPluginLock: () => loadLockMock(),
   installLockedPlugin: (...args: unknown[]) => installMock(...args),
 }));
 
@@ -54,6 +56,20 @@ describe("AgentPluginInstallPrompt", () => {
     installMock.mockReset().mockResolvedValue(undefined);
     setDismissedMock.mockReset().mockResolvedValue(undefined);
     toastErrorMock.mockReset();
+    loadLockMock.mockReset().mockResolvedValue([officialPlugin]);
+  });
+
+  it("installs the published release instead of the one bundled with this build", async () => {
+    const user = userEvent.setup();
+    const published = { ...officialPlugin, version: "1.0.1" } as LockedPlugin;
+    loadLockMock.mockResolvedValue([published]);
+    render(<AgentPluginInstallPrompt />);
+    await waitFor(() => expect(loadLockMock).toHaveBeenCalled());
+    await runOpenCode();
+
+    await user.click(screen.getByRole("button", { name: "Install plugin" }));
+
+    expect(installMock).toHaveBeenCalledWith(published);
   });
 
   it("installs matching plugin while allowing current command to continue", async () => {

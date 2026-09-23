@@ -11,7 +11,11 @@ import {
   type AgentCommandSubmittedDetail,
   missingAgentPluginForCommand,
 } from "@/lib/agent-plugin-prompt";
-import { bundledOfficialPluginLock, installLockedPlugin } from "@/lib/plugin-registry";
+import {
+  bundledOfficialPluginLock,
+  installLockedPlugin,
+  loadOfficialPluginLock,
+} from "@/lib/plugin-registry";
 import { agentPluginPromptDismissed, setAgentPluginPromptDismissed } from "@/lib/tauri";
 import { useActivePlugins } from "@/plugins/registry";
 import { useWorkspace } from "@/state/workspace-context";
@@ -22,6 +26,20 @@ export function AgentPluginInstallPrompt() {
   const activePlugins = useActivePlugins(selectedProjectId);
   const [dismissed, setDismissed] = useState(true);
   const [plugin, setPlugin] = useState<LockedPlugin | null>(null);
+  // Start from the bundled lock so a command run before the fetch settles still matches,
+  // then switch to the published lock so a shipped build never installs stale releases.
+  const [lock, setLock] = useState<LockedPlugin[]>(bundledOfficialPluginLock);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadOfficialPluginLock().then((published) => {
+      if (!cancelled) setLock(published);
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,16 +58,12 @@ export function AgentPluginInstallPrompt() {
     if (dismissed) return;
     function onCommand(event: Event): void {
       const command = (event as CustomEvent<AgentCommandSubmittedDetail>).detail.command;
-      const match = missingAgentPluginForCommand(
-        command,
-        activePlugins,
-        bundledOfficialPluginLock(),
-      );
+      const match = missingAgentPluginForCommand(command, activePlugins, lock);
       if (match) setPlugin(match);
     }
     window.addEventListener(AGENT_COMMAND_SUBMITTED_EVENT, onCommand);
     return () => window.removeEventListener(AGENT_COMMAND_SUBMITTED_EVENT, onCommand);
-  }, [activePlugins, dismissed]);
+  }, [activePlugins, dismissed, lock]);
 
   function install(): void {
     if (!plugin) return;

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
-import { bundledOfficialPluginLock } from "@/lib/plugin-registry";
+import { loadOfficialPluginLock } from "@/lib/plugin-registry";
 import { availablePluginBinaries } from "@/lib/tauri";
 
 /**
@@ -18,13 +18,16 @@ export function useRecommendedAgentPlugins(): { loaded: boolean; recommended: Lo
 
   useEffect(() => {
     let cancelled = false;
-    const candidates = bundledOfficialPluginLock().filter(
-      (plugin) =>
-        plugin.manifest.categories?.includes("agent-plugin") && plugin.manifest.agentBinary,
-    );
-    const binaries = candidates.flatMap((plugin) => plugin.manifest.agentBinary ?? []);
-    void availablePluginBinaries(binaries)
-      .then((available) => {
+    // The published lock, not the bundled one: a shipped build must recommend current
+    // releases. `loadOfficialPluginLock` falls back to the bundled copy offline.
+    void loadOfficialPluginLock()
+      .then(async (lock) => {
+        const candidates = lock.filter(
+          (plugin) =>
+            plugin.manifest.categories?.includes("agent-plugin") && plugin.manifest.agentBinary,
+        );
+        const binaries = candidates.flatMap((plugin) => plugin.manifest.agentBinary ?? []);
+        const available = await availablePluginBinaries(binaries);
         if (cancelled) return undefined;
         const installed = new Set(available);
         setRecommended(
