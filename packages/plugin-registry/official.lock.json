@@ -4,9 +4,9 @@
   "plugins": [
     {
       "package": "@pragma-sh/claude-code-plugin",
-      "version": "1.0.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.0.1.tgz",
-      "integrity": "sha512-igDvpIbEX8n7jlWIaqclJcSR22ldWdboQ8g/CD0qGQZ3pLQQ0pCixgaLVfsg+5qrQEEvoY7e/ZLVNaNVNIgxqw==",
+      "version": "1.0.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.0.2.tgz",
+      "integrity": "sha512-pKi9rxnZw6j8UwvMYlLCXnQy7xM9sGSf3ASa+DG6we1jVVwEx0i0+TgOKrMtSS8c0EtjX88PwXPk2AVUE+si7w==",
       "manifestSha256": "89f221514d6481b03cd6163078e8a0a3188538960dde16e1d7d260efb6ef2f62",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -129,9 +129,9 @@
     },
     {
       "package": "@pragma-sh/junie-plugin",
-      "version": "1.0.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.0.1.tgz",
-      "integrity": "sha512-GiOZ2Ew0KUVQveTd6SUq6mlrDkQ/zpoKP6HCssMEda3R4wpp4FUeRSamt9wGoqDffXW1U2KZx6616UwPqjCjig==",
+      "version": "1.0.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.0.2.tgz",
+      "integrity": "sha512-PzYHQqQrctZlwV3XQ5P7bKwdrWw720GegE2SCDEljw3L6wkpzPMXJeRlkF2AwzTo6oxzZfuGhhrMbn68LR0gRQ==",
       "manifestSha256": "7bd16c7fe07595ea5fb8d5ed3fcba00bbe65094e551b99be63ddd79728d852f4",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
