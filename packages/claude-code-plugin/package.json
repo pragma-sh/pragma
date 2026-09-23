@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Claude Code plugin that reports agent status to Pragma automatically via shell hooks.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/claude-code-plugin"
+  },
   "files": [
     ".claude-plugin",
     "assets",

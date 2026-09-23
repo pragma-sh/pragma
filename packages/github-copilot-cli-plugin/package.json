@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "GitHub Copilot CLI plugin that reports agent status and usage to Pragma.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/github-copilot-cli-plugin"
+  },
   "files": [
     "assets",
     "dist",

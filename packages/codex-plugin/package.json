@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Codex CLI plugin that reports agent status to Pragma via native hooks.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/codex-plugin"
+  },
   "files": [
     ".agents",
     ".codex-plugin",

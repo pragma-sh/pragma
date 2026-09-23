@@ -208,6 +208,18 @@ describe("every official plugin release reaches npm", () => {
     );
   });
 
+  // npm rejects a provenance publish (E422) unless `repository.url` names the repo
+  // the signing workflow ran in.
+  test("each one names this repository, as provenance requires", () => {
+    const unlinked = directories.filter((directory) => {
+      const pkg = JSON.parse(read(join(directory, "package.json"))) as {
+        repository?: { url?: string };
+      };
+      return pkg.repository?.url !== "git+https://github.com/pragma-sh/pragma.git";
+    });
+    expect(unlinked).toEqual([]);
+  });
+
   test("release.yml dispatches plugins.yml for them", () => {
     expect(read(".github/workflows/release.yml")).toContain("gh workflow run plugins.yml");
   });
