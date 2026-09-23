@@ -25,4 +25,5 @@ tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+filetime = "0.2"
 tempfile = "3"

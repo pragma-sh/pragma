@@ -925,10 +925,16 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let contents = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"png");
         let stale = save_dropped_file(temp.path(), "stale.png", &contents).expect("save");
-        std::thread::sleep(Duration::from_millis(150));
         let fresh = save_dropped_file(temp.path(), "fresh.png", &contents).expect("save");
+        // Backdate the stale drop's directory rather than sleeping: a real
+        // sleep races a slow runner, which can age the fresh drop past a
+        // small `max_age` before the sweep runs.
+        let stale_dir = std::path::Path::new(&stale).parent().expect("drop dir");
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_hours(1);
+        filetime::set_file_mtime(stale_dir, filetime::FileTime::from_system_time(an_hour_ago))
+            .expect("backdate");
 
-        sweep_dropped_files(temp.path(), Duration::from_millis(75));
+        sweep_dropped_files(temp.path(), Duration::from_mins(30));
 
         assert!(!std::path::Path::new(&stale).exists());
         assert!(std::path::Path::new(&fresh).exists());
