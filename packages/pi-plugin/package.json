@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Pi CLI extension that reports agent status to Pragma.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/pi-plugin"
+  },
   "files": [
     "assets",
     "dist",

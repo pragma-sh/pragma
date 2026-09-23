@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Prime Agent extension and Pragma launcher built on the shared Pi integration.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/prime-agent-plugin"
+  },
   "files": [
     "assets",
     "dist",
