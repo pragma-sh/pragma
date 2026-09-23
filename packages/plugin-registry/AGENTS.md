@@ -66,4 +66,5 @@ published release breaks installs of it. `lock:local` packs workspace bytes — 
 integrity hashes describe locally-packed tarballs, never the npm releases — so its output
 must not be committed. The supported path is a release: merging the release PR publishes each
 changed package through `plugins.yml`, whose `refresh-lock` regenerates the lock from npm;
-then merge its PR.
+then merge its PR. That PR is opened with `RELEASE_PLEASE_TOKEN`: the org forbids
+`GITHUB_TOKEN` from creating pull requests, and one it opened would run no CI.
