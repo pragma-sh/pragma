@@ -70,6 +70,30 @@ describe("install-local", () => {
     expect(sessionStart[0]).toContain(join(PACKAGE_ROOT, "hooks", "report.sh"));
   });
 
+  it("replaces a previous Pragma-managed npm install on upgrade", () => {
+    const previous = join(
+      "/Users/other/.pragma/plugins/npm",
+      "-pragma-sh-junie-plugin-1.0.0-a6fa4e9e-33b7-4515-baf6-6c3e2e5609b2",
+    );
+    const config = install({
+      hooks: {
+        SessionStart: [
+          {
+            hooks: [
+              { type: "command", command: `sh "${previous}/hooks/report.sh" cleared`, timeout: 10 },
+            ],
+          },
+        ],
+      },
+    });
+    const commands = hookCommands(config);
+    expect(commands.some((command) => command.includes(previous))).toBe(false);
+    const sessionStart = (
+      config.hooks as { SessionStart: Array<{ hooks?: Array<{ command?: string }> }> }
+    ).SessionStart;
+    expect(sessionStart).toHaveLength(1);
+  });
+
   it("preserves hooks contributed by other tools", () => {
     const foreign = "sh /some/other/tool/hook.sh event";
     const config = install({
