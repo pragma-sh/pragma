@@ -98,6 +98,10 @@ jobs:
       - run: bun run --filter @pragma-sh/plugin-registry lock
       - run: bun run --filter @pragma-sh/plugin-registry validate
       - uses: peter-evans/create-pull-request@v7
+        # The action pushes with git, which would run Husky's pre-push hook: a full
+        # typecheck + `cargo check` that needs GTK headers this runner lacks.
+        env:
+          HUSKY: "0"
         with:
           add-paths: packages/plugin-registry/official.lock.json
           branch: automation/official-plugin-lock

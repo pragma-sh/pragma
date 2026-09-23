@@ -23,6 +23,16 @@ interface PackResult {
   version: string;
 }
 
+/**
+ * `npm pack --json` prints an array up to npm 11 and, from npm 12, an object keyed by
+ * package name. Either way this lock packs exactly one package per call.
+ */
+function firstPackResult(
+  output: PackResult[] | Record<string, PackResult>,
+): PackResult | undefined {
+  return Array.isArray(output) ? output[0] : Object.values(output)[0];
+}
+
 const local = process.argv.includes("--local");
 const distTag = process.env.PRAGMA_PLUGIN_DIST_TAG ?? "latest";
 const official = await readJson<OfficialFile>(join(packageRoot, "official.json"));
@@ -47,7 +57,7 @@ try {
     );
     if (packed.exitCode !== 0)
       throw new Error(`${packageName}: npm pack failed: ${packed.stderr.toString()}`);
-    const result = (JSON.parse(packed.stdout.toString()) as PackResult[])[0];
+    const result = firstPackResult(JSON.parse(packed.stdout.toString()));
     if (!result?.integrity || !result.filename || !result.version)
       throw new Error(`${packageName}: npm pack returned incomplete metadata`);
 

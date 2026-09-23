@@ -198,7 +198,10 @@ bun run --filter @pragma-sh/codex-plugin install:local
 
 Installer registers this package as local Codex marketplace and installs
 `pragma-codex@pragma`. Restart Codex, run `/hooks`, and trust Pragma hook definitions. Re-run
-install and trust again after `hooks/hooks.json` changes.
+install and trust again after `hooks/hooks.json` changes. The installer removes any existing
+`pragma` marketplace first: Codex rejects re-adding a name from a different source ("already
+added from a different source"), and every desktop upgrade installs into a new versioned
+directory, so without that step no upgrade could succeed.
 
 For local verification, register this package's absolute path in global
 `~/.pragma/config.json`. An absolute path ensures desktop plugin discovery and the host
