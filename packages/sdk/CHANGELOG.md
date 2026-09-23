@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/sdk-v1.0.0...sdk-v1.0.1) (2026-09-23)
+
+
+### Miscellaneous Chores
+
+* **sdk:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/constants bumped to 1.0.1
+    * @pragma-sh/scratchpad-contract bumped to 1.0.1
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/sdk-v0.6.0...sdk-v1.0.0) (2026-09-22)
 
 

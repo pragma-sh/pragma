@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.0.0...ai-helpers-v1.0.1) (2026-09-23)
+
+
+### Miscellaneous Chores
+
+* **ai-helpers:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sidecar-kit bumped to 1.0.1
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/ai-helpers-v0.6.0...ai-helpers-v1.0.0) (2026-09-22)
 
 

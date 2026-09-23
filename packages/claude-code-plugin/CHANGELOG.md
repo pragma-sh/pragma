@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.0.0...claude-code-plugin-v1.0.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **plugins:** declare the repository so provenance publishes are accepted ([f41219d](https://github.com/pragma-sh/pragma/commit/f41219dc2556f07a73312945e4cb4e46ed79ede1))
+* **plugins:** declare the repository so provenance publishes are accepted ([50f12db](https://github.com/pragma-sh/pragma/commit/50f12dbe228f57bc13b90ee92edfe61163ed8217))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.0.1
+    * @pragma-sh/watcher-kit bumped to 1.0.1
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v0.2.5-alpha.0...claude-code-plugin-v1.0.0) (2026-09-22)
 
 

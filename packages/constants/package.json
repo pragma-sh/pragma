@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/constants",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared constants for the Pragma frontend and Tauri backend. Source of truth: schema.json + values.json.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",

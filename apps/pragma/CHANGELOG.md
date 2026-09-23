@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.0.0...pragma-v1.0.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **pragma:** offer published plugin releases and scroll long update notes ([e61e176](https://github.com/pragma-sh/pragma/commit/e61e176d22d995f8a1800eae522c6e72e67d86a2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.0.1
+    * @pragma-sh/plugin bumped to 1.0.1
+    * @pragma-sh/scratchpad bumped to 1.0.1
+    * @pragma-sh/scratchpad-viewer bumped to 1.0.1
+    * @pragma-sh/sdk bumped to 1.0.1
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.6.0...pragma-v1.0.0) (2026-09-22)
 
 

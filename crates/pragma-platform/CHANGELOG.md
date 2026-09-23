@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.0.0...pragma-platform-v1.0.1) (2026-09-23)
+
+
+### Miscellaneous Chores
+
+* **pragma-platform:** Synchronize desktop versions
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/pragma-platform-v0.6.0...pragma-platform-v1.0.0) (2026-09-22)
 
 
