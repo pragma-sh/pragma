@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import goApp from "../apps/pragma-go/app.json";
 import config from "../release-please-config.json";
 import manifest from "../.release-please-manifest.json";
+import official from "../packages/plugin-registry/official.json";
 
 interface ExtraFile {
   type: string;
@@ -176,5 +177,38 @@ describe("the bench crate does not shadow its own component", () => {
       path: "package.json",
       jsonpath: "$.version",
     });
+  });
+});
+
+describe("every official plugin release reaches npm", () => {
+  // `publish-plugins` in release.yml derives each plugin's Release Please path from
+  // its npm name and dispatches `plugins.yml` with that name as a choice input, so a
+  // plugin missing from either list is tagged on every release and never published.
+  const directories = official.packages.map(
+    (name) => `packages/${name.replace("@pragma-sh/", "")}`,
+  );
+
+  test("each one is a Release Please package at the path its name implies", () => {
+    expect(directories.filter((directory) => !(directory in packages))).toEqual([]);
+  });
+
+  test("each one stays out of the linked desktop group", () => {
+    const components = directories.map((directory) => packages[directory]?.component);
+    expect(
+      components.filter((component) => linkedVersions?.components?.includes(component ?? "")),
+    ).toEqual([]);
+  });
+
+  test("plugins.yml offers each one as a package to publish", () => {
+    const workflow = Bun.YAML.parse(read(".github/workflows/plugins.yml")) as {
+      on: { workflow_dispatch: { inputs: { package: { options: string[] } } } };
+    };
+    expect(workflow.on.workflow_dispatch.inputs.package.options.toSorted()).toEqual(
+      official.packages.toSorted(),
+    );
+  });
+
+  test("release.yml dispatches plugins.yml for them", () => {
+    expect(read(".github/workflows/release.yml")).toContain("gh workflow run plugins.yml");
   });
 });

@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Publish one alpha or refresh official lock
+        description: Publish one plugin or refresh official lock
         required: true
         type: choice
         options: [publish, refresh-lock]
       dist-tag:
         description: >-
-          npm dist-tag. `alpha` leaves `latest` where it is, so a prerelease never
-          becomes the default install; `latest` is what a stable release needs.
+          npm dist-tag. `latest` is what a stable release needs; `alpha` leaves
+          `latest` where it is, so a prerelease never becomes the default install.
         required: true
-        default: alpha
+        default: latest
         type: choice
-        options: [alpha, latest]
+        options: [latest, alpha]
       package:
         description: npm package to publish
         required: false
@@ -31,6 +31,12 @@ on:
           - "@pragma-sh/opencode-plugin"
           - "@pragma-sh/pi-plugin"
           - "@pragma-sh/prime-agent-plugin"
+      ref:
+        description: >-
+          Git ref to publish from — the plugin's release tag when `release.yml`
+          dispatches this. Empty publishes the ref the workflow was run on.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -45,6 +51,8 @@ jobs:
       published: ${{ steps.package.outputs.name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -71,6 +79,13 @@ jobs:
     if: always() && (inputs.operation == 'refresh-lock' || needs.publish.result == 'success')
     needs: [publish]
     runs-on: ubuntu-latest
+    # A release dispatches one run per plugin, all at once, and every one ends
+    # here writing the same branch. GitHub keeps one run going and only the
+    # newest pending one, cancelling the rest — which is exactly right: the lock
+    # resolves every package from npm, so the last refresh sees every publish.
+    concurrency:
+      group: official-plugin-lock
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

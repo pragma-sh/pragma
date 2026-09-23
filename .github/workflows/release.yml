@@ -26,6 +26,9 @@ jobs:
       go-tag: ${{ steps.release.outputs['apps/pragma-go--tag_name'] }}
       go-version: ${{ steps.release.outputs['apps/pragma-go--version'] }}
       releases-created: ${{ steps.release.outputs.releases_created }}
+      # Every path-keyed output (`packages/<dir>--release_created`, `--tag_name`),
+      # so `publish-plugins` can find whichever plugins this run released.
+      release-outputs: ${{ toJSON(steps.release.outputs) }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v4
@@ -304,6 +307,38 @@ jobs:
           id="$(jq -r '.[0].id' "$RUNNER_TEMP/build.json")"
           test -n "$id" && test "$id" != null
           eas submit --platform ios --profile production --id "$id" --non-interactive
+
+  # The ten official agent plugins are their own Release Please components, so a
+  # plugin release cuts a tag here but never reaches npm on its own. npm trusts
+  # `plugins.yml`, not this file, for those packages, so this job does not
+  # publish: it dispatches that workflow once per released plugin, pinned to the
+  # plugin's release tag. `plugins.yml` then publishes it under `latest` and
+  # refreshes `official.lock.json`, which is what the desktop installs from.
+  publish-plugins:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases-created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # A workflow_dispatch is the one event GITHUB_TOKEN may trigger.
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dispatch a publish for each released plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_OUTPUTS: ${{ needs.release-please.outputs.release-outputs }}
+        run: |
+          jq -r '.packages[]' packages/plugin-registry/official.json | while read -r package; do
+            directory="packages/${package#@pragma-sh/}"
+            created="$(jq -r --arg key "$directory--release_created" '.[$key] // ""' <<<"$RELEASE_OUTPUTS")"
+            [ "$created" = true ] || continue
+            tag="$(jq -r --arg key "$directory--tag_name" '.[$key]' <<<"$RELEASE_OUTPUTS")"
+            echo "dispatch $package@$tag"
+            gh workflow run plugins.yml --ref main \
+              -f operation=publish -f dist-tag=latest -f package="$package" -f ref="$tag"
+          done
 
   publish-packages:
     needs: release-please

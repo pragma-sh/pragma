@@ -24,7 +24,7 @@ interface PackResult {
 }
 
 const local = process.argv.includes("--local");
-const distTag = process.env.PRAGMA_PLUGIN_DIST_TAG ?? "alpha";
+const distTag = process.env.PRAGMA_PLUGIN_DIST_TAG ?? "latest";
 const official = await readJson<OfficialFile>(join(packageRoot, "official.json"));
 const temp = await mkdtemp(join(tmpdir(), "pragma-plugin-lock-"));
 
