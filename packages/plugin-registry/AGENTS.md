@@ -29,11 +29,14 @@ wherever it lived: Pragma deletes superseded `~/.pragma/plugins/npm/<name>-<vers
 directories, so matching only the old absolute path leaves hooks pointing at nothing.
 
 The dist-tag is still an explicit input for a manual run (`latest` by default, or `alpha`).
-It matters because `npm publish --tag alpha` does **not** move `latest`. The lock always
-resolves `latest` (`PRAGMA_PLUGIN_DIST_TAG` overrides it locally), so an `alpha` publish never
-becomes what the desktop installs. The ten `refresh-lock` jobs a release fans out share one
-concurrency group: GitHub runs one and keeps only the newest pending, which is the one that
-sees every publish.
+It matters because `npm publish --tag alpha` does **not** move `latest`. The lock
+resolves each plugin to the exact version in its workspace `package.json` on `main` — the
+release that just published — never to a dist-tag, so an `alpha` publish never becomes what
+the desktop installs (`PRAGMA_PLUGIN_DIST_TAG` opts into a tag locally). It must not resolve
+`latest`: npm serves cached package metadata for minutes after a publish, and the 1.0.2 lock
+refresh, run ~2.5 minutes after three publishes, locked two of them at 1.0.1. `npm pack` of a
+version npm does not list yet is retried with backoff. The ten `refresh-lock` jobs a release
+fans out share one concurrency group: GitHub runs one and keeps only the newest pending.
 
 The desktop never reads a dist-tag. `plugin_distribution.rs` installs an exact
 `<package>@<version>` taken from `official.lock.json` and rejects a tarball whose integrity
