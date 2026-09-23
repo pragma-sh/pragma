@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/pragma-sh/pragma/compare/junie-plugin-v1.0.1...junie-plugin-v1.0.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **junie-plugin:** replace a previous npm install's hooks instead of stacking ([ff42a90](https://github.com/pragma-sh/pragma/commit/ff42a90b67aa83125482d7acd2c8ca7ab2d1d88e))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/junie-plugin-v1.0.0...junie-plugin-v1.0.1) (2026-09-23)
 
 

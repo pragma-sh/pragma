@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.0.1...opencode-plugin-v1.0.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **opencode-plugin:** pin the installed version in opencode.json ([9f855aa](https://github.com/pragma-sh/pragma/commit/9f855aa6c9b94fcf64e8848df09580490a528cb3))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.0.0...opencode-plugin-v1.0.1) (2026-09-23)
 
 

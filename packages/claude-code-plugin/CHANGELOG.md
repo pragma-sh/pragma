@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.0.1...claude-code-plugin-v1.0.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **claude-code-plugin:** declare the real version so upgrades refresh Claude Code's cache ([f5e4ece](https://github.com/pragma-sh/pragma/commit/f5e4ece78e7af8f63588bf9312231b7cbcd0d88e))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.0.0...claude-code-plugin-v1.0.1) (2026-09-23)
 
 
