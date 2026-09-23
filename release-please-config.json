@@ -182,7 +182,14 @@
     },
     "packages/claude-code-plugin": {
       "release-type": "node",
-      "component": "claude-code-plugin"
+      "component": "claude-code-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/cursor-plugin": {
       "release-type": "node",
@@ -190,7 +197,14 @@
     },
     "packages/codex-plugin": {
       "release-type": "node",
-      "component": "codex-plugin"
+      "component": "codex-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".codex-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/pi-plugin": {
       "release-type": "node",
@@ -202,19 +216,47 @@
     },
     "packages/grok-plugin": {
       "release-type": "node",
-      "component": "grok-plugin"
+      "component": "grok-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".grok-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/kimi-plugin": {
       "release-type": "node",
-      "component": "kimi-plugin"
+      "component": "kimi-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "kimi.plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/junie-plugin": {
       "release-type": "node",
-      "component": "junie-plugin"
+      "component": "junie-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".junie-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/github-copilot-cli-plugin": {
       "release-type": "node",
-      "component": "github-copilot-cli-plugin"
+      "component": "github-copilot-cli-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     },
     "packages/dev-test-plugin": {
       "release-type": "node",

@@ -19,6 +19,15 @@ tag (`ref` input), under `latest`. It dispatches rather than publishes because n
 `npm trust` change per package. `scripts/release-config.test.ts` fails if a package in
 `official.json` is missing from the Release Please config or the workflow's choice list.
 
+**A host-tool manifest that declares a `version` is an `extra-files` entry.** Claude Code and
+Codex cache an installed plugin under that version (`.claude-plugin/plugin.json`,
+`.codex-plugin/plugin.json`, …) and only refresh the cache when it changes, so a manifest
+left at a placeholder keeps users on the first release they installed. Each such manifest is
+rewritten with `$.version` on release; `scripts/release-config.test.ts` fails if a new one is
+missed. Likewise an installer that edits the host's config must replace a previous install
+wherever it lived: Pragma deletes superseded `~/.pragma/plugins/npm/<name>-<version>-<uuid>`
+directories, so matching only the old absolute path leaves hooks pointing at nothing.
+
 The dist-tag is still an explicit input for a manual run (`latest` by default, or `alpha`).
 It matters because `npm publish --tag alpha` does **not** move `latest`. The lock always
 resolves `latest` (`PRAGMA_PLUGIN_DIST_TAG` overrides it locally), so an `alpha` publish never

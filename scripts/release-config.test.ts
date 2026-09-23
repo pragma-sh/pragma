@@ -231,3 +231,51 @@ describe("every official plugin release reaches npm", () => {
     expect(read(".github/workflows/release.yml")).toContain("gh workflow run plugins.yml");
   });
 });
+
+describe("host-tool plugin manifests carry the released version", () => {
+  // Claude Code and Codex cache an installed plugin under the version its host manifest
+  // declares, and only refresh that cache when the version changes. A manifest left at a
+  // placeholder keeps every user on the first release they installed, so each one that
+  // declares a version must be an `extra-files` entry Release Please rewrites.
+  const directories = official.packages.map(
+    (name) => `packages/${name.replace("@pragma-sh/", "")}`,
+  );
+  const ignored = new Set(["package.json", "pragma-plugin.json"]);
+
+  function versionedManifests(directory: string): string[] {
+    // Host manifests sit at the package root or in its dot-directory (`.claude-plugin/`).
+    return ["*plugin.json", ".*/*plugin.json"]
+      .flatMap((pattern) =>
+        Array.from(new Bun.Glob(pattern).scanSync({ cwd: join(ROOT, directory), dot: true })),
+      )
+      .filter((file) => !ignored.has(file))
+      .filter((file) => "version" in (JSON.parse(read(join(directory, file))) as object));
+  }
+
+  test("each versioned manifest is rewritten on release", () => {
+    const missing = directories.flatMap((directory) =>
+      versionedManifests(directory)
+        .filter(
+          (file) =>
+            !(packages[directory]?.["extra-files"] ?? []).some(
+              (entry) => entry.path === file && entry.jsonpath === "$.version",
+            ),
+        )
+        .map((file) => `${directory}/${file}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  test("each versioned manifest matches its package version", () => {
+    const drifted = directories.flatMap((directory) => {
+      const expected = manifest[directory as keyof typeof manifest];
+      return versionedManifests(directory)
+        .filter(
+          (file) =>
+            (JSON.parse(read(join(directory, file))) as { version: string }).version !== expected,
+        )
+        .map((file) => `${directory}/${file}`);
+    });
+    expect(drifted).toEqual([]);
+  });
+});
