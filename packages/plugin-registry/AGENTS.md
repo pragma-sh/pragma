@@ -11,12 +11,20 @@ published release) lacks them.
 
 ## Publishing and dist-tags
 
-`.github/workflows/plugins.yml` takes the npm **dist-tag** as an explicit input
-(`alpha` by default, or `latest`). It matters because `npm publish --tag alpha` does **not**
-move `latest`: publishing a stable release under `alpha` would leave `latest` pinned to
-whatever prerelease got there first, which is where these packages sit today
-(`latest` = `0.1.0-alpha.0` for all ten). Use `latest` for a stable release, `alpha` for a
-prerelease.
+**A plugin release publishes itself.** Each official plugin is its own Release Please
+component, and when the release PR merges, the `publish-plugins` job in `release.yml`
+dispatches `.github/workflows/plugins.yml` once per released plugin, pinned to its release
+tag (`ref` input), under `latest`. It dispatches rather than publishes because npm trusts
+`plugins.yml` — not `release.yml` — for these ten packages; moving that trust would need an
+`npm trust` change per package. `scripts/release-config.test.ts` fails if a package in
+`official.json` is missing from the Release Please config or the workflow's choice list.
+
+The dist-tag is still an explicit input for a manual run (`latest` by default, or `alpha`).
+It matters because `npm publish --tag alpha` does **not** move `latest`. The lock always
+resolves `latest` (`PRAGMA_PLUGIN_DIST_TAG` overrides it locally), so an `alpha` publish never
+becomes what the desktop installs. The ten `refresh-lock` jobs a release fans out share one
+concurrency group: GitHub runs one and keeps only the newest pending, which is the one that
+sees every publish.
 
 The desktop never reads a dist-tag. `plugin_distribution.rs` installs an exact
 `<package>@<version>` taken from `official.lock.json` and rejects a tarball whose integrity
@@ -25,7 +33,7 @@ resolves `latest`.
 
 The ten official agent plugins are deliberately **not** in Release Please's linked `desktop`
 group: nothing bundles them into the app (there is no staged `resources/plugins` any more),
-they install from npm at locked exact versions, and this workflow publishes them by hand. In
+they install from npm at locked exact versions, and each releases on its own schedule. In
 the group they would be forced to carry the desktop's version number and would drag a desktop
 release out of every plugin change. `@pragma-sh/sdk` and `@pragma-sh/plugin` _are_ in it, because
 the `plugins-host` sidecar bundles them.
@@ -47,5 +55,6 @@ verifies both the npm tarball integrity _and_ the installed `pragma-plugin.json`
 against the lock, so committing a lock whose manifest text or integrity does not match the
 published release breaks installs of it. `lock:local` packs workspace bytes — its
 integrity hashes describe locally-packed tarballs, never the npm releases — so its output
-must not be committed. The supported path is the `plugins.yml` workflow: publish each
-changed package, let `refresh-lock` regenerate the lock from npm, then merge its PR.
+must not be committed. The supported path is a release: merging the release PR publishes each
+changed package through `plugins.yml`, whose `refresh-lock` regenerates the lock from npm;
+then merge its PR.
