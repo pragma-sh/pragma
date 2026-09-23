@@ -38,8 +38,11 @@ fn hello_carries_the_build_id_of_the_running_binary() {
             }
         }
     };
+    // The socket accepts as soon as it is bound, but the hello is written only
+    // once start-up reaches the accept loop — which a loaded Windows runner has
+    // taken longer than 5s to do. Give it the same budget as the connect.
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(20)))
         .expect("read timeout");
     let frame = read_json_frame::<ServerFrame>(&mut stream);
     let _ = server.kill();
