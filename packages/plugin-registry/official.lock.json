@@ -179,9 +179,9 @@
     },
     {
       "package": "@pragma-sh/opencode-plugin",
-      "version": "1.0.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.0.1.tgz",
-      "integrity": "sha512-63ptvgCw735fubalOn1bdTJEwghEAwIusJRfHUiwkJ5SY/5+QDVNu1mG3rLpaYDZQNa39jLhLELAEJaVipUsiQ==",
+      "version": "1.0.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.0.2.tgz",
+      "integrity": "sha512-yPY0MO3qKA3UjMRhI73p8unlYdGNMxAgrxMgpj1ipnZHQLMbCSSU3HpzoWnEPqNJgHxxERMDHVNcLR6fxEGZUQ==",
       "manifestSha256": "eb123b67f443f0d3c5acae29a723146861aef0edc65f3c2d81509ec20a0adfb0",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
