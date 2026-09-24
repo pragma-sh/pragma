@@ -31,7 +31,8 @@
       "basePath": "/web",
       "manifestFile": "manifest.json",
       "resourceDir": "web"
-    }
+    },
+    "keepAwake": true
   },
   "platform": {
     "defaultBackend": "native",

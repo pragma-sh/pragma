@@ -608,6 +608,17 @@ async fn tunnel_status(pty: tauri::State<'_, PtyClient>) -> AppResult<serde_json
     )
 }
 
+/// Re-reads `gateway.keepAwake` so the server takes or releases its sleep
+/// inhibitor without restarting the tunnel.
+#[tauri::command]
+async fn tunnel_sync_keep_awake(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
+    pty.rpc(
+        pragma_constants::ProtocolRpcMethod::Tunnel,
+        serde_json::json!({ "action": "syncKeepAwake" }),
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // PTY spawn carries session + geometry + channel.
 async fn pty_spawn(
@@ -1341,6 +1352,7 @@ pub fn run() {
             tunnel_start,
             tunnel_stop,
             tunnel_status,
+            tunnel_sync_keep_awake,
             pty_spawn,
             pty_spawn_detached,
             pty_attach,

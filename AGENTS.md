@@ -614,7 +614,7 @@ becomes a real support burden, the place to fix it is a probe in `pragma-platfor
 **Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
 pattern is how a security guarantee quietly disappears — it is exactly what let the
 GitHub token be written world-readable on Windows. Platform differences belong in
-`crates/pragma-platform`, which owns seven seams and has a real implementation for each
+`crates/pragma-platform`, which owns eight seams and has a real implementation for each
 on every target:
 
 | Seam      | What it owns                                                                 |
@@ -625,6 +625,7 @@ on every target:
 | `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning  |
 | `shell`   | Which shell a PTY launches, and its interactive arguments                    |
 | `wsl`     | Enumerating installed WSL distributions (empty, never an error, off Windows) |
+| `power`   | Holding the system awake (a helper child that dies with its owner)           |
 | `install` | Replacing the installed app with a verified update and relaunching it        |
 
 Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:

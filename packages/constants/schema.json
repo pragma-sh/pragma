@@ -1529,7 +1529,8 @@
         "tokenHeader",
         "deviceHeaders",
         "push",
-        "web"
+        "web",
+        "keepAwake"
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
@@ -1578,6 +1579,10 @@
         },
         "web": {
           "$ref": "#/definitions/GatewayWeb"
+        },
+        "keepAwake": {
+          "type": "boolean",
+          "description": "Default for keeping the host awake while remote access is on, so system sleep does not interrupt a Pragma Go pairing. Users override it with gateway.keepAwake in the global config file; pragma-server holds the sleep inhibitor alongside the tunnel."
         }
       }
     },
