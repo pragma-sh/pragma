@@ -22,7 +22,7 @@ use crate::process_env;
 use crate::{CoreError, CoreResult};
 
 /// Git exclude entry that hides Pragma's worktree storage from the repo.
-const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
+pub(crate) const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
 /// Git exclude entry that keeps local scratchpad documents out of commits.
 const PRAGMA_SCRATCHPADS_EXCLUDE: &str = ".pragma/scratchpads/";
 
