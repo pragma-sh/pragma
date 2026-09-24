@@ -157,6 +157,7 @@ function PlatformCard({ platform, blurb, installers }: PlatformInstaller) {
   );
 }
 
+/** Displays the desktop installer picker. */
 export default function DownloadsPage() {
   return (
     <main className="flex-1">
