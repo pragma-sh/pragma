@@ -109,8 +109,8 @@ export const ROWS: readonly ComparisonRow[] = [
   },
   {
     feature: "Remote projects",
-    detail: "SSH hosts as first-class remote projects",
-    pragma: "SSH",
+    detail: "SSH hosts as first-class remote projects, plus WSL on Windows",
+    pragma: "SSH + WSL",
     emdash: "SSH",
     orca: "SSH + WSL",
     superset: "no",
