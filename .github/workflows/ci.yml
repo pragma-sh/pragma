@@ -54,15 +54,19 @@ jobs:
           PRAGMA_TEST_PTY: "1"
 
   build:
-    name: Build app (${{ matrix.os }})
+    name: Build app (${{ matrix.platform }})
     needs: [rust-windows]
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
+        include:
+          - runner: macos-latest
+            platform: macos
+          - runner: windows-latest
+            platform: windows-x86_64
+          - runner: windows-11-arm
+            platform: windows-aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

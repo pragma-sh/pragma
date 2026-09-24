@@ -8,7 +8,7 @@ import { ArrowRight } from "lucide-react";
 
 import { DownloadButton } from "@/components/download-button";
 import { Button } from "@/components/ui/button";
-import { downloadUrl } from "@/lib/shared";
+import { downloadsRoute } from "@/lib/shared";
 import { AgentChipField } from "./agent-chip-field";
 import { AGENT_BRANDS } from "./agents";
 
@@ -113,9 +113,12 @@ export function Hero() {
 
         <p ref={noteRef} className="text-muted-foreground mt-5 text-xs">
           macOS, Linux, and Windows. Local, over SSH, or inside WSL.{" "}
-          <a href={downloadUrl} className="hover:text-foreground underline underline-offset-4">
+          <Link
+            href={downloadsRoute}
+            className="hover:text-foreground underline underline-offset-4"
+          >
             All downloads
-          </a>
+          </Link>
         </p>
       </div>
 
