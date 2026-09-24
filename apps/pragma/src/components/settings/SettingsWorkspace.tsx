@@ -6,6 +6,7 @@ import {
   Blocks,
   ChevronRight,
   Clock,
+  HardDrive,
   Keyboard,
   LogOut,
   Palette,
@@ -25,6 +26,7 @@ import {
   type GitHubSettings,
   type TerminalSettings,
   type OtherSettings,
+  type StorageSettings,
 } from "@pragma-sh/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
@@ -37,6 +39,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { OtherSection } from "@/components/settings/OtherSection";
+import { StorageSection } from "@/components/settings/storage/StorageSection";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +74,7 @@ type BuiltinSection =
   | "theme"
   | "terminal"
   | "agentStatus"
+  | "storage"
   | "github"
   | "ai"
   | "mobile"
@@ -86,6 +90,7 @@ const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "storage",
 ]);
 
 const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
@@ -94,6 +99,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "storage",
   "github",
   "ai",
   "mobile",
@@ -136,6 +142,7 @@ interface PragmaConfig {
   other?: OtherSettings;
   updates?: { checkUrl?: string; autoDownload?: boolean };
   terminal?: TerminalSettings;
+  storage?: StorageSettings;
   [key: string]: unknown;
 }
 
@@ -158,6 +165,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateAgentStatusSettings(config.agentStatus);
   validateGitHubSettings(config.github);
   validateOtherSettings(config.other);
+  validateStorageSettings(config.storage);
   return config;
 }
 
@@ -219,6 +227,22 @@ function validateOtherSettings(other: PragmaConfig["other"]): void {
   validateConfigObject(other, "other");
   validateOptionalField(other.serverUrl, "other.serverUrl", "string");
   validateOptionalField(other.autoDownload, "other.autoDownload", "boolean");
+}
+
+function validateStorageSettings(storage: PragmaConfig["storage"]): void {
+  if (storage === undefined) return;
+  validateConfigObject(storage, "storage");
+  const reminder = storage.reminder;
+  if (reminder === undefined) return;
+  validateConfigObject(reminder, "storage.reminder");
+  validateOptionalField(reminder.enabled, "storage.reminder.enabled", "boolean");
+  validateOptionalField(reminder.startDate, "storage.reminder.startDate", "string");
+  if (
+    reminder.intervalDays !== undefined &&
+    (!Number.isInteger(reminder.intervalDays) || reminder.intervalDays < 1)
+  ) {
+    throw new Error("storage.reminder.intervalDays must be a positive integer");
+  }
 }
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
@@ -426,6 +450,7 @@ export function SettingsWorkspace() {
           loading={loading}
           persist={persist}
           projectId={workspace.selectedProjectId}
+          projectName={workspace.activeProject?.name ?? null}
           projectPath={workspace.activeProject?.path ?? null}
           reload={load}
           scope={scope}
@@ -489,6 +514,13 @@ function SettingsNavigation({
       >
         Agent Status
       </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "storage"}
+        icon={<HardDrive />}
+        onClick={() => setSection("storage")}
+      >
+        Storage
+      </SettingsNavItem>
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
       ) : null}
@@ -551,6 +583,7 @@ function SettingsContent({
   loading,
   persist,
   projectId,
+  projectName,
   projectPath,
   reload,
   scope,
@@ -564,6 +597,7 @@ function SettingsContent({
   loading: boolean;
   persist: PersistConfig;
   projectId: string | null;
+  projectName: string | null;
   projectPath: string | null;
   reload: () => Promise<void>;
   scope: ConfigScope;
@@ -603,6 +637,31 @@ function SettingsContent({
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
           <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
+  // Storage measures disk on its own; only its global reminder reads the
+  // config document, so the scan starts without waiting for that load.
+  if (section === "storage") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <StorageSection
+            persistReminder={(patch) =>
+              persist((current) => ({
+                ...current,
+                storage: {
+                  ...current.storage,
+                  reminder: { ...current.storage?.reminder, ...patch },
+                },
+              }))
+            }
+            projectId={projectId}
+            projectName={projectName}
+            reminder={scope === "global" && loaded ? (loaded.value.storage?.reminder ?? {}) : null}
+            scope={scope}
+          />
         </div>
       </main>
     );

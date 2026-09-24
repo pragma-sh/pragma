@@ -34,6 +34,7 @@ mod scratchpads;
 mod script_migration;
 mod scripts;
 mod ssh_host;
+mod storage;
 mod updates;
 mod whiteboards;
 mod window_chrome;
@@ -1426,6 +1427,9 @@ pub fn run() {
             fs::delete_file,
             fs::palette_search,
             fs::cancel_palette_search,
+            storage::scan_worktree_storage,
+            storage::cancel_worktree_storage_scan,
+            storage::delete_ignored_folder,
             ports::list_open_ports,
             git::worktree_changes,
             git::worktree_commits,
