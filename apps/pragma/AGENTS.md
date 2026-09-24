@@ -539,6 +539,19 @@ automations context rather than `config.json`, so like Theme it renders past the
 config load state. `openSettings(section?)` deep-links a section (the command
 palette's "Open automations" uses it).
 
+**Storage** (`components/settings/storage/`) also renders past the config load state:
+it scans disk, not `config.json`. Global scope boxes every project, project scope the
+current project's worktrees. `useStorageScan` runs `constants.storage.scanConcurrency`
+host scans at a time **only while mounted** — unmounting cancels the running ones on
+the host — and `storage-model.ts` turns the results into treemap boxes without counting
+a byte twice (a large file inside an ignored folder is inside that folder's box).
+`StorageReminderWatcher` (mounted in `App.tsx`) raises the global `storage.reminder`
+toast; which occurrence was dismissed is a cosmetic per-install localStorage value.
+The treemap is drawn on a `<canvas>` in GrandPerspective's style — its fixed palette
+deliberately ignores the theme — from the host's per-worktree `tree` (every top-level folder's total, plus the root's
+loose files). `storage-model.ts` draws only folders of `TREEMAP_MIN_FOLDER_BYTES`
+(15 MB) or more, whole, and never individual files.
+
 Plugins add React settings sections with `defineSettingsPage` and
 `definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
 render under the standard plugin boundary, and use the same host hooks as sidebar tabs.

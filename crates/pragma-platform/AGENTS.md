@@ -14,17 +14,18 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The seven seams
+## The eight seams
 
-| Module    | Unix                                 | Windows                                     |
-| --------- | ------------------------------------ | ------------------------------------------- |
-| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 1803+) |
-| `path`    | `std::fs::canonicalize`              | …then strip the `\\?\` verbatim prefix      |
-| `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)` |
-| `process` | `sysinfo`, `kill`, `pkill`, `ps`     | `sysinfo`, `taskkill`, `tasklist`           |
-| `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`      |
-| `wsl`     | no distributions, ever               | parse `wsl.exe --list --verbose`            |
-| `install` | `hdiutil`/`ditto` swap; `pkexec` pkg | NSIS `-setup.exe /S` via PowerShell helper  |
+| Module    | Unix                                  | Windows                                                    |
+| --------- | ------------------------------------- | ---------------------------------------------------------- |
+| `ipc`     | `std::os::unix::net`                  | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
+| `path`    | `std::fs::canonicalize`               | …then strip the `\\?\` verbatim prefix                     |
+| `perms`   | `chmod` `0600`/`0700`                 | `icacls /inheritance:r /grant:r <user>:(F)`                |
+| `process` | `sysinfo`, `kill`, `pkill`, `ps`      | `sysinfo`, `taskkill`, `tasklist`                          |
+| `shell`   | `$SHELL`, else the constants default  | probe `pwsh.exe` then `powershell.exe`                     |
+| `wsl`     | no distributions, ever                | parse `wsl.exe --list --verbose`                           |
+| `install` | `hdiutil`/`ditto` swap; `pkexec` pkg  | NSIS `-setup.exe /S` via PowerShell helper                 |
+| `disk`    | `st_blocks * 512`; `(dev, ino)` dedup | apparent `len()`; no link identity (stable `std` has none) |
 
 ### `path` — a canonical path git can read back
 

@@ -32,16 +32,16 @@ rows, selection) in the app data directory — tab _agent metadata_ lives in the
 
 ## `~/.pragma/`
 
-| Path                | Purpose                                                                                                     |
-| ------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `config.json`       | Global settings: `plugins[]`, `tunnel`, `agentStatus`, `github.prSignature`, `gateway.webEnabled`, `other`. |
-| `keybindings.json`  | Global keybinding overrides.                                                                                |
-| `theme.json`        | Global colour overrides (merged: defaults ← global ← project).                                              |
-| `automations/`      | Global automations (implicitly trusted).                                                                    |
-| `assets/sounds/`    | Global agent alert clips (≤5 s, ≤5 MB).                                                                     |
-| `automation-cache/` | The automations sidecar's managed dependency + entry cache.                                                 |
-| `plugins/npm/`      | Official plugins installed through the app.                                                                 |
-| `pragma-wsl/`       | Inside WSL distros: the WSL server's socket directory.                                                      |
+| Path                | Purpose                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `config.json`       | Global settings: `plugins[]`, `tunnel`, `agentStatus`, `github.prSignature`, `gateway.webEnabled`, `other`, `storage.reminder`. |
+| `keybindings.json`  | Global keybinding overrides.                                                                                                    |
+| `theme.json`        | Global colour overrides (merged: defaults ← global ← project).                                                                  |
+| `automations/`      | Global automations (implicitly trusted).                                                                                        |
+| `assets/sounds/`    | Global agent alert clips (≤5 s, ≤5 MB).                                                                                         |
+| `automation-cache/` | The automations sidecar's managed dependency + entry cache.                                                                     |
+| `plugins/npm/`      | Official plugins installed through the app.                                                                                     |
+| `pragma-wsl/`       | Inside WSL distros: the WSL server's socket directory.                                                                          |
 
 The production CLI installs to `~/.local/bin/pragma-cli` (Windows: alongside the app
 data dir); that directory is prepended to `PATH` in Pragma terminals.

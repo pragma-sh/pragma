@@ -179,6 +179,14 @@ than no guide.
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
   and Agent Status have both a global and a project scope (project wins); GitHub, AI,
   Other (update server/download), and mobile pairing/gateway history are global-only.
+  Storage also has both scopes, but as a _view_ (every project vs. the current one's
+  worktrees); only its reminder is persisted, under global `storage.reminder`.
+- Worktree disk usage is measured on the owning host: the walk, the gitignored-folder
+  list, and the re-checked delete live in `crates/pragma-core/src/storage.rs` behind
+  the `filesystem` RPC's `storageScan` / `cancelStorageScan` / `deleteIgnoredFolder`
+  ops; the Settings → Storage UI is `apps/pragma/src/components/settings/storage/`, and
+  the squarified layout it draws with is `apps/pragma/src/lib/treemap.ts`. A scan
+  runs only while that page is mounted and is cancelled on the host when it unmounts.
 - Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
   merged `index.css` defaults <- global <- project. Never restate a shipped default color in
   TS or Rust: `apps/pragma/src/index.css` is the source of truth and the token catalog is
@@ -614,7 +622,7 @@ becomes a real support burden, the place to fix it is a probe in `pragma-platfor
 **Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
 pattern is how a security guarantee quietly disappears — it is exactly what let the
 GitHub token be written world-readable on Windows. Platform differences belong in
-`crates/pragma-platform`, which owns seven seams and has a real implementation for each
+`crates/pragma-platform`, which owns eight seams and has a real implementation for each
 on every target:
 
 | Seam      | What it owns                                                                 |
@@ -626,6 +634,7 @@ on every target:
 | `shell`   | Which shell a PTY launches, and its interactive arguments                    |
 | `wsl`     | Enumerating installed WSL distributions (empty, never an error, off Windows) |
 | `install` | Replacing the installed app with a verified update and relaunching it        |
+| `disk`    | Bytes a file occupies on disk and hard-link identity (storage accounting)    |
 
 Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:
 
