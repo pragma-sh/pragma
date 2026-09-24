@@ -12,6 +12,7 @@ import {
   listWslDistros,
   readConfig,
   readPluginManifests,
+  tunnelSyncKeepAwake,
   writeConfig,
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
@@ -25,13 +26,22 @@ vi.mock("@/components/dialogs/PairDeviceDialog", () => ({
   PragmaGoSettings: ({
     webEnabled,
     onWebEnabledChange,
+    keepAwake,
+    onKeepAwakeChange,
   }: {
     webEnabled: boolean;
     onWebEnabledChange: (enabled: boolean) => void;
+    keepAwake: boolean;
+    onKeepAwakeChange: (enabled: boolean) => void;
   }) => (
-    <button type="button" onClick={() => onWebEnabledChange(!webEnabled)}>
-      Web access {webEnabled ? "enabled" : "disabled"}
-    </button>
+    <>
+      <button type="button" onClick={() => onWebEnabledChange(!webEnabled)}>
+        Web access {webEnabled ? "enabled" : "disabled"}
+      </button>
+      <button type="button" onClick={() => onKeepAwakeChange(!keepAwake)}>
+        Keep awake {keepAwake ? "enabled" : "disabled"}
+      </button>
+    </>
   ),
 }));
 
@@ -96,6 +106,7 @@ vi.mock("@/lib/tauri", () => ({
   listWslDistros: vi.fn(),
   readConfig: vi.fn(),
   readPluginManifests: vi.fn(),
+  tunnelSyncKeepAwake: vi.fn(),
   writeConfig: vi.fn(),
 }));
 
@@ -316,6 +327,21 @@ describe("SettingsWorkspace", () => {
         )}\n`,
         "project-1",
       ),
+    );
+  });
+
+  it("defaults keep awake on and resyncs the server after turning it off", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep awake enabled" }));
+
+    await waitFor(() => expect(tunnelSyncKeepAwake).toHaveBeenCalled());
+    expect(writeConfig).toHaveBeenCalledWith(
+      "global",
+      expect.stringContaining('"keepAwake": false'),
+      "project-1",
     );
   });
 

@@ -477,7 +477,10 @@ The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns
 pairing; the project sidebar has no phone shortcut. `PragmaGoSettings` toggles the tunnel
 and renders a `PairingPayload` QR (via `uqr`, offline). Its separate browser-pairing card
 persists `gateway.webEnabled` in global `.pragma/config.json`; the gateway serves `/web`
-only while this explicit setting is true. Encode/validate helpers live in
+only while this explicit setting is true. The **Keep awake** switch persists
+`gateway.keepAwake` (default `constants.gateway.keepAwake`, on); the tunnel supervisor
+holds a `pragma_platform::power::SleepInhibitor` while the tunnel runs and the setting is
+on, and `tunnel_sync_keep_awake` makes it re-read the setting without a restart. Encode/validate helpers live in
 `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 "Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads

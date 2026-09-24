@@ -52,6 +52,7 @@ import {
   gatewayDevices,
   readConfig,
   readPluginManifests,
+  tunnelSyncKeepAwake,
   writeConfig,
   type AiAuthMethod,
   type ConfigScope,
@@ -129,6 +130,7 @@ interface PragmaConfig {
   };
   gateway?: {
     webEnabled?: boolean;
+    keepAwake?: boolean;
     [key: string]: unknown;
   };
   agentStatus?: AgentStatusSettings;
@@ -165,6 +167,7 @@ function validateGateway(gateway: PragmaConfig["gateway"]): void {
   if (gateway === undefined) return;
   validateConfigObject(gateway, "gateway");
   validateOptionalField(gateway.webEnabled, "gateway.webEnabled", "boolean");
+  validateOptionalField(gateway.keepAwake, "gateway.keepAwake", "boolean");
 }
 
 function validateTerminal(terminal: PragmaConfig["terminal"]): void {
@@ -1235,6 +1238,15 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
             ...current,
             gateway: { ...current.gateway, webEnabled },
           })).catch(() => undefined);
+        }}
+        keepAwake={config.gateway?.keepAwake ?? constants.gateway.keepAwake}
+        onKeepAwakeChange={(keepAwake) => {
+          void persist((current) => ({
+            ...current,
+            gateway: { ...current.gateway, keepAwake },
+          }))
+            .then(tunnelSyncKeepAwake)
+            .catch(() => undefined);
         }}
       />
       <GatewayDevices />

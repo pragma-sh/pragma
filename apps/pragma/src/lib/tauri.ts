@@ -2060,6 +2060,14 @@ export function tunnelStatus(): Promise<TunnelStatus> {
   return invoke<TunnelStatus>("tunnel_status");
 }
 
+/**
+ * Tells the server to re-read `gateway.keepAwake`, taking or releasing its
+ * sleep inhibitor while remote access stays up.
+ */
+export function tunnelSyncKeepAwake(): Promise<void> {
+  return invoke<void>("tunnel_sync_keep_awake");
+}
+
 /** Reads one plugin-owned durable storage value as an opaque JSON string. */
 export function pluginStorageGet(pluginId: string, key: string): Promise<string | null> {
   return invoke<string | null>("plugin_storage_get", { pluginId, key });
