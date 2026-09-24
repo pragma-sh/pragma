@@ -357,5 +357,23 @@
         "cliCommand": "idea"
       }
     ]
+  },
+  "storage": {
+    "largeFileMinBytes": 10485760,
+    "largeFileLimit": 25,
+    "ignoredFolderMinBytes": 1048576,
+    "maxScanEntries": 3000000,
+    "scanConcurrency": 2,
+    "protectedFolders": [
+      ".git",
+      ".pragma"
+    ],
+    "reminderIntervalDays": 30,
+    "reminderIntervalPresets": [
+      7,
+      14,
+      30,
+      90
+    ]
   }
 }
