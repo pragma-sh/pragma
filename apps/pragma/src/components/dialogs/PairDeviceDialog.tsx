@@ -136,9 +136,13 @@ function usePairingTunnel(open: boolean): PairingTunnel {
 export function PragmaGoSettings({
   webEnabled,
   onWebEnabledChange,
+  keepAwake,
+  onKeepAwakeChange,
 }: {
   webEnabled: boolean;
   onWebEnabledChange: (enabled: boolean) => void;
+  keepAwake: boolean;
+  onKeepAwakeChange: (enabled: boolean) => void;
 }) {
   const { status, token, hostName, busy, error, toggleRemote, regenerateToken } =
     usePairingTunnel(true);
@@ -161,6 +165,20 @@ export function PragmaGoSettings({
             checked={enabled}
             disabled={busy}
             onCheckedChange={(next) => void toggleRemote(next)}
+          />
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-keep-awake">Keep awake</Label>
+            <p className="text-xs text-muted-foreground">
+              Keeps this computer from sleeping while remote access is on, so sleep will not
+              interrupt pairing. Also blocks sleep on lid close where the OS allows it.
+            </p>
+          </div>
+          <Switch
+            id="settings-keep-awake"
+            checked={keepAwake}
+            onCheckedChange={onKeepAwakeChange}
           />
         </div>
         {status.state === "error" ? (

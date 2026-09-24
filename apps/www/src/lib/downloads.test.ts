@@ -24,6 +24,8 @@ const UA = {
   mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
   windows:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+  windowsArm:
+    "Mozilla/5.0 (Windows NT 10.0; ARM64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
   linux: "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
   linuxArm: "Mozilla/5.0 (X11; Linux aarch64; rv:140.0) Gecko/20100101 Firefox/140.0",
   android:
@@ -83,8 +85,9 @@ describe("defaultTarget", () => {
     expect(archFromUserAgent("")).toBeNull();
   });
 
-  test("Windows has one installer", () => {
-    expect(defaultTarget("windows", "arm")).toBe("windows-x86_64");
+  test("Windows follows the CPU architecture", () => {
+    expect(defaultTarget("windows", archFromUserAgent(UA.windows))).toBe("windows-x86_64");
+    expect(defaultTarget("windows", archFromUserAgent(UA.windowsArm))).toBe("windows-aarch64");
   });
 });
 

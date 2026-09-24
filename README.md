@@ -7,7 +7,7 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
 
 <p>
   <a href="https://pragma-app.sh/download/darwin-aarch64"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-  <a href="https://pragma-app.sh/download/windows-x86_64"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://pragma-app.sh/downloads"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
   <a href="https://pragma-app.sh/download/linux-x86_64-deb"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
   <a href="https://apps.apple.com/us/app/pragma-sh-go/id6804842149"><img src="https://img.shields.io/badge/Download%20on%20the-App%20Store-0D96F6?style=for-the-badge&logo=appstore&logoColor=white" alt="Download Pragma Go on the App Store" /></a>
   <a href="#android-with-obtainium"><img src="https://img.shields.io/badge/Get%20it%20on-Obtainium-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Get Pragma Go on Obtainium" /></a>
@@ -143,7 +143,7 @@ Signed installers for every platform are attached to each [GitHub Release](https
 | Platform | Download                                                                                                                                                                                                                                            |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | macOS    | [Apple silicon (.dmg)](https://pragma-app.sh/download/darwin-aarch64) · [Intel (.dmg)](https://pragma-app.sh/download/darwin-x86_64)                                                                                                                |
-| Windows  | [x64 installer (.exe)](https://pragma-app.sh/download/windows-x86_64)                                                                                                                                                                               |
+| Windows  | [x64 installer (.exe)](https://pragma-app.sh/download/windows-x86_64) · [ARM64 installer (.exe)](https://pragma-app.sh/download/windows-aarch64)                                                                                                    |
 | Linux    | x64: [.deb](https://pragma-app.sh/download/linux-x86_64-deb) · [.rpm](https://pragma-app.sh/download/linux-x86_64-rpm) — ARM64: [.deb](https://pragma-app.sh/download/linux-aarch64-deb) · [.rpm](https://pragma-app.sh/download/linux-aarch64-rpm) |
 
 Pragma updates itself in place once installed. Release notes and older builds are on the [releases page](https://github.com/pragma-sh/pragma/releases).

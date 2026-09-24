@@ -64,6 +64,10 @@ jobs:
             platform: windows-x86_64
             source: target/release/bundle/nsis/*-setup.exe
             extension: exe
+          - runner: windows-11-arm
+            platform: windows-aarch64
+            source: target/release/bundle/nsis/*-setup.exe
+            extension: exe
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

@@ -477,7 +477,10 @@ The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns
 pairing; the project sidebar has no phone shortcut. `PragmaGoSettings` toggles the tunnel
 and renders a `PairingPayload` QR (via `uqr`, offline). Its separate browser-pairing card
 persists `gateway.webEnabled` in global `.pragma/config.json`; the gateway serves `/web`
-only while this explicit setting is true. Encode/validate helpers live in
+only while this explicit setting is true. The **Keep awake** switch persists
+`gateway.keepAwake` (default `constants.gateway.keepAwake`, on); the tunnel supervisor
+holds a `pragma_platform::power::SleepInhibitor` while the tunnel runs and the setting is
+on, and `tunnel_sync_keep_awake` makes it re-read the setting without a restart. Encode/validate helpers live in
 `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 "Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
@@ -745,6 +748,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+Release jobs run natively on each architecture, including `windows-11-arm`, so the host
+triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
+the app shell.
 `tauri:dev` also runs `web:stage` before Tauri starts so the gateway receives the latest
 Pragma Go browser bundle in its copied debug resources. Staging after startup is too late
 because the gateway loads that manifest once.

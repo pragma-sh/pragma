@@ -25,7 +25,16 @@ target, return an `Err` that says so. Do not no-op.
 | `shell`   | `$SHELL`, else the constants default  | probe `pwsh.exe` then `powershell.exe`                     |
 | `wsl`     | no distributions, ever                | parse `wsl.exe --list --verbose`                           |
 | `install` | `hdiutil`/`ditto` swap; `pkexec` pkg  | NSIS `-setup.exe /S` via PowerShell helper                 |
+| `power`   | `caffeinate` / `systemd-inhibit`      | PowerShell `SetThreadExecutionState`                       |
 | `disk`    | `st_blocks * 512`; `(dev, ino)` dedup | apparent `len()`; no link identity (stable `std` has none) |
+
+### `power` — a helper process, never FFI
+
+`unsafe` is forbidden, so `SleepInhibitor` holds the OS request in a child process that
+is killed on drop and also watches the spawning pid, so a crashed server cannot pin the
+machine awake. Lid close: Linux inhibits `handle-lid-switch`; macOS cannot without root
+(`pmset disablesleep`); Windows would mean rewriting the power plan's `LIDACTION`, which
+we deliberately do not do.
 
 ### `path` — a canonical path git can read back
 

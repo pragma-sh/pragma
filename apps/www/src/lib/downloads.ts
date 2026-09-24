@@ -14,6 +14,7 @@ export type DownloadArch = "arm" | "x86";
 export const DOWNLOAD_TARGETS = {
   "darwin-aarch64": { platform: "macos", extension: "dmg", label: "macOS (Apple silicon)" },
   "darwin-x86_64": { platform: "macos", extension: "dmg", label: "macOS (Intel)" },
+  "windows-aarch64": { platform: "windows", extension: "exe", label: "Windows (ARM64)" },
   "windows-x86_64": { platform: "windows", extension: "exe", label: "Windows (x64)" },
   "linux-x86_64-deb": { platform: "linux", extension: "deb", label: "Linux x64 (.deb)" },
   "linux-x86_64-rpm": { platform: "linux", extension: "rpm", label: "Linux x64 (.rpm)" },
@@ -117,7 +118,7 @@ export function defaultTarget(
 
 const DEFAULT_TARGETS: Record<DownloadPlatform, Record<DownloadArch, DownloadTarget>> = {
   macos: { arm: "darwin-aarch64", x86: "darwin-x86_64" },
-  windows: { arm: "windows-x86_64", x86: "windows-x86_64" },
+  windows: { arm: "windows-aarch64", x86: "windows-x86_64" },
   linux: { arm: "linux-aarch64-deb", x86: "linux-x86_64-deb" },
 };
 

@@ -85,6 +85,26 @@ describe("evaluateUpdate", () => {
     expect(result.asset?.url).toBe("https://example.com/Pragma.dmg");
   });
 
+  test("offers the native Windows ARM64 installer", () => {
+    const result = evaluateUpdate({
+      manifest: manifest({
+        apply: "restart",
+        components: { ...manifest({}).components, app: "0.0.1" },
+        assets: {
+          "windows-aarch64": {
+            url: "https://example.com/Pragma-windows-aarch64.exe",
+            sha256: "def",
+            signature: "sig",
+          },
+        },
+      }),
+      platform: "windows-aarch64",
+      running,
+    });
+    expect(result.available).toBe(true);
+    expect(result.asset?.url).toBe("https://example.com/Pragma-windows-aarch64.exe");
+  });
+
   test("is silent when the release has no asset for this platform", () => {
     const result = evaluateUpdate({
       manifest: manifest({
