@@ -15,8 +15,8 @@ set -euo pipefail
 #
 # Runs on macOS, Linux, and Windows (under Git Bash, which is what the
 # `windows-latest` CI runner provides). On Windows every produced binary carries
-# a `.exe` suffix, and Tauri expects the staged name to carry it too —
-# `pragma-server-x86_64-pc-windows-msvc.exe`.
+# a `.exe` suffix, and Tauri expects the staged name to carry it too, for example
+# `pragma-server-aarch64-pc-windows-msvc.exe` on a Windows ARM64 runner.
 
 profile="debug"
 if [[ "${1:-}" == "--release" ]]; then

@@ -558,9 +558,10 @@ without updating this guide and CI.
   CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
   `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
-  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on the
-  GitHub-hosted `windows-latest` image with the `rust-windows` job plus a
-  `windows-latest` entry in the `build` matrix.
+  on Windows 11 and with the Edge runtime on Windows 10. CI covers x64 on the
+  GitHub-hosted `windows-latest` image and ARM64 on `windows-11-arm`; releases use the
+  same native runners so Rust, Bun sidecars, Tauri, and NSIS all match the installer
+  architecture.
 - **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
   locks a running executable's image, our sidecars outlive the window by design, and a
   per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live

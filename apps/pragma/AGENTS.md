@@ -732,6 +732,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+Release jobs run natively on each architecture, including `windows-11-arm`, so the host
+triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
+the app shell.
 `tauri:dev` also runs `web:stage` before Tauri starts so the gateway receives the latest
 Pragma Go browser bundle in its copied debug resources. Staging after startup is too late
 because the gateway loads that manifest once.
