@@ -41,7 +41,7 @@ apps/www/
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, plugins, privacy, support,
+    │   ├── (home)/          # marketing route group (landing, downloads, plugins, privacy, support,
     │   │                    # deep-link forwarders /open + /install-plugin,
     │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
@@ -145,7 +145,7 @@ apps/www/
   are republished (`plugins.yml` publish → refresh-lock); never commit `lock:local`
   output — its tarball integrity hashes describe locally-packed bytes, not the npm
   releases the desktop verifies against.
-- **Every Download button is `DownloadButton`, and it links to `/download/{target}`.**
+- **Every automatic Download button is `DownloadButton`, and it links to `/download/{target}`.**
   Installer asset names carry the version (`Pragma-<version>-<target>.<ext>`, written by
   `release.yml`), so there is no stable GitHub URL to link to; the route reads the
   repository's Latest release (pinned to the newest desktop release) and redirects to the
@@ -154,7 +154,9 @@ apps/www/
   tablets, and ChromeOS keep the generic link. macOS defaults to Apple silicon because
   Safari reports every Mac as Intel. The README's download badges and table use the same
   route, so **renaming a release asset or a `DOWNLOAD_TARGETS` key breaks published
-  links** — keep them in step with `release.yml`.
+  links** — keep them in step with `release.yml`. `/downloads` is the explicit platform
+  and architecture picker; Windows must list both x64 and ARM64 because browser CPU hints
+  are not universally available.
 - **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma-sh/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
