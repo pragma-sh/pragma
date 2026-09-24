@@ -1244,9 +1244,14 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
           void persist((current) => ({
             ...current,
             gateway: { ...current.gateway, keepAwake },
-          }))
-            .then(tunnelSyncKeepAwake)
-            .catch(() => undefined);
+          })).then(
+            () =>
+              tunnelSyncKeepAwake().catch((cause: unknown) => {
+                toast.error(`Could not apply keep awake: ${errorMessage(cause)}`);
+              }),
+            // `persist` already reported the failed write.
+            () => undefined,
+          );
         }}
       />
       <GatewayDevices />

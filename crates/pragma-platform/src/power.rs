@@ -18,9 +18,17 @@
 //! Every helper also watches the process that spawned it and exits when that
 //! process does, so a crashed server never leaves the machine pinned awake.
 
+use std::io::Read;
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use crate::process::command;
+
+/// How long a fresh helper must stay alive before its request counts as held.
+/// A helper that cannot take the lock (denied by polkit, no session) exits
+/// almost immediately.
+const SETTLE: Duration = Duration::from_millis(400);
 
 /// A held request to keep the system awake; released when dropped.
 #[derive(Debug)]
@@ -35,13 +43,29 @@ impl SleepInhibitor {
     /// # Errors
     ///
     /// Returns an error when the platform helper cannot be spawned (for
-    /// example, `systemd-inhibit` is absent on a non-systemd Linux).
+    /// example, `systemd-inhibit` is absent on a non-systemd Linux) or exits
+    /// right away because it could not take the request; the error carries the
+    /// helper's own diagnostics.
     pub fn acquire(reason: &str) -> std::io::Result<Self> {
-        let child = inhibitor_command(reason, std::process::id())
+        let mut child = inhibitor_command(reason, std::process::id())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
+        thread::sleep(SETTLE);
+        if let Some(status) = child.try_wait()? {
+            let mut diagnostics = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut diagnostics);
+            }
+            return Err(std::io::Error::other(format!(
+                "sleep inhibitor exited immediately ({status}): {}",
+                diagnostics.trim()
+            )));
+        }
+        // Nothing reads the pipe from here on; close it so a chatty helper
+        // gets SIGPIPE instead of blocking on a full buffer.
+        drop(child.stderr.take());
         Ok(Self { child })
     }
 }
@@ -129,6 +153,9 @@ mod tests {
             return;
         };
         let pid = inhibitor.child.id();
+        // `acquire` only succeeds for a helper that survived the settle
+        // window, so the request is being held rather than merely spawned.
+        assert!(crate::process::is_running(pid, ""));
         drop(inhibitor);
         assert!(!crate::process::is_running(pid, ""));
     }

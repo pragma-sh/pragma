@@ -53,7 +53,7 @@ pub struct TunnelRegistry {
     status: Arc<Mutex<TunnelStatus>>,
     child: Mutex<Option<Child>>,
     /// Held while remote access is on and `gateway.keepAwake` allows it.
-    keep_awake: Mutex<Option<SleepInhibitor>>,
+    keep_awake: Arc<Mutex<Option<SleepInhibitor>>>,
     generation: Arc<AtomicU64>,
 }
 
@@ -63,7 +63,7 @@ impl TunnelRegistry {
             server_dir,
             status: Arc::new(Mutex::new(TunnelStatus::Idle)),
             child: Mutex::new(None),
-            keep_awake: Mutex::new(None),
+            keep_awake: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
         });
         if Self::read_config().is_ok_and(|config| config.enabled) {
@@ -167,7 +167,10 @@ impl TunnelRegistry {
     /// Takes or releases the sleep inhibitor to match the running tunnel and
     /// the current `gateway.keepAwake` setting.
     fn sync_keep_awake(&self) {
-        let running = self.child.lock().is_ok_and(|child| child.is_some());
+        let alive = self.status.lock().is_ok_and(|status| {
+            matches!(*status, TunnelStatus::Starting | TunnelStatus::Active(_))
+        });
+        let running = alive && self.child.lock().is_ok_and(|child| child.is_some());
         let wanted = running && read_keep_awake(&config_path());
         let Ok(mut held) = self.keep_awake.lock() else {
             return;
@@ -199,6 +202,7 @@ impl TunnelRegistry {
     fn spawn_scanner<R: Read + Send + 'static>(&self, reader: R, pattern: Regex, generation: u64) {
         let status = Arc::clone(&self.status);
         let live_generation = Arc::clone(&self.generation);
+        let keep_awake = Arc::clone(&self.keep_awake);
         thread::spawn(move || {
             let mut last_line = String::new();
             for line in BufReader::new(reader).lines().map_while(Result::ok) {
@@ -223,6 +227,10 @@ impl TunnelRegistry {
                             &last_line
                         }
                     ));
+                }
+                // A tunnel that died on its own no longer needs the host awake.
+                if let Ok(mut held) = keep_awake.lock() {
+                    *held = None;
                 }
             }
         });
@@ -266,8 +274,9 @@ impl TunnelRegistry {
 }
 
 fn config_path() -> PathBuf {
-    std::env::var_os("HOME")
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+    // `HOME` is unset on Windows; Settings writes under the user profile.
+    pragma_platform::path::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
         .join(".pragma/config.json")
 }
 
