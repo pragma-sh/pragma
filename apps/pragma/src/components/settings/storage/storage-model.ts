@@ -95,10 +95,12 @@ function worktreeNode(
     return {
       ...base,
       // The map shows only the large folders, so the worktree's box is their
-      // sum. A host older than the tree omits it; the worktree is one box.
-      bytes: tree
-        ? children.reduce((sum, child) => sum + child.bytes, 0)
-        : state.storage.totalBytes,
+      // sum. A host older than the tree omits it, and a worktree with no
+      // qualifying folder would sum to zero and vanish; both stay one box.
+      bytes:
+        children.length > 0
+          ? children.reduce((sum, child) => sum + child.bytes, 0)
+          : state.storage.totalBytes,
       fileCount: state.storage.fileCount,
       kind: "worktree",
       children,

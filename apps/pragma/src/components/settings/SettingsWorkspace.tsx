@@ -148,6 +148,9 @@ interface PragmaConfig {
 
 interface LoadedConfig {
   value: PragmaConfig;
+  /** The scope and project this document was read for. */
+  scope: ConfigScope;
+  projectId: string | null;
 }
 
 type PersistConfig = (update: (current: PragmaConfig) => PragmaConfig) => Promise<void>;
@@ -346,7 +349,7 @@ export function SettingsWorkspace() {
       if (generation !== loadGeneration.current) return;
       const value = parsePragmaConfig(document.contents);
       latestConfig.current = value;
-      setLoaded({ value });
+      setLoaded({ value, scope, projectId: workspace.selectedProjectId });
     } catch (cause) {
       if (generation !== loadGeneration.current) return;
       latestConfig.current = null;
@@ -383,13 +386,7 @@ export function SettingsWorkspace() {
       const contents = `${JSON.stringify(value, null, 2)}\n`;
       const targetScope = scope;
       const targetProjectId = workspace.selectedProjectId;
-      setLoaded((loadedConfig) =>
-        loadedConfig
-          ? {
-              value,
-            }
-          : loadedConfig,
-      );
+      setLoaded((loadedConfig) => (loadedConfig ? { ...loadedConfig, value } : loadedConfig));
       const write = saveQueue.current.then(() =>
         writeConfig(targetScope, contents, targetProjectId),
       );
@@ -659,7 +656,11 @@ function SettingsContent({
             }
             projectId={projectId}
             projectName={projectName}
-            reminder={scope === "global" && loaded ? (loaded.value.storage?.reminder ?? {}) : null}
+            reminder={
+              scope === "global" && loaded?.scope === "global"
+                ? (loaded.value.storage?.reminder ?? {})
+                : null
+            }
             scope={scope}
           />
         </div>
