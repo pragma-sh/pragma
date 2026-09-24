@@ -623,7 +623,7 @@ becomes a real support burden, the place to fix it is a probe in `pragma-platfor
 **Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
 pattern is how a security guarantee quietly disappears — it is exactly what let the
 GitHub token be written world-readable on Windows. Platform differences belong in
-`crates/pragma-platform`, which owns eight seams and has a real implementation for each
+`crates/pragma-platform`, which owns nine seams and has a real implementation for each
 on every target:
 
 | Seam      | What it owns                                                                 |

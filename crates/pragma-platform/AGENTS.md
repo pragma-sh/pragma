@@ -14,7 +14,7 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The eight seams
+## The nine seams
 
 | Module    | Unix                                  | Windows                                                    |
 | --------- | ------------------------------------- | ---------------------------------------------------------- |
