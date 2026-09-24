@@ -163,6 +163,7 @@ describe("SettingsWorkspace", () => {
       }),
     });
     vi.mocked(writeConfig).mockResolvedValue();
+    vi.mocked(tunnelSyncKeepAwake).mockResolvedValue();
     vi.mocked(gatewayDevices).mockResolvedValue([]);
     vi.mocked(listWslDistros).mockResolvedValue({ isWindows: false, distros: [] });
     vi.mocked(aiAuthMethods).mockResolvedValue([
@@ -327,6 +328,19 @@ describe("SettingsWorkspace", () => {
         )}\n`,
         "project-1",
       ),
+    );
+  });
+
+  it("reports a failed keep-awake sync instead of swallowing it", async () => {
+    vi.mocked(tunnelSyncKeepAwake).mockRejectedValue(new Error("server unreachable"));
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep awake enabled" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("server unreachable")),
     );
   });
 
