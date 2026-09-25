@@ -28,7 +28,7 @@
     },
     "apps/pragma": {
       "name": "pragma",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "dependencies": {
         "@codemirror/language": "^6.12.3",
         "@codemirror/language-data": "^6.5.2",
@@ -91,6 +91,7 @@
         "octokit": "^5.0.5",
         "radix-ui": "^1.5.0",
         "react": "^19.2.6",
+        "react-day-picker": "^10.0.1",
         "react-dom": "^19.2.6",
         "react-markdown": "^10.1.0",
         "react-resizable-panels": "^4.11.2",
@@ -135,7 +136,7 @@
     },
     "apps/pragma-go": {
       "name": "pragma-go",
-      "version": "0.1.5",
+      "version": "1.0.0",
       "dependencies": {
         "@expo/metro-runtime": "~57.0.8",
         "@expo/ui": "~57.0.8",
@@ -199,7 +200,7 @@
     },
     "apps/www": {
       "name": "www",
-      "version": "0.2.0",
+      "version": "1.0.0",
       "dependencies": {
         "@pragma-sh/brand": "workspace:*",
         "@pragma-sh/plugin-registry": "workspace:*",
@@ -236,7 +237,7 @@
     },
     "packages/ai-helpers": {
       "name": "@pragma-sh/ai-helpers",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "pragma-ai": "./src/cli.ts",
       },
@@ -253,7 +254,7 @@
     },
     "packages/automations": {
       "name": "@pragma-sh/automations",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "pragma-automations": "src/cli.ts",
       },
@@ -268,7 +269,7 @@
     },
     "packages/bench": {
       "name": "@pragma-sh/bench",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -283,7 +284,7 @@
     },
     "packages/claude-code-plugin": {
       "name": "@pragma-sh/claude-code-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.2",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -295,7 +296,7 @@
     },
     "packages/codex-plugin": {
       "name": "@pragma-sh/codex-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -307,7 +308,7 @@
     },
     "packages/constants": {
       "name": "@pragma-sh/constants",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "devDependencies": {
         "json-schema-to-typescript": "^15.0.4",
         "typescript": "^6.0.3",
@@ -316,7 +317,7 @@
     },
     "packages/create-pragma-plugin": {
       "name": "create-pragma-plugin",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "create-pragma-plugin": "./dist/cli.js",
       },
@@ -329,7 +330,7 @@
     },
     "packages/cursor-plugin": {
       "name": "@pragma-sh/cursor-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -341,7 +342,7 @@
     },
     "packages/dev-test-plugin": {
       "name": "@pragma-sh/dev-test-plugin",
-      "version": "0.1.5",
+      "version": "1.0.1",
       "dependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
@@ -363,7 +364,7 @@
     },
     "packages/github-copilot-cli-plugin": {
       "name": "@pragma-sh/github-copilot-cli-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -375,7 +376,7 @@
     },
     "packages/github-helpers": {
       "name": "@pragma-sh/github-helpers",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "pragma-github": "./src/cli.ts",
       },
@@ -390,7 +391,7 @@
     },
     "packages/grok-plugin": {
       "name": "@pragma-sh/grok-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -402,7 +403,7 @@
     },
     "packages/junie-plugin": {
       "name": "@pragma-sh/junie-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.2",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -414,7 +415,7 @@
     },
     "packages/kimi-plugin": {
       "name": "@pragma-sh/kimi-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -426,7 +427,7 @@
     },
     "packages/opencode-plugin": {
       "name": "@pragma-sh/opencode-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.2",
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
         "@pragma-sh/plugin": "workspace:*",
@@ -440,7 +441,7 @@
     },
     "packages/pi-plugin": {
       "name": "@pragma-sh/pi-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "0.80.10",
         "@pragma-sh/plugin": "workspace:*",
@@ -457,10 +458,10 @@
     },
     "packages/plugin": {
       "name": "@pragma-sh/plugin",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "dependencies": {
-        "@pragma-sh/constants": "^0.0.0",
-        "@pragma-sh/sdk": "^0.0.0",
+        "@pragma-sh/constants": "^1.0.1",
+        "@pragma-sh/sdk": "^1.0.1",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -490,7 +491,7 @@
     },
     "packages/plugins-host": {
       "name": "@pragma-sh/plugins-host",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "pragma-plugins": "./src/cli.ts",
       },
@@ -508,7 +509,7 @@
     },
     "packages/prime-agent-plugin": {
       "name": "@pragma-sh/prime-agent-plugin",
-      "version": "0.2.5-alpha.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/pi-plugin": "workspace:*",
         "@types/node": "^24.12.3",
@@ -518,9 +519,9 @@
     },
     "packages/scratchpad": {
       "name": "@pragma-sh/scratchpad",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "dependencies": {
-        "@pragma-sh/sdk": "^0.0.0",
+        "@pragma-sh/sdk": "^1.0.1",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
@@ -536,9 +537,9 @@
     },
     "packages/scratchpad-contract": {
       "name": "@pragma-sh/scratchpad-contract",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "dependencies": {
-        "@pragma-sh/constants": "^0.0.0",
+        "@pragma-sh/constants": "^1.0.1",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
@@ -547,9 +548,9 @@
     },
     "packages/scratchpad-viewer": {
       "name": "@pragma-sh/scratchpad-viewer",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "dependencies": {
-        "@pragma-sh/scratchpad-contract": "^0.0.0",
+        "@pragma-sh/scratchpad-contract": "^1.0.1",
       },
       "devDependencies": {
         "@mdx-js/mdx": "^3.1.1",
@@ -569,7 +570,7 @@
     },
     "packages/sdk": {
       "name": "@pragma-sh/sdk",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/scratchpad-contract": "workspace:*",
@@ -581,7 +582,7 @@
     },
     "packages/sidecar-kit": {
       "name": "@pragma-sh/sidecar-kit",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -590,7 +591,7 @@
     },
     "packages/watcher": {
       "name": "@pragma-sh/watcher",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "bin": {
         "pragma-watch": "./src/cli.ts",
       },
@@ -605,7 +606,7 @@
     },
     "packages/watcher-kit": {
       "name": "@pragma-sh/watcher-kit",
-      "version": "0.6.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",
@@ -961,6 +962,8 @@
     "@csstools/css-syntax-patches-for-csstree": ["@csstools/css-syntax-patches-for-csstree@1.1.9", "", { "peerDependencies": { "css-tree": "^3.2.1" }, "optionalPeers": ["css-tree"] }, "sha512-iGGw4OsAYsS6pD29MdJ2bX/nJx65a04ZZiw6x+VwWlP2DdXf6f++Zmuv/OzALpdyfVhjbduIIF2cXM7HWBIe9A=="],
 
     "@csstools/css-tokenizer": ["@csstools/css-tokenizer@4.0.0", "", {}, "sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA=="],
+
+    "@date-fns/tz": ["@date-fns/tz@1.5.0", "", {}, "sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg=="],
 
     "@dimforge/rapier3d-compat": ["@dimforge/rapier3d-compat@0.12.0", "", {}, "sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow=="],
 
@@ -3030,6 +3033,8 @@
 
     "data-view-byte-offset": ["data-view-byte-offset@1.0.1", "", { "dependencies": { "call-bound": "^1.0.2", "es-errors": "^1.3.0", "is-data-view": "^1.0.1" } }, "sha512-BS8PfmtDGnrgYdOonGZQdLZslWIeCGFP9tpan0hi1Co2Zr2NKADsvGYA8XxuG/4UWgJ6Cjtv+YJnB6MM69QGlQ=="],
 
+    "date-fns": ["date-fns@4.4.0", "", {}, "sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w=="],
+
     "dayjs": ["dayjs@1.11.23", "", {}, "sha512-QDTCU0M0MxR3hQfnlDJfwekQiaanm1ubOD231u73WBckQ/fsamwRLiE2GBz6D3a/xF1NgfiDLJjXBa1hYOYTtQ=="],
 
     "debounce-fn": ["debounce-fn@4.0.0", "", { "dependencies": { "mimic-fn": "^3.0.0" } }, "sha512-8pYCQiL9Xdcg0UPSD3d+0KMlOjp+KGU5EPwYddgzQ7DATsg4fuUDjQtsYLmWjnk2obnNHgV3vE2Y4jejSOJVBQ=="],
@@ -4375,6 +4380,8 @@
     "raw-body": ["raw-body@3.0.2", "", { "dependencies": { "bytes": "~3.1.2", "http-errors": "~2.0.1", "iconv-lite": "~0.7.0", "unpipe": "~1.0.0" } }, "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA=="],
 
     "react": ["react@19.2.8", "", {}, "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw=="],
+
+    "react-day-picker": ["react-day-picker@10.0.1", "", { "dependencies": { "@date-fns/tz": "^1.4.1", "date-fns": "^4.1.0" }, "peerDependencies": { "@types/react": ">=16.8.0", "react": ">=16.8.0" }, "optionalPeers": ["@types/react"] }, "sha512-eNh6BlwcYInWaJtRv18mXQ06Ys/H6rdTZAnTaSdOYJuTpwP1JMCHNd1FDRadA+gbeinq+psdULN5Xnowy9mV8w=="],
 
     "react-devtools-core": ["react-devtools-core@6.1.5", "", { "dependencies": { "shell-quote": "^1.6.1", "ws": "^7" } }, "sha512-ePrwPfxAnB+7hgnEr8vpKxL9cmnp7F322t8oqcPshbIQQhDKgFDW4tjhF2wjVbdXF9O/nyuy3sQWd9JGpiLPvA=="],
 

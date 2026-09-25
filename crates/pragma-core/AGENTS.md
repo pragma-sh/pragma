@@ -70,6 +70,21 @@ Tauri or client presentation code.
   hitting `MAX_READ_BYTES` — the PDF viewer's path. Keep the chunk cap comfortably below
   the protocol's 16 MB frame limit: base64 inflates every chunk by 4/3.
 
+- **Storage scans (`storage.rs`) skip `.pragma/worktrees/`** so a main checkout never
+  counts its linked worktrees twice, charge allocated bytes once per hard-linked inode
+  (`pragma_platform::disk`), and take ignored folders from
+  `git ls-files --others --ignored --exclude-standard --directory`. `DeleteIgnoredFolder`
+  never trusts the client's list: it re-runs `git check-ignore`, refuses links and
+  anything under `constants.storage.protectedFolders` (`.git`, `.pragma`), then removes.
+  Palette search and storage scans share `cancel::CancelRegistry` for cancel-by-id.
+
+- **A field added to an RPC response must be optional on the wire.** The client talks to
+  whatever server is already running — a detached dev server from an earlier build, or
+  an SSH host on an older release — and `daemon.protocolVersion` only moves on a release,
+  so a newly required field fails the whole call with `json error: missing field`. That
+  is exactly how `WorktreeStorage.tree` first shipped; it is now optional and the client
+  degrades (one box per worktree) instead of failing.
+
 ## Rules
 
 - No Tauri dependencies.

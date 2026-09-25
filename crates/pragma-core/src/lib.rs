@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod cancel;
 pub mod exec;
 pub mod fanout;
 pub mod fs;
@@ -18,6 +19,8 @@ pub mod git;
 pub mod process_env;
 pub mod rpc;
 pub mod scratchpads;
+pub mod storage;
+mod storage_tree;
 pub mod tabs;
 pub mod watcher;
 pub mod whiteboards;

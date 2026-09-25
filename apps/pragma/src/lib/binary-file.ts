@@ -53,7 +53,7 @@ async function readWholeFile(
 
 /** Human-readable byte size for the size-limit and progress messages. */
 export function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {

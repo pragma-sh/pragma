@@ -30,6 +30,7 @@ import type {
   WorktreeCommitList,
   Worktree,
   WorktreeStatus,
+  WorktreeStorage,
   AgentMessage,
   AgentReportPayload,
   AutomationInfo,
@@ -980,6 +981,21 @@ export function paletteSearch(
 /** Cancels an in-flight host palette search. */
 export function cancelPaletteSearch(projectId: string, searchId: string): Promise<void> {
   return invoke("cancel_palette_search", { projectId, searchId });
+}
+
+/** Measures one worktree's disk usage on its owning host. */
+export function scanWorktreeStorage(worktreeId: string, scanId: string): Promise<WorktreeStorage> {
+  return invoke<WorktreeStorage>("scan_worktree_storage", { worktreeId, scanId });
+}
+
+/** Stops an in-flight worktree storage scan. Safe after it has finished. */
+export function cancelWorktreeStorageScan(worktreeId: string, scanId: string): Promise<void> {
+  return invoke("cancel_worktree_storage_scan", { worktreeId, scanId });
+}
+
+/** Deletes one gitignored folder; the host refuses tracked or protected paths. */
+export function deleteIgnoredFolder(worktreeId: string, path: string): Promise<void> {
+  return invoke("delete_ignored_folder", { worktreeId, path });
 }
 
 /**

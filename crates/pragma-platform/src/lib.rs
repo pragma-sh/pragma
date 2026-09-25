@@ -8,6 +8,8 @@
 //!
 //! Eight seams live here:
 //!
+//! - [`disk`] — how many bytes a file occupies on disk, and which hard-linked
+//!   entries share one copy of the data.
 //! - [`install`] — replacing the installed desktop app with a downloaded build
 //!   and relaunching it.
 //! - [`ipc`] — the local socket the server binds and clients connect to.
@@ -19,6 +21,7 @@
 //! - [`shell`] — resolving the interactive shell a PTY should launch.
 //! - [`wsl`] — enumerating the WSL distributions a machine has installed.
 
+pub mod disk;
 pub mod install;
 pub mod ipc;
 pub mod path;

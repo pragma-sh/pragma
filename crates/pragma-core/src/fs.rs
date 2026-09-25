@@ -8,19 +8,18 @@
 //! whichever host owns the socket — local for local projects, the remote box for
 //! SSH-bridged projects.
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use pragma_constants::{DirEntry, FileChunk, FileContents, CONSTANTS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::cancel::CancelRegistry;
 use crate::process_env;
+use crate::storage;
 use crate::{CoreError, CoreResult};
 
 /// Files larger than this are reported as `truncated` and never read into memory
@@ -35,8 +34,8 @@ const MAX_SEARCH_SNIPPET_BYTES: usize = 512;
 const MIN_FILE_MATCH_SCORE: f64 = 0.45;
 const MAX_CONCURRENT_SEARCHES: usize = if cfg!(test) { 1_024 } else { 2 };
 
-static ACTIVE_SEARCHES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ACTIVE_SEARCHES: CancelRegistry =
+    CancelRegistry::new("palette search", MAX_CONCURRENT_SEARCHES);
 
 /// One trusted worktree root included in a project palette search.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -149,6 +148,13 @@ pub enum FsRequest {
     },
     /// Cancels an active palette search. Safe when the id is already complete.
     CancelPaletteSearch { search_id: String },
+    /// Measures a worktree's disk usage: totals, largest files, and the
+    /// gitignored folders the Storage page offers to delete.
+    StorageScan { scan_id: String, root: String },
+    /// Stops an active storage scan. Safe when the id is already complete.
+    CancelStorageScan { scan_id: String },
+    /// Deletes one gitignored folder after the host re-checks it is safe to.
+    DeleteIgnoredFolder { root: String, path: String },
 }
 
 /// Dispatches a `filesystem` RPC payload to the matching operation and returns a
@@ -206,45 +212,17 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             deadline_ms,
         )?),
         FsRequest::CancelPaletteSearch { search_id } => {
-            cancel_palette_search(&search_id);
+            ACTIVE_SEARCHES.cancel(&search_id);
             to_value(())
         }
-    }
-}
-
-fn register_search(search_id: &str) -> CoreResult<Arc<AtomicBool>> {
-    if search_id.is_empty() {
-        return Err(CoreError::InvalidPayload(
-            "search id is required".to_string(),
-        ));
-    }
-    let mut active = ACTIVE_SEARCHES
-        .lock()
-        .map_err(|error| CoreError::Operation(error.to_string()))?;
-    if let Some(previous) = active.remove(search_id) {
-        previous.store(true, Ordering::Relaxed);
-    }
-    if active.len() >= MAX_CONCURRENT_SEARCHES {
-        return Err(CoreError::Operation(
-            "too many concurrent palette searches".to_string(),
-        ));
-    }
-    let cancelled = Arc::new(AtomicBool::new(false));
-    active.insert(search_id.to_string(), Arc::clone(&cancelled));
-    Ok(cancelled)
-}
-
-fn cancel_palette_search(search_id: &str) {
-    if let Ok(active) = ACTIVE_SEARCHES.lock() {
-        if let Some(cancelled) = active.get(search_id) {
-            cancelled.store(true, Ordering::Relaxed);
+        FsRequest::StorageScan { scan_id, root } => to_value(storage::scan(&scan_id, &root)?),
+        FsRequest::CancelStorageScan { scan_id } => {
+            storage::cancel_scan(&scan_id);
+            to_value(())
         }
-    }
-}
-
-fn unregister_search(search_id: &str) {
-    if let Ok(mut active) = ACTIVE_SEARCHES.lock() {
-        active.remove(search_id);
+        FsRequest::DeleteIgnoredFolder { root, path } => {
+            to_value(storage::delete_ignored_folder(&root, &path)?)
+        }
     }
 }
 
@@ -269,7 +247,7 @@ fn palette_search(
         ));
     }
 
-    let cancelled = register_search(search_id)?;
+    let cancelled = ACTIVE_SEARCHES.register(search_id)?;
     let result = (|| {
         let deadline = Instant::now() + Duration::from_millis(deadline_ms.clamp(1, 5_000));
         let smart_case = query.chars().any(char::is_uppercase);
@@ -283,7 +261,7 @@ fn palette_search(
         'roots: for search_root in roots {
             let root = pragma_platform::path::canonicalize(&search_root.root)?;
             for relative in search_paths(&root) {
-                if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                if cancelled.is_cancelled() || Instant::now() >= deadline {
                     truncated = true;
                     break 'roots;
                 }
@@ -384,7 +362,7 @@ fn palette_search(
         });
         Ok(PaletteSearchResponse { matches, truncated })
     })();
-    unregister_search(search_id);
+    drop(cancelled);
     result
 }
 
@@ -502,7 +480,7 @@ fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
 
 /// Validates a worktree-relative path: rejects absolute paths and any `..`
 /// component before any disk access, returning the cleaned relative path.
-fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
+pub(crate) fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
     let rel = Path::new(relative);
     let mut cleaned = PathBuf::new();
     for component in rel.components() {

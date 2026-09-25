@@ -28,7 +28,8 @@
     "whiteboards",
     "fanout",
     "updates",
-    "onboarding"
+    "onboarding",
+    "storage"
   ],
   "properties": {
     "app": {
@@ -102,6 +103,9 @@
     },
     "onboarding": {
       "$ref": "#/definitions/Onboarding"
+    },
+    "storage": {
+      "$ref": "#/definitions/StorageDefaults"
     }
   },
   "definitions": {
@@ -4439,6 +4443,247 @@
             "$ref": "#/definitions/UpdatePlatform"
           },
           "description": "Installer platform ids the check API accepts."
+        }
+      }
+    },
+    "StorageDefaults": {
+      "title": "StorageDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for the Settings \u2192 Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
+      "required": [
+        "largeFileMinBytes",
+        "largeFileLimit",
+        "ignoredFolderMinBytes",
+        "maxScanEntries",
+        "scanConcurrency",
+        "protectedFolders",
+        "reminderIntervalDays",
+        "reminderIntervalPresets"
+      ],
+      "properties": {
+        "largeFileMinBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Smallest file a worktree scan lists as a large file."
+        },
+        "largeFileLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most large files one worktree scan returns, largest first."
+        },
+        "ignoredFolderMinBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Smallest gitignored folder offered under Free up space. Tiny folders are still counted in the totals."
+        },
+        "maxScanEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most filesystem entries one worktree scan visits before it stops and reports itself truncated."
+        },
+        "scanConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many worktree scans the Storage page runs at once."
+        },
+        "protectedFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Worktree-relative folders (and everything beneath them) the host never deletes as a gitignored folder, even when git reports them ignored. `.pragma` holds project config and, in the main checkout, every linked worktree."
+        },
+        "reminderIntervalDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default days between storage reminders when the user enables them without choosing an interval."
+        },
+        "reminderIntervalPresets": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Interval choices, in days, offered by the storage reminder picker."
+        }
+      }
+    },
+    "StorageSettings": {
+      "title": "StorageSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `storage` block of global `.pragma/config.json`. Global-only. Every field is optional.",
+      "properties": {
+        "reminder": {
+          "$ref": "#/definitions/StorageReminderSettings"
+        }
+      }
+    },
+    "StorageReminderSettings": {
+      "title": "StorageReminderSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "When Pragma reminds the user to review disk usage. Reminders recur every `intervalDays` days starting on `startDate`.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether storage reminders are shown."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Local calendar date (YYYY-MM-DD) of the first reminder."
+        },
+        "intervalDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days between reminders. Missing uses StorageDefaults.reminderIntervalDays."
+        }
+      }
+    },
+    "StorageFile": {
+      "title": "StorageFile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "ignored"],
+      "description": "One large file found by a worktree storage scan.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative path with `/` separators."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes the file occupies on disk."
+        },
+        "ignored": {
+          "type": "boolean",
+          "description": "True when the file lies inside a gitignored folder."
+        }
+      }
+    },
+    "StorageFolder": {
+      "title": "StorageFolder",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "fileCount"],
+      "description": "One gitignored folder a worktree storage scan found and the user may delete.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative folder path with `/` separators and no trailing slash."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes the folder's contents occupy on disk."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files inside the folder."
+        }
+      }
+    },
+    "WorktreeStorage": {
+      "title": "WorktreeStorage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "totalBytes",
+        "fileCount",
+        "gitBytes",
+        "ignoredBytes",
+        "largeFiles",
+        "ignoredFolders",
+        "truncated"
+      ],
+      "description": "Disk usage of one worktree, computed on the host that owns it. Linked Pragma worktrees nested under `.pragma/worktrees` are excluded so the main checkout never double-counts them.",
+      "properties": {
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes every scanned file occupies, including `.git` and gitignored folders."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files scanned."
+        },
+        "gitBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes under the worktree's own `.git` entry (object store in a main checkout)."
+        },
+        "ignoredBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes inside every gitignored folder, deletable or protected."
+        },
+        "largeFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageFile"
+          },
+          "description": "Largest files at or above StorageDefaults.largeFileMinBytes, largest first."
+        },
+        "ignoredFolders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageFolder"
+          },
+          "description": "Deletable gitignored folders at or above StorageDefaults.ignoredFolderMinBytes, largest first."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the scan stopped at StorageDefaults.maxScanEntries or was cancelled, so totals are a lower bound."
+        },
+        "tree": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageTreeEntry"
+          },
+          "description": "Top-level folder totals under the worktree root, for the treemap. Optional on the wire: a host built before it existed omits it, and the worktree is then drawn as one box."
+        }
+      }
+    },
+    "StorageTreeEntryKind": {
+      "title": "StorageTreeEntryKind",
+      "type": "string",
+      "enum": ["folder", "file", "files"],
+      "description": "What a treemap entry stands for: a top-level folder, or the files directly in the worktree root (`files`). `file` is reserved for a single file."
+    },
+    "StorageTreeEntry": {
+      "title": "StorageTreeEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bytes", "fileCount", "kind", "children"],
+      "description": "One box of a worktree's treemap: a top-level folder's total size, or the root's own files.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "File or folder name (not a path). Empty for a `files` remainder."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes on disk."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files the entry holds, counting everything beneath a folder."
+        },
+        "kind": {
+          "$ref": "#/definitions/StorageTreeEntryKind"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageTreeEntry"
+          },
+          "description": "Always empty today: the treemap stops at top-level folders. Kept so a deeper tree can be added without a wire change."
         }
       }
     }

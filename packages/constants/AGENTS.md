@@ -71,6 +71,11 @@ Two things that break the tarball if changed carelessly:
   and `skill.id` / `skill.targets[]` (`id`, home-relative `directory`, button `label`) for
   the global skill directories the skills step installs into. Rust resolves `directory`
   against the home directory; the frontend only ever sends `id` over IPC.
+- `storage.*` — Settings → Storage: large-file threshold/limit, the smallest ignored
+  folder offered for deletion, the host scan entry cap, page scan concurrency,
+  `protectedFolders` the host never deletes, and reminder interval default/presets.
+  The user's reminder lives in global `.pragma/config.json` `storage.reminder`
+  (`StorageSettings`); `WorktreeStorage` is the host scan's response shape.
 - `theme.fileName` / `theme.modes` — location and color-scheme blocks of the optional
   `.pragma/theme.json` color overrides (see `apps/pragma/AGENTS.md`). Only the file
   contract is shared; the token catalog is derived from `apps/pragma/src/index.css`.

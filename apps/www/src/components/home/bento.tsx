@@ -7,6 +7,7 @@ import {
   Compass,
   Gauge,
   Globe,
+  HardDrive,
   Keyboard,
   NotebookPen,
   PencilRuler,
@@ -106,21 +107,28 @@ const ITEMS: readonly BentoItem[] = [
     title: "Agent alerts",
     description:
       "A chime, a system notification, and a status dot the moment an agent finishes or needs a decision — with your own sound clips per project.",
-    span: "sm:col-span-6 lg:col-span-4",
+    span: "sm:col-span-6 lg:col-span-6",
   },
   {
     icon: Keyboard,
     title: "Keybindings",
     description:
       "Every action is rebindable per platform, globally or per project, validated on write so a bad chord can never lock you out.",
-    span: "sm:col-span-6 lg:col-span-4",
+    span: "sm:col-span-6 lg:col-span-6",
   },
   {
     icon: Gauge,
     title: "Usage limits",
     description:
       "Plugins report provider quota, so the remaining window for each agent subscription is one click away in the tab bar.",
-    span: "sm:col-span-12 lg:col-span-4",
+    span: "sm:col-span-6 lg:col-span-6",
+  },
+  {
+    icon: HardDrive,
+    title: "Storage manager",
+    description:
+      "A treemap of what every project and worktree costs on disk, measured on the host that owns it. Delete gitignored build output and dependencies in a click, or get a reminder to check.",
+    span: "sm:col-span-6 lg:col-span-6",
   },
 ];
 
@@ -130,7 +138,7 @@ const ITEMS: readonly BentoItem[] = [
  * This is the page's band of charcoal cards — the rhythm break comes from what
  * stands on the canvas, not from tinting the canvas, so the section ground is
  * the same near-black as its neighbours. Every tile is the same card: no
- * featured tile, no spotlight tile. Thirteen items with one of them singled out
+ * featured tile, no spotlight tile. Fourteen items with one of them singled out
  * asserted a ranking the list does not have, and it spent the page's gradient
  * allowance on a footnote — the closing call to action is the one spotlight now.
  */
