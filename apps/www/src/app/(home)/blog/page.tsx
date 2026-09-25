@@ -28,15 +28,13 @@ function FeaturedMedia({ post }: { post: Post }) {
           aria-hidden="true"
           className="pointer-events-none size-full object-cover motion-reduce:hidden"
         />
-        {post.data.video.poster ? (
-          <Image
-            src={post.data.video.poster}
-            alt=""
-            width={1200}
-            height={675}
-            className="hidden size-full object-cover motion-reduce:block"
-          />
-        ) : null}
+        <Image
+          src={post.data.video.poster}
+          alt=""
+          width={1200}
+          height={675}
+          className="hidden size-full object-cover motion-reduce:block"
+        />
         <span className="bg-background/85 absolute right-4 bottom-4 rounded-full px-4 py-2 text-xs font-medium">
           Watch the launch film →
         </span>

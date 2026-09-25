@@ -21,7 +21,7 @@ const blog = defineDocs({
       video: z
         .object({
           src: z.url(),
-          poster: z.string().optional(),
+          poster: z.string().min(1),
           captions: z.string().min(1),
         })
         .optional(),

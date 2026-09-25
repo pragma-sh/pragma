@@ -32,8 +32,8 @@ Write the post in Markdown here. MDX works too.
 ```
 
 `title`, `description`, and a quoted ISO `date` are required. `cover` and `video`
-are optional. Put local cover and poster files in `public/blog/` and include both
-`src` and descriptive `alt` for a cover. A `video` needs a public HTTPS URL and
+are optional. Put local cover and poster files in `public/blog/` (or reuse an existing site image from the `public/` root) and include both
+`src` and descriptive `alt` for a cover. A `video` needs a public HTTPS URL, a `poster`, and
 appears as the featured media and an article player; it requires a WebVTT `captions`
 file alongside it. `cover` remains its share image.
 Fumadocs compiles the post, the newest date is featured at

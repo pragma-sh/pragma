@@ -142,7 +142,11 @@ export function SiteNavbar({
 
           <ThemeToggle />
 
-          <Button asChild variant="secondary" className="pill-cta gap-2 max-md:size-11 max-md:p-0">
+          <Button
+            asChild
+            variant="secondary"
+            className="pill-cta gap-2 max-md:size-11 max-md:p-0 max-[420px]:hidden"
+          >
             <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="Pragma on GitHub">
               <GithubMark className="size-4" />
               <span className="max-md:hidden">GitHub</span>

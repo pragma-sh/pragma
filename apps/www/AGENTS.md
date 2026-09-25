@@ -134,8 +134,8 @@ apps/www/
 - **Blog posts are files in `content/blog/`.** Add a root-level `.md` or `.mdx` file;
   its filename is the slug. The Fumadocs schema in `lib/blog.ts` requires `title`,
   `description`, and a quoted ISO `date` in frontmatter. An optional `cover` object
-  has `src` (a file in `public/blog/`) and descriptive `alt`; an optional `video`
-  has a public HTTPS `src`, optional local `poster` and required WebVTT `captions`, and takes over the featured
+  has `src` (a file in `public/blog/`, or an existing shared `public/` image) and descriptive `alt`; an optional `video`
+  has a public HTTPS `src`, required local `poster` (the reduced-motion fallback) and required WebVTT `captions`, and takes over the featured
   media while the cover remains the social image. The index sorts newest
   first and features that entry; `/blog/[slug]` pre-renders each file. See
   `README.md` for a copy-ready post.
