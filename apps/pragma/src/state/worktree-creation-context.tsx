@@ -73,6 +73,11 @@ interface WorktreeCreationContextValue {
   draft: WorktreeCreationRequest | null;
   /** Re-opens the progress screen (from the optimistic sidebar row). */
   viewCreation: () => void;
+  /** Leaves the progress screen without touching the run. The worktree tree
+   *  calls it on every row click, because clicking the already-selected row
+   *  changes no selection identity — the key effect alone would leave the user
+   *  stuck on the full-frame screen. {@link viewCreation} re-opens it. */
+  leaveCreation: () => void;
   /** Starts a creation in the background — the caller closes its dialog immediately. */
   startCreation: (request: WorktreeCreationRequest) => void;
   /** Clears a failed run's screen. */
@@ -296,10 +301,12 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
       // Pass the owner explicitly so terminal/session creation still routes to
       // the project that created this worktree.
       await workspace.refreshProject(request.projectId);
-      // `focus: false` when the user has left for other work in the meantime,
-      // so a background completion opens the terminal/agent tab without
-      // pulling them away from what they're doing now.
-      const options = { projectId: request.projectId, focus };
+      // `focus` is false when the user left the screen while the run was in
+      // flight, so a background completion opens the terminal/agent tab
+      // without pulling them away from what they're doing now. `worktreePath`
+      // is carried explicitly because a switched-away owner's worktree is not
+      // in the loaded snapshot.
+      const options = { projectId: request.projectId, focus, worktreePath: worktree.path };
       const prompt = request.prompt?.trim();
       if (prompt && request.agent) {
         const tab = await workspace.startSession(
@@ -347,6 +354,12 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
       current ? { ...current, viewing: true, viewedFrom: selectionRef.current } : current,
     );
   }, []);
+  const leaveCreation = useCallback(() => {
+    viewingRef.current = false;
+    setCreation((current) =>
+      current && current.viewing ? { ...current, viewing: false } : current,
+    );
+  }, []);
   const { draft, dismiss, retry, tryAgain, clearDraft } = useFailureRecovery({
     creation,
     setCreation,
@@ -356,8 +369,28 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
     openCreatedWorktree,
   });
   const value = useMemo(
-    () => ({ creation, draft, startCreation, viewCreation, dismiss, retry, tryAgain, clearDraft }),
-    [creation, draft, startCreation, viewCreation, dismiss, retry, tryAgain, clearDraft],
+    () => ({
+      creation,
+      draft,
+      startCreation,
+      viewCreation,
+      leaveCreation,
+      dismiss,
+      retry,
+      tryAgain,
+      clearDraft,
+    }),
+    [
+      creation,
+      draft,
+      startCreation,
+      viewCreation,
+      leaveCreation,
+      dismiss,
+      retry,
+      tryAgain,
+      clearDraft,
+    ],
   );
 
   return <WorktreeCreationContext value={value}>{children}</WorktreeCreationContext>;

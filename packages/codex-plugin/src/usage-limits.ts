@@ -2,6 +2,8 @@ import { runProviderCommand } from "@pragma-sh/plugin/catalog";
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 
 const RATE_LIMITS_REQUEST_ID = 2;
+/** Metered bucket codex reports for the account's main quota. */
+const CODEX_BUCKET_ID = "codex";
 // Keep stdin open long enough for slower app-server processes to flush their response.
 const APP_SERVER_DRAIN_SECONDS = 3;
 const APP_SERVER_MESSAGES = [
@@ -72,31 +74,25 @@ export function parseCodexUsageLimits(value: unknown, observedAt: number): Usage
   if (!isRecord(value)) {
     throw new Error("Codex usage response was not an object");
   }
-  const defaultSnapshot = isRecord(value.rateLimits) ? value.rateLimits : null;
-  const bucketRecord = isRecord(value.rateLimitsByLimitId) ? value.rateLimitsByLimitId : null;
-  const buckets = bucketRecord ? Object.entries(bucketRecord) : [];
-  if (buckets.length === 0 && defaultSnapshot) {
-    buckets.push(["codex", defaultSnapshot]);
-  }
-
   const limits: UsageLimit[] = [];
-  for (const [fallbackId, rawSnapshot] of buckets) {
-    if (!isRecord(rawSnapshot)) {
-      continue;
-    }
-    const baseId = slug(stringValue(rawSnapshot.limitId) ?? fallbackId) || "codex";
+  const emittedWindows = new Set<string>();
+  for (const bucket of rateLimitBuckets(value)) {
     addRateLimitWindow(
       limits,
-      `${baseId}-primary`,
+      emittedWindows,
+      bucket,
+      `${bucket.id}-primary`,
       "5-hour limit",
-      rawSnapshot.primary,
+      bucket.snapshot.primary,
       observedAt,
     );
     addRateLimitWindow(
       limits,
-      `${baseId}-secondary`,
+      emittedWindows,
+      bucket,
+      `${bucket.id}-secondary`,
       "Weekly limit",
-      rawSnapshot.secondary,
+      bucket.snapshot.secondary,
       observedAt,
     );
   }
@@ -110,8 +106,67 @@ export function parseCodexUsageLimits(value: unknown, observedAt: number): Usage
   return { status: "ready", observedAt, limits };
 }
 
+/** One metered rate-limit bucket from `rateLimits` or `rateLimitsByLimitId`. */
+interface RateLimitBucket {
+  /** Normalized metered limit id, also the prefix of this bucket's limit ids. */
+  id: string;
+  /** Bucket name shown on non-default buckets (for example `gpt-reserve`). */
+  label: string;
+  snapshot: Record<string, unknown>;
+}
+
+/**
+ * Merges the backward-compatible single-bucket `rateLimits` view with the
+ * multi-bucket `rateLimitsByLimitId` map. The former mirrors one map entry under
+ * the same `limitId`, so keying both by that id emits the bucket once; when the
+ * map omits the default bucket the default snapshot still survives, keeping
+ * `codex-primary` present. Every distinct bucket remains its own entry.
+ */
+function rateLimitBuckets(value: Record<string, unknown>): RateLimitBucket[] {
+  const byId = new Map<string, RateLimitBucket>();
+  const defaultSnapshot = isRecord(value.rateLimits) ? value.rateLimits : null;
+  if (defaultSnapshot) {
+    addRateLimitBucket(byId, defaultSnapshot, CODEX_BUCKET_ID);
+  }
+  const bucketRecord = isRecord(value.rateLimitsByLimitId) ? value.rateLimitsByLimitId : null;
+  for (const [key, rawSnapshot] of Object.entries(bucketRecord ?? {})) {
+    if (isRecord(rawSnapshot)) {
+      // The authoritative multi-bucket view wins a collision with the mirror.
+      addRateLimitBucket(byId, rawSnapshot, key);
+    }
+  }
+  // Rust serializes the map from a HashMap, so its key order is arbitrary; sort so
+  // the default bucket stays first and the rest render deterministically.
+  return [...byId.values()].toSorted(compareBuckets);
+}
+
+function addRateLimitBucket(
+  byId: Map<string, RateLimitBucket>,
+  snapshot: Record<string, unknown>,
+  fallbackId: string,
+): void {
+  const id = slug(stringValue(snapshot.limitId) ?? fallbackId) || CODEX_BUCKET_ID;
+  byId.set(id, { id, label: stringValue(snapshot.limitName) ?? id, snapshot });
+}
+
+/** Orders the default `codex` bucket first, then every other bucket by id. */
+function compareBuckets(a: RateLimitBucket, b: RateLimitBucket): number {
+  if (a.id === b.id) {
+    return 0;
+  }
+  if (a.id === CODEX_BUCKET_ID) {
+    return -1;
+  }
+  if (b.id === CODEX_BUCKET_ID) {
+    return 1;
+  }
+  return a.id.localeCompare(b.id);
+}
+
 function addRateLimitWindow(
   limits: UsageLimit[],
+  emittedWindows: Set<string>,
+  bucket: RateLimitBucket,
   id: string,
   fallbackTitle: string,
   value: unknown,
@@ -120,16 +175,60 @@ function addRateLimitWindow(
   if (!isRecord(value) || !isFiniteNumber(value.usedPercent)) {
     return;
   }
-  const duration = isFiniteNumber(value.windowDurationMins) ? value.windowDurationMins : null;
+  // One metered window can be exposed twice: the same snapshot mirrored by another
+  // bucket, or a window-only bucket whose primary and secondary carry it. Identical
+  // usage, duration, and reset describe one window and are emitted once; a different
+  // percentage, duration, or reset is a distinct quota and stays.
+  if (isDuplicateWindow(emittedWindows, value)) {
+    return;
+  }
+  limits.push(rateLimitWindow(bucket, id, fallbackTitle, value, value.usedPercent, observedAt));
+}
+
+/** Records a metered window and reports whether an identical one came before it. */
+function isDuplicateWindow(emittedWindows: Set<string>, window: Record<string, unknown>): boolean {
+  const key = equivalentWindowKey(window);
+  if (key === null) {
+    return false;
+  }
+  if (emittedWindows.has(key)) {
+    return true;
+  }
+  emittedWindows.add(key);
+  return false;
+}
+
+/** Builds one normalized percentage window. */
+function rateLimitWindow(
+  bucket: RateLimitBucket,
+  id: string,
+  fallbackTitle: string,
+  window: Record<string, unknown>,
+  usedPercent: number,
+  observedAt: number,
+): UsageLimit {
+  const duration = isFiniteNumber(window.windowDurationMins) ? window.windowDurationMins : null;
   const title = duration === null ? fallbackTitle : durationTitle(duration, fallbackTitle);
-  const resetsAt = isFiniteNumber(value.resetsAt) ? value.resetsAt * 1000 : null;
-  limits.push({
+  const resetsAt = isFiniteNumber(window.resetsAt) ? window.resetsAt * 1000 : null;
+  return {
     id,
-    title,
-    used: Math.min(100, Math.max(0, value.usedPercent)),
+    title: bucket.id === CODEX_BUCKET_ID ? title : `${bucket.label} ${lowercaseFirst(title)}`,
+    used: Math.min(100, Math.max(0, usedPercent)),
     limit: 100,
     ...(resetsAt === null ? {} : { resetsInMs: Math.max(0, resetsAt - observedAt) }),
-  });
+  };
+}
+
+/** Identity of one metered window; `null` when the response omits part of it. */
+function equivalentWindowKey(window: Record<string, unknown>): string | null {
+  if (
+    !isFiniteNumber(window.usedPercent) ||
+    !isFiniteNumber(window.windowDurationMins) ||
+    !isFiniteNumber(window.resetsAt)
+  ) {
+    return null;
+  }
+  return JSON.stringify([window.usedPercent, window.windowDurationMins, window.resetsAt]);
 }
 
 function durationTitle(minutes: number, fallback: string): string {
@@ -141,6 +240,10 @@ function durationTitle(minutes: number, fallback: string): string {
     return `${minutes / 60}-hour limit`;
   }
   return fallback;
+}
+
+function lowercaseFirst(value: string): string {
+  return `${value[0]?.toLowerCase() ?? ""}${value.slice(1)}`;
 }
 
 function shellQuote(value: string): string {

@@ -190,7 +190,18 @@ function ModelChoice({
   );
 }
 
-/** Pin toggle shown to the left of each model; pins float the model to the top. */
+/**
+ * Pin toggle shown to the left of each model; pins float the model to the top.
+ *
+ * The button sits inside a Radix menu row — a selectable leaf or, for models
+ * with reasoning, the submenu trigger — so a click here must stay a click here.
+ * Radix selects a menu item on `pointerup` when its own `pointerdown` never
+ * arrived (it synthesizes `currentTarget.click()`), and the submenu trigger
+ * toggles on any un-prevented `click`. Stopping both pointer events keeps the
+ * item from seeing the gesture at all, and `preventDefault` guards the
+ * trigger's `defaultPrevented` check — the pin toggles, nothing selects, and
+ * every open menu stays open through the reorder.
+ */
 function ModelPinButton({ agent, model }: { agent: AgentConfig; model: AgentModel }) {
   const pinned = isModelPinned(agent.id, model.id);
   return (
@@ -200,6 +211,7 @@ function ModelPinButton({ agent, model }: { agent: AgentConfig; model: AgentMode
         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         type="button"
         onPointerDown={(event) => event.stopPropagation()}
+        onPointerUp={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

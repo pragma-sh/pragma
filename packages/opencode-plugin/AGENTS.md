@@ -61,11 +61,14 @@ remain active. Child classification survives partial `session.updated` payloads 
 **`busy` is set by:**
 
 - `chat.message`, `command.execute.before`, non-question `tool.execute.before`,
-  `session.status` busy/retry
+  `session.status` busy/retry, and `session.next.shell.started` for a standalone
+  OpenCode shell command (which may have no session busy/idle pair)
 
 **`busy` is cleared by:**
 
 - `session.idle`, `session.status` idle, a non-abort `session.error`, `session.deleted`
+- `session.next.shell.ended` finishes its matching standalone shell call; overlapping
+  shell calls and agent work keep the tab running until all have finished
 
 **Chat content (mobile/desktop transcript):**
 

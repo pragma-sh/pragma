@@ -114,6 +114,8 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   /** Child session id → parent session id. Child lifecycle keeps its parent busy. */
   const childSessions = new Map<string, string>();
   const activeChildSessions = new Set<string>();
+  /** Standalone shell commands do not necessarily emit a session busy/idle pair. */
+  const activeShellCalls = new Set<string>();
   let pendingLegacyQuestion: ReturnType<typeof setTimeout> | null = null;
   let activeCanonicalQuestionId: string | null = null;
 
@@ -122,6 +124,8 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     "session.idle": applySessionIdleEvent,
     "session.error": applySessionErrorEvent,
     "session.deleted": applySessionDeletedEvent,
+    "session.next.shell.started": applyShellStartedEvent,
+    "session.next.shell.ended": applyShellEndedEvent,
     "server.instance.disposed": () => "clear",
     "permission.replied": applyPermissionRepliedEvent,
     "question.replied": applyQuestionRepliedEvent,
@@ -384,6 +388,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     attention = false;
     childSessions.clear();
     activeChildSessions.clear();
+    activeShellCalls.clear();
     if (lastReported === "cleared") {
       return;
     }
@@ -395,7 +400,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     if (attention) {
       return `attention:${attentionKind}`;
     }
-    if (busy) {
+    if (busy || activeShellCalls.size > 0) {
       return "started";
     }
     return "stopped";
@@ -455,6 +460,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     }
     busy = false;
     attention = false;
+    removeShellCalls(sessionIdFromEvent(event));
     removeChildren(sessionIdFromEvent(event));
     return "sync";
   }
@@ -462,8 +468,29 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   function applySessionDeletedEvent(event: RuntimeEvent): EventAction {
     busy = false;
     attention = false;
+    removeShellCalls(sessionIdFromEvent(event));
     removeChildren(sessionIdFromEvent(event));
     return "sync";
+  }
+
+  function applyShellStartedEvent(event: RuntimeEvent): EventAction {
+    const key = shellCallKey(event);
+    if (!key) return "none";
+    activeShellCalls.add(key);
+    return "sync";
+  }
+
+  function applyShellEndedEvent(event: RuntimeEvent): EventAction {
+    const key = shellCallKey(event);
+    if (!key || !activeShellCalls.delete(key)) return "none";
+    return "sync";
+  }
+
+  function removeShellCalls(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    for (const key of activeShellCalls) {
+      if (key.startsWith(`${sessionId}:`)) activeShellCalls.delete(key);
+    }
   }
 
   function hasActiveChildren(parentId: string | undefined): boolean {
@@ -757,6 +784,15 @@ function sessionIdFromEvent(event: RuntimeEvent): string | undefined {
     }
   }
   return undefined;
+}
+
+function shellCallKey(event: RuntimeEvent): string | undefined {
+  const properties: unknown = event.properties;
+  return isRecord(properties) &&
+    typeof properties.sessionID === "string" &&
+    typeof properties.callID === "string"
+    ? `${properties.sessionID}:${properties.callID}`
+    : undefined;
 }
 
 function assistantTextPart(

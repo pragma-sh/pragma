@@ -578,4 +578,46 @@ describe("SplitHost", () => {
     expect(moveTabToPaneMock).toHaveBeenCalledWith("one", "pane-right");
     expect(splitTabAtPaneMock).not.toHaveBeenCalled();
   });
+
+  /// The active pane tab is tinted with the split accent — the bar's elevated
+  /// background used to swallow it — while inactive tabs stay muted, and the
+  /// focused pane's border uses the same accent.
+  it("marks the active pane tab and focused pane border with the split accent", () => {
+    const originalRoot = mockWorkspace.splitRoot;
+    const originalActiveTabId = mockWorkspace.activeTabId;
+    const originalFocusedPaneId = mockWorkspace.focusedPaneId;
+    mockWorkspace.tabs = [tab("one"), tab("two"), tab("three")];
+    mockWorkspace.activeTabId = "two";
+    mockWorkspace.focusedPaneId = "pane-right";
+    mockWorkspace.splitRoot = {
+      kind: "split",
+      id: "split-accent",
+      direction: "horizontal",
+      children: [
+        { kind: "pane", id: "pane-left", tabIds: ["one"], activeTabId: "one" },
+        { kind: "pane", id: "pane-right", tabIds: ["two", "three"], activeTabId: "two" },
+      ],
+    };
+
+    // Not `renderHost()`: it resets `tabs` to the two-tab default.
+    render(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+
+    const active = screen.getByText("two").closest('[draggable="true"]');
+    const inactive = screen.getByText("three").closest('[draggable="true"]');
+    const focusedPane = screen.getByText("two").closest("section");
+    expect(active).not.toBeNull();
+    expect(inactive).not.toBeNull();
+    expect(active!.className).toContain("border-split-accent/50");
+    expect(active!.className).toContain("bg-split-accent/15");
+    expect(inactive!.className).not.toContain("split-accent");
+    expect(focusedPane!.className).toContain("border-split-accent/35");
+
+    mockWorkspace.splitRoot = originalRoot;
+    mockWorkspace.activeTabId = originalActiveTabId;
+    mockWorkspace.focusedPaneId = originalFocusedPaneId;
+  });
 });

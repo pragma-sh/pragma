@@ -109,7 +109,7 @@ function Harness({
   prompt?: string;
   agent?: AgentConfig | null;
 }) {
-  const { startCreation, creation, viewCreation, draft } = useWorktreeCreation();
+  const { startCreation, creation, viewCreation, leaveCreation, draft } = useWorktreeCreation();
   return (
     <>
       <button
@@ -135,6 +135,9 @@ function Harness({
       </button>
       <button type="button" onClick={viewCreation}>
         view
+      </button>
+      <button type="button" onClick={leaveCreation}>
+        leave
       </button>
       <span data-testid="draft">{draft ? `${draft.branch}|${draft.prompt ?? ""}` : "none"}</span>
       <span data-testid="idle">{creation ? "busy" : "idle"}</span>
@@ -194,6 +197,7 @@ describe("WorktreeCreationProvider", () => {
       expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
         projectId: "p",
         focus: true,
+        worktreePath: newWorktree.path,
       }),
     );
     expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new", "p");
@@ -279,7 +283,11 @@ describe("WorktreeCreationProvider", () => {
 
     await waitFor(() => expect(refreshProjectMock).toHaveBeenCalledWith("p"));
     expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new", "p");
-    expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p", focus: true });
+    expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+      projectId: "p",
+      focus: true,
+      worktreePath: newWorktree.path,
+    });
   });
 
   it("leaves the screen when only the selected project changes", async () => {
@@ -296,6 +304,7 @@ describe("WorktreeCreationProvider", () => {
       expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
         projectId: "p",
         focus: false,
+        worktreePath: newWorktree.path,
       }),
     );
     // Left before completion, so opening the new worktree must not steal focus.
@@ -314,8 +323,31 @@ describe("WorktreeCreationProvider", () => {
       expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
         projectId: "p",
         focus: false,
+        worktreePath: newWorktree.path,
       }),
     );
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("leaves on an explicit signal even though the selection is unchanged", async () => {
+    const { resolve } = deferCreate();
+    renderHarness(null, "Fix the bug", testAgent);
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    // What a click on the already-selected worktree row does: the selection
+    // identity never changes, so only the explicit call can leave the screen.
+    screen.getByRole("button", { name: "leave" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    resolve(newWorktree);
+    await waitFor(() =>
+      expect(startSessionMock).toHaveBeenCalledWith("wt-new", testAgent, "Fix the bug", undefined, {
+        projectId: "p",
+        focus: false,
+        worktreePath: newWorktree.path,
+      }),
+    );
+    // Left before completion, so opening the new worktree must not steal focus.
     expect(selectWorktreeMock).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
   });
@@ -331,6 +363,7 @@ describe("WorktreeCreationProvider", () => {
       expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
         projectId: "p",
         focus: true,
+        worktreePath: newWorktree.path,
       }),
     );
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
@@ -358,6 +391,7 @@ describe("WorktreeCreationProvider", () => {
     expect(startSessionMock).toHaveBeenCalledWith("wt-new", testAgent, "Fix the bug", undefined, {
       projectId: "p",
       focus: true,
+      worktreePath: newWorktree.path,
     });
     screen.getByRole("button", { name: "Retry" }).click();
     await waitFor(() => expect(startSessionMock).toHaveBeenCalledTimes(2));

@@ -11,6 +11,34 @@ import {
 } from "@/lib/theme-presets";
 import { THEME_DEFAULTS, THEME_TOKENS } from "@/lib/theme-tokens";
 
+/** Circular distance between two OKLCh hues, in degrees. */
+function hueDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/** Reasons one preset mode's split accent fails to read apart from its primary. */
+function splitAccentProblems(label: string, block: Record<string, string | undefined>): string[] {
+  const splitColor = block["split-accent"];
+  if (splitColor === undefined) {
+    return [`${label} is missing split-accent`];
+  }
+  const oklch = converter("oklch");
+  const primary = oklch(block.primary ?? "")!;
+  const split = oklch(splitColor)!;
+  // An achromatic color has no hue to collide with.
+  const distance =
+    primary.h === undefined || split.h === undefined ? 360 : hueDistance(primary.h, split.h);
+  const problems: string[] = [];
+  if (distance < 30) {
+    problems.push(`${label} split hue ${split.h} is ${distance}° from primary`);
+  }
+  if ((split.c ?? 0) < 0.03) {
+    problems.push(`${label} split accent is too achromatic to read`);
+  }
+  return problems;
+}
+
 describe("theme presets", () => {
   it("provides unique, sourced presets with light and dark ramps", () => {
     expect(THEME_PRESETS).toHaveLength(11);
@@ -74,6 +102,19 @@ describe("theme presets", () => {
       }
     }
     expect(lowContrast).toEqual([]);
+  });
+
+  /// The split accent must never be the hue the ordinary active tabs use. Every
+  /// catalog token must be present so the split chrome stays themeable too.
+  it("gives every preset a split accent distinct from its primary, and a complete catalog", () => {
+    const problems: string[] = [];
+    for (const preset of THEME_OPTIONS) {
+      const colors = themePresetColors(preset);
+      for (const mode of ["light", "dark"] as const) {
+        problems.push(...splitAccentProblems(`${preset.id} ${mode}`, colors[mode]));
+      }
+    }
+    expect(problems).toEqual([]);
   });
 
   it("keeps VS Code Modern shell surfaces neutral", () => {

@@ -154,10 +154,7 @@ describe("ReviewTab interactions", () => {
     );
   });
 
-  it("scrolls to a comment when the toolbar next arrow is clicked", async () => {
-    const scrollIntoView = vi
-      .spyOn(Element.prototype, "scrollIntoView")
-      .mockImplementation(() => undefined);
+  it("steps to a comment when the toolbar next arrow is clicked", async () => {
     const { container } = render(<ReviewTab tab={tab} />);
     // The toolbar reports the single thread as one navigable comment.
     await waitFor(() => expect(screen.getByText("1 comment")).toBeInTheDocument());
@@ -170,24 +167,48 @@ describe("ReviewTab interactions", () => {
     const next = screen.getByRole("button", { name: "Next comment" });
     expect(next).toBeEnabled();
     fireEvent.click(next);
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     // On the only comment now: both ends are reached, so both arrows disable.
-    expect(screen.getByRole("button", { name: "Next comment" })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Next comment" })).toBeDisabled(),
+    );
     expect(screen.getByRole("button", { name: "Previous comment" })).toBeDisabled();
-    scrollIntoView.mockRestore();
   });
 
-  it("redirects wheel scrolling to the review container until the diff is clicked", async () => {
+  it("leaves wheel scrolling to the review container until the diff is clicked", async () => {
     const { container } = render(<ReviewTab tab={tab} />);
     await screen.findByRole("button", { name: /Resolve/ });
-    const pane = container.querySelector<HTMLElement>(".h-80");
+    const pane = container.querySelector<HTMLElement>("[data-review-diff-pane] > div");
     expect(pane).not.toBeNull();
-    // Not engaged → the diff must not trap the wheel; the default scroll is
-    // cancelled so the parent review container scrolls instead.
-    expect(fireEvent.wheel(pane as HTMLElement, { deltaY: 40 })).toBe(false);
-    // Clicking into the diff engages it → it keeps its own scroll.
+    // Not engaged → the diff scroller is `overflow: hidden`, so the wheel chains
+    // natively to the review container (no JS wheel interception).
+    expect(pane).not.toHaveAttribute("data-engaged");
+    // Clicking into the diff engages it → it scrolls itself.
     fireEvent.pointerDown(pane as HTMLElement);
-    expect(fireEvent.wheel(pane as HTMLElement, { deltaY: 40 })).toBe(true);
+    expect(pane).toHaveAttribute("data-engaged");
+    fireEvent.pointerLeave(pane as HTMLElement);
+    expect(pane).not.toHaveAttribute("data-engaged");
+  });
+
+  it("resizes a file's diff pane from its drag handle", async () => {
+    const { container } = render(<ReviewTab tab={tab} />);
+    await screen.findByRole("button", { name: /Resolve/ });
+    const pane = container.querySelector<HTMLElement>("[data-review-diff-pane] > div");
+    const handle = screen.getByRole("separator", { name: "Resize diff for f.ts" });
+    expect(pane).toHaveStyle({ height: "320px" });
+
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(pane).toHaveStyle({ height: "360px" });
+
+    fireEvent.pointerDown(handle, { button: 0, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 400, pointerId: 1 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(pane).toHaveStyle({ height: "660px" });
+
+    // Dragging far up clamps to the minimum instead of collapsing the pane.
+    fireEvent.pointerDown(handle, { button: 0, clientY: 900, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(pane).toHaveStyle({ height: "120px" });
   });
 
   it("scrolls a file into view when its focus is requested", async () => {

@@ -103,6 +103,7 @@ vi.mock("@/state/workspace-context", () => ({
 }));
 
 const viewCreationMock = vi.fn();
+const leaveCreationMock = vi.fn();
 let creationMock: unknown = null;
 
 vi.mock("@/state/worktree-creation-context", () => ({
@@ -110,6 +111,7 @@ vi.mock("@/state/worktree-creation-context", () => ({
     creation: creationMock,
     startCreation: vi.fn(),
     viewCreation: viewCreationMock,
+    leaveCreation: leaveCreationMock,
     dismiss: vi.fn(),
     retry: vi.fn(),
   }),
@@ -136,6 +138,7 @@ afterEach(() => {
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
   viewCreationMock.mockReset();
+  leaveCreationMock.mockReset();
   creationMock = null;
   activateTabLocationMock.mockReset();
   restoreFanoutTabMock.mockReset();
@@ -193,6 +196,32 @@ describe("WorktreeTree", () => {
     expect(container.querySelector(".lucide-loader-circle")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Second feature" }));
     expect(viewCreationMock).toHaveBeenCalled();
+    // Re-opening the screen from the pending row is not a navigation away.
+    expect(leaveCreationMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves the creation screen when the already-selected row is clicked", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "feature-2",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: true,
+      viewedFrom: "p|main|",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "main" }));
+
+    // The click selects the row it is already on, so the selection identity
+    // does not change — the explicit leave is what dismisses the screen.
+    expect(selectWorktreeMock).toHaveBeenCalledWith("main");
+    expect(leaveCreationMock).toHaveBeenCalled();
   });
 
   it("nests the spinner row under a non-main parent", async () => {

@@ -91,6 +91,12 @@ export const THEME_TOKEN_GROUPS: readonly ThemeTokenGroup[] = [
     ],
   },
   {
+    id: "split",
+    label: "Split workspace",
+    description: "The accent that marks split parent and pane tabs.",
+    tokens: ["split-accent"],
+  },
+  {
     id: "sidebar",
     label: "Sidebar",
     description: "The project rail and its tab strips.",

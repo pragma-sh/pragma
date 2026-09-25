@@ -337,7 +337,9 @@ function resolvePaneCwd(
 /** Border class for a pane: highlighted when focused within a split. */
 function paneBorderClass(showBar: boolean, focused: boolean): string {
   if (!showBar) return "border-transparent";
-  return focused ? "border-primary/35" : "border-border";
+  // The same split accent as the parent/pane tabs, so one hue marks all split
+  // chrome — the focused pane and its tabs — in every theme.
+  return focused ? "border-split-accent/35" : "border-border";
 }
 
 // fallow-ignore-next-line complexity -- pane focus, drag drop zones, and terminal retention share one React surface; extracting would reintroduce prop drilling across the split tree.
@@ -528,8 +530,10 @@ function PaneTab({
         <div
           className={cn(
             "group flex h-6 min-w-24 max-w-44 items-center gap-1 rounded-md border px-1.5 text-xs",
+            // The active tab is tinted with the split accent rather than the
+            // bar's own elevated background, which it would otherwise melt into.
             active
-              ? "border-border bg-elevated text-foreground"
+              ? "border-split-accent/50 bg-split-accent/15 text-foreground"
               : "text-muted-foreground border-transparent hover:bg-muted",
           )}
           // A renaming tab must not be draggable: the drag gesture otherwise wins
