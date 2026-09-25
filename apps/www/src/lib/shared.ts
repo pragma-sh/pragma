@@ -13,6 +13,7 @@ export const docsRoute = "/docs";
 export const downloadsRoute = "/downloads";
 export const pluginsRoute = "/plugins";
 export const compareRoute = "/compare";
+export const blogRoute = "/blog";
 
 /** Base route for generated per-page OG images. */
 export const docsImageRoute = "/og/docs";

@@ -496,6 +496,23 @@ manifest images sit in `{rounded.xl}` hairline-ruled tiles. Deep-link forwarder 
 (`/open`, `/install-plugin`) are single centered cards on canvas with the same two-pill
 row — they exist to hand a query to the `pragma://` scheme, not to be read.
 
+### Blog
+
+`/blog` is a quiet editorial extension of the marketing artboard. The newest article
+occupies a wide, image-led feature: cover art in a `{colors.surface-1}` frame on one
+side, title and summary in display/body type on the other. The image is a real article
+cover, not another gradient spotlight. Remaining articles form a dated, hairline-ruled
+list below. A single post still stands alone as the feature without an empty list.
+Each cover and title share one link to the article. A post can feature a muted launch
+video in the index (the card remains one link) and a controlled player in the article;
+its optional cover then supplies the social preview. Posts are Fumadocs-compiled files
+in `content/blog/`, with publication date and optional media in frontmatter.
+
+An article narrows to a readable text column, with a back link, date, title, lead,
+optional full-width cover, and sectioned body. Cover illustrations may use their own
+palette as editorial content; surrounding chrome uses the existing canvas, ink, muted
+ink, and hairline tokens. At mobile widths the feature stacks image above copy.
+
 ### Comparison
 
 **`comparison-row`** — a row of the feature matrix. `{colors.canvas}` ground,
@@ -512,6 +529,8 @@ Height 56px, max width 1024px, rounded `{rounded.full}`, type `{typography.body-
 the standard floating shadow. It is sticky in the marketing flow and fixed over the
 Fumadocs grid so both surfaces keep the same position; docs also exposes its sidebar
 trigger on mobile.
+The site links (including Blog) collapse into a menu below 768px, leaving the
+search and primary actions reachable in the capsule.
 
 **`download-cta`** — Every Download action (nav, hero, closing CTA, compare pages) is one
 `.pill-cta` whose leading 16px glyph is the visitor's platform mark — Apple for macOS, the

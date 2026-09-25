@@ -60,6 +60,9 @@
     // directory at build time (`defineDocs` in `apps/www/src/lib/source.ts`),
     // never statically imported.
     "apps/www/content/docs/**",
+    // Blog articles are also compiled by Fumadocs from `content/blog`
+    // (`defineDocs` in `apps/www/src/lib/blog.ts`), not statically imported.
+    "apps/www/content/blog/**",
   ],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],

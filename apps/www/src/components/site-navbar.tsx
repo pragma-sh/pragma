@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FullSearchTrigger, SearchTrigger } from "fumadocs-ui/layouts/shared/slots/search-trigger";
-import { ChevronDown, PanelLeft } from "lucide-react";
+import { ChevronDown, Menu, PanelLeft } from "lucide-react";
 import { useDocsLayout } from "fumadocs-ui/layouts/docs";
 
 import { BrandIcon } from "@/components/brand-icon";
@@ -20,11 +20,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { compareDetailRoute, COMPETITORS } from "@/lib/compare-data";
-import { appName, compareRoute, docsRoute, pluginsRoute, repoUrl } from "@/lib/shared";
+import { appName, blogRoute, compareRoute, docsRoute, pluginsRoute, repoUrl } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
   { label: "Plugins", href: pluginsRoute },
+  { label: "Blog", href: blogRoute },
   { label: "Docs", href: docsRoute },
 ];
 
@@ -99,7 +100,7 @@ export function SiteNavbar({
           <span className="font-heading font-semibold max-[420px]:hidden">{appName}</span>
         </Link>
 
-        <div className="hidden items-center sm:flex">
+        <div className="hidden items-center md:flex">
           {navLinks.map(({ label, href }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
@@ -118,6 +119,21 @@ export function SiteNavbar({
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Open site menu"
+              className="hover:bg-accent focus-visible:ring-ring flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 md:hidden"
+            >
+              <Menu className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="rounded-2xl p-1.5 md:hidden">
+              {[...navLinks, { label: "Compare", href: compareRoute }].map(({ label, href }) => (
+                <DropdownMenuItem key={href} asChild className="rounded-xl">
+                  <Link href={href}>{label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <FullSearchTrigger
             hideIfDisabled
             className="bg-secondary/50 hidden h-11 w-40 rounded-full border-0 lg:inline-flex"
@@ -126,7 +142,11 @@ export function SiteNavbar({
 
           <ThemeToggle />
 
-          <Button asChild variant="secondary" className="pill-cta gap-2 max-md:size-11 max-md:p-0">
+          <Button
+            asChild
+            variant="secondary"
+            className="pill-cta gap-2 max-md:size-11 max-md:p-0 max-[420px]:hidden"
+          >
             <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="Pragma on GitHub">
               <GithubMark className="size-4" />
               <span className="max-md:hidden">GitHub</span>
