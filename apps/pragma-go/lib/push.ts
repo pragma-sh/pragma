@@ -108,29 +108,58 @@ async function expoPushToken(projectId: string): Promise<string> {
 /** Where credentials for an unacknowledged revocation wait for a retry. */
 const REVOCATION_STORE_KEY = "pragma.push-revocation.v1";
 
+/** How long the host gets to acknowledge a revocation before it is left queued. */
+const REVOCATION_TIMEOUT_MS = 8_000;
+
+/** The revocation an unpair started, if it has not settled yet. */
+let revocationInFlight: Promise<void> | null = null;
+
 /**
  * Stops the host pushing to this device. Called when the user unpairs.
  *
- * Unpairing has to work with the host unreachable, but a revocation that is
- * simply dropped leaves the host sending agent-alert contents to a phone that
- * is no longer paired and can no longer ask it to stop. So a failed revocation
- * keeps this host's credentials queued, and {@link flushPendingRevocations}
- * retries on the next launch.
+ * Unpairing has to work with the host unreachable, so callers need not await
+ * this: the credentials are queued *before* any request is made, then the
+ * revocation runs in the background, bounded by
+ * {@link REVOCATION_TIMEOUT_MS}. A host that confirms clears the queue; one
+ * that does not answer leaves it for {@link flushPendingRevocations} to retry
+ * on the next launch. A revocation that is simply dropped would leave the host
+ * sending agent-alert contents to a phone that can no longer ask it to stop.
  *
  * A registration still in flight is waited on (then cancelled) first: a
  * `POST /v1/push/tokens` that reached the host after this `DELETE` would
  * re-register the token and resume delivery to a phone that just unpaired.
  */
-export async function unregisterFromPush(
-  client: PragmaClient,
-  config: ConnectionConfig,
-): Promise<void> {
+export function unregisterFromPush(client: PragmaClient, config: ConnectionConfig): Promise<void> {
+  // Recorded synchronously, so a re-pair started straight after sees it.
+  const attempt = queuePendingRevocation(config).then(() => revoke(client, config));
+  revocationInFlight = attempt;
+  void attempt.finally(() => {
+    if (revocationInFlight === attempt) revocationInFlight = null;
+  });
+  return attempt;
+}
+
+/**
+ * Resolves once a background revocation has settled. Pairing waits on this so
+ * a `DELETE` still on the wire cannot land after the re-pair's registration
+ * and silently switch notifications off again. Bounded by the revocation's own
+ * timeout, so it never hangs.
+ */
+export async function settleRevocation(): Promise<void> {
+  await revocationInFlight;
+}
+
+async function revoke(client: PragmaClient, config: ConnectionConfig): Promise<void> {
   await registrationGate.settle(REGISTRATION_SETTLE_MS);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REVOCATION_TIMEOUT_MS);
   try {
-    await client.push.unregister();
+    await client.push.unregister({ signal: controller.signal });
     await forgetPendingRevocations(config.url);
   } catch {
-    await queuePendingRevocation(config);
+    // Already queued before the request, so the next launch retries it.
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

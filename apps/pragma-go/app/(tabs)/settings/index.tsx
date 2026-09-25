@@ -115,8 +115,8 @@ function UnpairCard({ host }: { host: string | null }) {
         {confirming ? (
           <>
             <Text className="text-sm text-muted-foreground">
-              Unpairing clears the stored token and stops notifications. You will need the desktop's
-              pairing code to connect again.
+              Unpairing disconnects and stops notifications. The desktop stays under Previous
+              connections on the pairing screen, so you can reconnect with one tap.
             </Text>
             <Button onPress={() => setConfirming(false)} variant="ghost">
               <Text>Cancel</Text>

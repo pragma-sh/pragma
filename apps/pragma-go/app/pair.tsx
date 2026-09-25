@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { NavGroup, NavRow } from "@/components/NavRow";
 import { RememberBrowserToggle } from "@/components/RememberBrowserToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import { Text } from "@/components/ui/text";
 import { probeConnection, useConnection } from "@/lib/connection-context";
 import { hapticSuccess, hapticWarning } from "@/lib/haptics";
 import { sameScanFrame, scanFrame, type ScanFrame, type ScanViewSize } from "@/lib/scan-frame";
+import { savedHostLabel, type SavedHost } from "@/lib/saved-hosts";
 import { defaultGatewayUrl } from "@/lib/web-handoff";
 import {
   parsePairingPayload,
@@ -29,9 +31,10 @@ import {
  * Pairing screen: scan the desktop's QR code, or fall back to typing the
  * gateway URL + token. Every candidate is validated (shape + protocol, then a
  * live reachability/token probe) before it's persisted and the app connects.
+ * Hosts connected to before are listed underneath for a one-tap reconnect.
  */
 export default function PairScreen() {
-  const { pair } = useConnection();
+  const { pair, savedHosts, forgetSavedHost } = useConnection();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   // In a browser the page is served by the gateway it talks to, so the URL is
@@ -40,6 +43,9 @@ export default function PairScreen() {
   const [manualToken, setManualToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The saved host being reconnected, so its status shows on its own row
+  // rather than up by the scanner.
+  const [savedAttempt, setSavedAttempt] = useState<string | null>(null);
   const handledRef = useRef(false);
 
   async function tryPair(config: ConnectionConfig, hostName?: string): Promise<void> {
@@ -60,6 +66,7 @@ export default function PairScreen() {
 
   function onScan(raw: string): void {
     if (handledRef.current || busy) return;
+    setSavedAttempt(null);
     const scan = validateScan(raw);
     if (!scan.ok) {
       setError(scan.reason);
@@ -70,12 +77,27 @@ export default function PairScreen() {
   }
 
   function onManualSubmit(): void {
+    setSavedAttempt(null);
     const result = validateManualEntry(manualUrl, manualToken);
     if (!result.ok) {
       setError(result.reason);
       return;
     }
     void tryPair(result.config);
+  }
+
+  function onReconnect(host: SavedHost): void {
+    if (busy) return;
+    setSavedAttempt(host.config.url);
+    void tryPair(host.config, host.hostName ?? undefined);
+  }
+
+  function onForget(host: SavedHost): void {
+    if (savedAttempt === host.config.url) {
+      setSavedAttempt(null);
+      setError(null);
+    }
+    void forgetSavedHost(host.config.url);
   }
 
   return (
@@ -104,7 +126,7 @@ export default function PairScreen() {
           onScan={onScan}
         />
 
-        <PairingStatus busy={busy} error={error} />
+        {savedAttempt === null ? <PairingStatus busy={busy} error={error} /> : null}
         <RememberBrowserToggle />
         <ManualPairingForm
           busy={busy}
@@ -113,6 +135,14 @@ export default function PairScreen() {
           setUrl={setManualUrl}
           token={manualToken}
           url={manualUrl}
+        />
+        <SavedHostList
+          activeUrl={savedAttempt}
+          busy={busy}
+          error={error}
+          hosts={savedHosts}
+          onForget={onForget}
+          onReconnect={onReconnect}
         />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -148,6 +178,59 @@ function PairingStatus({ busy, error }: { busy: boolean; error: string | null })
       {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
       {busy ? <Text className="text-sm text-muted-foreground">Connecting…</Text> : null}
     </>
+  );
+}
+
+/**
+ * Hosts this device has connected to before. Tapping one re-runs the same
+ * probe a fresh pairing does, with the stored token, and connects on success;
+ * a failure (the desktop is off, or its token was regenerated) is shown on
+ * that row, which can then be removed.
+ */
+function SavedHostList({
+  activeUrl,
+  busy,
+  error,
+  hosts,
+  onForget,
+  onReconnect,
+}: {
+  activeUrl: string | null;
+  busy: boolean;
+  error: string | null;
+  hosts: SavedHost[];
+  onForget: (host: SavedHost) => void;
+  onReconnect: (host: SavedHost) => void;
+}) {
+  if (hosts.length === 0) return null;
+  const activeHost = hosts.find((host) => host.config.url === activeUrl);
+  return (
+    <View className="gap-2">
+      <NavGroup title="Previous connections">
+        {hosts.map((host) => (
+          <NavRow
+            key={host.config.url}
+            onPress={busy ? undefined : () => onReconnect(host)}
+            subtitle={host.hostName ? host.config.url : undefined}
+            title={savedHostLabel(host)}
+            trailing={
+              busy && host === activeHost ? (
+                <Text className="text-sm text-muted-foreground">Connecting…</Text>
+              ) : (
+                <Button onPress={() => onForget(host)} size="sm" variant="ghost">
+                  <Text className="text-muted-foreground">Remove</Text>
+                </Button>
+              )
+            }
+          />
+        ))}
+      </NavGroup>
+      {activeHost && error ? (
+        <Text className="px-4 text-sm text-destructive">
+          {savedHostLabel(activeHost)}: {error}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
