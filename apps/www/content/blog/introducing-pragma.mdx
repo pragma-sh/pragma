@@ -1,0 +1,56 @@
+---
+title: Introducing Pragma
+description: Run coding agents in parallel, each in its own Git worktree, with the context and tools to take an idea all the way to a pull request.
+date: "2026-09-24"
+cover:
+  src: /pragma-app.png
+  alt: The Pragma desktop workspace with projects, worktrees, and agent sessions
+video:
+  src: https://github.com/user-attachments/assets/9cf9e8cd-8afb-4837-a2b0-ecd5a9ff2511
+  poster: /pragma-app.png
+  captions: /blog/launch-captions.vtt
+---
+
+Today we're introducing **Pragma**, a terminal-first development environment built for running coding agents in parallel. Each task can live in its own Git worktree, with persistent terminal sessions and a clear view of which agents are running, finished, or waiting for you.
+
+Pragma is open source and free to use. [Download Pragma](/downloads) for macOS, Linux, or Windows, or [explore the source on GitHub](https://github.com/pragma-sh/pragma).
+
+## One workspace, many threads of work
+
+The sidebar is organized around projects and worktrees. Switch between feature branches without losing your place, and see which worktrees have agents that need attention. You can nest worktrees to keep a larger project organized rather than flattening every task into one long list.
+
+If you prefer a board, Pragma's prompt board carries a task from idea to pull request. Create a task, assign it to an agent, follow its progress, and move it through your workflow without leaving the workspace.
+
+## Compare approaches with Fanout
+
+Fanout sends the same prompt to multiple agents in separate worktrees. You can inspect their results together, compare the implementations, and choose what to keep. Agents can start a fanout through the CLI, inspect the attempts, and select a result themselves, too.
+
+Pragma supports Claude Code, Codex, Cursor, OpenCode, Grok, Pi, GitHub Copilot CLI, Junie, Kimi Code, Prime Agent, and custom agents through plugins. You don't have to commit to one coding agent to use the workspace.
+
+## From diff to pull request
+
+Git and GitHub are part of the workflow, not a browser tab to keep reopening. Review diffs, manage branches, commit and push changes, and generate commit messages with AI. The pull-request pane brings comments and review feedback into the app. Its Fix It list lets you select review items and hand them to an agent; stacked pull-request workflows are supported as well.
+
+For the small changes around that work, there's an integrated CodeMirror editor with syntax highlighting, a WYSIWYG Markdown editor, and viewers for images and PDFs. Update an environment variable, fix copy, inspect a generated file, or open the worktree in your preferred full IDE when you need more room.
+
+## Make the workspace programmable
+
+The CLI lets you and your agents interact with Pragma directly. An agent skill explains the workflow to coding agents, while a TypeScript SDK and plugin API let you build integrations of your own. Plugins can connect new agents to the launcher and status system, and extend the workspace itself.
+
+TypeScript automations can run on a schedule or respond to events. They can use the SDK to start agents, create workflows, and react to changes inside Pragma. Built-in usage-limit tracking, customizable keybindings and themes, notifications, an integrated browser with design mode, lightweight AI, and a persistent app server round out the day-to-day experience.
+
+## Better handoffs than a wall of text
+
+Agent results often arrive as a huge Markdown dump. Scratchpads give agents a richer place to explain what they found: Markdown can sit alongside React components in an interactive document. Whiteboards and Excalidraw diagrams help make a plan or a result visible, and you can edit and collaborate on them rather than treating them as terminal output to scroll past.
+
+## Keep work moving from your phone
+
+Pragma Go lets you check agent status and respond when an agent needs clarification away from your desk. The [iOS app is on the App Store](https://apps.apple.com/us/app/pragma-sh-go/id6804842149); Android is available to build and install locally. Built-in and custom agent integrations can report status to mobile, so a long-running task doesn't require you to sit in front of the desktop just in case it stops to ask a question.
+
+## Why build another agent workspace?
+
+Good tools already exist for launching agents in isolated worktrees. We built Pragma because we wanted **an extensible home for the whole workflow**: agent integrations that reach both desktop and mobile, deep GitHub review, usage monitoring, model fanout, interactive scratchpads and whiteboards, programmable automations, and a CLI and SDK that agents can use themselves. There's even an agent skill to help coding agents build new Pragma integrations.
+
+Individually, many of these ideas exist elsewhere. The goal is to bring them together without locking you into one agent or adding another subscription. Pragma is open source, and the desktop app runs on macOS, Linux, and Windows with PowerShell or WSL shells.
+
+**[Download Pragma](/downloads)** and let us know what you build with it.
