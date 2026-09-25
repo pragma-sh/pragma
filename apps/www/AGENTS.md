@@ -1,7 +1,7 @@
 # `apps/www` — Pragma marketing + docs site
 
 Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
-plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
+blog at `/blog`, plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
 app. Its `@pragma-sh/*` dependencies are data-only `@pragma-sh/plugin-registry` and render-only
 `@pragma-sh/brand`; nothing in desktop app may import from website.
 
@@ -33,6 +33,7 @@ but a bare `next dev`/`tsc` in a clean checkout will fail until you run `fumadoc
 ```
 apps/www/
 ├── DESIGN.md                # the marketing design system — tokens + rules, edited before the CSS
+├── content/blog/            # one Markdown or MDX file per post (filename = slug)
 ├── content/docs/            # MDX documentation pages (the /docs sidebar mirrors this tree)
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
@@ -41,7 +42,7 @@ apps/www/
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, downloads, plugins, privacy, support,
+    │   ├── (home)/          # marketing route group (landing, blog/[slug], downloads, plugins, privacy, support,
     │   │                    # deep-link forwarders /open + /install-plugin,
     │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
@@ -80,6 +81,8 @@ apps/www/
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
         ├── deploy.ts        # pure Ignored-Build-Step decision (production = release commits only)
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
+        ├── blog.ts          # Fumadocs blog collection with required frontmatter schema
+        ├── blog-utils.ts    # date formatting and newest-first sort
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
         ├── downloads.ts     # installer targets, OS/CPU detection, latest-release asset lookup
         ├── github-api.ts    # server-side GitHub REST base + token headers
@@ -128,6 +131,14 @@ apps/www/
   token in a component — a literal hex or a hand-mixed grey in a `className` is a bug.
 - **Route strings live in `lib/shared.ts`.** `/docs`, `/og/docs`, and `/llms.mdx/docs` are
   referenced by the source loader, the proxy, and the page components — change them there.
+- **Blog posts are files in `content/blog/`.** Add a root-level `.md` or `.mdx` file;
+  its filename is the slug. The Fumadocs schema in `lib/blog.ts` requires `title`,
+  `description`, and a quoted ISO `date` in frontmatter. An optional `cover` object
+  has `src` (a file in `public/blog/`) and descriptive `alt`; an optional `video`
+  has a public HTTPS `src`, optional local `poster` and required WebVTT `captions`, and takes over the featured
+  media while the cover remains the social image. The index sorts newest
+  first and features that entry; `/blog/[slug]` pre-renders each file. See
+  `README.md` for a copy-ready post.
 - **`/{action}` pages forward deep links; they do not parse them.** GitHub's markdown
   sanitizer keeps only `http`/`https` hrefs, so every link that must survive a PR body
   points at a web route (`/open?...`, `/install-plugin?...`) whose `DeepLinkForward`
