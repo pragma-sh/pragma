@@ -139,6 +139,9 @@ apps/www/
   media while the cover remains the social image. The index sorts newest
   first and features that entry; `/blog/[slug]` pre-renders each file. See
   `README.md` for a copy-ready post.
+  Fumadocs discovers these files at build time, so Fallow cannot trace imports to
+  them: keep `apps/www/content/blog/**` in `.fallowrc.jsonc`'s
+  `dynamicallyLoaded` list when changing the content pipeline.
 - **`/{action}` pages forward deep links; they do not parse them.** GitHub's markdown
   sanitizer keeps only `http`/`https` hrefs, so every link that must survive a PR body
   points at a web route (`/open?...`, `/install-plugin?...`) whose `DeepLinkForward`
