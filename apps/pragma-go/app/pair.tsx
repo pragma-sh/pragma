@@ -208,20 +208,13 @@ function SavedHostList({
     <View className="gap-2">
       <NavGroup title="Previous connections">
         {hosts.map((host) => (
-          <NavRow
+          <SavedHostRow
+            busy={busy}
+            connecting={busy && host === activeHost}
+            host={host}
             key={host.config.url}
-            onPress={busy ? undefined : () => onReconnect(host)}
-            subtitle={host.hostName ? host.config.url : undefined}
-            title={savedHostLabel(host)}
-            trailing={
-              busy && host === activeHost ? (
-                <Text className="text-sm text-muted-foreground">Connecting…</Text>
-              ) : (
-                <Button onPress={() => onForget(host)} size="sm" variant="ghost">
-                  <Text className="text-muted-foreground">Remove</Text>
-                </Button>
-              )
-            }
+            onForget={onForget}
+            onReconnect={onReconnect}
           />
         ))}
       </NavGroup>
@@ -231,6 +224,40 @@ function SavedHostList({
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/** One saved host: tap to reconnect, or remove it from the list. */
+function SavedHostRow({
+  busy,
+  connecting,
+  host,
+  onForget,
+  onReconnect,
+}: {
+  busy: boolean;
+  connecting: boolean;
+  host: SavedHost;
+  onForget: (host: SavedHost) => void;
+  onReconnect: (host: SavedHost) => void;
+}) {
+  return (
+    <NavRow
+      onPress={busy ? undefined : () => onReconnect(host)}
+      subtitle={host.hostName ? host.config.url : undefined}
+      title={savedHostLabel(host)}
+      trailing={<SavedHostAction connecting={connecting} onForget={() => onForget(host)} />}
+    />
+  );
+}
+
+/** A saved row's trailing slot: progress while connecting, otherwise Remove. */
+function SavedHostAction({ connecting, onForget }: { connecting: boolean; onForget: () => void }) {
+  if (connecting) return <Text className="text-sm text-muted-foreground">Connecting…</Text>;
+  return (
+    <Button onPress={onForget} size="sm" variant="ghost">
+      <Text className="text-muted-foreground">Remove</Text>
+    </Button>
   );
 }
 
