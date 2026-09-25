@@ -111,42 +111,71 @@ const REVOCATION_STORE_KEY = "pragma.push-revocation.v1";
 /** How long the host gets to acknowledge a revocation before it is left queued. */
 const REVOCATION_TIMEOUT_MS = 8_000;
 
-/** The revocation an unpair started, if it has not settled yet. */
-let revocationInFlight: Promise<void> | null = null;
+/** Revocations still on the wire: this process's unpair, and the launch-time retry. */
+const revocationsInFlight = new Set<Promise<void>>();
+
+/**
+ * Upper bound on everything {@link settleRevocation} waits for: the registration
+ * grace, then the request itself. Expo token minting cannot be aborted, so the
+ * wait is raced against this rather than trusted to finish.
+ */
+const REVOCATION_SETTLE_BOUND_MS = REGISTRATION_SETTLE_MS + REVOCATION_TIMEOUT_MS + 1_000;
+
+function trackRevocation(work: Promise<void>): void {
+  revocationsInFlight.add(work);
+  void work.finally(() => revocationsInFlight.delete(work));
+}
 
 /**
  * Stops the host pushing to this device. Called when the user unpairs.
  *
- * Unpairing has to work with the host unreachable, so callers need not await
- * this: the credentials are queued *before* any request is made, then the
- * revocation runs in the background, bounded by
- * {@link REVOCATION_TIMEOUT_MS}. A host that confirms clears the queue; one
- * that does not answer leaves it for {@link flushPendingRevocations} to retry
- * on the next launch. A revocation that is simply dropped would leave the host
- * sending agent-alert contents to a phone that can no longer ask it to stop.
+ * The returned promise resolves once the credentials are safely queued, which
+ * is a local write: callers should await it before discarding the active
+ * connection, or a crash in between would lose the revocation. The request to
+ * the host is *not* awaited: it runs in the background, bounded by
+ * {@link REVOCATION_TIMEOUT_MS}, so a host that has gone away cannot strand the
+ * user. A host that confirms clears the queue; one that does not answer leaves
+ * it for {@link flushPendingRevocations} to retry on the next launch.
  *
  * A registration still in flight is waited on (then cancelled) first: a
  * `POST /v1/push/tokens` that reached the host after this `DELETE` would
  * re-register the token and resume delivery to a phone that just unpaired.
  */
-export function unregisterFromPush(client: PragmaClient, config: ConnectionConfig): Promise<void> {
-  // Recorded synchronously, so a re-pair started straight after sees it.
-  const attempt = queuePendingRevocation(config).then(() => revoke(client, config));
-  revocationInFlight = attempt;
-  void attempt.finally(() => {
-    if (revocationInFlight === attempt) revocationInFlight = null;
+export async function unregisterFromPush(
+  client: PragmaClient,
+  config: ConnectionConfig,
+): Promise<void> {
+  let queued!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    queued = resolve;
   });
-  return attempt;
+  // Tracked before the save starts, so a re-pair begun right after sees it.
+  trackRevocation(gate.then(() => revoke(client, config)));
+  try {
+    await queuePendingRevocation(config);
+  } finally {
+    queued();
+  }
 }
 
 /**
- * Resolves once a background revocation has settled. Pairing waits on this so
- * a `DELETE` still on the wire cannot land after the re-pair's registration
- * and silently switch notifications off again. Bounded by the revocation's own
- * timeout, so it never hangs.
+ * Resolves once background revocations have settled. Pairing waits on this so a
+ * `DELETE` still on the wire — from an unpair or a launch-time retry — cannot
+ * land after the re-pair's registration and silently switch notifications off
+ * again. Bounded as a whole by {@link REVOCATION_SETTLE_BOUND_MS}, so it never
+ * hangs.
  */
 export async function settleRevocation(): Promise<void> {
-  await revocationInFlight;
+  if (revocationsInFlight.size === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, REVOCATION_SETTLE_BOUND_MS);
+  });
+  try {
+    await Promise.race([Promise.all(revocationsInFlight), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function revoke(client: PragmaClient, config: ConnectionConfig): Promise<void> {
@@ -156,8 +185,9 @@ async function revoke(client: PragmaClient, config: ConnectionConfig): Promise<v
   try {
     await client.push.unregister({ signal: controller.signal });
     await forgetPendingRevocations(config.url);
-  } catch {
+  } catch (error) {
     // Already queued before the request, so the next launch retries it.
+    console.warn("push revocation not acknowledged; will retry on next launch", error);
   } finally {
     clearTimeout(timeout);
   }
@@ -168,7 +198,15 @@ async function revoke(client: PragmaClient, config: ConnectionConfig): Promise<v
  * before pairing, so a host that was unreachable at unpair time still stops
  * pushing as soon as the phone can reach it again.
  */
-export async function flushPendingRevocations(
+export function flushPendingRevocations(
+  clientFor: (config: ConnectionConfig) => Promise<PragmaClient>,
+): Promise<void> {
+  const flush = flushQueue(clientFor);
+  trackRevocation(flush);
+  return flush;
+}
+
+async function flushQueue(
   clientFor: (config: ConnectionConfig) => Promise<PragmaClient>,
 ): Promise<void> {
   const pending = livePendingRevocations(await readPendingRevocations(), Date.now());
@@ -191,14 +229,18 @@ async function retryRevocation(
   config: ConnectionConfig,
   clientFor: (config: ConnectionConfig) => Promise<PragmaClient>,
 ): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REVOCATION_TIMEOUT_MS);
   try {
-    await (await clientFor(config)).push.unregister();
+    await (await clientFor(config)).push.unregister({ signal: controller.signal });
     return true;
   } catch (error) {
     // A rejected token can never revoke anything, so retrying it forever only
     // keeps dead credentials on the device: give up and let the host expire the
     // registration when Expo reports the token dead.
     return error instanceof PragmaGatewayError && error.httpStatus === 401;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -217,7 +259,7 @@ async function writePendingRevocations(pending: PendingRevocation[]): Promise<vo
     pending.length === 0
       ? SecureStore.deleteItemAsync(REVOCATION_STORE_KEY)
       : SecureStore.setItemAsync(REVOCATION_STORE_KEY, JSON.stringify(pending));
-  await write.catch(() => undefined);
+  await write;
 }
 
 async function ensurePermission(): Promise<boolean> {

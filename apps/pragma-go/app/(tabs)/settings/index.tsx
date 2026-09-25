@@ -115,8 +115,10 @@ function UnpairCard({ host }: { host: string | null }) {
         {confirming ? (
           <>
             <Text className="text-sm text-muted-foreground">
-              Unpairing disconnects and stops notifications. The desktop stays under Previous
-              connections on the pairing screen, so you can reconnect with one tap.
+              Unpairing disconnects this device and asks the desktop to stop notifications. If the
+              desktop is offline, it is asked again on the next launch, so alerts may continue until
+              then. The desktop stays under Previous connections on the pairing screen, so you can
+              reconnect with one tap.
             </Text>
             <Button onPress={() => setConfirming(false)} variant="ghost">
               <Text>Cancel</Text>

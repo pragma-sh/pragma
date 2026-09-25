@@ -71,3 +71,14 @@ describe("savedHostLabel", () => {
     expect(savedHostLabel(host("https://a.example"))).toBe("a.example");
   });
 });
+
+describe("savedHostLabel with a path", () => {
+  it("shows only the host for a URL with a path and query", () => {
+    const pathHost: SavedHost = {
+      config: { url: "https://box.ngrok.app:8443/base/path?x=1", token: "t" },
+      hostName: null,
+      lastConnectedAt: 1,
+    };
+    expect(savedHostLabel(pathHost)).toBe("box.ngrok.app:8443");
+  });
+});

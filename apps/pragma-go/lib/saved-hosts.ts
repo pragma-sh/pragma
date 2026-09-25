@@ -58,7 +58,13 @@ export function forgetHost(hosts: SavedHost[], url: string): SavedHost[] {
 /** The name a saved host is listed under: its own name, else the URL's host. */
 export function savedHostLabel(host: SavedHost): string {
   if (host.hostName) return host.hostName;
-  return host.config.url.replace(/^https?:\/\//i, "");
+  return urlHost(host.config.url);
+}
+
+/** The host part of a URL (with port), falling back to the URL minus its scheme and path. */
+function urlHost(url: string): string {
+  const authority = /^(?:[a-z][a-z0-9+.-]*:\/\/)?([^/?#]*)/i.exec(url.trim())?.[1];
+  return authority ? authority : url;
 }
 
 function isSavedHost(value: unknown): value is SavedHost {

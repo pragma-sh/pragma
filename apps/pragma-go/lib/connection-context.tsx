@@ -188,9 +188,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<ConnectionStatus>("loading");
   const [stored, setStored] = useState<StoredState | null>(null);
 
-  useRestoredConnection(setStored, setStatus);
   useFlushedRevocations();
-  const { savedHosts, forgetSavedHost } = useSavedHosts(stored);
+  const { savedHosts, rememberSavedHost, forgetSavedHost } = useSavedHosts(stored);
+  useRestoredConnection(setStored, setStatus, rememberSavedHost);
 
   const connection = useMemo(() => connectionState(stored), [stored]);
   const [client, setClient] = useState<PragmaClient | null>(null);
@@ -226,9 +226,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const unpair = useCallback(async () => {
     // Tell the host to stop pushing, without waiting for it to answer: a host
     // that has gone away must not strand the user on a dead connection. The
-    // revocation is queued before it is sent, so an unanswered one is retried
-    // on the next launch instead of leaving the token live on the host.
-    if (client && config) void unregisterFromPush(client, config);
+    // revocation is saved before the credential is discarded (awaited here), so
+    // an unanswered one is retried on the next launch instead of leaving the
+    // token live on the host; only the request itself runs in the background.
+    if (client && config) {
+      await unregisterFromPush(client, config).catch((error: unknown) => {
+        console.error("could not save the push revocation; the host may keep notifying", error);
+      });
+    }
     setStored(null);
     setStatus("unpaired");
     await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
@@ -297,7 +302,9 @@ function isStoredState(value: StoredState): boolean {
  */
 function useFlushedRevocations(): void {
   useEffect(() => {
-    void flushPendingRevocations(clientFor);
+    flushPendingRevocations(clientFor).catch((error: unknown) => {
+      console.error("could not retry pending push revocations", error);
+    });
   }, []);
 }
 
@@ -309,56 +316,90 @@ function useFlushedRevocations(): void {
  */
 function useSavedHosts(stored: StoredState | null): {
   savedHosts: SavedHost[];
+  rememberSavedHost: (state: StoredState) => Promise<void>;
   forgetSavedHost: (url: string) => Promise<void>;
 } {
   const [savedHosts, setSavedHosts] = useState<SavedHost[]>([]);
 
   const update = useCallback(async (change: (hosts: SavedHost[]) => SavedHost[]) => {
-    const next = change(await readSavedHosts());
-    await SecureStore.setItemAsync(SAVED_HOSTS_STORE_KEY, JSON.stringify(next)).catch(
-      () => undefined,
-    );
-    setSavedHosts(next);
+    setSavedHosts(await updateSavedHosts(change));
   }, []);
 
   useEffect(() => {
-    void readSavedHosts().then(setSavedHosts);
+    readSavedHosts()
+      .then(setSavedHosts)
+      .catch((error: unknown) => console.error("could not read saved hosts", error));
   }, []);
+
+  const rememberSavedHost = useCallback(
+    (state: StoredState) =>
+      update((hosts) => rememberHost(hosts, state.config, state.hostName, Date.now())),
+    [update],
+  );
 
   useEffect(() => {
     if (!stored) return;
-    void update((hosts) => rememberHost(hosts, stored.config, stored.hostName, Date.now()));
-  }, [stored, update]);
+    rememberSavedHost(stored).catch((error: unknown) =>
+      console.error("could not remember this connection", error),
+    );
+  }, [stored, rememberSavedHost]);
 
   const forgetSavedHost = useCallback(
     (url: string) => update((hosts) => forgetHost(hosts, url)),
     [update],
   );
 
-  return { savedHosts, forgetSavedHost };
+  return { savedHosts, rememberSavedHost, forgetSavedHost };
 }
 
+/** Tail of the saved-hosts write chain: each edit starts from the one before. */
+let savedHostsWrites: Promise<void> = Promise.resolve();
+
+/**
+ * Applies `change` to the stored list and returns the result. Edits are
+ * serialized, so overlapping removes or a remove during a reconnect cannot each
+ * read the same old list and let the last write undo the others. A failed
+ * write rejects instead of being reported as saved.
+ */
+async function updateSavedHosts(change: (hosts: SavedHost[]) => SavedHost[]): Promise<SavedHost[]> {
+  const previous = savedHostsWrites;
+  let release!: () => void;
+  savedHostsWrites = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const next = change(await readSavedHosts());
+    await SecureStore.setItemAsync(SAVED_HOSTS_STORE_KEY, JSON.stringify(next));
+    return next;
+  } finally {
+    release();
+  }
+}
+
+/** Reads the stored list. A storage error rejects rather than reading as empty. */
 async function readSavedHosts(): Promise<SavedHost[]> {
-  const raw = await SecureStore.getItemAsync(SAVED_HOSTS_STORE_KEY).catch(() => null);
-  return parseSavedHosts(raw);
+  return parseSavedHosts(await SecureStore.getItemAsync(SAVED_HOSTS_STORE_KEY));
 }
 
 function useRestoredConnection(
   setStored: (state: StoredState | null) => void,
   setStatus: (status: ConnectionStatus) => void,
+  rememberSavedHost: (state: StoredState) => Promise<void>,
 ): void {
   useEffect(() => {
     let cancelled = false;
-    void restoreConnection(setStored, setStatus, () => cancelled);
+    void restoreConnection(setStored, setStatus, rememberSavedHost, () => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [setStatus, setStored]);
+  }, [setStatus, setStored, rememberSavedHost]);
 }
 
 async function restoreConnection(
   setStored: (state: StoredState | null) => void,
   setStatus: (status: ConnectionStatus) => void,
+  rememberSavedHost: (state: StoredState) => Promise<void>,
   isCancelled: () => boolean,
 ): Promise<void> {
   const handoff = takeTokenFromUrl();
@@ -367,7 +408,13 @@ async function restoreConnection(
   if (!stored) return setStatus("unpaired");
   const probe = await probeConnection(stored.config);
   if (isCancelled()) return;
-  return applyRestoredProbe(probe, stored, Boolean(handoff), setStored, setStatus);
+  return applyRestoredProbe(
+    probe,
+    stored,
+    { persist: Boolean(handoff), remember: rememberSavedHost },
+    setStored,
+    setStatus,
+  );
 }
 
 /**
@@ -388,7 +435,7 @@ async function restoredState(): Promise<StoredState | null> {
 async function applyRestoredProbe(
   probe: ProbeResult,
   stored: StoredState,
-  persist: boolean,
+  { persist, remember }: { persist: boolean; remember: (state: StoredState) => Promise<void> },
   setStored: (state: StoredState | null) => void,
   setStatus: (status: ConnectionStatus) => void,
 ): Promise<void> {
@@ -398,6 +445,14 @@ async function applyRestoredProbe(
     if (persist) await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(stored));
     setStored(stored);
     return setStatus("paired");
+  }
+  // A connection stored before saved hosts existed (or one the host could not
+  // answer for now) is about to be discarded: keep it as a one-tap reconnect.
+  // A handoff was never a connection this device held, so it is not kept.
+  if (!persist) {
+    await remember(stored).catch((error: unknown) =>
+      console.error("could not keep the unreachable connection in history", error),
+    );
   }
   await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
   setStatus("unpaired");
