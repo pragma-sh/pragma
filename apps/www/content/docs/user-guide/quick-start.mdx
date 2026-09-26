@@ -10,13 +10,17 @@ with an agent in it, review what the agent did, and ship it.
 
 Open the **Add project** menu at the bottom of the left sidebar. Two tabs:
 
-- **Local** — open an existing git checkout from disk, or paste a remote URL and
+- **Local** — **Add project** opens a folder from disk, or paste a remote URL and
   **Clone remote** into Pragma's projects directory.
 - **Remote** — connect a project over SSH (see [SSH support](/docs/user-guide/ssh)).
 
-<Callout title="Git required">
-  Pragma drives real git worktrees, so the folder you add must be a git checkout (or a remote URL
-  git can clone).
+<Callout title="Folders without git">
+  Pragma drives real git worktrees, so a git checkout gets every feature. If the folder you pick is
+  not a git repository, Pragma warns you and offers to **Initialize git repository**, **Open another
+  project**, **Continue without git**, or **Don’t show again** (turn the warning back on under
+  Settings → Other). A project without git shows a single **root** worktree: terminals, tabs, and
+  agents work as usual, but new worktrees, Changes, and Pull Request stay off until you initialize a
+  repository — which you can do later from the new-worktree button or either pane.
 </Callout>
 
 The project appears in the project switcher at the bottom of the sidebar, with the
