@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/scratchpad",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Interactive runtime and UI components for Pragma scratchpads.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",
@@ -44,7 +44,7 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma-sh/sdk": "^1.0.1"
+    "@pragma-sh/sdk": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",

@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.0.0...pragma-go-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **pragma-go:** remember previous connections for one-tap reconnect ([69c5172](https://github.com/pragma-sh/pragma/commit/69c517252fd4b45ac09b49a981fe9472c50ed234))
+* **pragma-go:** remember previous connections for one-tap reconnect ([ef9381e](https://github.com/pragma-sh/pragma/commit/ef9381e59f57da793f8f4adb13e36e93bc2fc2fe))
+
+
+### Bug Fixes
+
+* **pragma-go:** harden saved hosts and push revocation ordering ([164fc6e](https://github.com/pragma-sh/pragma/commit/164fc6e421972557c9a60d1668a5c82c194e086e))
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v0.1.5...pragma-go-v1.0.0) (2026-09-22)
 
 

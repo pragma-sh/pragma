@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.0.1...pragma-core-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **pragma-core:** scan worktree disk usage on the host ([e1ea2ca](https://github.com/pragma-sh/pragma/commit/e1ea2ca94e41d79a2b4a8c7213bb609b8241f064))
+* **pragma:** add Settings → Storage with treemap, cleanup, and reminders ([252a7a6](https://github.com/pragma-sh/pragma/commit/252a7a6c0321527d8bebe1bc18334bdfa39a245e))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+
+
+### Bug Fixes
+
+* **pragma:** address storage review findings ([c359021](https://github.com/pragma-sh/pragma/commit/c35902168c8c8ad99baf94d0d45b8c7f97b1836a))
+* **pragma:** harden plain-project git init and file deletes ([a63a246](https://github.com/pragma-sh/pragma/commit/a63a2461f3f387779d39828bce331026a22e586f))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.0.0...pragma-core-v1.0.1) (2026-09-23)
 
 

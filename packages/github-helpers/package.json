@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/github-helpers",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "Host-side GitHub helpers for Pragma, compiled as the pragma-github sidecar.",
   "license": "AGPL-3.0-only",

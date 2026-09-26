@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.0.1...pragma-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* build and ship Windows ARM64 natively ([8f02e2a](https://github.com/pragma-sh/pragma/commit/8f02e2a48577be54b8e187c65dbc7d43be1f6045))
+* **pragma:** add Settings → Storage with treemap, cleanup, and reminders ([252a7a6](https://github.com/pragma-sh/pragma/commit/252a7a6c0321527d8bebe1bc18334bdfa39a245e))
+* **pragma:** add storage settings page and reminders ([842eb6c](https://github.com/pragma-sh/pragma/commit/842eb6c6616275a92fe68de56730e82ce9c21c8c))
+* **pragma:** keep host awake while remote access is on ([e05cb97](https://github.com/pragma-sh/pragma/commit/e05cb971f3257d69c1f543316667d2473077248f))
+* **pragma:** keep host awake while remote access is on ([e13b979](https://github.com/pragma-sh/pragma/commit/e13b979450a4032735b47e08ec532f1e0779eab7))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+* **pragma:** support projects without git ([d6f8475](https://github.com/pragma-sh/pragma/commit/d6f8475d8ebacf2a0ece700879e95d6f3f984e3d))
+
+
+### Bug Fixes
+
+* address review feedback on review pane, background launches, and codex usage ([410a002](https://github.com/pragma-sh/pragma/commit/410a0025ac20f615bb9bb894128b4b52ce8d8220))
+* **pragma:** address storage review findings ([c359021](https://github.com/pragma-sh/pragma/commit/c35902168c8c8ad99baf94d0d45b8c7f97b1836a))
+* **pragma:** harden keep-awake inhibitor and sync ([0c2ccc5](https://github.com/pragma-sh/pragma/commit/0c2ccc552c0537cb11be318de559fdbb8bc38b51))
+* **pragma:** harden plain-project git init and file deletes ([a63a246](https://github.com/pragma-sh/pragma/commit/a63a2461f3f387779d39828bce331026a22e586f))
+* review pane scrolling, background worktree launches, and plugin status ([0a422d7](https://github.com/pragma-sh/pragma/commit/0a422d740929fabba8b890095ed529bb73ef6c15))
+* review pane scrolling, background worktree launches, and plugin status ([4aabc82](https://github.com/pragma-sh/pragma/commit/4aabc82d9023c5522b67c5329344c870b22f5d7b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.1.0
+    * @pragma-sh/plugin bumped to 1.1.0
+    * @pragma-sh/scratchpad bumped to 1.1.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.1.0
+    * @pragma-sh/sdk bumped to 1.1.0
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.0.0...pragma-v1.0.1) (2026-09-23)
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.3](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.0.2...opencode-plugin-v1.0.3) (2026-09-26)
+
+
+### Bug Fixes
+
+* review pane scrolling, background worktree launches, and plugin status ([0a422d7](https://github.com/pragma-sh/pragma/commit/0a422d740929fabba8b890095ed529bb73ef6c15))
+* review pane scrolling, background worktree launches, and plugin status ([4aabc82](https://github.com/pragma-sh/pragma/commit/4aabc82d9023c5522b67c5329344c870b22f5d7b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.1.0
+    * @pragma-sh/sdk bumped to 1.1.0
+    * @pragma-sh/watcher-kit bumped to 1.1.0
+
 ## [1.0.2](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.0.1...opencode-plugin-v1.0.2) (2026-09-23)
 
 
