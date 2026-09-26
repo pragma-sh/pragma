@@ -27,8 +27,8 @@ vi.mock("@/components/editor/codemirror-language", () => ({
 }));
 vi.mock("@codemirror/merge", () => ({
   MergeView: class {
-    a = { dispatch: dispatchMock };
-    b = { dispatch: dispatchMock };
+    a = { dispatch: dispatchMock, requestMeasure: () => undefined };
+    b = { dispatch: dispatchMock, requestMeasure: () => undefined, state: { doc: { lines: 0 } } };
     constructor(config: unknown) {
       mergeViewMock(config);
     }

@@ -1,5 +1,13 @@
+import { clampChroma } from "culori";
+
 import type { ThemeFile, ThemeOverrides } from "@/lib/theme";
-import { cssColorToRgba, type Rgba, rgbaToOklch } from "@/lib/theme-color";
+import {
+  cssColorToOklch,
+  cssColorToRgba,
+  oklchToString,
+  type Rgba,
+  rgbaToOklch,
+} from "@/lib/theme-color";
 import { THEME_DEFAULTS, THEME_TOKENS, type ThemeMode } from "@/lib/theme-tokens";
 
 interface ThemePalette {
@@ -615,6 +623,37 @@ function luminance([r, g, b]: Rgba): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** Circular distance between two OKLCh hues, in degrees. */
+function hueDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/**
+ * The split accent for adapted palettes.
+ *
+ * A palette's `skill` color is that design system's own deliberate second
+ * accent, picked to read differently from its `primary` — so it becomes the
+ * hue of the split chrome (parent tab, pane tabs, focused pane). The one
+ * exception is Catppuccin, whose skill equals its primary: there the accent
+ * moves to skill's hue rotated 150° in OKLCh, keeping lightness and chroma,
+ * with the chroma clamped to the sRGB gamut. Either way the split accent is
+ * never the hue the ordinary active tabs use.
+ */
+function splitAccentColor(value: ThemePalette): string {
+  const skill = cssColorToOklch(value.skill)!;
+  const primary = cssColorToOklch(value.primary);
+  // An achromatic primary (`h` collapsed to 0) cannot collide with a hue.
+  if (primary && hueDistance(primary.h, skill.h) >= 30) {
+    return value.skill;
+  }
+  const rotated = clampChroma(
+    { mode: "oklch", l: skill.l, c: skill.c, h: (skill.h + 150) % 360 },
+    "oklch",
+  );
+  return oklchToString({ l: rotated.l, c: rotated.c, h: rotated.h });
+}
+
 function paletteOverrides(value: ThemePalette, mode: ThemeMode): ThemeOverrides {
   return {
     canvas: value.canvas,
@@ -649,6 +688,7 @@ function paletteOverrides(value: ThemePalette, mode: ThemeMode): ThemeOverrides 
     "skill-foreground": value.skillForeground,
     "diff-added": value.success,
     "diff-removed": value.destructive,
+    "split-accent": splitAccentColor(value),
     sidebar: value.canvas,
     "sidebar-foreground": value.mutedForeground,
     "sidebar-primary": value.primary,

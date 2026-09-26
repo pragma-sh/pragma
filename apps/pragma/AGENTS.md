@@ -301,6 +301,16 @@ conflict-resolution changes. A PR review opens a `pr-review` `TabKind`
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
 (fed lazily near the viewport by `github_pr_file_diff`), and inline thread resolve/unresolve.
+Each diff pane (`github/ReviewFileDiff`) is drag-resizable (`hooks/use-vertical-resize.ts`),
+and polls git only while near the viewport. A pane is `overflow: hidden` until the user clicks
+into it, so the wheel reaches the page natively. Don't go back to a JS wheel redirect: a
+non-passive wheel listener pushes every scroll through the main thread. Refreshes keep
+unchanged file/thread references (`github/review-data.ts`) so the memoized file sections
+don't all re-render. Comment navigation goes through `settleCommentIntoView`
+(`github/review-scroll.ts`), which re-centers the comment in its pane and the pane on screen
+each frame until it holds still. Don't use `scrollIntoView` (smooth or `EditorView`'s)
+here: the diff is virtualized, so it aims at estimated line heights and overshoots, and
+CodeMirror's version also scrolls every ancestor.
 
 Each `ReviewThreadCard` also offers two fix affordances: **Fix** (opens
 `github/FixCommentDialog` to launch an agent on that one comment) and **Add to fix it
@@ -1548,6 +1558,20 @@ event, which `create_worktree` emits just before the project's `setup` commands 
 event means no setup scripts and no step. A failure keeps the screen up with the message.
 Failures before creation offer Dismiss; failures while refreshing or opening an already-created
 worktree retain the launch request and offer Retry, which reopens it without creating the branch again.
+
+**Leaving the screen never cancels the run, and a same-row click must still leave it.**
+`WorktreeTree` calls the provider's explicit `leaveCreation()` on every row click, because
+clicking the worktree that is already selected changes no selection identity — the
+`viewedFrom` key effect alone would leave the user stuck on the full-frame screen. The
+optimistic pending row is the one row that calls `viewCreation()` instead. At completion
+the provider decides foreground vs background from `viewingRef` (which the key effect
+keeps live): a background completion must call `startSession` with `focus: false`, which
+routes through `startBackgroundAgentSession` (`lib/agent-launch.ts`) — spawning the daemon
+PTY directly, since an unmounted tab's `terminalManager.whenConnected` would wait for a
+focus that never comes. `WorktreeTargetOptions.worktreePath` carries the new worktree's
+path for that path, because `refreshProject` deliberately skips state writes for a project
+the user already switched away from — and `createTerminalTab` returns the host-side tab
+for a foreign project instead of false-failing.
 
 `Worktree` rows carry a `hidden` boolean (v3 migration). Hidden rows are filtered out of
 the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` and

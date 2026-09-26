@@ -176,6 +176,19 @@ artwork. Codex owns credentials and refresh, so Pragma never reads or prints tok
 normalizes primary and secondary windows to percentage limits and treats API-key-only /
 signed-out accounts as `authentication-required`.
 
+Normalization dedupes by identity, never by window length. `rateLimits` is the protocol's
+backward-compatible single-bucket view and mirrors one `rateLimitsByLimitId` entry, so
+buckets are keyed by slugged `limitId`: the mirror is emitted once, the default snapshot
+survives when the map omits `codex` (keeping `codex-primary` for the collapsed row), and a
+window repeated with identical usage, duration, and reset in the same snapshot's other slot
+is emitted once. That check is per bucket: distinct buckets always remain, even when their
+windows coincide (two untouched weekly quotas look identical), and a
+non-`codex` bucket is titled with its `limitName` (e.g. `gpt-reserve weekly limit`) so a
+genuinely separate weekly quota cannot read as the default weekly limit twice. Limit ids
+are `${bucketId}-primary` / `${bucketId}-secondary`, unique by construction. Response
+shape spot-checked against `codex-cli 0.153.4` on 2026-09-24; re-verify it on every
+tested-version bump.
+
 ## Branding provenance
 
 User selected official Codex artwork after review of redistribution uncertainty. Source is

@@ -220,6 +220,48 @@ describe("Pragma opencode plugin", () => {
     );
   });
 
+  it("reports standalone shell commands without a session busy/idle pair", async () => {
+    const { hooks, reports } = testHooks();
+    const shell = (type: string, callID: string) =>
+      runtimeEvent(type, { sessionID: "s1", callID, command: "git status" });
+
+    await hooks.event?.(shell("session.next.shell.started", "call-1"));
+    await hooks.event?.(shell("session.next.shell.ended", "call-1"));
+    await hooks.event?.(shell("session.next.shell.started", "call-2"));
+    await hooks.event?.(shell("session.next.shell.ended", "call-2"));
+
+    expect(reports).toEqual(["started", "stopped", "started", "stopped"]);
+  });
+
+  it("keeps running until every overlapping shell command and agent turn ends", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.(
+      runtimeEvent("session.next.shell.started", { sessionID: "s1", callID: "call-1" }),
+    );
+    await hooks.event?.(sessionIdleEvent());
+    await hooks.event?.(
+      runtimeEvent("session.next.shell.ended", { sessionID: "s1", callID: "unknown" }),
+    );
+    expect(reports).toEqual(["started"]);
+    await hooks.event?.(
+      runtimeEvent("session.next.shell.ended", { sessionID: "s1", callID: "call-1" }),
+    );
+    expect(reports).toEqual(["started", "stopped"]);
+  });
+
+  it("clears an interrupted standalone shell command without a trailing done", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("session.next.shell.started", { sessionID: "s1", callID: "call-1" }),
+    );
+    await hooks.event?.(abortErrorEvent());
+    await hooks.event?.(
+      runtimeEvent("session.next.shell.ended", { sessionID: "s1", callID: "call-1" }),
+    );
+    expect(reports).toEqual(["started", "cleared"]);
+  });
+
   it("preserves report order when consecutive lifecycle events overlap", async () => {
     const reports: Report[] = [];
     let releaseStarted: (() => void) | undefined;

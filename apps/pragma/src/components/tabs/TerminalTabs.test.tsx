@@ -234,6 +234,22 @@ describe("TerminalTabs", () => {
     expect(screen.queryByText("three")).not.toBeInTheDocument();
   });
 
+  /// The split parent tab carries the split accent so it never reads as an
+  /// ordinary tab — and ordinary tabs never pick the accent up.
+  it("marks the split parent tab with the split accent, unlike ordinary tabs", () => {
+    render(<TerminalTabs />);
+    const plain = screen.getByText("two").closest("div.group");
+    expect(plain).not.toBeNull();
+    expect(plain!.className).not.toContain("split-accent");
+    cleanup();
+
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+    const parent = screen.getByTitle("Split: one");
+    expect(parent.className).toContain("border-split-accent/45");
+    expect(parent.className).toContain("bg-split-accent/10");
+  });
+
   /// Regression: the strip was one `AnimatePresence` shared by every worktree,
   /// so switching worktrees played the old worktree's exit alongside the new
   /// worktree's entrance. Both sets held layout space at once and the tabs

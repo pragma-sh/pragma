@@ -134,22 +134,30 @@ function handleTerminalKeyEvent(
   tabId: string,
   event: KeyboardEvent,
 ): boolean {
-  // xterm runs custom key handlers for both keydown and legacy keypress events.
-  // WebKit can turn both Enter events into terminal input, yielding two CRs.
+  // xterm runs custom key handlers for keydown, legacy keypress (WebKit's
+  // printable-input path), and keyup (Kitty key-release reports). Two rules
+  // follow. First, only Enter keypress is suppressed: WebKit turns it into a
+  // second CR on top of keydown's, while every other keypress is valid
+  // printable input that must reach xterm. Second, side effects (find, soft
+  // newline, native editing) run only on the keydown that starts the gesture —
+  // rewriting Shift+Enter on keyup as well would emit a second ESC+CR, and
+  // keypress would fire the find request twice.
   if (event.type === "keypress" && event.key === "Enter") {
     return false;
   }
   const platform = currentTerminalPlatform();
-  if (isFindShortcut(event, platform)) {
-    event.preventDefault();
-    manager.requestFind(tabId);
-    return false;
-  }
-  if (handleSoftNewline(manager, tabId, event)) {
-    return false;
-  }
-  if (handleNativeEditingSequence(manager, tabId, event, platform)) {
-    return false;
+  if (event.type === "keydown") {
+    if (isFindShortcut(event, platform)) {
+      event.preventDefault();
+      manager.requestFind(tabId);
+      return false;
+    }
+    if (handleSoftNewline(manager, tabId, event)) {
+      return false;
+    }
+    if (handleNativeEditingSequence(manager, tabId, event, platform)) {
+      return false;
+    }
   }
   // Let configured Pragma/plugin shortcuts bubble to the window listener even
   // when xterm owns focus.
@@ -280,6 +288,27 @@ function handleNativeEditingSequence(
   event.preventDefault();
   manager.writeWhenReady(tabId, sequence);
   return true;
+}
+
+/**
+ * Resolves how a click on a terminal link opens, by platform convention:
+ * Cmd+click on macOS / Ctrl+click elsewhere opens the URL in the system default
+ * browser (`external: true`), while Shift+click remains the deliberate in-app
+ * gesture that opens a browser split to the right. Alt/Option+Shift+click stays
+ * external as the legacy chord. A plain click returns `null` so xterm keeps
+ * selection / TUI mouse reporting.
+ */
+function resolveTerminalLinkActivation(
+  event: Pick<MouseEvent, "shiftKey" | "altKey" | "metaKey" | "ctrlKey">,
+  platform: TerminalPlatform,
+): { external: boolean } | null {
+  if (platform === "mac" ? event.metaKey : event.ctrlKey) {
+    return { external: true };
+  }
+  if (!event.shiftKey) {
+    return null;
+  }
+  return { external: event.altKey };
 }
 
 interface PendingInputQueue {
@@ -470,21 +499,26 @@ export class TerminalManager {
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     // Web links open through the workspace handler rather than the OS browser:
-    // Shift+click opens the URL in a browser split to the right; Alt/Option+
-    // Shift+click opens it in the system browser instead. A plain click is left
-    // to xterm (selection / TUI mouse reporting) — Shift is the deliberate
-    // "open this link" gesture, and also bypasses a TUI's mouse tracking.
+    // Cmd+click (mac) / Ctrl+click (elsewhere) opens the URL in the system
+    // browser, Shift+click opens it in a browser split to the right, and
+    // Alt/Option+Shift+click stays external as the legacy chord. A plain click
+    // is left to xterm (selection / TUI mouse reporting) — see
+    // resolveTerminalLinkActivation for the exact rules.
     terminal.loadAddon(
       new WebLinksAddon((event, uri) => {
         const handler = getTerminalLinkHandler();
-        if (!handler || !event.shiftKey) {
+        if (!handler) {
+          return;
+        }
+        const activation = resolveTerminalLinkActivation(event, currentTerminalPlatform());
+        if (!activation) {
           return;
         }
         handler.openUrl({
           tabId: tab.id,
           worktreeId: tab.worktreeId,
           url: uri,
-          external: event.altKey,
+          external: activation.external,
         });
       }),
     );

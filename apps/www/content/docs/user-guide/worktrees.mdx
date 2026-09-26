@@ -50,6 +50,13 @@ accepted the sync offer), **Creating worktree**, and **Running scripts** when th
 defines `setup` commands in `.pragma/scripts.json`. A failure before the worktree exists
 offers Dismiss; a later failure offers Retry.
 
+Creation never blocks the workspace. Click any worktree row — including the one you are
+already on — to return to your terminal; the sidebar keeps a spinner row where the new
+worktree will land, and clicking that row brings the progress screen back. If you are
+still watching when it finishes, the new worktree takes over with its terminal or agent
+session; if you left, the session starts in the background and stays out of your way
+until you open the tab.
+
 ### Syncing main first
 
 If main is behind its remote, a **Main is behind remote** alert asks whether to sync

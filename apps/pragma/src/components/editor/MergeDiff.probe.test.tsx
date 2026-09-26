@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 
-import { type DiffComment, MergeDiff } from "./MergeDiff";
+import { type DiffComment, type MergeDiffHandle, MergeDiff } from "./MergeDiff";
 
 function Counter() {
   const [n, setN] = useState(0);
@@ -41,5 +41,14 @@ describe("MergeDiff widget portal state", () => {
     await new Promise((r) => setTimeout(r, 0));
     // State is preserved: the widget DOM (portal container) was reused.
     expect(screen.getByText(/count 1/)).toBeInTheDocument();
+  });
+
+  it("exposes its navigation handle through the memo wrapper", () => {
+    const ref = createRef<MergeDiffHandle>();
+    render(<MergeDiff comments={makeComments()} newText={"a\nb\n"} oldText={"a\n"} ref={ref} />);
+    expect(ref.current?.scroller()).toBeInstanceOf(HTMLElement);
+    expect(ref.current?.revealComment("t1")).toBe(true);
+    // Unknown comments have no anchor line, so navigation can skip them.
+    expect(ref.current?.revealComment("missing")).toBe(false);
   });
 });

@@ -403,7 +403,8 @@ function tabEntryClassName(active: boolean): string {
 /**
  * The "parent" entry shown in the top bar for a collapsed split. Its X closes
  * the whole split — every tab in every pane — because the split's panes are not
- * individually reachable from this strip.
+ * individually reachable from this strip. It carries the split accent so it
+ * never reads as an ordinary top-bar tab in any theme.
  */
 function SplitParentTab({
   tab,
@@ -432,7 +433,10 @@ function SplitParentTab({
       <ContextMenuTrigger asChild>
         <motion.div
           animate="visible"
-          className={tabEntryClassName(splitIsActive)}
+          className={cn(
+            tabEntryClassName(splitIsActive),
+            "border-split-accent/45 bg-split-accent/10",
+          )}
           exit="exit"
           initial="hidden"
           key="split-parent"
@@ -452,7 +456,7 @@ function SplitParentTab({
               }}
               onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
             >
-              <ParentIcon className="text-primary size-3.5 shrink-0" />
+              <ParentIcon className="text-split-accent size-3.5 shrink-0" />
               <TabAgentDot tabId={tab.id} />
               <ShortcutHint value={shortcutHint} />
               <span className="min-w-0 flex-1 truncate">{displayTitle}</span>

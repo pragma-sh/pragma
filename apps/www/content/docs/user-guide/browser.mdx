@@ -36,6 +36,17 @@ your words.
 
 A failed page load (timeout or an empty document) shows a retry instead of a broken pane.
 
+## Links from the terminal
+
+URLs printed in a terminal — a dev server's address, a failing test's docs link — and
+worktree file paths both render as links:
+
+- **Shift+click** opens a URL in a browser split to the right, and a file path in an
+  editor split — the deliberate "open this" gesture.
+- **<Keys mac="⌘" other="Ctrl" />+click** on a URL opens it in your system browser
+  instead of a Pragma tab.
+- Plain clicks stay with the terminal for selection and TUI mouse reporting.
+
 ## Splits and agents
 
 A browser tab is a first-class tab: split it beside a terminal, run it in a worktree, and

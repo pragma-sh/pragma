@@ -1181,16 +1181,22 @@ function useWorktreeRowControls(
 ) {
   const workspace = useWorkspace();
   const kanban = useKanban();
+  const { leaveCreation } = useWorktreeCreation();
   const rename = useWorktreeRename(node.worktree);
   const collapsedIds = useCollapsedWorktreeIds();
   const expanded = !collapsedIds.has(node.worktree.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const handleSelect = useCallback(() => {
+    // Clicking any row is an explicit "back to work": leave the full-frame
+    // creation screen explicitly, so clicking the row that is already
+    // selected — where the selection identity does not change — still returns
+    // to the terminal instead of leaving the user stuck on the screen.
+    leaveCreation();
     workspace.selectWorktree(node.worktree.id);
     // Selecting a worktree always returns to the terminal view, even when the
     // agent board is the visible surface.
     kanban.exitBoard();
-  }, [workspace, kanban, node.worktree.id]);
+  }, [leaveCreation, workspace, kanban, node.worktree.id]);
   const handleCreateChild = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
     onCreateChild(node.worktree.id);
