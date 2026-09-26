@@ -350,7 +350,10 @@ oxfmt collapses short arrays onto one — so each run of the generator re-breaks
 
 - `**/CHANGELOG.md`, `packages/constants/values.json` and
   `apps/pragma/src-tauri/tauri.conf.json` are rewritten by **Release Please** on every
-  release, and those rewrites land on `main` when the release PR merges.
+  release, and those rewrites land on `main` when the release PR merges. So is every
+  agent-plugin manifest listed as an `extra-files` entry in `release-please-config.json`
+  (`packages/*-plugin/**/plugin.json`, `kimi.plugin.json`) — adding a new `extra-files`
+  JSON path means adding it to `ignorePatterns` in the same change.
 - `packages/constants/values.json` additionally has a **second** writer:
   `packages/constants/scripts/generate-types.ts` rewrites it whenever
   `daemon.protocolVersion` drifts from `crates/pragma-protocol/Cargo.toml`. In CI
