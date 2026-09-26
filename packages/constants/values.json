@@ -377,5 +377,9 @@
       30,
       90
     ]
+  },
+  "projects": {
+    "nonGitWarning": true,
+    "nonGitRootLabel": "root"
   }
 }

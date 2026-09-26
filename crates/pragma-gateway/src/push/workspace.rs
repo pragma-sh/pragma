@@ -99,6 +99,7 @@ mod tests {
                 icon_emoji: None,
                 order_index: 0,
                 created_at: "now".to_string(),
+                is_git: true,
             }],
             worktrees: vec![Worktree {
                 id: "worktree-1".to_string(),

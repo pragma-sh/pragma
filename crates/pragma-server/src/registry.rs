@@ -1902,6 +1902,7 @@ mod tests {
                 icon_emoji: None,
                 order_index: 0,
                 created_at: "2026-01-01 00:00:00".to_string(),
+                is_git: true,
             }],
             worktrees: vec![Worktree {
                 id: "worktree-main".to_string(),

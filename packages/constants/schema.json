@@ -29,7 +29,8 @@
     "fanout",
     "updates",
     "onboarding",
-    "storage"
+    "storage",
+    "projects"
   ],
   "properties": {
     "app": {
@@ -106,6 +107,9 @@
     },
     "storage": {
       "$ref": "#/definitions/StorageDefaults"
+    },
+    "projects": {
+      "$ref": "#/definitions/ProjectDefaults"
     }
   },
   "definitions": {
@@ -1234,6 +1238,10 @@
         "autoDownload": {
           "type": "boolean",
           "description": "When true, Pragma polls on launch, on an interval, and when the window becomes visible. When false, only Check now runs. The download itself starts when the user clicks Install Update."
+        },
+        "nonGitProjectWarning": {
+          "type": "boolean",
+          "description": "When false, adding a folder that is not a git repository skips the warning and adds it as a plain project. Omitted uses `projects.nonGitWarning`."
         }
       }
     },
@@ -2640,6 +2648,23 @@
       "type": "string",
       "enum": ["idle", "running", "stopping"]
     },
+    "ProjectDefaults": {
+      "title": "ProjectDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for adding projects.",
+      "required": ["nonGitWarning", "nonGitRootLabel"],
+      "properties": {
+        "nonGitWarning": {
+          "type": "boolean",
+          "description": "Whether adding a folder that is not a git repository warns first. Overridden by `other.nonGitProjectWarning` in global `.pragma/config.json`."
+        },
+        "nonGitRootLabel": {
+          "type": "string",
+          "description": "Sidebar label for the single worktree of a project that is not a git repository (git projects show `main`)."
+        }
+      }
+    },
     "Project": {
       "title": "Project",
       "type": "object",
@@ -2664,6 +2689,11 @@
         },
         "createdAt": {
           "type": "string"
+        },
+        "isGit": {
+          "type": "boolean",
+          "default": true,
+          "description": "False when the project directory is not the root of a git repository. Such a project has a single root worktree and no git features (worktrees, changes, pull requests) until the user initializes a repository. Omitted means true, so snapshots written before this field existed still read as git projects."
         }
       }
     },
