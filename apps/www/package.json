@@ -15,6 +15,7 @@
   "dependencies": {
     "@pragma-sh/brand": "workspace:*",
     "@pragma-sh/plugin-registry": "workspace:*",
+    "@pragma-sh/treemap": "workspace:*",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "class-variance-authority": "^0.7.1",

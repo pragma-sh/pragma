@@ -118,6 +118,7 @@ than no guide.
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── brand/                   # `@pragma-sh/brand` the Pragma mark as vector geometry + palettes → see packages/brand/AGENTS.md
+│   ├── treemap/                 # `@pragma-sh/treemap` GrandPerspective-style treemap layout + palette → see packages/treemap/AGENTS.md
 │   ├── sdk/                     # `@pragma-sh/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
@@ -185,7 +186,9 @@ than no guide.
   list, and the re-checked delete live in `crates/pragma-core/src/storage.rs` behind
   the `filesystem` RPC's `storageScan` / `cancelStorageScan` / `deleteIgnoredFolder`
   ops; the Settings → Storage UI is `apps/pragma/src/components/settings/storage/`, and
-  the squarified layout it draws with is `apps/pragma/src/lib/treemap.ts`. A scan
+  the squarified layout, GrandPerspective palette, and cushion shading it draws
+  with are `packages/treemap` (`@pragma-sh/treemap`), which the website also uses for
+  its Storage cover. A scan
   runs only while that page is mounted and is cancelled on the host when it unmounts.
 - Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
   merged `index.css` defaults <- global <- project. Never restate a shipped default color in
