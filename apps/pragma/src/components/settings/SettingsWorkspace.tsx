@@ -233,6 +233,7 @@ function validateOtherSettings(other: PragmaConfig["other"]): void {
   validateConfigObject(other, "other");
   validateOptionalField(other.serverUrl, "other.serverUrl", "string");
   validateOptionalField(other.autoDownload, "other.autoDownload", "boolean");
+  validateOptionalField(other.nonGitProjectWarning, "other.nonGitProjectWarning", "boolean");
 }
 
 function validateStorageSettings(storage: PragmaConfig["storage"]): void {

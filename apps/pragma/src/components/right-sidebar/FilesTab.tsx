@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import { FilePlus, FolderPlus } from "lucide-react";
 import { toast } from "sonner";
 
+import { FileDeleteDialog } from "@/components/right-sidebar/FileDeleteDialog";
 import { FileTree, type FileTreeController } from "@/components/right-sidebar/FileTreeNode";
 import { IconButton, TOOLBAR_BUTTON_CLASS } from "@/components/ui/icon-button";
+import { usePlainProjectId } from "@/hooks/use-plain-project-id";
 import { errorMessage } from "@/lib/errors";
 import { endPathDrag, fileBase64, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
 import { useWorktreeFileChange } from "@/lib/file-watch";
@@ -258,17 +260,28 @@ function useClearSelectionOnClickAway(
   }, [panel, tree, clearSelection]);
 }
 
-/** Delete handler + the global Cmd/Ctrl+Delete shortcut wiring. */
+/**
+ * Delete handler + the global Cmd/Ctrl+Delete shortcut wiring. A git worktree
+ * deletes straight away — recovery is `git checkout -- <path>` / `git clean
+ * -fd`. With `confirmFirst` (a plain project, where nothing can restore the
+ * file) a request only stages the paths in `pendingPaths` until confirmed.
+ */
 function useFileTreeDelete(
   worktreeId: string | null,
   selectedPaths: Set<string>,
   setSelectedPaths: React.Dispatch<React.SetStateAction<Set<string>>>,
   bumpNonce: (path: string) => void,
-): (path: string, name: string) => Promise<void> {
+  confirmFirst: boolean,
+): {
+  requestDelete: (paths: string[]) => void;
+  pendingPaths: string[] | null;
+  confirmDelete: () => void;
+  cancelDelete: () => void;
+} {
+  const [pendingPaths, setPendingPaths] = useState<string[] | null>(null);
   const commitDelete = useCallback(
     async (path: string, name: string) => {
       if (!worktreeId) return;
-      // Git tracks the worktree so recovery is `git checkout -- <path>` / `git clean -fd` — no confirm dialog.
       try {
         await deleteFile(worktreeId, path);
         setSelectedPaths((previous) => {
@@ -285,15 +298,35 @@ function useFileTreeDelete(
     [worktreeId, bumpNonce, setSelectedPaths],
   );
 
+  const deleteNow = useCallback(
+    (paths: string[]) => {
+      for (const path of paths) void commitDelete(path, basename(path));
+    },
+    [commitDelete],
+  );
+  const requestDelete = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (confirmFirst) setPendingPaths(paths);
+      else deleteNow(paths);
+    },
+    [confirmFirst, deleteNow],
+  );
+  const confirmDelete = useCallback(() => {
+    if (pendingPaths !== null) deleteNow(pendingPaths);
+    setPendingPaths(null);
+  }, [pendingPaths, deleteNow]);
+  const cancelDelete = useCallback(() => setPendingPaths(null), []);
+
   useEffect(() => {
     function onRequest() {
-      for (const path of selectedPaths) void commitDelete(path, basename(path));
+      requestDelete([...selectedPaths]);
     }
     window.addEventListener("pragma:request-delete-file", onRequest);
     return () => window.removeEventListener("pragma:request-delete-file", onRequest);
-  }, [selectedPaths, commitDelete]);
+  }, [selectedPaths, requestDelete]);
 
-  return commitDelete;
+  return { requestDelete, pendingPaths, confirmDelete, cancelDelete };
 }
 
 /** Build the {@link FileTreeController} from current state and helpers. */
@@ -301,9 +334,9 @@ function buildFileTreeController(args: {
   worktreeId: string;
   workspace: Workspace;
   state: ReturnType<typeof useFileTreeState>;
-  commitDelete: (path: string, name: string) => Promise<void>;
+  requestDelete: (paths: string[]) => void;
 }): FileTreeController {
-  const { worktreeId, workspace, state, commitDelete } = args;
+  const { worktreeId, workspace, state, requestDelete } = args;
   function selectEntry(
     entry: import("@pragma-sh/constants").DirEntry,
     event: MouseEvent<HTMLButtonElement>,
@@ -404,7 +437,7 @@ function buildFileTreeController(args: {
         bumpNonce: state.bumpNonce,
         setRenameMode: state.setRenameMode,
       }),
-    commitDelete,
+    commitDelete: (path) => requestDelete([path]),
     moveEntries: (paths, targetDir) => void moveEntries(paths, targetDir),
     dropFiles: (files, targetDir) => void dropFiles(files, targetDir),
     nonceFor: (path) => state.nonces[path] ?? 0,
@@ -423,16 +456,18 @@ export function FilesTab() {
   const workspace = useWorkspace();
   const worktreeId = workspace.selectedWorktreeId;
   const state = useFileTreeState(worktreeId ?? null);
-  const commitDelete = useFileTreeDelete(
+  const fileDelete = useFileTreeDelete(
     worktreeId ?? null,
     state.selectedPaths,
     state.setSelectedPaths,
     state.bumpNonce,
+    usePlainProjectId() !== null,
   );
+  const { requestDelete } = fileDelete;
   const wtId = worktreeId ?? "";
   const ctrl = useMemo(
-    () => buildFileTreeController({ worktreeId: wtId, workspace, state, commitDelete }),
-    [wtId, workspace, state, commitDelete],
+    () => buildFileTreeController({ worktreeId: wtId, workspace, state, requestDelete }),
+    [wtId, workspace, state, requestDelete],
   );
   const panelRef = useRef<HTMLDivElement | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
@@ -495,6 +530,11 @@ export function FilesTab() {
       >
         <FileTree ctrl={ctrl} depth={0} path="" />
       </div>
+      <FileDeleteDialog
+        paths={fileDelete.pendingPaths}
+        onCancel={fileDelete.cancelDelete}
+        onConfirm={fileDelete.confirmDelete}
+      />
     </div>
   );
 }

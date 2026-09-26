@@ -370,13 +370,30 @@ impl Db {
             }
             conn.execute_batch("PRAGMA user_version = 18;")?;
         }
+        // v19 adds `is_git` to `projects`. 0 marks a folder that is not a git
+        // repository: it keeps a single root worktree and no git features until
+        // the user initializes a repository. Every pre-existing row is a git
+        // project, which the default of 1 preserves.
+        if version < 19 {
+            let has_is_git: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'is_git'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_is_git == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE projects ADD COLUMN is_git INTEGER NOT NULL DEFAULT 1;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 19;")?;
+        }
         Ok(())
     }
 
     pub fn list_projects(&self) -> AppResult<Vec<Project>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, path, icon_emoji, order_index, created_at FROM projects ORDER BY order_index, created_at",
+            "SELECT id, name, path, icon_emoji, order_index, created_at, is_git FROM projects ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([], project_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
@@ -388,6 +405,23 @@ impl Db {
         path: String,
         branch: String,
     ) -> AppResult<Project> {
+        self.insert_project(name, path, branch, true)
+    }
+
+    /// Persists a folder that is not a git repository. It gets the same single
+    /// main worktree a git project has — tabs, agent sessions and statuses all
+    /// hang off it — but no branch, since there is none to name.
+    pub fn insert_plain_project(&self, name: String, path: String) -> AppResult<Project> {
+        self.insert_project(name, path, String::new(), false)
+    }
+
+    fn insert_project(
+        &self,
+        name: String,
+        path: String,
+        branch: String,
+        is_git: bool,
+    ) -> AppResult<Project> {
         let project_id = Uuid::new_v4().to_string();
         let worktree_id = Uuid::new_v4().to_string();
         {
@@ -398,8 +432,8 @@ impl Db {
             let order_index: i64 =
                 tx.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
             tx.execute(
-                "INSERT INTO projects (id, name, path, order_index) VALUES (?1, ?2, ?3, ?4)",
-                params![project_id, name, path, order_index],
+                "INSERT INTO projects (id, name, path, order_index, is_git) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![project_id, name, path, order_index, is_git],
             )?;
             tx.execute(
                 "INSERT INTO worktrees (id, project_id, parent_id, branch, title, path, is_main)
@@ -415,11 +449,29 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, name, path, icon_emoji, order_index, created_at FROM projects WHERE id = ?1",
+                "SELECT id, name, path, icon_emoji, order_index, created_at, is_git FROM projects WHERE id = ?1",
                 [project_id],
                 project_from_row,
             )
             .map_err(AppError::from)
+    }
+
+    /// Promotes a plain project to a git project once its folder has become a
+    /// repository, recording the branch its main worktree is on. Ids are kept,
+    /// so every tab, agent session and status attached to the project survives.
+    pub fn mark_project_git(&self, project_id: &str, branch: &str) -> AppResult<()> {
+        let mut conn = self.0.lock()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE projects SET is_git = 1 WHERE id = ?1",
+            params![project_id],
+        )?;
+        tx.execute(
+            "UPDATE worktrees SET branch = ?1 WHERE project_id = ?2 AND is_main = 1",
+            params![branch, project_id],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Sets (or, with `None`, clears) the emoji shown for a project in the
@@ -1291,6 +1343,7 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         icon_emoji: row.get(3)?,
         order_index: row.get::<_, i64>(4)?,
         created_at: row.get(5)?,
+        is_git: row.get(6)?,
     })
 }
 
@@ -1372,6 +1425,34 @@ fn shell_to_columns(shell: Option<&ShellProfile>) -> (Option<&'static str>, Opti
 mod tests {
     use super::Db;
     use pragma_constants::TabKind;
+
+    /// A plain folder keeps its ids when it becomes a repository, so tabs and
+    /// agent sessions attached to its root worktree carry over.
+    #[test]
+    fn promotes_a_plain_project_in_place() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_plain_project("notes".to_string(), "/tmp/notes".to_string())
+            .expect("plain project should insert");
+        assert!(!project.is_git);
+        let root = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .remove(0);
+        assert!(root.is_main);
+        assert_eq!(root.branch, "");
+
+        db.mark_project_git(&project.id, "main")
+            .expect("project should promote");
+
+        assert!(db.project(&project.id).expect("project should read").is_git);
+        let promoted = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .remove(0);
+        assert_eq!(promoted.id, root.id);
+        assert_eq!(promoted.branch, "main");
+    }
 
     #[test]
     fn sets_and_clears_a_project_icon_emoji() {

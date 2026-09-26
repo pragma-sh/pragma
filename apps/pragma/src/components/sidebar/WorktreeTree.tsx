@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Copy,
   EyeOff,
+  Folder,
   GitBranch,
   GitBranchPlus,
   GitMerge,
@@ -50,6 +51,7 @@ import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { githubRepoRef, worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, pendingWorktreeIndex, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
+import { projectIsGit, worktreeDisplayLabel } from "@/lib/non-git-project";
 import { cn } from "@/lib/utils";
 import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
@@ -707,11 +709,6 @@ function useWorktreeRename(worktree: Worktree): {
 
 type RenameApi = ReturnType<typeof useWorktreeRename>;
 
-/** Resolve a worktree's display label (`main` for the main worktree). */
-function worktreeLabel(worktree: Worktree): string {
-  return worktree.isMain ? "main" : (worktree.title ?? worktree.branch);
-}
-
 interface WorktreeRowLabelState {
   depth: number;
   expanded: boolean;
@@ -1142,7 +1139,10 @@ function useWorktreeRow(
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
 ) {
   const controls = useWorktreeRowControls(node, onCreateChild);
-  const label = worktreeLabel(node.worktree);
+  const { activeProject } = useWorkspace();
+  // A project that is not a git repository has one root folder, not a branch.
+  const plainRoot = node.worktree.isMain && !projectIsGit(activeProject);
+  const label = worktreeDisplayLabel(node.worktree, activeProject);
   // Fanout attempts hang under the row like children do, so the caret has to
   // account for them — otherwise a parent with only attempts can't be collapsed.
   const fanout = useFanoutForParent(node.worktree.id);
@@ -1151,7 +1151,8 @@ function useWorktreeRow(
   const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
-  const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
+  const { Icon: glyph } = worktreeGlyph(merged, prLifecycle);
+  const WorktreeIcon = plainRoot ? Folder : glyph;
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
   const shortcutIndex = useWorktreeShortcutIndex(node.worktree.id);
   const shortcutHint = useShortcutHint("worktree", shortcutIndex);

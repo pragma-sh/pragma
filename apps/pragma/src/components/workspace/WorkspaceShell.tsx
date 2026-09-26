@@ -26,6 +26,7 @@ import {
 } from "@/lib/shortcut-hints";
 import { browserDevtools, browserReload, onMenuAction, type MenuAction } from "@/lib/tauri";
 import { errorMessage } from "@/lib/errors";
+import { requestAddProject } from "@/lib/non-git-project";
 import { terminalManager } from "@/lib/terminal-manager";
 import { reloadWebview, restartServer } from "@/lib/troubleshooting";
 import { useKanban } from "@/state/kanban-context";
@@ -218,9 +219,7 @@ function NoProjectsState() {
       <div className="max-w-md space-y-3">
         <h1 className="text-foreground text-2xl font-semibold">What will you build with Pragma?</h1>
         <p className="text-muted-foreground text-sm">Open a project to get started.</p>
-        <Button onClick={() => window.dispatchEvent(new Event("pragma:create-project"))}>
-          Add project
-        </Button>
+        <Button onClick={() => requestAddProject()}>Add project</Button>
       </div>
     </div>
   );

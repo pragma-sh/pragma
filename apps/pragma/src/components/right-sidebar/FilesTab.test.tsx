@@ -6,12 +6,18 @@ const listDirEntriesMock = vi.fn();
 const pathExistsMock = vi.fn();
 const renameFileMock = vi.fn();
 const writeFileBytesMock = vi.fn();
+const deleteFileMock = vi.fn();
+const workspaceMock = vi.hoisted(() => ({
+  selectedWorktreeId: "wt",
+  openFileTab: () => {},
+  activeProject: undefined as { id: string; isGit: boolean } | undefined,
+}));
 
 vi.mock("@/lib/tauri", () => ({
   listDirEntries: (...args: unknown[]) => listDirEntriesMock(...args),
   createFile: vi.fn(),
   createFolder: vi.fn(),
-  deleteFile: vi.fn(),
+  deleteFile: (...args: unknown[]) => deleteFileMock(...args),
   pathExists: (...args: unknown[]) => pathExistsMock(...args),
   renameFile: (...args: unknown[]) => renameFileMock(...args),
   writeFileBytes: (...args: unknown[]) => writeFileBytesMock(...args),
@@ -26,7 +32,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/state/workspace-context", () => ({
-  useWorkspace: () => ({ selectedWorktreeId: "wt", openFileTab: vi.fn() }),
+  useWorkspace: () => workspaceMock,
 }));
 
 import { FilesTab } from "./FilesTab";
@@ -40,6 +46,9 @@ beforeEach(() => {
   pathExistsMock.mockReset();
   renameFileMock.mockReset();
   writeFileBytesMock.mockReset();
+  deleteFileMock.mockReset();
+  deleteFileMock.mockResolvedValue(undefined);
+  workspaceMock.activeProject = undefined;
   listDirEntriesMock.mockImplementation(async (_worktreeId: string, path: string) =>
     path === "" ? [dirEntry] : [fileEntry],
   );
@@ -142,5 +151,39 @@ describe("FilesTab root drop zone", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(renameFileMock).not.toHaveBeenCalled();
+  });
+});
+
+/** Fire the global delete shortcut's request for the current selection. */
+function requestDelete() {
+  window.dispatchEvent(new Event("pragma:request-delete-file"));
+}
+
+describe("FilesTab delete", () => {
+  it("deletes straight away in a git worktree, where git can restore it", async () => {
+    await renderWithSelection();
+    requestDelete();
+
+    await waitFor(() => expect(deleteFileMock).toHaveBeenCalledWith("wt", "src"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("asks first in a plain project, where nothing can restore it", async () => {
+    workspaceMock.activeProject = { id: "p", isGit: false };
+    await renderWithSelection();
+    requestDelete();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteFileMock).toHaveBeenCalledWith("wt", "src"));
+  });
+
+  it("keeps the file when a plain-project delete is cancelled", async () => {
+    workspaceMock.activeProject = { id: "p", isGit: false };
+    await renderWithSelection();
+    requestDelete();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete" })).toBeNull());
+    expect(deleteFileMock).not.toHaveBeenCalled();
   });
 });
