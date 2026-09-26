@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.2](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.0.1...codex-plugin-v1.0.2) (2026-09-26)
+
+
+### Bug Fixes
+
+* address review feedback on review pane, background launches, and codex usage ([410a002](https://github.com/pragma-sh/pragma/commit/410a0025ac20f615bb9bb894128b4b52ce8d8220))
+* review pane scrolling, background worktree launches, and plugin status ([0a422d7](https://github.com/pragma-sh/pragma/commit/0a422d740929fabba8b890095ed529bb73ef6c15))
+* review pane scrolling, background worktree launches, and plugin status ([4aabc82](https://github.com/pragma-sh/pragma/commit/4aabc82d9023c5522b67c5329344c870b22f5d7b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.1.0
+    * @pragma-sh/watcher-kit bumped to 1.1.0
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.0.0...codex-plugin-v1.0.1) (2026-09-23)
 
 

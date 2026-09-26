@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/www-v1.0.0...www-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* build and ship Windows ARM64 natively ([8f02e2a](https://github.com/pragma-sh/pragma/commit/8f02e2a48577be54b8e187c65dbc7d43be1f6045))
+* **pragma-go:** remember previous connections for one-tap reconnect ([69c5172](https://github.com/pragma-sh/pragma/commit/69c517252fd4b45ac09b49a981fe9472c50ed234))
+* **pragma-go:** remember previous connections for one-tap reconnect ([ef9381e](https://github.com/pragma-sh/pragma/commit/ef9381e59f57da793f8f4adb13e36e93bc2fc2fe))
+* **pragma:** add Settings → Storage with treemap, cleanup, and reminders ([252a7a6](https://github.com/pragma-sh/pragma/commit/252a7a6c0321527d8bebe1bc18334bdfa39a245e))
+* **pragma:** keep host awake while remote access is on ([e05cb97](https://github.com/pragma-sh/pragma/commit/e05cb971f3257d69c1f543316667d2473077248f))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+* **www:** add blog index, post pages, and sitemap entries ([1612d87](https://github.com/pragma-sh/pragma/commit/1612d872e0235c5a0a1100ac7da70a154709513a))
+* **www:** add blog with Fumadocs collection, index, and post pages ([f837b44](https://github.com/pragma-sh/pragma/commit/f837b443e531d2781ba0bbb13cc15b51642dd9de))
+* **www:** add downloads page with Windows ARM64 support ([73a3fc8](https://github.com/pragma-sh/pragma/commit/73a3fc8cf917b2da789bd50343dda3ae3428d791))
+* **www:** add storage manager card to homepage bento [skip ci] ([e82700a](https://github.com/pragma-sh/pragma/commit/e82700a0b64f53ebb0053c94ef526f36f0046c91))
+
+
+### Bug Fixes
+
+* **pragma-go:** harden saved hosts and push revocation ordering ([164fc6e](https://github.com/pragma-sh/pragma/commit/164fc6e421972557c9a60d1668a5c82c194e086e))
+* **pragma:** harden plain-project git init and file deletes ([a63a246](https://github.com/pragma-sh/pragma/commit/a63a2461f3f387779d39828bce331026a22e586f))
+* review pane scrolling, background worktree launches, and plugin status ([0a422d7](https://github.com/pragma-sh/pragma/commit/0a422d740929fabba8b890095ed529bb73ef6c15))
+* review pane scrolling, background worktree launches, and plugin status ([4aabc82](https://github.com/pragma-sh/pragma/commit/4aabc82d9023c5522b67c5329344c870b22f5d7b))
+* **www:** address blog review feedback ([981adf5](https://github.com/pragma-sh/pragma/commit/981adf5f08ac48a16fa7ba42968572072e761c66))
+* **www:** pass blog pre-push audit ([771af35](https://github.com/pragma-sh/pragma/commit/771af35b00e9d4a09c94405013f576aeeb24ae51))
+
 ## [1.0.0](https://github.com/pragma-sh/pragma/compare/www-v0.2.0...www-v1.0.0) (2026-09-22)
 
 

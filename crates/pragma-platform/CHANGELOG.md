@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.0.1...pragma-platform-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **pragma-core:** scan worktree disk usage on the host ([e1ea2ca](https://github.com/pragma-sh/pragma/commit/e1ea2ca94e41d79a2b4a8c7213bb609b8241f064))
+* **pragma:** add Settings → Storage with treemap, cleanup, and reminders ([252a7a6](https://github.com/pragma-sh/pragma/commit/252a7a6c0321527d8bebe1bc18334bdfa39a245e))
+* **pragma:** keep host awake while remote access is on ([e05cb97](https://github.com/pragma-sh/pragma/commit/e05cb971f3257d69c1f543316667d2473077248f))
+* **pragma:** keep host awake while remote access is on ([e13b979](https://github.com/pragma-sh/pragma/commit/e13b979450a4032735b47e08ec532f1e0779eab7))
+
+
+### Bug Fixes
+
+* **pragma:** harden keep-awake inhibitor and sync ([0c2ccc5](https://github.com/pragma-sh/pragma/commit/0c2ccc552c0537cb11be318de559fdbb8bc38b51))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.0.0...pragma-platform-v1.0.1) (2026-09-23)
 
 
