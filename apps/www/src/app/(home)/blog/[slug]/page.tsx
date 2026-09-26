@@ -1,8 +1,10 @@
+import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { BlogTags } from "@/components/blog-tags";
 import { blogSource, getBlogPost } from "@/lib/blog";
 import { blogDate } from "@/lib/blog-utils";
 import { blogRoute } from "@/lib/shared";
@@ -44,9 +46,12 @@ export default async function BlogPostPage(props: PageProps<"/blog/[slug]">) {
           >
             ← All stories
           </Link>
-          <p className="text-muted-foreground mt-12 text-sm">
-            <time dateTime={post.data.date}>{blogDate(post.data.date)}</time>
-          </p>
+          <div className="mt-12 flex flex-wrap items-center gap-3">
+            <p className="text-muted-foreground text-sm">
+              <time dateTime={post.data.date}>{blogDate(post.data.date)}</time>
+            </p>
+            <BlogTags tags={post.data.tags} />
+          </div>
           <h1 className="font-heading type-display-lg mt-4 text-balance">{post.data.title}</h1>
           <p className="text-muted-foreground mt-6 max-w-2xl text-xl leading-relaxed">
             {post.data.description}
@@ -87,7 +92,7 @@ export default async function BlogPostPage(props: PageProps<"/blog/[slug]">) {
         ) : null}
 
         <div className="prose dark:prose-invert prose-lg prose-headings:font-heading prose-headings:tracking-tight prose-p:text-muted-foreground prose-headings:text-foreground mx-auto mt-12 max-w-3xl sm:mt-16">
-          <MDX />
+          <MDX components={{ img: defaultMdxComponents.img }} />
         </div>
       </article>
 

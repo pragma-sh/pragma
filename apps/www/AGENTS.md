@@ -3,7 +3,8 @@
 Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
 blog at `/blog`, plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
 app. Its `@pragma-sh/*` dependencies are data-only `@pragma-sh/plugin-registry` and render-only
-`@pragma-sh/brand`; nothing in desktop app may import from website.
+`@pragma-sh/brand` and the geometry-only `@pragma-sh/treemap`; nothing in desktop app may
+import from website.
 
 ## Stack
 
@@ -51,6 +52,7 @@ apps/www/
     │   ├── download/[target]/ # redirects to the latest release's installer for one platform
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
+    │   ├── og/blog/         # code-drawn blog covers (storage-manager: the Storage treemap)
     │   └── global.css       # Tailwind + shadcn tokens + the `.artboard` palette + Fumadocs preset
     ├── components/
     │   ├── ui/              # shadcn primitives — do not hand-edit, re-add via the CLI
@@ -62,6 +64,7 @@ apps/www/
     │   ├── download-button.tsx # the one Download button: detects the OS, shows its mark
     │   ├── app-store-button.tsx # Pragma Go App Store pill → dialog with QR code + store link
     │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
+    │   ├── blog-tags.tsx    # a post's frontmatter tags as pills (index + article)
     │   ├── support/         # the support request form (client) posting to the route's action
     │   ├── deep-link-forward.tsx  # one pragma:// hand-off page (auto-redirect + fallback pills)
     │   └── home/            # landing page sections
@@ -82,7 +85,8 @@ apps/www/
         ├── deploy.ts        # pure Ignored-Build-Step decision (production = release commits only)
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── blog.ts          # Fumadocs blog collection with required frontmatter schema
-        ├── blog-utils.ts    # date formatting and newest-first sort
+        ├── blog-utils.ts    # date formatting, newest-first sort, and tag labels
+        ├── storage-cover.ts # layout of the Storage treemap blog cover (@pragma-sh/treemap)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
         ├── downloads.ts     # installer targets, OS/CPU detection, latest-release asset lookup
         ├── github-api.ts    # server-side GitHub REST base + token headers
@@ -133,11 +137,16 @@ apps/www/
   referenced by the source loader, the proxy, and the page components — change them there.
 - **Blog posts are files in `content/blog/`.** Add a root-level `.md` or `.mdx` file;
   its filename is the slug. The Fumadocs schema in `lib/blog.ts` requires `title`,
-  `description`, and a quoted ISO `date` in frontmatter. An optional `cover` object
-  has `src` (a file in `public/blog/`, or an existing shared `public/` image) and descriptive `alt`; an optional `video`
+  `description`, and a quoted ISO `date` in frontmatter. Optional `tags` are limited to the
+  keys of `blogTagLabels` in `lib/blog-utils.ts` (`release` for a version announcement) and
+  render as pills on the index and the post. An optional `cover` object
+  has `src` (a file in `public/blog/`, an existing shared `public/` image, or a
+  code-drawn `/og/blog/*` route) and descriptive `alt`; an optional `video`
   has a public HTTPS `src`, required local `poster` (the reduced-motion fallback) and required WebVTT `captions`, and takes over the featured
   media while the cover remains the social image. The index sorts newest
-  first and features that entry; `/blog/[slug]` pre-renders each file. See
+  first and features that entry; `/blog/[slug]` pre-renders each file. A Markdown
+  image in a post body is imported by Fumadocs as an object, so the article renders it
+  with Fumadocs' `img` (a `next/image`); a bare `<img>` would get `src="[object Object]"`. See
   `README.md` for a copy-ready post.
   Fumadocs discovers these files at build time, so Fallow cannot trace imports to
   them: keep `apps/www/content/blog/**` in `.fallowrc.jsonc`'s

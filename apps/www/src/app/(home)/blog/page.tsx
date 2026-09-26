@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
+import { BlogTags } from "@/components/blog-tags";
 import { getBlogPosts } from "@/lib/blog";
 import { blogDate } from "@/lib/blog-utils";
 import { cn } from "@/lib/utils";
@@ -75,6 +76,9 @@ function FeaturedPost({ post }: { post: Post }) {
           <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">
             Latest · <time dateTime={post.data.date}>{blogDate(post.data.date)}</time>
           </p>
+          <div className="mt-4">
+            <BlogTags tags={post.data.tags} />
+          </div>
           <h2 className="font-heading type-display-md mt-5 text-balance group-hover:underline group-hover:underline-offset-4 sm:text-5xl">
             {post.data.title}
           </h2>

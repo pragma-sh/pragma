@@ -3,7 +3,7 @@ import { pageSchema } from "fumadocs-core/source/schema";
 import { defineDocs } from "fumadocs-mdx/macro";
 import { z } from "zod";
 
-import { publishedFirst } from "./blog-utils";
+import { blogTags, publishedFirst } from "./blog-utils";
 import { blogRoute } from "./shared";
 
 const blog = defineDocs({
@@ -12,6 +12,7 @@ const blog = defineDocs({
     schema: pageSchema.extend({
       description: z.string().min(1),
       date: z.iso.date(),
+      tags: z.array(z.enum(blogTags)).default([]),
       cover: z
         .object({
           src: z.string().min(1),

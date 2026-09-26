@@ -12,3 +12,14 @@ export function blogDate(date: string): string {
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
 }
+
+/** Frontmatter tags a post may carry, mapped to the label readers see. */
+export const blogTagLabels = {
+  release: "New release",
+} as const;
+
+/** A tag accepted in blog frontmatter. */
+export type BlogTag = keyof typeof blogTagLabels;
+
+/** Every accepted tag, for the frontmatter schema. */
+export const blogTags = Object.keys(blogTagLabels) as [BlogTag, ...BlogTag[]];

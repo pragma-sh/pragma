@@ -19,6 +19,7 @@ Add a `.md` or `.mdx` file directly under `content/blog/`. Its filename becomes 
 title: My new post
 description: A short summary for the blog index and link previews.
 date: "2026-09-24"
+tags: [release]
 cover:
   src: /blog/my-cover.png
   alt: Description of the cover image
@@ -31,8 +32,10 @@ video:
 Write the post in Markdown here. MDX works too.
 ```
 
-`title`, `description`, and a quoted ISO `date` are required. `cover` and `video`
-are optional. Put local cover and poster files in `public/blog/` (or reuse an existing site image from the `public/` root) and include both
+`title`, `description`, and a quoted ISO `date` are required. `tags`, `cover`, and
+`video` are optional. `tags` accepts only the keys of `blogTagLabels` in
+`src/lib/blog-utils.ts` (`release` shows a **New release** pill); add a tag there to
+make it valid. Put local cover and poster files in `public/blog/` (or reuse an existing site image from the `public/` root) and include both
 `src` and descriptive `alt` for a cover. A `video` needs a public HTTPS URL, a `poster`, and
 appears as the featured media and an article player; it requires a WebVTT `captions`
 file alongside it. `cover` remains its share image.
