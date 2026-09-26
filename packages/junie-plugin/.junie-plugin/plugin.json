@@ -1,6 +1,6 @@
 {
   "name": "pragma-junie",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Reports Junie CLI agent status (running / done / attention) to Pragma automatically.",
   "author": {
     "name": "Pragma"

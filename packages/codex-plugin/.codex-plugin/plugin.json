@@ -1,6 +1,6 @@
 {
   "name": "pragma-codex",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Reports Codex CLI lifecycle, approvals, and messages to Pragma.",
   "hooks": "./hooks/hooks.json",
   "interface": {
@@ -9,7 +9,9 @@
     "longDescription": "Reports Codex turns, completions, aborts, subagents, and command approvals to Pragma without affecting non-Pragma sessions.",
     "developerName": "Pragma",
     "category": "Developer Tools",
-    "capabilities": ["Read"],
+    "capabilities": [
+      "Read"
+    ],
     "websiteURL": "https://github.com/openai/codex",
     "brandColor": "#5B5DFF",
     "composerIcon": "./assets/codex.png",

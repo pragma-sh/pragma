@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.0.1...pragma-server-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **constants:** add plain-project defaults and is_git flag ([1be5913](https://github.com/pragma-sh/pragma/commit/1be59138f8cfd9d7e96fe8af7d19be627c35d528))
+* **pragma:** keep host awake while remote access is on ([e05cb97](https://github.com/pragma-sh/pragma/commit/e05cb971f3257d69c1f543316667d2473077248f))
+* **pragma:** keep host awake while remote access is on ([e13b979](https://github.com/pragma-sh/pragma/commit/e13b979450a4032735b47e08ec532f1e0779eab7))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+
+
+### Bug Fixes
+
+* **pragma:** harden keep-awake inhibitor and sync ([0c2ccc5](https://github.com/pragma-sh/pragma/commit/0c2ccc552c0537cb11be318de559fdbb8bc38b51))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.0.0...pragma-server-v1.0.1) (2026-09-23)
 
 

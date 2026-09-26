@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.0.1...pragma-gateway-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **constants:** add plain-project defaults and is_git flag ([1be5913](https://github.com/pragma-sh/pragma/commit/1be59138f8cfd9d7e96fe8af7d19be627c35d528))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.0.0...pragma-gateway-v1.0.1) (2026-09-23)
 
 
