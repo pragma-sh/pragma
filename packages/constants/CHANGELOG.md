@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/constants-v1.0.1...constants-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* build and ship Windows ARM64 natively ([8f02e2a](https://github.com/pragma-sh/pragma/commit/8f02e2a48577be54b8e187c65dbc7d43be1f6045))
+* **constants:** add plain-project defaults and is_git flag ([1be5913](https://github.com/pragma-sh/pragma/commit/1be59138f8cfd9d7e96fe8af7d19be627c35d528))
+* **constants:** add storage scan contract and defaults ([eb7efa4](https://github.com/pragma-sh/pragma/commit/eb7efa4d8bb5302bfaae8a73ee8e8ab006c023e3))
+* **pragma:** add Settings → Storage with treemap, cleanup, and reminders ([252a7a6](https://github.com/pragma-sh/pragma/commit/252a7a6c0321527d8bebe1bc18334bdfa39a245e))
+* **pragma:** keep host awake while remote access is on ([e05cb97](https://github.com/pragma-sh/pragma/commit/e05cb971f3257d69c1f543316667d2473077248f))
+* **pragma:** keep host awake while remote access is on ([e13b979](https://github.com/pragma-sh/pragma/commit/e13b979450a4032735b47e08ec532f1e0779eab7))
+* **pragma:** support projects without git ([7b6748b](https://github.com/pragma-sh/pragma/commit/7b6748b777f1cad493f960a95ba49a95c15099fa))
+
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/constants-v1.0.0...constants-v1.0.1) (2026-09-23)
 
 

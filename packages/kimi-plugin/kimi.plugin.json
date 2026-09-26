@@ -1,12 +1,15 @@
 {
   "name": "pragma-kimi",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Report Kimi Code agent status into Pragma via pragma-cli.",
   "author": {
     "name": "Pragma"
   },
   "license": "MIT",
-  "keywords": ["pragma", "agent"],
+  "keywords": [
+    "pragma",
+    "agent"
+  ],
   "hooks": [
     {
       "event": "SessionStart",
