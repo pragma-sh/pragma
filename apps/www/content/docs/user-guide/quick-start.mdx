@@ -20,7 +20,9 @@ Open the **Add project** menu at the bottom of the left sidebar. Two tabs:
   project**, **Continue without git**, or **Don’t show again** (turn the warning back on under
   Settings → Other). A project without git shows a single **root** worktree: terminals, tabs, and
   agents work as usual, but new worktrees, Changes, and Pull Request stay off until you initialize a
-  repository — which you can do later from the new-worktree button or either pane.
+  repository — which you can do later from the new-worktree button or either pane. Initializing
+  needs a git commit identity (`user.name` / `user.email`). Deleting from the Files pane asks first
+  in a folder without git, since there is no git history to restore the file from.
 </Callout>
 
 The project appears in the project switcher at the bottom of the sidebar, with the

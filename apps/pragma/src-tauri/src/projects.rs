@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use pragma_constants::Project;
+use pragma_core::git::{GitRequest, RepoStatus};
 use tauri::{Manager, State};
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::git;
+use crate::hosts::Hosts;
+use crate::pty::PtyClient;
 
 const PROJECTS_DIRECTORY: &str = "projectsDirectory";
 
@@ -14,12 +17,14 @@ const PROJECTS_DIRECTORY: &str = "projectsDirectory";
 #[tauri::command(async)]
 pub fn list_projects(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
 ) -> AppResult<Vec<Project>> {
     let projects = db.list_projects()?;
+    let local = hosts.local();
     let mut promoted = false;
     for project in projects.iter().filter(|project| !project.is_git) {
-        promoted |= promote_if_repository(&db, project)?;
+        promoted |= promote_if_repository(&db, &local, project)?;
     }
     if !promoted {
         return Ok(projects);
@@ -28,24 +33,35 @@ pub fn list_projects(
     db.list_projects()
 }
 
-/// Whether `path` is the root of a git repository — what the Add project flow
-/// asks before deciding whether to warn about a plain folder.
+/// Whether `path` can back a git project — a repository root with a commit.
+/// The Add project flow asks this before deciding whether to warn about a
+/// plain folder.
 #[tauri::command(async)]
-pub fn project_directory_is_git(path: String) -> AppResult<bool> {
-    git::is_repo_root(&pragma_platform::path::canonicalize(PathBuf::from(path))?)
+pub fn project_directory_is_git(hosts: State<'_, Hosts>, path: String) -> AppResult<bool> {
+    let path = pragma_platform::path::canonicalize(PathBuf::from(path))?;
+    Ok(repo_status(&hosts.local(), &path)?.is_usable())
 }
 
 /// Adds a local folder as a project. A folder that is not a git repository is
 /// refused unless `allow_non_git` is set, in which case it becomes a plain
-/// project: one root worktree, no git features.
+/// project: one root worktree, no git features. With `initialize_git` the
+/// folder is made a repository *before* anything is saved, so a failed
+/// initialization leaves no half-added project behind.
 #[tauri::command(async)]
 pub fn add_project(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     path: String,
     allow_non_git: Option<bool>,
+    initialize_git: Option<bool>,
 ) -> AppResult<Project> {
-    let project = add_project_path(&db, PathBuf::from(path), allow_non_git.unwrap_or(false))?;
+    let local = hosts.local();
+    let path = PathBuf::from(path);
+    if initialize_git.unwrap_or(false) {
+        init_repository(&local, &pragma_platform::path::canonicalize(&path)?)?;
+    }
+    let project = add_project_path(&db, &local, path, allow_non_git.unwrap_or(false))?;
     publisher.trigger();
     Ok(project)
 }
@@ -55,16 +71,15 @@ pub fn add_project(
 #[tauri::command(async)]
 pub fn init_project_git(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     project_id: String,
 ) -> AppResult<Project> {
     let project = db.project(&project_id)?;
     if !project.is_git {
-        let path = Path::new(&project.path);
-        if !git::is_repo_root(path)? {
-            git::init_repository(path)?;
-        }
-        promote_if_repository(&db, &project)?;
+        let local = hosts.local();
+        init_repository(&local, Path::new(&project.path))?;
+        promote_if_repository(&db, &local, &project)?;
         publisher.trigger();
     }
     db.project(&project_id)
@@ -101,13 +116,14 @@ pub fn set_project_icon(
 #[tauri::command(async)]
 pub fn clone_project(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     remote_url: String,
     into_directory: String,
 ) -> AppResult<Project> {
     let target = git::clone(&remote_url, &PathBuf::from(&into_directory))?;
     db.set_setting(PROJECTS_DIRECTORY, &into_directory)?;
-    let project = add_project_path(&db, target, false)?;
+    let project = add_project_path(&db, &hosts.local(), target, false)?;
     publisher.trigger();
     Ok(project)
 }
@@ -120,12 +136,17 @@ pub fn get_projects_directory(app: tauri::AppHandle, db: State<'_, Db>) -> AppRe
     Ok(app.path().home_dir()?.to_string_lossy().into_owned())
 }
 
-fn add_project_path(db: &Db, path: PathBuf, allow_non_git: bool) -> AppResult<Project> {
+fn add_project_path(
+    db: &Db,
+    local: &PtyClient,
+    path: PathBuf,
+    allow_non_git: bool,
+) -> AppResult<Project> {
     // This string is stored and later handed to git as a worktree location, so
     // it has to be canonical *and* plain — `std`'s canonicalize would hand
     // Windows back a `\\?\C:\…` verbatim path that git reads as a UNC path.
     let canonical = pragma_platform::path::canonicalize(&path)?;
-    let is_git = !allow_non_git || git::is_repo_root(&canonical)?;
+    let is_git = !allow_non_git || repo_status(local, &canonical)?.is_usable();
     if is_git {
         git::ensure_repo(&canonical)?;
         git::ensure_pragma_excluded(&canonical)?;
@@ -146,17 +167,39 @@ fn add_project_path(db: &Db, path: PathBuf, allow_non_git: bool) -> AppResult<Pr
     db.insert_project_with_main_worktree(name, stored_path, branch)
 }
 
-/// Promotes a plain project whose folder is now a git repository root.
-/// Returns whether it did. Plain projects are always local — a remote project
-/// must already be a repository to be added — so the folder is on this disk.
-fn promote_if_repository(db: &Db, project: &Project) -> AppResult<bool> {
+/// Promotes a plain project whose folder is now a repository root with a
+/// commit. Returns whether it did. A `git init` with no commit yet does not
+/// count: worktrees could not be created from its unborn `HEAD`. Plain projects
+/// are always local — a remote project must already be a repository to be
+/// added — so the local host answers for the folder.
+fn promote_if_repository(db: &Db, local: &PtyClient, project: &Project) -> AppResult<bool> {
     let path = Path::new(&project.path);
     // A cheap stat first: this runs on every project list, and a plain folder
     // almost never has a `.git`, so git is only asked on a real transition.
-    if !path.join(".git").exists() || !git::is_repo_root(path)? {
+    if !path.join(".git").exists() || !repo_status(local, path)?.is_usable() {
         return Ok(false);
     }
     git::ensure_pragma_excluded(path)?;
     db.mark_project_git(&project.id, &git::current_branch(path)?)?;
     Ok(true)
+}
+
+/// Asks the host whether `path` is a repository root and has a commit.
+fn repo_status(host: &PtyClient, path: &Path) -> AppResult<RepoStatus> {
+    git::host_rpc(
+        host,
+        &GitRequest::RepoStatus {
+            root: path.to_string_lossy().into_owned(),
+        },
+    )
+}
+
+/// Has the host make `path` a repository with a first commit.
+fn init_repository(host: &PtyClient, path: &Path) -> AppResult<()> {
+    git::host_rpc(
+        host,
+        &GitRequest::InitRepository {
+            root: path.to_string_lossy().into_owned(),
+        },
+    )
 }

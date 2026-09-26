@@ -17,7 +17,6 @@ import {
   cloneProject,
   connectRemoteProject,
   getProjectsDirectory,
-  initProjectGit,
   pickDirectory,
   projectDirectoryIsGit,
   type RemoteAuthChoice,
@@ -79,8 +78,10 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
     if (folder === null) return;
     await adopt(async () => {
       if (options.dontShowAgain) await disableNonGitWarning();
-      const project = await addProject(folder, { allowNonGit: true });
-      return options.initialize ? initProjectGit(project.id) : project;
+      // Initializing happens inside the add, before the project is saved: a
+      // failed `git init` then leaves nothing behind, and a retry is not
+      // refused as a duplicate path.
+      return addProject(folder, { allowNonGit: true, initializeGit: options.initialize });
     });
   }
 

@@ -445,11 +445,18 @@ export function listProjects(): Promise<Project[]> {
  * is refused unless `allowNonGit` is set, which adds it as a plain project with
  * a single root worktree and no git features.
  */
-export function addProject(path: string, options?: { allowNonGit?: boolean }): Promise<Project> {
-  return invoke<Project>("add_project", { path, allowNonGit: options?.allowNonGit ?? false });
+export function addProject(
+  path: string,
+  options?: { allowNonGit?: boolean; initializeGit?: boolean },
+): Promise<Project> {
+  return invoke<Project>("add_project", {
+    path,
+    allowNonGit: options?.allowNonGit ?? false,
+    initializeGit: options?.initializeGit ?? false,
+  });
 }
 
-/** Whether `path` is the root of a git repository. */
+/** Whether `path` can back a git project: a repository root with a commit. */
 export function projectDirectoryIsGit(path: string): Promise<boolean> {
   return invoke<boolean>("project_directory_is_git", { path });
 }

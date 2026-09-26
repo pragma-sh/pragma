@@ -1573,19 +1573,29 @@ local folder that is not a git repository root. It still gets a main worktree ro
 an empty `branch` — so tabs, agent sessions and statuses work unchanged; the sidebar labels
 it `constants.projects.nonGitRootLabel` ("root"). Read the flag through
 `lib/non-git-project.ts` (`projectIsGit`, `worktreeDisplayLabel`), never `=== false` inline.
+A folder counts as git only when it is a repository **root whose `HEAD` has a commit**
+(`RepoStatus::is_usable`) — an unborn `HEAD` has nothing for `git worktree add` to branch
+from. Detection and initialization are the host's `git` RPC (`repoStatus` /
+`initRepository` in `pragma-core`), never git run from the Tauri shell.
 
 - **Adding.** `CreateProjectDialog` asks `project_directory_is_git` after the picker; a plain
   folder shows `NonGitFolderWarning` (Initialize / Open another / Continue / Don't show again)
   unless global `other.nonGitProjectWarning` is `false` (Settings → Other). `add_project`
-  refuses a plain folder unless `allowNonGit` is passed.
+  refuses a plain folder unless `allowNonGit` is passed. Initialize passes `initializeGit`,
+  which makes the repository **before** the row is inserted, so a failed init saves nothing
+  and a retry is not refused as a duplicate path.
 - **Gating.** `useSidebarDialogs.openWorktreeDialog` is the single choke point for worktree
   creation: on a plain project it opens `InitGitDialog` instead and continues into the create
   dialog once git exists. `RightSidebar` swaps Changes and Pull Request for
   `NonGitProjectNotice` and hides Commit & PR; the agent board refuses to start a card.
-- **Promotion is in place.** `init_project_git` runs `git init` plus an empty first commit
-  (worktrees need a commit to branch from) and `Db::mark_project_git` flips the flag and
-  records the branch on the existing main row — ids never change. `list_projects` also
-  promotes a plain project whose folder gained a `.git` (a `git init` in a terminal).
+  The Files pane stays, but its delete asks first (`FileDeleteDialog`): git worktrees delete
+  without confirming because git can restore the file, and a plain folder cannot.
+- **Promotion is in place.** `init_project_git` runs `git init` plus an empty
+  `--no-verify` first commit and `Db::mark_project_git` flips the flag and records the
+  branch on the existing main row — ids never change. A commit git refuses (no identity)
+  is an **error**, never a logged warning, so nothing is promoted with an unborn `HEAD`.
+  `list_projects` also promotes a plain project whose folder gained a `.git` — but only
+  once it has a commit, so a bare `git init` in a terminal leaves it plain.
   Remote (SSH) projects are always git.
 
 ## Importing another tool's project scripts

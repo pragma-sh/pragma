@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   addProject: vi.fn(),
-  initProjectGit: vi.fn(),
   pickDirectory: vi.fn(),
   projectDirectoryIsGit: vi.fn(),
   nonGitWarningEnabled: vi.fn(),
@@ -17,7 +16,6 @@ vi.mock("@/lib/tauri", () => ({
   cloneProject: vi.fn(),
   connectRemoteProject: vi.fn(),
   getProjectsDirectory: () => Promise.resolve("/home/user"),
-  initProjectGit: mocks.initProjectGit,
   pickDirectory: mocks.pickDirectory,
   projectDirectoryIsGit: mocks.projectDirectoryIsGit,
 }));
@@ -40,7 +38,6 @@ beforeEach(() => {
   mocks.projectDirectoryIsGit.mockResolvedValue(false);
   mocks.nonGitWarningEnabled.mockResolvedValue(true);
   mocks.addProject.mockResolvedValue({ id: "project-1" });
-  mocks.initProjectGit.mockResolvedValue({ id: "project-1" });
   mocks.disableNonGitWarning.mockResolvedValue(undefined);
   mocks.reload.mockResolvedValue(undefined);
   mocks.selectProject.mockResolvedValue(undefined);
@@ -87,7 +84,6 @@ describe("CreateProjectDialog", () => {
 
     await waitFor(() => expect(mocks.selectProject).toHaveBeenCalledWith("project-1"));
     expect(mocks.addProject).toHaveBeenCalledWith("/home/user/notes", { allowNonGit: true });
-    expect(mocks.initProjectGit).not.toHaveBeenCalled();
     expect(mocks.disableNonGitWarning).not.toHaveBeenCalled();
   });
 
@@ -95,8 +91,27 @@ describe("CreateProjectDialog", () => {
     await pickFolder();
     fireEvent.click(await screen.findByRole("button", { name: "Initialize git repository" }));
 
-    await waitFor(() => expect(mocks.initProjectGit).toHaveBeenCalledWith("project-1"));
-    expect(mocks.selectProject).toHaveBeenCalledWith("project-1");
+    await waitFor(() => expect(mocks.selectProject).toHaveBeenCalledWith("project-1"));
+    expect(mocks.addProject).toHaveBeenCalledWith("/home/user/notes", {
+      allowNonGit: true,
+      initializeGit: true,
+    });
+  });
+
+  it("saves nothing when initializing fails, so the user can retry", async () => {
+    mocks.addProject.mockRejectedValueOnce(new Error("no commit identity"));
+    await pickFolder();
+    fireEvent.click(await screen.findByRole("button", { name: "Initialize git repository" }));
+
+    expect(await screen.findByText("no commit identity")).toBeTruthy();
+    expect(mocks.selectProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Continue without git" }));
+
+    await waitFor(() => expect(mocks.selectProject).toHaveBeenCalledWith("project-1"));
+    expect(mocks.addProject).toHaveBeenLastCalledWith("/home/user/notes", {
+      allowNonGit: true,
+      initializeGit: undefined,
+    });
   });
 
   it("persists don't-show-again and adds the folder", async () => {
