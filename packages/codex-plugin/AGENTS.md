@@ -180,8 +180,9 @@ Normalization dedupes by identity, never by window length. `rateLimits` is the p
 backward-compatible single-bucket view and mirrors one `rateLimitsByLimitId` entry, so
 buckets are keyed by slugged `limitId`: the mirror is emitted once, the default snapshot
 survives when the map omits `codex` (keeping `codex-primary` for the collapsed row), and a
-window repeated with identical usage, duration, and reset — in another bucket or in the
-same snapshot's other slot — is emitted once. Distinct buckets always remain, and a
+window repeated with identical usage, duration, and reset in the same snapshot's other slot
+is emitted once. That check is per bucket: distinct buckets always remain, even when their
+windows coincide (two untouched weekly quotas look identical), and a
 non-`codex` bucket is titled with its `limitName` (e.g. `gpt-reserve weekly limit`) so a
 genuinely separate weekly quota cannot read as the default weekly limit twice. Limit ids
 are `${bucketId}-primary` / `${bucketId}-secondary`, unique by construction. Response

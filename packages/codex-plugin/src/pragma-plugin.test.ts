@@ -189,19 +189,20 @@ it("keeps the default snapshot when the bucket map omits codex", () => {
   });
 });
 
-it("drops a window that another bucket exposes identically", () => {
+it("keeps buckets whose windows happen to match", () => {
   const observedAt = 1_800_000_000_000;
-  const weekly = { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_800_086_400 };
+  const weekly = { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_800_086_400 };
   expect(
     parseCodexUsageLimits(
       {
         rateLimitsByLimitId: {
-          codex: {
-            limitId: "codex",
-            primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1_800_003_600 },
-            secondary: weekly,
+          codex: { limitId: "codex", primary: weekly, secondary: null },
+          base_model_inference: {
+            limitId: "base_model_inference",
+            limitName: "gpt-reserve",
+            primary: weekly,
+            secondary: null,
           },
-          codex_secondary: { limitId: "codex_secondary", primary: weekly, secondary: null },
         },
       },
       observedAt,
@@ -210,11 +211,11 @@ it("drops a window that another bucket exposes identically", () => {
     status: "ready",
     observedAt,
     limits: [
-      { id: "codex-primary", title: "5-hour limit", used: 10, limit: 100, resetsInMs: 3_600_000 },
+      { id: "codex-primary", title: "Weekly limit", used: 0, limit: 100, resetsInMs: 86_400_000 },
       {
-        id: "codex-secondary",
-        title: "Weekly limit",
-        used: 40,
+        id: "base-model-inference-primary",
+        title: "gpt-reserve weekly limit",
+        used: 0,
         limit: 100,
         resetsInMs: 86_400_000,
       },

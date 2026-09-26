@@ -2947,6 +2947,7 @@ function useSessionLaunch(
   selectWorktree: (worktreeId: string | null, projectId?: string) => void,
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>,
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>,
+  closeTab: (tabId: string) => Promise<void>,
   worktrees: Record<string, Worktree[]>,
 ): (
   worktreeId: string,
@@ -2973,18 +2974,29 @@ function useSessionLaunch(
       }
       void markTabAgent(tab.id, agent);
       if (!focus) {
-        return launchBackgroundAgent(tab, worktreeId, worktrees, options, {
-          agent,
-          message,
-          modelSelection,
-        });
+        // The tab exists before the PTY does. A failed spawn must not leave it
+        // behind as an empty agent tab — a retry would add a second one.
+        try {
+          const launched = await launchBackgroundAgent(tab, worktreeId, worktrees, options, {
+            agent,
+            message,
+            modelSelection,
+          });
+          if (!launched) {
+            await closeTab(tab.id);
+          }
+          return launched;
+        } catch (cause) {
+          await closeTab(tab.id);
+          throw cause;
+        }
       }
       // Foreground: the tab was just revealed and will mount a terminal;
       // `startAgentInTab` waits for that PTY connection before writing.
       startAgentInTab(tab.id, agent, message, modelSelection);
       return tab;
     },
-    [createTerminalTab, markTabAgent, selectWorktree, worktrees],
+    [closeTab, createTerminalTab, markTabAgent, selectWorktree, worktrees],
   );
 }
 
@@ -4458,6 +4470,7 @@ function useTabManagement({
     selectWorktree,
     createTerminalTab,
     markTabAgent,
+    closeTab,
     state.worktrees,
   );
   useDeepLinkHandler(

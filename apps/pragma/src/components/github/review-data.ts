@@ -1,6 +1,12 @@
 import type { GitHubRepoRef } from "@pragma-sh/constants";
 
-import type { PullFile, PullRequestSummary, PullReview, ReviewThread } from "@/lib/github";
+import type {
+  GitHubActor,
+  PullFile,
+  PullRequestSummary,
+  PullReview,
+  ReviewThread,
+} from "@/lib/github";
 
 /**
  * How often the review tab re-fetches PR metadata, files, comments, and local
@@ -59,12 +65,19 @@ function fileSignature(file: PullFile): string {
   return `${file.path}:${file.oldPath ?? ""}:${file.status}:${file.additions}:${file.deletions}`;
 }
 
+function actorSignature(actor: GitHubActor | null): string {
+  return actor ? `${actor.login}@${actor.avatarUrl}` : "";
+}
+
 function threadsSignature(threads: ReviewThread[]): string {
   return threads
     .map(
       (thread) =>
         `${thread.id}:${thread.isResolved}:${thread.line}:${thread.comments
-          .map((comment) => `${comment.id}:${comment.body}`)
+          .map(
+            (comment) =>
+              `${comment.id}:${comment.body}:${comment.createdAt}:${actorSignature(comment.user)}`,
+          )
           .join(",")}`,
     )
     .join("|");
@@ -74,7 +87,10 @@ function threadsSignature(threads: ReviewThread[]): string {
 export function reviewDataSignature(data: ReviewData): string {
   const files = data.files.map(fileSignature).join("|");
   const reviews = data.reviews
-    .map((review) => `${review.id}:${review.state}:${review.body}`)
+    .map(
+      (review) =>
+        `${review.id}:${review.state}:${review.body}:${review.submittedAt ?? ""}:${actorSignature(review.user)}`,
+    )
     .join("|");
   const threads = [...data.threadsByPath.entries()]
     .map(([path, list]) => `${path}=${threadsSignature(list)}`)

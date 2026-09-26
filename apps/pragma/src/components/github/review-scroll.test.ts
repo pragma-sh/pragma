@@ -116,6 +116,40 @@ describe("settleCommentIntoView", () => {
     expect(target.reveal).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps waiting past the settle budget for a slow diff to mount", () => {
+    const outer = scroller(10_000);
+    const node = document.createElement("div");
+    outer.getBoundingClientRect = () => rect(0, 800);
+    node.getBoundingClientRect = () => rect(3000 - outer.scrollTop, 60);
+    let clock = 0;
+    let mounted = false;
+    const frames: (() => void)[] = [];
+    settleCommentIntoView({
+      outer,
+      topInset: 36,
+      findNode: () => (mounted ? node : null),
+      target: null,
+      schedule: (callback) => frames.push(callback),
+      cancel: () => {
+        frames.length = 0;
+      },
+      now: () => clock,
+    });
+    // The git request and render take longer than the 3s settle budget.
+    for (let tick = 0; tick < 10; tick += 1) {
+      clock += 500;
+      frames.shift()?.();
+    }
+    expect(frames.length).toBeGreaterThan(0);
+    mounted = true;
+    while (frames.length > 0) {
+      clock += 16;
+      frames.shift()?.();
+    }
+    const { top, bottom } = node.getBoundingClientRect();
+    expect((top + bottom) / 2).toBeCloseTo((36 + 800) / 2);
+  });
+
   it("stops as soon as the user scrolls", () => {
     const { outer, settle, frames } = fixture();
     settle();

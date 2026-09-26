@@ -25,7 +25,12 @@ export interface ReviewCommentTarget {
 const EDGE_MARGIN_PX = 16;
 /** Consecutive still frames before a navigation counts as landed. */
 const STABLE_FRAMES = 2;
-/** Upper bound on correcting — long enough for a cold diff to load and render. */
+/**
+ * Upper bound on waiting for the comment to mount. A deferred diff first runs a
+ * git request and a CodeMirror render, which can take far longer than settling.
+ */
+const MOUNT_BUDGET_MS = 30_000;
+/** Upper bound on correcting once the comment is mounted and real heights arrive. */
 const SETTLE_BUDGET_MS = 3000;
 /** Anything the user does to scroll ends an unfinished settle rather than fighting it. */
 const USER_SCROLL_EVENTS = ["wheel", "pointerdown", "touchstart"] as const;
@@ -111,11 +116,13 @@ export interface SettleOptions {
 }
 
 /**
- * One correction pass. Returns true once the comment is mounted and neither
- * scroller had to move — i.e. the comment is centered in its diff and the file
- * is centered on screen.
+ * Outcome of one correction pass: the comment is not mounted yet, it moved, or
+ * it held still — centered in its diff with the file centered on screen.
  */
-function settleStep({ outer, topInset, findNode, target }: SettleOptions): boolean {
+type SettleState = "unmounted" | "moving" | "still";
+
+/** One correction pass over both scrollers. */
+function settleStep({ outer, topInset, findNode, target }: SettleOptions): SettleState {
   const node = findNode();
   let placed = node !== null;
   let moved = 0;
@@ -134,7 +141,10 @@ function settleStep({ outer, topInset, findNode, target }: SettleOptions): boole
   if (focus) {
     moved += scrollByClamped(outer, centeringDelta(focus, band));
   }
-  return placed && Math.abs(moved) < 1;
+  if (node === null) {
+    return "unmounted";
+  }
+  return placed && Math.abs(moved) < 1 ? "still" : "moving";
 }
 
 /**
@@ -146,13 +156,17 @@ function settleStep({ outer, topInset, findNode, target }: SettleOptions): boole
  * mounts the portal into it. A one-shot (let alone smooth) `scrollIntoView`
  * aims at those estimates and overshoots as the real heights arrive. Instead
  * this re-measures every frame and corrects both scrollers instantly until the
- * comment holds still. Returns a function that stops it early.
+ * comment holds still. Waiting for a deferred diff to mount has its own, longer
+ * budget. Returns a function that stops it early.
  */
 export function settleCommentIntoView(options: SettleOptions): () => void {
   const schedule = options.schedule ?? ((callback) => requestAnimationFrame(callback));
   const cancel = options.cancel ?? ((handle) => cancelAnimationFrame(handle));
   const now = options.now ?? (() => performance.now());
-  const deadline = now() + SETTLE_BUDGET_MS;
+  // The settle budget starts only once the comment mounts, so a slow deferred
+  // diff never exhausts it before there is anything to position.
+  let deadline = now() + MOUNT_BUDGET_MS;
+  let mounted = false;
   let stableFrames = 0;
   let frame = 0;
   let stopped = false;
@@ -171,7 +185,12 @@ export function settleCommentIntoView(options: SettleOptions): () => void {
     if (stopped) {
       return;
     }
-    stableFrames = settleStep(options) ? stableFrames + 1 : 0;
+    const state = settleStep(options);
+    if (state !== "unmounted" && !mounted) {
+      mounted = true;
+      deadline = now() + SETTLE_BUDGET_MS;
+    }
+    stableFrames = state === "still" ? stableFrames + 1 : 0;
     if (stableFrames >= STABLE_FRAMES || now() > deadline) {
       stop();
       return;

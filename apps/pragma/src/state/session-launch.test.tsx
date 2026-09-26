@@ -198,4 +198,22 @@ describe("startSession launch paths", () => {
     // The foreign project's snapshot is never polluted with another project's tab.
     expect(result.current.projectTabs.map((item) => item.id)).not.toContain("created-1");
   });
+
+  it("closes the tab when a background PTY spawn fails", async () => {
+    const { result } = await renderWorkspace();
+    startBackgroundAgentSessionMock.mockRejectedValueOnce(new Error("spawn failed"));
+
+    await act(async () => {
+      await expect(
+        result.current.startSession("wt-child", agent, "Fix the bug", undefined, {
+          projectId: "proj",
+          focus: false,
+          worktreePath: worktreeChild.path,
+        }),
+      ).rejects.toThrow("spawn failed");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("close_tab", { tabId: "created-1" });
+    expect(result.current.projectTabs.map((tab) => tab.id)).not.toContain("created-1");
+  });
 });

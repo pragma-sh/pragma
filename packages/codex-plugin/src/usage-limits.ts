@@ -75,8 +75,10 @@ export function parseCodexUsageLimits(value: unknown, observedAt: number): Usage
     throw new Error("Codex usage response was not an object");
   }
   const limits: UsageLimit[] = [];
-  const emittedWindows = new Set<string>();
   for (const bucket of rateLimitBuckets(value)) {
+    // Scoped per bucket: two buckets are distinct quotas even when their usage,
+    // duration, and reset happen to coincide (e.g. both untouched this week).
+    const emittedWindows = new Set<string>();
     addRateLimitWindow(
       limits,
       emittedWindows,
@@ -175,17 +177,17 @@ function addRateLimitWindow(
   if (!isRecord(value) || !isFiniteNumber(value.usedPercent)) {
     return;
   }
-  // One metered window can be exposed twice: the same snapshot mirrored by another
-  // bucket, or a window-only bucket whose primary and secondary carry it. Identical
-  // usage, duration, and reset describe one window and are emitted once; a different
-  // percentage, duration, or reset is a distinct quota and stays.
+  // A bucket can expose one metered window in both its primary and secondary slot.
+  // Identical usage, duration, and reset within a bucket describe one window and are
+  // emitted once. The mirrored `rateLimits` snapshot is already merged by limit id in
+  // `rateLimitBuckets`, so a window in a different bucket is always its own quota.
   if (isDuplicateWindow(emittedWindows, value)) {
     return;
   }
   limits.push(rateLimitWindow(bucket, id, fallbackTitle, value, value.usedPercent, observedAt));
 }
 
-/** Records a metered window and reports whether an identical one came before it. */
+/** Records a metered window and reports whether an identical one came before it in its bucket. */
 function isDuplicateWindow(emittedWindows: Set<string>, window: Record<string, unknown>): boolean {
   const key = equivalentWindowKey(window);
   if (key === null) {

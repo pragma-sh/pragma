@@ -62,6 +62,17 @@ describe("reuseUnchangedReviewData", () => {
     expect(reviewDataSignature(merged)).toBe(reviewDataSignature(next));
   });
 
+  it("replaces a thread list whose comment author changed", () => {
+    const prev = data([file("a.ts")], [thread("a1", "a.ts")]);
+    const renamed = thread("a1", "a.ts");
+    renamed.comments[0]!.user = { login: "octocat", avatarUrl: "https://avatar" };
+    const next = data([file("a.ts")], [renamed]);
+    const merged = reuseUnchangedReviewData(prev, next);
+
+    expect(merged.threadsByPath.get("a.ts")).toBe(next.threadsByPath.get("a.ts"));
+    expect(reviewDataSignature(merged)).not.toBe(reviewDataSignature(prev));
+  });
+
   it("drops files and threads that disappeared", () => {
     const prev = data([file("a.ts"), file("b.ts")], [thread("a1", "a.ts"), thread("b1", "b.ts")]);
     const merged = reuseUnchangedReviewData(prev, data([file("a.ts")], [thread("a1", "a.ts")]));
