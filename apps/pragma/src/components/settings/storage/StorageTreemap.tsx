@@ -10,10 +10,17 @@ import {
 import { ChevronRight, ZoomOut } from "lucide-react";
 import { animate } from "motion/react";
 
+import {
+  cushionStops,
+  paletteColor,
+  PROJECT_FRAME_COLOR,
+  TREEMAP_BACKGROUND,
+  type TreemapRect,
+} from "@pragma-sh/treemap";
+
 import { IconButton } from "@/components/ui/icon-button";
 import { formatBytes } from "@/lib/binary-file";
 import { motionTransition, useMotionTransition } from "@/lib/motion";
-import type { TreemapRect } from "@/lib/treemap";
 import { cn } from "@/lib/utils";
 
 import { findNodePath, TREEMAP_MIN_FOLDER_BYTES, type StorageNode } from "./storage-model";
@@ -26,23 +33,7 @@ import {
   type TreemapLayout,
 } from "./treemap-layout";
 
-/**
- * GrandPerspective's "Bujumbura" palette, sampled from its screenshots. The
- * treemap deliberately does not follow the app theme: like GrandPerspective,
- * it is a loud, fixed palette on black so adjacent folders are unmistakable.
- */
-const TREEMAP_PALETTE = [
-  "#3b8fe4", // blue
-  "#98c41c", // lime
-  "#d8d43c", // yellow
-  "#d5421b", // red
-  "#e27b12", // orange
-  "#d9a878", // tan
-  "#6f5036", // brown
-] as const;
-
-/** The line around each project, drawn in the middle of its black gutter. */
-const PROJECT_FRAME_COLOR = "rgba(255, 255, 255, 0.75)";
+/** Width of the line around each project. */
 const PROJECT_FRAME_WIDTH = 2;
 
 /** Tiles thinner than this are filled flat; a gradient cannot show there. */
@@ -51,28 +42,7 @@ const MIN_SHADED = 3;
 const WHEEL_STEP = 40;
 const WHEEL_COOLDOWN_MS = 350;
 
-function paletteColor(slot: number): string {
-  const size = TREEMAP_PALETTE.length;
-  return TREEMAP_PALETTE[((slot % size) + size) % size] ?? TREEMAP_PALETTE[0];
-}
-
-/** Mixes a `#rrggbb` color toward white (`amount` > 0) or black (< 0). */
-function shade(hex: string, amount: number): string {
-  const value = Number.parseInt(hex.slice(1), 16);
-  const target = amount > 0 ? 255 : 0;
-  const weight = Math.abs(amount);
-  const channel = (shift: number) => {
-    const base = (value >> shift) & 0xff;
-    return Math.round(base + (target - base) * weight);
-  };
-  return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`;
-}
-
-/**
- * The cushion look: light falls from the top-left, so every tile runs from a
- * highlight in that corner through its color to a shadow at the bottom-right.
- * With no gaps between tiles, that shading is the only edge a tile has.
- */
+/** Paints one tile with the cushion shading, or flat when too thin to show it. */
 function drawLeaf(context: CanvasRenderingContext2D, leaf: Leaf): void {
   const { x, y, width, height } = leaf.rect;
   const color = leaf.node.kind === "pending" ? "#3a3a3a" : paletteColor(leaf.node.color);
@@ -80,9 +50,7 @@ function drawLeaf(context: CanvasRenderingContext2D, leaf: Leaf): void {
     context.fillStyle = color;
   } else {
     const gradient = context.createLinearGradient(x, y, x + width, y + height);
-    gradient.addColorStop(0, shade(color, 0.55));
-    gradient.addColorStop(0.45, color);
-    gradient.addColorStop(1, shade(color, -0.6));
+    for (const stop of cushionStops(color)) gradient.addColorStop(stop.offset, stop.color);
     context.fillStyle = gradient;
   }
   context.fillRect(x, y, width, height);
@@ -146,7 +114,7 @@ function useTreemapCanvases(
   useLayoutEffect(() => {
     const context = prepareCanvas(canvasRef.current, width, height);
     if (!context) return;
-    context.fillStyle = "#000";
+    context.fillStyle = TREEMAP_BACKGROUND;
     context.fillRect(0, 0, width, height);
     for (const leaf of layout.leaves) drawLeaf(context, leaf);
     context.strokeStyle = PROJECT_FRAME_COLOR;

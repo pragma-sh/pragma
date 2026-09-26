@@ -1,0 +1,20 @@
+{
+  "name": "@pragma-sh/treemap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GrandPerspective-style treemap geometry and colours: the squarified layout, the fixed palette, and the cushion shading. Shared by the desktop Storage page and the website.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

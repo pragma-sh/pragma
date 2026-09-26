@@ -54,6 +54,7 @@
     "@pragma-sh/scratchpad": "workspace:*",
     "@pragma-sh/scratchpad-viewer": "workspace:*",
     "@pragma-sh/sdk": "workspace:*",
+    "@pragma-sh/treemap": "workspace:*",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",

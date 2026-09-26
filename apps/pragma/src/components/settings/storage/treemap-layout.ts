@@ -1,4 +1,4 @@
-import { squarify, type TreemapRect } from "@/lib/treemap";
+import { squarify, type TreemapRect } from "@pragma-sh/treemap";
 
 import type { StorageNode } from "./storage-model";
 

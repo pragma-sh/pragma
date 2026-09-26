@@ -60,6 +60,7 @@
         "@pragma-sh/scratchpad": "workspace:*",
         "@pragma-sh/scratchpad-viewer": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",
+        "@pragma-sh/treemap": "workspace:*",
         "@tailwindcss/vite": "^4.3.0",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2.7.1",
@@ -204,6 +205,7 @@
       "dependencies": {
         "@pragma-sh/brand": "workspace:*",
         "@pragma-sh/plugin-registry": "workspace:*",
+        "@pragma-sh/treemap": "workspace:*",
         "@react-three/drei": "^10.7.8",
         "@react-three/fiber": "^9.7.0",
         "class-variance-authority": "^0.7.1",
@@ -586,6 +588,14 @@
       "version": "1.0.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/treemap": {
+      "name": "@pragma-sh/treemap",
+      "version": "0.1.0",
+      "devDependencies": {
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -1753,6 +1763,8 @@
     "@pragma-sh/sdk": ["@pragma-sh/sdk@workspace:packages/sdk"],
 
     "@pragma-sh/sidecar-kit": ["@pragma-sh/sidecar-kit@workspace:packages/sidecar-kit"],
+
+    "@pragma-sh/treemap": ["@pragma-sh/treemap@workspace:packages/treemap"],
 
     "@pragma-sh/watcher": ["@pragma-sh/watcher@workspace:packages/watcher"],
 

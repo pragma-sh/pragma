@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { squarify, type TreemapTile } from "./treemap";
+import { squarify, type TreemapTile } from "./squarify";
 
 const BOUNDS = { x: 0, y: 0, width: 600, height: 400 };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { blogDate, publishedFirst } from "./blog-utils";
+import { blogDate, blogTagLabels, blogTags, publishedFirst } from "./blog-utils";
 
 describe("blog", () => {
   it("features the newest dated post without changing source order", () => {
@@ -11,5 +11,10 @@ describe("blog", () => {
 
   it("formats a publication date in UTC", () => {
     expect(blogDate("2026-09-24")).toBe("September 24, 2026");
+  });
+
+  it("labels every accepted tag", () => {
+    expect(blogTags).toEqual(["release"]);
+    expect(blogTagLabels.release).toBe("New release");
   });
 });
