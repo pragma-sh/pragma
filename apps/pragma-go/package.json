@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "expo lint",
-    "eas-build-post-install": "bunx turbo run build --filter=pragma-go^..."
+    "eas-build-post-install": "bun x turbo run build --filter=pragma-go^..."
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",
