@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { projectIsGit } from "@/lib/non-git-project";
 import { useRequiredContext } from "@/lib/context";
 
 import { toast } from "sonner";
@@ -404,6 +405,11 @@ async function launchCard(
 ): Promise<void> {
   const target = card.projectId;
   const projectWorktrees = workspace.worktrees[target] ?? [];
+  if (!projectIsGit(workspace.projects.find((project) => project.id === target))) {
+    throw new Error(
+      "This project is not a git repository. Initialize one to run cards in their own worktree.",
+    );
+  }
   if (syncMainWorktreeId) {
     await githubPullBranch(syncMainWorktreeId);
   }

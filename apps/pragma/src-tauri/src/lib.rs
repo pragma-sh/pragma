@@ -1372,6 +1372,8 @@ pub fn run() {
             read_daemon_log,
             projects::list_projects,
             projects::add_project,
+            projects::project_directory_is_git,
+            projects::init_project_git,
             projects::remove_project,
             projects::set_project_icon,
             projects::clone_project,

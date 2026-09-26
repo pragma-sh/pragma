@@ -440,9 +440,26 @@ export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
 }
 
-/** Persists an existing git checkout as a project. */
-export function addProject(path: string): Promise<Project> {
-  return invoke<Project>("add_project", { path });
+/**
+ * Persists a local folder as a project. A folder that is not a git repository
+ * is refused unless `allowNonGit` is set, which adds it as a plain project with
+ * a single root worktree and no git features.
+ */
+export function addProject(path: string, options?: { allowNonGit?: boolean }): Promise<Project> {
+  return invoke<Project>("add_project", { path, allowNonGit: options?.allowNonGit ?? false });
+}
+
+/** Whether `path` is the root of a git repository. */
+export function projectDirectoryIsGit(path: string): Promise<boolean> {
+  return invoke<boolean>("project_directory_is_git", { path });
+}
+
+/**
+ * Initializes a git repository in a plain project's folder and promotes the
+ * project in place, keeping its tabs and agent sessions.
+ */
+export function initProjectGit(projectId: string): Promise<Project> {
+  return invoke<Project>("init_project_git", { projectId });
 }
 
 /** Removes a project from Pragma without deleting its checkout. */

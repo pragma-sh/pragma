@@ -433,6 +433,60 @@ pub fn ensure_repo(path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Whether `path` is the **root** of a git repository. A plain folder — or one
+/// that merely sits inside a repository — answers `false`; only failing to run
+/// git at all is an error.
+pub fn is_repo_root(path: &Path) -> AppResult<bool> {
+    let output = crate::process_env::git()
+        .args([
+            "-C",
+            path_string(path).as_str(),
+            "rev-parse",
+            "--show-toplevel",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let toplevel = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let toplevel = pragma_platform::path::canonicalize(&toplevel)?;
+    Ok(toplevel == pragma_platform::path::canonicalize(path)?)
+}
+
+/// Turns a plain folder into a git repository with an empty first commit.
+///
+/// The commit is what makes worktrees possible straight away: `git worktree
+/// add` needs a commit to branch from and refuses an unborn `HEAD`. It is
+/// empty so nothing in the folder is committed behind the user's back. A
+/// missing commit identity only costs that convenience, so it is logged rather
+/// than failing an initialization that already happened.
+pub fn init_repository(path: &Path) -> AppResult<()> {
+    let root = path_string(path);
+    let output = crate::process_env::git()
+        .args(["-C", root.as_str(), "init"])
+        .output()?;
+    if !output.status.success() {
+        return Err(AppError::Git(stderr(output.stderr)));
+    }
+    let commit = crate::process_env::git()
+        .args([
+            "-C",
+            root.as_str(),
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Initial commit",
+        ])
+        .output()?;
+    if !commit.status.success() {
+        log::warn!(
+            "initialized {root} but could not create its first commit: {}",
+            stderr(commit.stderr)
+        );
+    }
+    Ok(())
+}
+
 pub fn current_branch(path: &Path) -> AppResult<String> {
     let output = crate::process_env::git()
         .args(["-C", path_string(path).as_str(), "branch", "--show-current"])
@@ -538,7 +592,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{current_branch, ensure_pragma_excluded, ensure_repo, PRAGMA_WORKTREES_EXCLUDE};
+    use super::{
+        current_branch, ensure_pragma_excluded, ensure_repo, init_repository, is_repo_root,
+        PRAGMA_WORKTREES_EXCLUDE,
+    };
 
     fn run(dir: &Path, args: &[&str]) {
         let output = crate::process_env::git()
@@ -556,6 +613,28 @@ mod tests {
         run(dir.path(), &["init", "-b", "main"]);
         ensure_repo(dir.path()).expect("repo should validate");
         assert_eq!(current_branch(dir.path()).expect("branch"), "main");
+    }
+
+    #[test]
+    fn detects_repo_roots() {
+        let dir = tempdir().expect("tempdir");
+        assert!(!is_repo_root(dir.path()).expect("plain folder"));
+        run(dir.path(), &["init", "-b", "main"]);
+        assert!(is_repo_root(dir.path()).expect("repo root"));
+        let nested = dir.path().join("scratch");
+        std::fs::create_dir(&nested).expect("nested dir");
+        assert!(!is_repo_root(&nested).expect("folder inside a repo"));
+    }
+
+    #[test]
+    fn initializes_a_plain_folder() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("notes.txt"), "keep me\n").expect("write file");
+
+        init_repository(dir.path()).expect("init");
+
+        assert!(is_repo_root(dir.path()).expect("now a repo"));
+        assert!(!current_branch(dir.path()).expect("branch").is_empty());
     }
 
     /// A directory that merely sits *inside* a repo is not a project root:

@@ -31,6 +31,7 @@ import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 import { isMacPlatform } from "@/lib/platform";
 import type { AgentConfig, AgentModelSelection } from "@/lib/tauri";
 import { listPluginAgents } from "@/plugins/agents";
+import { worktreeDisplayLabel } from "@/lib/non-git-project";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface NewAgentSessionDialogProps {
@@ -673,9 +674,7 @@ export function NewAgentSessionDialog({
                         <>
                           <GitBranch className="size-3.5" />
                           <span className="truncate">
-                            {form.selectedWorktree.isMain
-                              ? "main"
-                              : (form.selectedWorktree.title ?? form.selectedWorktree.branch)}
+                            {worktreeDisplayLabel(form.selectedWorktree, workspace.activeProject)}
                           </span>
                         </>
                       ) : (
@@ -693,7 +692,7 @@ export function NewAgentSessionDialog({
                         <SelectItem key={worktree.id} value={worktree.id}>
                           <GitBranch className="size-3.5" />
                           <span className="truncate">
-                            {worktree.isMain ? "main" : (worktree.title ?? worktree.branch)}
+                            {worktreeDisplayLabel(worktree, workspace.activeProject)}
                           </span>
                         </SelectItem>
                       ))

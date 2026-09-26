@@ -25,6 +25,7 @@ export function OtherSection({
   const defaultUrl = runtime?.checkUrl ?? constants.updates.devCheckUrl;
   const serverUrl = settings.serverUrl ?? "";
   const autoDownload = settings.autoDownload ?? constants.updates.autoDownload;
+  const nonGitWarning = settings.nonGitProjectWarning ?? constants.projects.nonGitWarning;
   const [draftUrl, setDraftUrl] = useState(serverUrl);
 
   useEffect(() => {
@@ -87,6 +88,22 @@ export function OtherSection({
             checked={autoDownload}
             id="other-auto-download"
             onCheckedChange={(checked) => void persist({ autoDownload: checked })}
+          />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Projects"
+        description="Pragma can add a folder that is not a git repository; it gets one root worktree and no git features until you initialize a repository."
+      >
+        <div className="flex items-center justify-between gap-4">
+          <label className="text-sm" htmlFor="other-non-git-warning">
+            Warn when adding a folder that is not a git repository
+          </label>
+          <Switch
+            checked={nonGitWarning}
+            id="other-non-git-warning"
+            onCheckedChange={(checked) => void persist({ nonGitProjectWarning: checked })}
           />
         </div>
       </SettingsCard>

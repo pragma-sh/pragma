@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,12 @@ const sidebarMocks = vi.hoisted(() => ({
   },
   /** The failed-run request the provider republishes for "Try again". */
   draft: null as null | { parentWorktreeId: string },
+  activeProject: { id: "project-1", name: "Pragma" } as {
+    id: string;
+    name: string;
+    isGit?: boolean;
+  },
+  initGitDialogProps: null as null | { projectId: string | null; onInitialized?: () => void },
 }));
 
 vi.mock("@/state/worktree-creation-context", () => ({
@@ -26,7 +32,7 @@ vi.mock("@/state/kanban-context", () => ({
 
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => ({
-    activeProject: { name: "Pragma" },
+    activeProject: sidebarMocks.activeProject,
     selectedProjectId: "project-1",
     worktrees: { "project-1": [{ id: "main-1", isMain: true }] },
   }),
@@ -63,6 +69,12 @@ vi.mock("@/state/updates-context", () => ({
 }));
 vi.mock("@/components/sidebar/OpenPortsCard", () => ({ OpenPortsCard: () => null }));
 vi.mock("@/components/dialogs/CreateProjectDialog", () => ({ CreateProjectDialog: () => null }));
+vi.mock("@/components/dialogs/InitGitDialog", () => ({
+  InitGitDialog: (props: { projectId: string | null; onInitialized?: () => void }) => {
+    sidebarMocks.initGitDialogProps = props;
+    return null;
+  },
+}));
 vi.mock("@/components/dialogs/CreateWorktreeDialog", () => ({
   CreateWorktreeDialog: (props: { open: boolean; parentWorktreeId?: string }) => {
     sidebarMocks.createWorktreeDialogProps = props;
@@ -86,6 +98,8 @@ afterEach(() => {
   localStorage.clear();
   sidebarMocks.createWorktreeDialogProps = null;
   sidebarMocks.draft = null;
+  sidebarMocks.activeProject = { id: "project-1", name: "Pragma" };
+  sidebarMocks.initGitDialogProps = null;
 });
 
 describe("ProjectSidebar", () => {
@@ -138,6 +152,23 @@ describe("ProjectSidebar", () => {
     expect(sidebarMocks.createWorktreeDialogProps).toMatchObject({
       open: true,
       parentWorktreeId: "child-1",
+    });
+  });
+
+  it("asks to initialize git instead of creating a worktree on a plain project", async () => {
+    sidebarMocks.activeProject = { id: "project-1", name: "Notes", isGit: false };
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "New worktree off root" }));
+
+    expect(sidebarMocks.initGitDialogProps?.projectId).toBe("project-1");
+    expect(sidebarMocks.createWorktreeDialogProps?.open).toBe(false);
+
+    // Once the repository exists, the interrupted creation continues.
+    act(() => sidebarMocks.initGitDialogProps?.onInitialized?.());
+    expect(sidebarMocks.createWorktreeDialogProps).toMatchObject({
+      open: true,
+      parentWorktreeId: "main-1",
     });
   });
 });
