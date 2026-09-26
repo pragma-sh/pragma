@@ -62,6 +62,15 @@ Settings → **Pragma Go**:
 
 Prefer manual? Expand **Manual** for copyable **URL** and **Token** rows.
 
+Pragma Go remembers the desktops it has connected to. They appear under **Previous
+connections** on the pairing screen: tap one to reconnect with its saved token, or
+**Remove** it. In the browser, connections are kept in session storage unless you choose
+**Remember this browser**, so closing the tab clears them. Settings → **Unpair this device** returns to the pairing screen straight
+away, even if the desktop is unreachable. The app tells the desktop to stop sending
+notifications in the background and tries again on the next launch if it gets no answer.
+Regenerating the token on the desktop invalidates saved connections too. Scan the QR code
+again after doing that.
+
 **Keep awake** (on by default) stops the computer from sleeping while remote access is
 on, so sleep will not interrupt pairing. On Linux it also blocks sleep on lid close;
 macOS and Windows still sleep when the lid closes unless an external display keeps them
