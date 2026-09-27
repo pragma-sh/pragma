@@ -68,13 +68,20 @@ function artifactUrl(build: BuildSummary | null): string {
 }
 
 /**
- * Ship as an update exactly when a finished build already has the fingerprint.
- * `matchingBuilds` is the result of filtering by that fingerprint, so any entry
- * is a match; the fingerprint is re-checked in case the filter is ever ignored.
- *
- * On Android that build's APK is re-attached to the release for a fresh
- * Obtainium install, so a match whose artifact has expired or was never
- * uploaded can't back an update — treat it as no match and build instead.
+ * Whether a fingerprint-matching build can actually back an update. On Android
+ * that build's APK is re-attached to the release for a fresh Obtainium
+ * install, so a match whose artifact has expired or was never uploaded can't
+ * back one.
+ */
+function canShipUpdate(platform: Platform, build: BuildSummary): boolean {
+  return platform !== "android" || artifactUrl(build) !== "";
+}
+
+/**
+ * Ship as an update exactly when a finished, still-installable build already
+ * has the fingerprint. `matchingBuilds` is the result of filtering by that
+ * fingerprint, so any entry is a match; the fingerprint is re-checked in case
+ * the filter is ever ignored.
  */
 export function decide(
   platform: Platform,
@@ -83,9 +90,8 @@ export function decide(
   matchingBuilds: BuildSummary[],
   latestBuild: BuildSummary | null,
 ): PlatformPlan {
-  const candidate = matchingBuilds.find((build) => build.fingerprint?.hash === fingerprint) ?? null;
-  const matchingBuild =
-    candidate && platform === "android" && !artifactUrl(candidate) ? null : candidate;
+  const candidate = matchingBuilds.find((build) => build.fingerprint?.hash === fingerprint);
+  const matchingBuild = candidate && canShipUpdate(platform, candidate) ? candidate : null;
   return {
     platform,
     profile: RELEASE_PROFILES[platform],
