@@ -1,0 +1,62 @@
+# Previews, on the release PR, how the next Pragma Go release will ship: per
+# platform, an over-the-air update or a new binary. `release.yml` makes the real
+# decision with the same script when the PR merges; this only makes it visible
+# beforehand, so an accidental native change (which forces a store build) is
+# caught in review rather than discovered in the TestFlight queue.
+#
+# It lives on GitHub Actions, not RWX, because it writes a PR comment — see the
+# fallow workflow for why RWX's token cannot.
+name: Pragma Go ship plan
+
+on:
+  pull_request:
+    # Release Please only touches this file when the PR releases Pragma Go.
+    paths:
+      - apps/pragma-go/version.txt
+
+concurrency:
+  group: pragma-go-ship-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  plan:
+    if: ${{ startsWith(github.head_ref, 'release-please--branches--') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        env:
+          HUSKY: "0"
+        run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Plan
+        run: bun scripts/pragma-go-ship-plan.ts --comment ship-plan.md
+      # Sticky: the body starts with `<!-- pragma-go-ship-plan -->`, so every
+      # push to the release PR updates one comment instead of adding another.
+      - name: Post the sticky plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          existing="$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
+            --jq 'map(select(.body | startswith("<!-- pragma-go-ship-plan -->"))) | .[0].id // empty')"
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" -F body=@ship-plan.md > /dev/null
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR/comments" -F body=@ship-plan.md > /dev/null
+          fi
