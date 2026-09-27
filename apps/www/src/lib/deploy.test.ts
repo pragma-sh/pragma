@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { shouldDeploy } from "./deploy";
+import { DEPLOY_LABEL, fetchPrLabels, needsPrLabels, shouldDeploy } from "./deploy";
 
 describe("shouldDeploy", () => {
   test("builds every preview deployment", () => {
@@ -66,5 +66,55 @@ describe("shouldDeploy", () => {
 
   test("builds when provenance is unreadable rather than skipping silently", () => {
     expect(shouldDeploy({ env: "production", commitMessage: undefined })).toBe(true);
+  });
+
+  test("builds production for a merge labelled for deploy", () => {
+    const commitMessage = "docs(www): publish the storage manager post (#170)";
+    expect(shouldDeploy({ env: "production", commitMessage, prLabels: [DEPLOY_LABEL] })).toBe(true);
+    expect(shouldDeploy({ env: "production", commitMessage, prLabels: ["documentation"] })).toBe(
+      false,
+    );
+    expect(shouldDeploy({ env: "production", commitMessage, prLabels: [] })).toBe(false);
+  });
+});
+
+describe("needsPrLabels", () => {
+  test("only asks GitHub when the labels can change the answer", () => {
+    expect(needsPrLabels({ env: "production", commitMessage: "docs: fix a typo" })).toBe(true);
+    expect(needsPrLabels({ env: "preview", commitMessage: "docs: fix a typo" })).toBe(false);
+    expect(needsPrLabels({ env: "production", commitMessage: "chore(main): release" })).toBe(false);
+    expect(needsPrLabels({ env: "production", commitMessage: undefined })).toBe(false);
+  });
+});
+
+/** A fetch stub answering every request with `body`. */
+const respond = (body: unknown, status = 200): typeof fetch =>
+  (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+
+describe("fetchPrLabels", () => {
+  const sha = "abc123";
+  const pull = (overrides: Record<string, unknown>) => ({
+    merged_at: "2026-09-27T00:00:00Z",
+    merge_commit_sha: sha,
+    labels: [{ name: DEPLOY_LABEL }],
+    ...overrides,
+  });
+
+  test("returns the labels of the pull request that merged the commit", async () => {
+    expect(await fetchPrLabels(sha, respond([pull({})]))).toEqual([DEPLOY_LABEL]);
+  });
+
+  test("ignores open pull requests and ones merged as a different commit", async () => {
+    const pulls = [pull({ merged_at: null }), pull({ merge_commit_sha: "def456" })];
+    expect(await fetchPrLabels(sha, respond(pulls))).toEqual([]);
+  });
+
+  test("returns no labels when the lookup fails", async () => {
+    expect(await fetchPrLabels(sha, respond({ message: "rate limited" }, 403))).toEqual([]);
+    const reject = (async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+    expect(await fetchPrLabels(sha, reject)).toEqual([]);
+    expect(await fetchPrLabels(undefined, respond([pull({})]))).toEqual([]);
   });
 });
