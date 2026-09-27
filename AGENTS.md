@@ -473,7 +473,8 @@ keeps it out of `node-workspace`: as a `node` package it was released — with A
 iOS store builds — every time the desktop group bumped a package it depends on.
 Merging the release PR is also what deploys the website: production Vercel builds are
 gated on a Release Please commit (see `apps/www/AGENTS.md`), so a merge to `main` that is
-not a release only produces previews.
+not a release only produces previews — unless its PR carries the `deploy:www` label, which
+ships content that can go live on its own (a blog post, copy) right away.
 
 **Nine packages are published to npm on every desktop release** — `@pragma-sh/sdk`,
 `@pragma-sh/plugin`, `@pragma-sh/automations`, `@pragma-sh/scratchpad`,
@@ -531,10 +532,10 @@ it doesn't read), and the default task timeout is **10 minutes**, so any long ta
 an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
 validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
 
-The **fallow** audit is the one Linux check that is _not_ an RWX task: it lives in
+The **fallow** audit is a Linux check that is _not_ an RWX task: it lives in
 `.github/workflows/fallow.yml`. It scopes to the diff against the base ref and fails on
-issues the change introduces. **It runs on GitHub Actions because it is the only check
-that writes back to GitHub.** Posting the sticky PR comment needs `pull_requests: write`,
+issues the change introduces. **It runs on GitHub Actions because it writes back to
+GitHub.** Posting the sticky PR comment needs `pull_requests: write`,
 and RWX cannot mint a token that has it (see below) — so the job uses GitHub's own
 `GITHUB_TOKEN`, which makes the comment authored by `github-actions[bot]` instead of by
 whichever personal access token happened to be in the RWX vault. `--format
@@ -545,7 +546,11 @@ findings live in the job log and the comment. The job needs `fetch-depth: 0` (fa
 diffs against a real base) _and_ `bun run generate` (fallow resolves imports statically,
 so the gitignored `src/generated/**` modules must exist first). It is skipped on
 `release-please--branches--*`, which carry only generated version bumps and CHANGELOGs —
-no hand-written code to audit and no author to advise.
+no hand-written code to audit and no author to advise. The **Pragma Go ship plan**
+(`.github/workflows/pragma-go-ship-plan.yml`) is the other GitHub-writing check and the
+mirror image: it runs _only_ on a release PR that bumps `apps/pragma-go/version.txt`, and
+keeps a sticky comment saying whether each platform will ship as an OTA update or a new
+binary (see _Releases: update or new binary_ in `apps/pragma-go/AGENTS.md`).
 
 **CI clones and fetches with no token — `pragma-sh/pragma` is public.** RWX's
 `${{ github.token }}` context is not to be relied on: it can vanish mid-run with

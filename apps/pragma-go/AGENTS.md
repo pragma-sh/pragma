@@ -139,9 +139,10 @@ from the desktop.
 ## Stack
 
 - **Expo SDK 57** + **expo-router** (file-based routing, typed routes, React Compiler).
-- **EAS Update** (`eas.json` + `expo-updates`): preview channel publishes OTA on `main`
-  via `.eas/workflows/update.yml`. Native binary bumps still go through EAS Build
-  (`runtimeVersion.policy: fingerprint`).
+- **EAS Update** (`eas.json` + `expo-updates`, `runtimeVersion.policy: fingerprint`):
+  every `pragma-go-v*` release ships each platform as an OTA update or a new EAS Build,
+  decided by fingerprint (see _Releases: update or new binary_). Nothing publishes on a
+  plain push to `main`.
 - **New Architecture** enabled; requires a **custom dev build** (not Expo Go) because
   of native modules (liquid glass, native tabs, gesture-handler/reanimated 4).
 - **NativeWind v4** (Tailwind) for styling; tokens live in `global.css` + `tailwind.config.js`.
@@ -606,14 +607,16 @@ eas submit --platform ios --latest
   `.easignore`. After any local Release run, check the archive size eas-cli prints
   (tracked sources are ~91 MB) before letting a build proceed.
 - **Android ships outside the Play Store as an APK on GitHub.** The `android-apk` job in
-  `release.yml` builds the `preview` profile on EAS for every `pragma-go-v*` release and
-  attaches `Pragma-Go-<version>-android.apk`; users install it with Obtainium (README →
+  `release.yml` attaches `Pragma-Go-<version>-android.apk` to every `pragma-go-v*`
+  release — a fresh `preview` build, or on an update-only release the existing build
+  with the matching fingerprint; users install it with Obtainium (README →
   _Android with Obtainium_). Obtainium is told to use the release date as the version,
   because the release tag (`package.json`) and the APK's `versionName` (`expo.version`)
-  deliberately differ. APKs are on the `preview` update channel, while `bun run update`
-  publishes to `production` — APK users get fixes from the next APK, not OTA.
-- **iOS ships to TestFlight from CI.** The `ios-testflight` job in `release.yml` builds
-  the `production` profile on EAS for every `pragma-go-v*` release, then runs
+  deliberately differ. APKs are on the `preview` update channel, which only releases
+  publish to; `bun run update` publishes to `production`, so a hand-published fix never
+  reaches APK users.
+- **iOS ships to TestFlight from CI.** When a release needs a new binary, the
+  `ios-testflight` job in `release.yml` builds the `production` profile on EAS, then runs
   `eas submit --id <build>` as a separate step, so a rejected upload fails the job. It
   depends on credentials stored on EAS: the distribution certificate, the provisioning
   profile, and an App Store Connect API key for EAS Submit. The API key is the one that
@@ -627,6 +630,30 @@ eas submit --platform ios --latest
 
 A JavaScript-only fix ships with `eas update`; no new binary, no new TestFlight
 build, no review.
+
+### Releases: update or new binary
+
+Nobody decides this per release PR. `scripts/pragma-go-ship-plan.ts` fingerprints
+the release tag per platform (with `PRAGMA_STORE_BUILD=1`) and asks EAS for a
+finished build of that platform's release profile (`production` for iOS, `preview`
+for Android) with the same hash (`eas build:list --fingerprint-hash`):
+
+- **A build matches** → the change is JavaScript-only. `release.yml` runs
+  `eas update` on that profile's channel and skips the build.
+- **No build matches** → a native input moved. `release.yml` builds (and, on iOS,
+  submits to TestFlight) as before.
+
+A wrong answer cannot brick anyone: an update published under a fingerprint no
+binary has is simply never served. The same script runs on the release PR
+(`.github/workflows/pragma-go-ship-plan.yml`) and keeps a sticky comment saying
+which way each platform will go, with the `eas fingerprint:compare` command to
+name the input when a new binary is a surprise. Two limits: a release is only cut
+by commits under `apps/pragma-go`, so a change to a bundled workspace package
+(`@pragma-sh/sdk`, `scratchpad-viewer`, `constants`) waits for the next app
+release; and an update reaches only users already on the matching binary — iOS
+users who have not installed the last TestFlight/App Store build get it once they do.
+
+For an out-of-band fix between releases:
 
 ```bash
 bun run --filter pragma-go update --message "fix: keep sheet actions above the keyboard"

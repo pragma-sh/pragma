@@ -120,6 +120,18 @@ bun run dev:www      # Next.js + Fumadocs on http://localhost:3000
 
 Docs content is MDX under `apps/www/content/docs/`. See `apps/www/AGENTS.md`.
 
+### When the website goes live
+
+Every pull request gets a Vercel preview. **Production deploys only when a release is
+cut**, because the site documents whatever desktop build is current — merging a docs
+change to `main` does not publish it on its own.
+
+For a change that can go live on its own — a blog post, landing-page copy, a fix to docs
+for a feature that has already shipped — add the **`deploy:www`** label to the pull
+request **before** merging it, and the merge deploys production right away. Adding the
+label after the merge does nothing; redeploy from the Vercel dashboard instead. Never use
+it on docs for an unreleased feature.
+
 ### Environment for the contact form
 
 The `/support` page — the contact form submitted to App Store Connect as the Support URL —
@@ -271,7 +283,7 @@ Git hooks do some of this for you:
 - **commit-msg** — commitlint validates the message.
 - **pre-push** — typecheck, `cargo fmt --check`, sidecar staging, `cargo check`, and `fallow:check`.
 
-CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.** The one exception is the fallow audit, which lives in `.github/workflows/fallow.yml` because it posts a PR comment and only GitHub Actions can hand it a token allowed to write one.
+CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.** The exceptions are the checks that post a PR comment — the fallow audit (`.github/workflows/fallow.yml`) and the Pragma Go ship plan on release PRs (`.github/workflows/pragma-go-ship-plan.yml`) — because only GitHub Actions can hand them a token allowed to write one.
 
 ## Release secrets
 
@@ -291,7 +303,7 @@ exact names below.
 | `APPLE_ID`                           | Notarization                                           | Apple account on the signing team                      |
 | `APPLE_PASSWORD`                     | Notarization                                           | An **app-specific** password, not the account password |
 | `APPLE_TEAM_ID`                      | Notarization                                           | The parenthetical in the Developer ID certificate name |
-| `EXPO_TOKEN`                         | Pragma Go's APK and TestFlight build on each release   | An Expo robot access token for the project's account   |
+| `EXPO_TOKEN`                         | Pragma Go's build or OTA update on each release        | An Expo robot access token for the project's account   |
 
 **The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
 makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
@@ -331,30 +343,42 @@ unsigned one.
 
 ### Expo token
 
-Both Pragma Go jobs authenticate to EAS with `EXPO_TOKEN`. Without it they fail at the
-`expo/expo-github-action` step before anything builds. Use a **robot** token, not a
+Every Pragma Go job — the ship plan, the APK, and TestFlight — authenticates to EAS with
+`EXPO_TOKEN`. Without it they fail at the `expo/expo-github-action` step before anything
+builds. Use a **robot** token, not a
 personal one: it belongs to no human account and can be revoked without logging anyone
 out. On [expo.dev](https://expo.dev), open the `ekrich` account → **Settings → Access
-tokens** → **Add robot**, give it the **Developer** role (building and submitting need
-nothing more), create a token for it, and store it:
+tokens** → **Add robot**, give it the **Developer** role (building, submitting, and
+publishing updates need nothing more), create a token for it, and store it:
 
 ```bash
 gh secret set EXPO_TOKEN --repo pragma-sh/pragma   # paste the token when prompted
 ```
 
+### Pragma Go: OTA update or new binary
+
+Nobody chooses this per release. The `pragma-go-plan` job fingerprints the release tag per
+platform and asks EAS for a finished build of that platform's release profile with the
+same hash. A match means the release is JavaScript-only, so it ships as an `eas update` on
+that profile's channel and no build runs; no match means a native input moved, so a new
+binary is built. The release PR gets a sticky comment from
+`.github/workflows/pragma-go-ship-plan.yml` previewing which way each platform will go.
+Nothing publishes on an ordinary merge to `main`. For the details and limits, see
+_Releases: update or new binary_ in `apps/pragma-go/AGENTS.md`.
+
 ### Android APK
 
-The `android-apk` job builds the `preview` EAS profile and attaches
-`Pragma-Go-<version>-android.apk` to the `pragma-go-v*` release, which is what Obtainium
-users track. EAS holds the Android keystore, so the job runs `--non-interactive` and
+The `android-apk` job attaches `Pragma-Go-<version>-android.apk` to the `pragma-go-v*`
+release, which is what Obtainium users track: a fresh `preview` build, or, on an
+update-only release, the existing build whose fingerprint matches. EAS holds the Android keystore, so the job runs `--non-interactive` and
 fails if the project has no Android credentials yet — create them once with
 `eas credentials --platform android`. Losing that keystore means no installed APK can
 upgrade in place again.
 
 ### iOS TestFlight
 
-The `ios-testflight` job builds the `production` EAS profile and submits it to App Store
-Connect, where it lands in TestFlight after Apple finishes processing it. Nothing about
+When a release needs a new binary, the `ios-testflight` job builds the `production` EAS
+profile and submits it to App Store Connect, where it lands in TestFlight after Apple finishes processing it. Nothing about
 Apple reaches GitHub: both credentials it needs live on EAS, and `--non-interactive`
 fails rather than prompting when one is missing. Set them up once with
 `eas credentials --platform ios` (production profile):
