@@ -34,7 +34,7 @@ export const COMMENT_MARKER = "<!-- pragma-go-ship-plan -->";
  * TestFlight from `production`; Android is the `preview` APK on GitHub (see
  * `release.yml`). Keep in step with the `--profile` in those jobs.
  */
-export const RELEASE_PROFILES = { ios: "production", android: "preview" } as const;
+const RELEASE_PROFILES = { ios: "production", android: "preview" } as const;
 
 /** A platform Pragma Go ships a binary for. */
 export type Platform = keyof typeof RELEASE_PROFILES;
@@ -90,21 +90,32 @@ function shortHash(hash: string | null | undefined): string {
   return hash ? `\`${hash.slice(0, 8)}\`` : "unknown";
 }
 
+const PLATFORM_LABELS: Record<Platform, string> = { ios: "iOS", android: "Android" };
+
 function describeBuild(build: BuildSummary): string {
   const number = build.appBuildVersion ? `build ${build.appBuildVersion}` : "build";
   return `${number} (\`${build.id.slice(0, 8)}\`)`;
 }
 
+function describeUpdate(plan: PlatformPlan, matchingBuild: BuildSummary): string {
+  return `over-the-air update on \`${plan.channel}\` — fingerprint ${shortHash(plan.fingerprint)} matches ${describeBuild(matchingBuild)}`;
+}
+
+function describeNewBinary(plan: PlatformPlan): string {
+  const latest = plan.latestBuild;
+  const previous = latest
+    ? `; newest \`${plan.profile}\` build is ${describeBuild(latest)} at ${shortHash(latest.fingerprint?.hash)}`
+    : "";
+  return `**new binary** — no \`${plan.profile}\` build has fingerprint ${shortHash(plan.fingerprint)}${previous}`;
+}
+
 /** One human-readable line per platform, shared by the log and the PR comment. */
 export function describePlan(plan: PlatformPlan): string {
-  const label = plan.platform === "ios" ? "iOS" : "Android";
-  if (plan.action === "update" && plan.matchingBuild) {
-    return `**${label}** → over-the-air update on \`${plan.channel}\` — fingerprint ${shortHash(plan.fingerprint)} matches ${describeBuild(plan.matchingBuild)}`;
-  }
-  const previous = plan.latestBuild
-    ? `; newest \`${plan.profile}\` build is ${describeBuild(plan.latestBuild)} at ${shortHash(plan.latestBuild.fingerprint?.hash)}`
-    : "";
-  return `**${label}** → **new binary** — no \`${plan.profile}\` build has fingerprint ${shortHash(plan.fingerprint)}${previous}`;
+  const how =
+    plan.action === "update" && plan.matchingBuild
+      ? describeUpdate(plan, plan.matchingBuild)
+      : describeNewBinary(plan);
+  return `**${PLATFORM_LABELS[plan.platform]}** → ${how}`;
 }
 
 /** The sticky release-PR comment. */
@@ -191,23 +202,35 @@ function planFor(platform: Platform): PlatformPlan {
   );
 }
 
+/** Where the matching build's installable artifact can be downloaded, if anywhere. */
+function artifactUrl(build: BuildSummary | null): string {
+  const { buildUrl, applicationArchiveUrl } = build?.artifacts ?? {};
+  return [buildUrl, applicationArchiveUrl].find(Boolean) ?? "";
+}
+
+function outputLines(plan: PlatformPlan): string[] {
+  const prefix = plan.platform;
+  return [
+    `${prefix}-action=${plan.action}`,
+    `${prefix}-fingerprint=${plan.fingerprint}`,
+    `${prefix}-channel=${plan.channel}`,
+    `${prefix}-build-id=${plan.matchingBuild?.id ?? ""}`,
+    `${prefix}-artifact-url=${artifactUrl(plan.matchingBuild)}`,
+  ];
+}
+
 function writeOutputs(file: string, plans: PlatformPlan[]): void {
-  const lines = plans.flatMap((plan) => {
-    const build = plan.matchingBuild;
-    return [
-      `${plan.platform}-action=${plan.action}`,
-      `${plan.platform}-fingerprint=${plan.fingerprint}`,
-      `${plan.platform}-channel=${plan.channel}`,
-      `${plan.platform}-build-id=${build?.id ?? ""}`,
-      `${plan.platform}-artifact-url=${build?.artifacts?.buildUrl ?? build?.artifacts?.applicationArchiveUrl ?? ""}`,
-    ];
-  });
-  appendFileSync(file, `${lines.join("\n")}\n`);
+  appendFileSync(file, `${plans.flatMap(outputLines).join("\n")}\n`);
+}
+
+/** The file named by `--comment <file>`, or null when the flag is absent. */
+function commentFileArg(argv: string[]): string | null {
+  const index = argv.indexOf("--comment");
+  return index === -1 ? null : (argv[index + 1] ?? null);
 }
 
 function main(): void {
-  const commentIndex = process.argv.indexOf("--comment");
-  const commentFile = commentIndex === -1 ? null : process.argv[commentIndex + 1];
+  const commentFile = commentFileArg(process.argv);
 
   const plans = (Object.keys(RELEASE_PROFILES) as Platform[]).map(planFor);
   for (const plan of plans) console.log(describePlan(plan));
