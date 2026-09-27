@@ -473,7 +473,8 @@ keeps it out of `node-workspace`: as a `node` package it was released — with A
 iOS store builds — every time the desktop group bumped a package it depends on.
 Merging the release PR is also what deploys the website: production Vercel builds are
 gated on a Release Please commit (see `apps/www/AGENTS.md`), so a merge to `main` that is
-not a release only produces previews.
+not a release only produces previews — unless its PR carries the `deploy:www` label, which
+ships content that can go live on its own (a blog post, copy) right away.
 
 **Nine packages are published to npm on every desktop release** — `@pragma-sh/sdk`,
 `@pragma-sh/plugin`, `@pragma-sh/automations`, `@pragma-sh/scratchpad`,
