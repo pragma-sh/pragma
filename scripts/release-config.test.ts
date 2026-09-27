@@ -61,7 +61,7 @@ describe("Release Please cannot rewrite the mobile runtime version", () => {
   });
 
   test("the store version is never behind the desktop major", () => {
-    expect(goApp.expo.version).toBe("1.0.0");
+    expect(goApp.expo.version).toBe("1.1.0");
   });
 
   // `node-workspace` releases every `node` package whose workspace dependency moved, so

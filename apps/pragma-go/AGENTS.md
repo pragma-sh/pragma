@@ -570,7 +570,7 @@ eas submit --platform ios --latest
   that builds through some other task is not.
 - **`appVersionSource` is `remote`**, so EAS owns `ios.buildNumber` /
   `android.versionCode` and `autoIncrement` on the production profile bumps them
-  server-side; `app.json`'s `version` (the marketing version, `1.0.0`) stays the
+  server-side; `app.json`'s `version` (the marketing version, `1.1.0`) stays the
   source of truth for the store listing. Do not hand-bump the build number.
 - **Release Please must never write `app.json`, and `apps/pragma-go` deliberately has
   no `extra-files` entry in `release-please-config.json`.** `expo.version` is inside the
@@ -582,8 +582,12 @@ eas submit --platform ios --latest
   untouched. `scripts/release-config.test.ts` asserts no extra-file targets `app.json`.
   Only **6** of the ~116 fingerprint inputs live outside `node_modules` —
   `.gitignore`, `eas.json`, `assets/images/icon.png`, `assets/AppIcon.icon`, and the two
-  config plugins — plus the resolved `expoConfig`. Touch one of those and the next OTA
-  needs a new binary; touch anything else and it does not.
+  config plugins — plus the resolved `expoConfig` and **`package.json`'s `scripts`**
+  (`packageJson:scripts`). Touch one of those and the next OTA needs a new binary; touch
+  anything else and it does not. The scripts entry is easy to miss: changing
+  `eas-build-post-install` from `bunx` to `bun x` for the 1.1.0 release moved the iOS
+  runtime `271fba10…` → `cc3a606e…`. So when a fingerprint input has to change anyway,
+  bump `expo.version` in the same break rather than spending a second one later.
 - **The repo root has an `.easignore`, and it is load-bearing.** eas-cli builds the
   upload archive from `.gitignore` files only — it never reads `.git/info/exclude`,
   which is where `.pragma/worktrees/` (whole extra checkouts of this repo, tens of
