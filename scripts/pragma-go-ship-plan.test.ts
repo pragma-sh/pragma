@@ -46,6 +46,29 @@ describe("decide", () => {
     expect(plan.action).toBe("build");
     expect(describePlan(plan)).not.toContain("newest");
   });
+
+  test("builds Android when the matching build's APK is no longer downloadable", () => {
+    const match: BuildSummary = {
+      id: "e0db79ae-61ec",
+      appBuildVersion: "15",
+      fingerprint: { hash: FINGERPRINT },
+      artifacts: {},
+    };
+    const plan = decide("android", "preview", FINGERPRINT, [match], match);
+    expect(plan.action).toBe("build");
+    expect(plan.matchingBuild).toBeNull();
+  });
+
+  test("still ships an iOS update when the matching build has no artifact url", () => {
+    const match: BuildSummary = {
+      id: "e0db79ae-61ec",
+      appBuildVersion: "15",
+      fingerprint: { hash: FINGERPRINT },
+      artifacts: {},
+    };
+    const plan = decide("ios", "production", FINGERPRINT, [match], match);
+    expect(plan.action).toBe("update");
+  });
 });
 
 describe("renderComment", () => {

@@ -61,10 +61,20 @@ export interface PlatformPlan {
   latestBuild: BuildSummary | null;
 }
 
+/** Where the matching build's installable artifact can be downloaded, if anywhere. */
+function artifactUrl(build: BuildSummary | null): string {
+  const { buildUrl, applicationArchiveUrl } = build?.artifacts ?? {};
+  return [buildUrl, applicationArchiveUrl].find(Boolean) ?? "";
+}
+
 /**
  * Ship as an update exactly when a finished build already has the fingerprint.
  * `matchingBuilds` is the result of filtering by that fingerprint, so any entry
  * is a match; the fingerprint is re-checked in case the filter is ever ignored.
+ *
+ * On Android that build's APK is re-attached to the release for a fresh
+ * Obtainium install, so a match whose artifact has expired or was never
+ * uploaded can't back an update — treat it as no match and build instead.
  */
 export function decide(
   platform: Platform,
@@ -73,8 +83,9 @@ export function decide(
   matchingBuilds: BuildSummary[],
   latestBuild: BuildSummary | null,
 ): PlatformPlan {
+  const candidate = matchingBuilds.find((build) => build.fingerprint?.hash === fingerprint) ?? null;
   const matchingBuild =
-    matchingBuilds.find((build) => build.fingerprint?.hash === fingerprint) ?? null;
+    candidate && platform === "android" && !artifactUrl(candidate) ? null : candidate;
   return {
     platform,
     profile: RELEASE_PROFILES[platform],
@@ -200,12 +211,6 @@ function planFor(platform: Platform): PlatformPlan {
     matching,
     latest ?? null,
   );
-}
-
-/** Where the matching build's installable artifact can be downloaded, if anywhere. */
-function artifactUrl(build: BuildSummary | null): string {
-  const { buildUrl, applicationArchiveUrl } = build?.artifacts ?? {};
-  return [buildUrl, applicationArchiveUrl].find(Boolean) ?? "";
 }
 
 function outputLines(plan: PlatformPlan): string[] {
