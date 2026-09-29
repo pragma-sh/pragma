@@ -207,44 +207,77 @@ async fn run_sidecar(command: &'static str, stdin: String) -> AppResult<Value> {
         .map_err(|error| AppError::Ai(error.to_string()))?
 }
 
-/// Whether a System 1 key is stored, and the effective endpoint.
+/// Whether a System 1 key is stored, and the effective endpoint. The config and
+/// credential files are read on a blocking worker so the IPC handler never
+/// stalls painting or terminal keystrokes.
 #[tauri::command]
-pub fn system1_status(
+pub async fn system1_status(
     app: tauri::AppHandle,
     store: State<'_, System1KeyStore>,
 ) -> AppResult<System1Status> {
-    status(&app, &store)
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || status(&app, &store))
+        .await
+        .map_err(|error| AppError::Ai(format!("System 1 status task failed: {error}")))?
 }
 
-/// Stores the System 1 API key, returning the refreshed status.
+/// Stores the System 1 API key, returning the refreshed status. The write runs
+/// off the IPC handler, like [`system1_status`].
 #[tauri::command]
-pub fn system1_set_api_key(
+pub async fn system1_set_api_key(
     app: tauri::AppHandle,
     store: State<'_, System1KeyStore>,
     api_key: String,
 ) -> AppResult<System1Status> {
-    let api_key = api_key.trim();
+    let api_key = api_key.trim().to_string();
     if api_key.is_empty() {
         return Err(AppError::InvalidInput("API key is empty".to_string()));
     }
-    store
-        .file
-        .write(api_key)
-        .map_err(|error| AppError::Ai(format!("failed to store System 1 key: {error}")))?;
-    status(&app, &store)
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .file
+            .write(&api_key)
+            .map_err(|error| AppError::Ai(format!("failed to store System 1 key: {error}")))?;
+        status(&app, &store)
+    })
+    .await
+    .map_err(|error| AppError::Ai(format!("System 1 key task failed: {error}")))?
 }
 
-/// Removes the stored System 1 API key, returning the refreshed status.
+/// Removes the stored System 1 API key, returning the refreshed status. The
+/// removal runs off the IPC handler, like [`system1_status`].
 #[tauri::command]
-pub fn system1_clear_api_key(
+pub async fn system1_clear_api_key(
     app: tauri::AppHandle,
     store: State<'_, System1KeyStore>,
 ) -> AppResult<System1Status> {
-    store
-        .file
-        .clear()
-        .map_err(|error| AppError::Ai(format!("failed to clear System 1 key: {error}")))?;
-    status(&app, &store)
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .file
+            .clear()
+            .map_err(|error| AppError::Ai(format!("failed to clear System 1 key: {error}")))?;
+        status(&app, &store)
+    })
+    .await
+    .map_err(|error| AppError::Ai(format!("System 1 key task failed: {error}")))?
+}
+
+/// The model route [`system1_check`] should test. An explicitly supplied draft
+/// model wins; a draft URL with a blank model follows **that host's** default,
+/// never the model saved for a different endpoint; with no draft URL the saved
+/// model applies.
+fn check_model(
+    configured_model: &str,
+    draft_url: Option<&str>,
+    draft_model: Option<&str>,
+) -> String {
+    match (non_blank(draft_model), draft_url) {
+        (Some(model), _) => model.to_string(),
+        (None, Some(url)) => resolve_model(None, url),
+        (None, None) => configured_model.to_string(),
+    }
 }
 
 /// Verifies an endpoint and key with the cheapest possible request, resolving
@@ -260,16 +293,10 @@ pub async fn system1_check(
     model: Option<String>,
 ) -> AppResult<String> {
     let settings = global_settings(&app)?;
-    let (configured_url, _) = effective_settings(&settings);
-    let base_url = base_url
-        .filter(|url| !url.trim().is_empty())
-        .unwrap_or(configured_url);
-    // A draft URL may be a different provider, so its model default is
-    // re-resolved against it rather than taken from the saved settings.
-    let model = resolve_model(
-        non_blank(model.as_deref()).or(settings.model.as_deref()),
-        &base_url,
-    );
+    let (configured_url, configured_model) = effective_settings(&settings);
+    let draft_url = base_url.filter(|url| !url.trim().is_empty());
+    let model = check_model(&configured_model, draft_url.as_deref(), model.as_deref());
+    let base_url = draft_url.unwrap_or(configured_url);
     let api_key = api_key
         .filter(|key| !key.trim().is_empty())
         .or_else(|| store.file.read())
@@ -470,6 +497,30 @@ mod tests {
             resolve_model(Some(" typesafe/jev-1.13 "), "https://openrouter.ai/api"),
             "typesafe/jev-1.13"
         );
+    }
+
+    #[test]
+    fn check_model_uses_draft_host_default_not_saved_model() {
+        // A blank draft model against a new host must not reuse the old model.
+        assert_eq!(
+            check_model(
+                "jev-latest",
+                Some("https://openrouter.ai/api/alpha/decisions"),
+                None
+            ),
+            "~typesafe/jev-latest"
+        );
+        // An explicit draft model still wins.
+        assert_eq!(
+            check_model(
+                "jev-latest",
+                Some("https://openrouter.ai/api"),
+                Some("typesafe/jev-1.13")
+            ),
+            "typesafe/jev-1.13"
+        );
+        // With no draft URL, the configured model applies.
+        assert_eq!(check_model("jev-latest", None, None), "jev-latest");
     }
 
     #[test]

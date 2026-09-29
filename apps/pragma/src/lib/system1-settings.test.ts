@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applySystem1Patch,
   defaultSystem1Model,
-  validateSystem1Settings,
+  sanitizeSystem1Settings,
 } from "./system1-settings";
 
 describe("applySystem1Patch", () => {
@@ -27,17 +27,19 @@ describe("applySystem1Patch", () => {
   });
 });
 
-describe("validateSystem1Settings", () => {
-  it("accepts absent and well-typed blocks", () => {
-    expect(() => validateSystem1Settings(undefined)).not.toThrow();
-    expect(() => validateSystem1Settings({ baseUrl: "https://x", model: "jev" })).not.toThrow();
+describe("sanitizeSystem1Settings", () => {
+  it("keeps absent and well-typed blocks", () => {
+    expect(sanitizeSystem1Settings(undefined)).toBeUndefined();
+    expect(sanitizeSystem1Settings({ baseUrl: "https://x", model: "jev" })).toEqual({
+      baseUrl: "https://x",
+      model: "jev",
+    });
   });
 
-  it("rejects the wrong shapes", () => {
-    expect(() => validateSystem1Settings([] as never)).toThrow("system1 must be an object");
-    expect(() => validateSystem1Settings({ baseUrl: 3 } as never)).toThrow(
-      "system1.baseUrl must be a string",
-    );
+  it("treats the wrong shapes as absent instead of throwing", () => {
+    expect(sanitizeSystem1Settings([])).toBeUndefined();
+    expect(sanitizeSystem1Settings({ baseUrl: 3 })).toBeUndefined();
+    expect(sanitizeSystem1Settings("nope")).toBeUndefined();
   });
 });
 

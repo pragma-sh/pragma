@@ -200,6 +200,21 @@ describe("SettingsWorkspace", () => {
     });
   });
 
+  it("keeps other settings reachable when the optional system1 block is malformed", async () => {
+    vi.mocked(readConfig).mockResolvedValue({
+      exists: true,
+      path: "/home/user/.pragma/config.json",
+      contents: JSON.stringify({
+        plugins: [{ path: "./plugins/two" }],
+        system1: { baseUrl: 42 },
+      }),
+    });
+    render(<SettingsWorkspace />);
+
+    expect(await screen.findByText("Loaded plugins")).toBeInTheDocument();
+    expect(screen.queryByText("config.json needs attention")).not.toBeInTheDocument();
+  });
+
   it("shows loaded plugins by name with delete controls only", async () => {
     render(<SettingsWorkspace />);
 

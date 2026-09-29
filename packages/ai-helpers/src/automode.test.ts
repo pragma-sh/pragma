@@ -179,4 +179,20 @@ describe("applyAutoModeFilters", () => {
     expect(excluded).not.toContain("codex");
     expect(excluded).toContain("cursor");
   });
+
+  it("drops an unknown model list when a model filter names the agent", () => {
+    // `cursor` lists no models; a bare exclude could still match its default,
+    // so it must not survive with no model id and bypass the hard filter.
+    const ids = applyAutoModeFilters(
+      candidates,
+      merged("---\nmodels:\n  exclude: ['*haiku*']\n---\n"),
+    ).map((c) => c.id);
+    expect(ids).not.toContain("cursor");
+    expect(ids).toContain("codex");
+    // An agent-scoped filter leaves unrelated unknown-list agents alone.
+    const scoped = applyAutoModeFilters(candidates, merged("---\nmodels: ['codex/*']\n---\n")).map(
+      (c) => c.id,
+    );
+    expect(scoped).toContain("cursor");
+  });
 });

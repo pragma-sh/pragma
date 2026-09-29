@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/lib/errors";
 import { openExternal } from "@/lib/open-external";
 import { defaultSystem1Model } from "@/lib/system1-settings";
-import { system1Check, system1ClearApiKey, system1SetApiKey } from "@/lib/tauri";
+import { system1Check, system1ClearApiKey, system1SetApiKey, system1Status } from "@/lib/tauri";
 import { setSystem1Status, useSystem1Status } from "@/state/system1";
 
 /** Where to get a Jev key; shown next to the key field. */
@@ -71,10 +71,10 @@ function useSystem1Form(
         baseUrl: draftUrl === DEFAULT_URL ? undefined : draftUrl,
         model: draftModel,
       });
-      if (draftKey) {
-        setSystem1Status(await system1SetApiKey(draftKey));
-        setApiKey("");
-      }
+      // Refresh the shared status on every save: a URL or model change with no
+      // new key must still update what Auto (and a reopened form) reads.
+      setSystem1Status(draftKey ? await system1SetApiKey(draftKey) : await system1Status());
+      if (draftKey) setApiKey("");
       toast.success("System 1 model saved");
       onSaved?.();
     });

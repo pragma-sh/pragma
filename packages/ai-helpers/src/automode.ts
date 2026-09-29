@@ -271,9 +271,11 @@ function keepModel(
 }
 
 /**
- * Applies the hard filters. An agent whose every listed model was filtered
- * out is dropped; an agent that never listed models (the list is unknown, not
- * empty by choice) is kept with none.
+ * Applies the hard filters. An agent whose every listed model was filtered out
+ * is dropped. An agent whose model list is unknown (discovery failed or timed
+ * out) is kept only when no model filter names it: with a filter active we
+ * cannot prove its default model is allowed, and a launch with no model id
+ * would fall back to exactly the model the user may have excluded.
  */
 export function applyAutoModeFilters<C extends AutoModeCandidate>(
   candidates: readonly C[],
@@ -288,8 +290,13 @@ export function applyAutoModeFilters<C extends AutoModeCandidate>(
 
     const modelInclude = patternsForAgent(preferences.models.include, candidate.id, agentIds);
     const modelExclude = patternsForAgent(preferences.models.exclude, candidate.id, agentIds);
+    if (candidate.models.length === 0) {
+      if (modelInclude.length > 0 || modelExclude.length > 0) continue;
+      out.push({ ...candidate, models: [] });
+      continue;
+    }
     const models = candidate.models.filter((model) => keepModel(model, modelInclude, modelExclude));
-    if (candidate.models.length > 0 && models.length === 0) continue;
+    if (models.length === 0) continue;
     out.push({ ...candidate, models });
   }
   return out;

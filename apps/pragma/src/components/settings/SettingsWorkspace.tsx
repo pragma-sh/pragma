@@ -51,7 +51,7 @@ import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import { resetPrSignatureCache, validateGitHubSettings } from "@/lib/pr-signature";
-import { applySystem1Patch, validateSystem1Settings } from "@/lib/system1-settings";
+import { applySystem1Patch, sanitizeSystem1Settings } from "@/lib/system1-settings";
 import {
   aiAuthMethods,
   aiLogout,
@@ -176,7 +176,9 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateGitHubSettings(config.github);
   validateOtherSettings(config.other);
   validateStorageSettings(config.storage);
-  validateSystem1Settings(config.system1);
+  // System 1 is optional and Auto treats a malformed block as defaults, so a
+  // typo there must not clear the whole document and lock every Settings section.
+  config.system1 = sanitizeSystem1Settings(config.system1);
   return config;
 }
 
