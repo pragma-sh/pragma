@@ -9,6 +9,7 @@
     "core-model",
     "worktrees",
     "agent-board",
+    "prompt-context",
     "browser",
     "files",
     "github",

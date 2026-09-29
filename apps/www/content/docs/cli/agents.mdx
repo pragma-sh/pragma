@@ -13,14 +13,20 @@ agent id from `--agent` and the worktree/tab context from the environment.
 ## start / status
 
 ```sh
-pragma-cli agent start --worktree <ID> --agent <ID> [--model <ID>] [--prompt <PROMPT>]
+pragma-cli agent start --agent <ID> [--worktree <ID>] [--model <ID> [--reasoning <ID>]]
+  [--mode <ID>] [--permission-mode <ID>] [--slash-command <NAME>] [--prompt <PROMPT>] [--headless]
+pragma-cli agent options --agent <ID>
 pragma-cli agent status [--worktree <ID>] [--watch]
 ```
 
-`start` launches an agent session **through the app** (brokered, so UI state stays
-consistent). It is not supported for plugin-defined agents — launch those from the
-Pragma UI so their model and argument builders run. `status` reads the current statuses
-directly from the server and works while the app is closed; `--watch` follows changes.
+`start` launches a catalog agent through the gateway: with the app open it opens a tab
+there, and with `--headless` (or the app closed) the host runs the session itself.
+`--mode` and `--permission-mode` default to the agent's first entry; `--slash-command`
+runs that command with `--prompt` as its input. Every selection is checked against the
+catalog first. `options` lists what an agent accepts — models (with reasoning levels),
+modes, permission modes (defaults marked), and slash commands. `status` reads the current
+statuses directly from the server and works while the app is closed; `--watch` follows
+changes.
 
 ## report
 
@@ -78,7 +84,9 @@ pragma-cli agent verify --agent <ID> [--scenario <ID>] [--jobs <N>] [--headed]
 
 A conformance suite that launches your agent and exercises the whole reporting surface —
 reply, session naming, command approvals (allowed and denied), question forms, message
-submit, subagents, aborts, interrupts, usage limits, and stream integrity. Scenarios are
+submit, subagents, aborts, interrupts, usage limits, slash commands, and stream integrity.
+`--scenario slash-commands` checks only that the catalog lists well-formed slash commands,
+and needs no worktree. Scenarios are
 skipped automatically when the agent's catalog entry declares `excludeFeatures`. Pass
 `--headed` to watch, `--prompts <FILE>` to override scenario prompts, `--jobs` (max 16)
 to parallelize.

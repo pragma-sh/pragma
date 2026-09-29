@@ -1,0 +1,76 @@
+---
+title: Prompt context
+description: defineContextProvider — add your own sources to the agent prompt's @ picker.
+---
+
+The [`@` picker](/docs/user-guide/prompt-context) in the agent prompt is fed by context
+providers. Pragma ships **Files**, **GitHub issues**, and **Pull requests**; a plugin adds more
+with `defineContextProvider`.
+
+```tsx
+import { definePlugin, defineContextProvider } from "@pragma-sh/plugin";
+
+export default definePlugin({
+  name: "linear",
+  contextProviders: [
+    defineContextProvider<unknown, { key: string }>({
+      id: "linear-issues",
+      title: "Linear issues",
+      iconPath: "./assets/linear.png", // or `icon: SomeIconComponent`
+      search: async ({ query, signal }, ctx) => {
+        const issues = await fetchMyIssues(query, signal);
+        return issues.map((issue) => ({
+          id: issue.id,
+          displayName: issue.key, // inserted as `@ENG-42`
+          searchText: `${issue.key} ${issue.title}`,
+          description: issue.title,
+          data: { key: issue.key },
+        }));
+      },
+      resolve: async ({ item }) => {
+        const issue = await fetchIssue(item.data!.key);
+        return `Linear issue ${issue.key}: ${issue.title}\nLink: ${issue.url}\n\n${issue.description}`;
+      },
+    }),
+  ],
+});
+```
+
+## How it runs
+
+- **`search`** runs on every change to the typed query (debounced, and aborted through
+  `signal` when superseded). Return a broad list if you like: the host filters and ranks items
+  by `searchText` (default `displayName`) — prefix, then substring, then fuzzy — and shows at
+  most 8 per provider. A throwing provider is skipped; the others still show.
+- **`resolve`** runs once per picked item when the session launches, and only if its
+  `@displayName` is still in the prompt. The returned text is appended to the prompt in a
+  `<context mention="…" source="<title>">` block. Return an empty string to send nothing.
+- Both receive the active `project` and the dialog's target `worktree` (`id`, `path`,
+  `branch`), plus the usual plugin context (`config`, `sdk`, `notify`).
+- `when(ctx)` hides the provider for a project where it does not apply.
+- To show a message instead of results — "Sign in to Linear to see issues" — throw
+  `new ContextProviderNotice(message)` from `search`. The picker shows each distinct notice
+  once, under the other providers' results; any other error is logged and hides the provider.
+
+## Icons
+
+A provider, or any single item, takes either `icon` (a React icon component, e.g. from
+`@pragma-sh/plugin/icons`) or `iconPath` (a PNG/SVG URL, an absolute path, or a path relative to
+the plugin directory). An item's own icon wins over its provider's.
+
+## Shapes
+
+```ts
+interface ContextItem<TData = unknown> {
+  id: string; // unique within the provider
+  displayName: string; // shown in the picker, inserted as `@displayName`
+  searchText?: string; // what the typed query matches
+  description?: string; // secondary line in the picker
+  icon?: PluginIcon;
+  iconPath?: string;
+  data?: TData; // JSON-serializable, handed back to resolve
+}
+```
+
+`contextQuery`, `matchContextItems`, `formatPromptWithContext`, and its inverse `splitPromptContext` are exported too, so another
+client can reproduce the desktop's picker and prompt format exactly.
