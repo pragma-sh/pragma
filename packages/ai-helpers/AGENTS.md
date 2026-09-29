@@ -31,8 +31,11 @@ and speaks newline-delimited JSON ("NDJSON") on stdout:
 
 - **One-shot commands** print a single terminal `result` / `error` line:
   `methods`, `status`, `set-key`, `logout`, `commit-message`, `commit-plan`,
-  `pull-request`, `inline-edit`. Input (diff / JSON context / API key) arrives on
-  **stdin**.
+  `pull-request`, `inline-edit`, `auto-select`, `system1-check`. Input (diff / JSON
+  context / API key) arrives on **stdin**. The two System 1 commands take their key and
+  endpoint on stdin from `system1.rs`; a `System1Error` is reported with the code
+  `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …) and an `AutoSelectError`
+  (every agent filtered out) as `auto-unavailable`.
 - **`ask`** streams assistant text: `{ type: "delta", text }`, optional
   `{ type: "reset" }` when a model attempt is abandoned, then
   `{ type: "result", text }` or `error`. JSON context on stdin lists the question
@@ -54,23 +57,27 @@ The Rust side parses the last non-empty line.
 
 ## Module map (`src/`)
 
-| File                | Responsibility                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `cli.ts`            | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch      |
-| `index.ts`          | Public package surface — re-exports only; import from here, not deep paths          |
-| `auth.ts`           | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys         |
-| `pick-model.ts`     | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)              |
-| `constants.ts`      | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)        |
-| `model-date.ts`     | Parses release dates out of model ids for the recency filter                        |
-| `model-insights.ts` | modelgrep client + disk cache — throughput, latency, benchmark scores               |
-| `prompts.ts`        | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested        |
-| `session.ts`        | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                 |
-| `run-failure.ts`    | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`             |
-| `commit-message.ts` | `git diff --cached` → one commit message (fast model)                               |
-| `commit-plan.ts`    | Whole-worktree diff → a multi-commit plan (standard model)                          |
-| `pull-request.ts`   | Committed branch diff → PR title + body (standard model, tools enabled)             |
-| `inline-edit.ts`    | Editor buffer + instruction → exact-text replacements (standard, read-only tools)   |
-| `ask-ai.ts`         | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project) |
+| File                  | Responsibility                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `cli.ts`              | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch      |
+| `index.ts`            | Public package surface — re-exports only; import from here, not deep paths          |
+| `auth.ts`             | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys         |
+| `pick-model.ts`       | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)              |
+| `constants.ts`        | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)        |
+| `model-date.ts`       | Parses release dates out of model ids for the recency filter                        |
+| `model-insights.ts`   | modelgrep client + disk cache — throughput, latency, benchmark scores               |
+| `harness-insights.ts` | Terminal-Bench leaderboard (agent × model) — accuracy, time, tokens/cost per solve  |
+| `disk-cache.ts`       | Versioned, TTL-bound JSON cache envelope shared by both insight feeds               |
+| `automode.ts`         | Parses/merges `automode.md` and applies its include/exclude globs                   |
+| `auto-select.ts`      | Auto mode: one fan-out System 1 request → agent, model, reasoning effort            |
+| `prompts.ts`          | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested        |
+| `session.ts`          | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                 |
+| `run-failure.ts`      | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`             |
+| `commit-message.ts`   | `git diff --cached` → one commit message (fast model)                               |
+| `commit-plan.ts`      | Whole-worktree diff → a multi-commit plan (standard model)                          |
+| `pull-request.ts`     | Committed branch diff → PR title + body (standard model, tools enabled)             |
+| `inline-edit.ts`      | Editor buffer + instruction → exact-text replacements (standard, read-only tools)   |
+| `ask-ai.ts`           | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project) |
 
 **`inline-edit` never writes.** Its tools are pinned to `INLINE_EDIT_TOOLS`
 (`read`, `grep`, `find`, `ls`) — the buffer it is editing is usually **unsaved**, so a
@@ -89,6 +96,35 @@ the Tauri channel the same way login streams OAuth events.
 prompts, and other context. Otherwise an installed Pragma Pi extension can observe these
 SDK-only helper turns and report them as user-visible Pi agent sessions when the app was
 launched from a Pragma terminal environment.
+
+## Auto mode (`auto-select.ts`)
+
+Auto mode is a different kind of selection from the tiers below: it picks a **launch** — an
+agent CLI, one of that agent's models, and a reasoning effort — with a System 1 model
+(`@pragma-sh/system1`, TypeSafe Jev by default), not an LLM.
+
+- **One request, speculative fan-out.** It asks `agent` (a choice over the survivors),
+  `model_<i>` for every agent with more than one model, and a `difficulty` score, all at
+  once. Reading the winning agent's model answer costs nothing extra. Keep it one request;
+  a sequential "agent, then model" call doubles the latency for no gain.
+- **Hard rules are code, not prompt.** `automode.md` include/exclude globs are applied by
+  `applyAutoModeFilters` before anything is sent; only its prose and `priority` reach the
+  model. Never move a filter into the prompt.
+- **Evidence lives in the option descriptions.** Each agent option carries its
+  Terminal-Bench rows plus a relative tier per axis (`tier()`: best / above median / …);
+  each model option carries modelgrep scores and, when the leaderboard ran it, its result
+  inside that harness. Models are capped at `AUTO_SELECT.maxModelsPerAgent`, keeping
+  benchmarked models first, because a choice accepts at most 255 options.
+- **Matching is fuzzy on purpose.** `harnessMatchesAgent` compares compacted names or ids
+  (`Grok Build` ~ `grok`); `rowMatchesModel` compares `insightKey`s of the model's
+  `canonicalId`, id, and name and allows a suffix match (`claudefable51` ~ `fable51`).
+  A version mismatch (`opus 5` vs `opus 5.5`) must **not** match.
+- **Difficulty → effort** is positional: `reasoningForDifficulty` spreads 0–1 across the
+  model's `reasoning` list, which plugins order lowest first.
+- **The leaderboard is a web page.** `parseLeaderboardHtml` decodes the Next.js RSC
+  chunks and bracket-matches the `"rows":[…]` array. If Terminal-Bench changes its page,
+  the parse returns nothing and auto mode degrades to model benchmarks. The fixture test
+  builds the page the way Next.js does; update it when the real shape moves.
 
 ## Model selection
 

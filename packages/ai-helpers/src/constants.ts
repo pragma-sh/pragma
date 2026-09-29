@@ -137,3 +137,42 @@ export type ModelKind = "fast" | "standard" | "high";
 
 /** Reference models the tier price ceilings are anchored to. */
 export type PriceAnchor = keyof typeof PICK_MODEL.priceAnchors;
+
+/**
+ * Terminal-Bench leaderboard + on-disk cache settings for
+ * {@link loadHarnessInsights}. Harness-level results — one row per agent ×
+ * model × reasoning effort — are what tell auto mode that the same model
+ * scores differently under Claude Code and Codex.
+ */
+export const HARNESS_INSIGHTS = {
+  /**
+   * The official leaderboard page. There is no documented JSON endpoint; the
+   * page embeds its rows (validated against a published schema) in the React
+   * Server Components payload, which `parseLeaderboardHtml` extracts.
+   */
+  leaderboardUrl: "https://www.tbench.ai/leaderboard/terminal-bench",
+  /** Human label for the source, shown alongside the numbers. */
+  sourceLabel: "Terminal-Bench",
+  cacheFile: ".pragma/cache/harness-insights.json",
+  /** Bump whenever {@link HarnessInsight} gains a field. */
+  cacheVersion: 1,
+  /** The leaderboard changes a few times a month; a day is plenty. */
+  cacheTtlHours: 24,
+  /** A launch must never hang on a third-party page. */
+  fetchTimeoutMs: 3_000,
+} as const;
+
+/** Knobs for the System 1 auto-select request (see `auto-select.ts`). */
+export const AUTO_SELECT = {
+  /**
+   * Most models offered to the System 1 model per agent. OpenCode can list
+   * hundreds; the API caps a choice at 255 options and a long tail of
+   * unbenchmarked models only dilutes the probabilities. Models with benchmark
+   * data are kept first.
+   */
+  maxModelsPerAgent: 40,
+  /** Harness results shown per agent, best accuracy first. */
+  maxHarnessRowsPerAgent: 6,
+  /** Below this agent-choice confidence the UI flags the pick as a guess. */
+  lowConfidence: 0.35,
+} as const;

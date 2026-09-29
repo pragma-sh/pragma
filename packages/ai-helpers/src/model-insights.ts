@@ -16,11 +16,11 @@
  * as a requirement.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { MODEL_INSIGHTS } from "./constants.ts";
+import { type DiskCacheSpec, readDiskCache, writeDiskCache } from "./disk-cache.ts";
 
 /** The subset of modelgrep's model record Pragma ranks on. */
 export interface ModelInsight {
@@ -45,12 +45,6 @@ export type ModelInsights = ReadonlyMap<string, ModelInsight>;
 
 /** An empty lookup — the offline/unavailable case. */
 export const NO_INSIGHTS: ModelInsights = new Map();
-
-interface CacheFile {
-  version: number;
-  fetchedAt: string;
-  insights: Record<string, ModelInsight>;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -132,38 +126,21 @@ export function insightCachePath(): string {
   return join(homedir(), MODEL_INSIGHTS.cacheFile);
 }
 
-/** Read and JSON-parse the cache file, or `null` if it is missing or corrupt. */
-async function readCacheJson(path: string): Promise<unknown> {
-  try {
-    return JSON.parse(await readFile(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Validate a parsed cache file's envelope: correct shape, matching schema
- * version, and within the TTL. A future `fetchedAt` (a clock that moved
- * backwards) is treated as expired rather than trusted forever.
- */
-function isUsableCacheFile(parsed: unknown, now: Date): parsed is CacheFile {
-  if (!isRecord(parsed) || typeof parsed.fetchedAt !== "string" || !isRecord(parsed.insights)) {
-    return false;
-  }
-  if (parsed.version !== MODEL_INSIGHTS.cacheVersion) return false;
-
-  const fetchedAt = new Date(parsed.fetchedAt).getTime();
-  if (Number.isNaN(fetchedAt)) return false;
-  const ageHours = (now.getTime() - fetchedAt) / 3_600_000;
-  return ageHours >= 0 && ageHours <= MODEL_INSIGHTS.cacheTtlHours;
+function cacheSpec(path: string): DiskCacheSpec {
+  return {
+    path,
+    version: MODEL_INSIGHTS.cacheVersion,
+    ttlHours: MODEL_INSIGHTS.cacheTtlHours,
+    payloadKey: "insights",
+  };
 }
 
 async function readCache(path: string, now: Date): Promise<Map<string, ModelInsight> | null> {
-  const parsed = await readCacheJson(path);
-  if (!isUsableCacheFile(parsed, now)) return null;
+  const insights = await readDiskCache(cacheSpec(path), now);
+  if (!isRecord(insights)) return null;
 
   const index = new Map<string, ModelInsight>();
-  for (const [key, value] of Object.entries(parsed.insights)) {
+  for (const [key, value] of Object.entries(insights)) {
     const insight = parseInsightFromCache(value);
     if (insight) index.set(key, insight);
   }
@@ -181,20 +158,6 @@ function parseInsightFromCache(value: unknown): ModelInsight | null {
     costInput: numberOrNull(value.costInput),
     costOutput: numberOrNull(value.costOutput),
   };
-}
-
-async function writeCache(
-  path: string,
-  index: ReadonlyMap<string, ModelInsight>,
-  now: Date,
-): Promise<void> {
-  const file: CacheFile = {
-    version: MODEL_INSIGHTS.cacheVersion,
-    fetchedAt: now.toISOString(),
-    insights: Object.fromEntries(index),
-  };
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
 }
 
 async function fetchPage(offset: number, signal: AbortSignal): Promise<unknown[]> {
@@ -248,9 +211,7 @@ export async function loadModelInsights(options?: {
     const entries = await fetchCatalog(AbortSignal.timeout(MODEL_INSIGHTS.fetchTimeoutMs));
     const index = indexInsights(entries);
     if (index.size === 0) return NO_INSIGHTS;
-    await writeCache(path, index, now).catch(() => {
-      // A read-only home directory must not fail model selection.
-    });
+    await writeDiskCache(cacheSpec(path), Object.fromEntries(index), now);
     return index;
   } catch {
     return NO_INSIGHTS;
