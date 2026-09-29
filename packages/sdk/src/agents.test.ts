@@ -520,4 +520,32 @@ describe("agents connect", () => {
       },
     ]);
   });
+
+  it("reads an agent's launch options from the catalog", async () => {
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async () =>
+        Response.json({
+          agents: [
+            {
+              id: "pragma.claude-code",
+              name: "Claude Code",
+              pluginId: "pragma.claude-code",
+              models: [],
+              slashCommands: [{ name: "review", invocation: "/review" }],
+              permissionModes: [{ id: "auto", name: "Auto" }],
+              launch: { commands: [] },
+            },
+          ],
+        }),
+    });
+
+    await expect(client.agents.launchOptions("pragma.claude-code")).resolves.toEqual({
+      slashCommands: [{ name: "review", invocation: "/review" }],
+      modes: [],
+      permissionModes: [{ id: "auto", name: "Auto" }],
+    });
+    await expect(client.agents.launchOptions("missing")).rejects.toThrow("agent not found");
+  });
 });
