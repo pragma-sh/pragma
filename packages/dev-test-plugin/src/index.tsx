@@ -12,6 +12,7 @@ import { FORTUNE_REROLL_EVENT, FortuneTab } from "./fortune-tab";
 import { OverviewTab } from "./overview-tab";
 import { openReportWebView, reportWebView } from "./report-webview";
 import { DevTestSettingsPage } from "./settings-page";
+import { testMentionsProvider } from "./test-mentions";
 
 export default definePlugin({
   name: "Pragma Dev Test Plugin",
@@ -37,6 +38,7 @@ export default definePlugin({
     ],
     webViews: [reportWebView],
   },
+  contextProviders: [testMentionsProvider],
   commands: [
     defineCommand({
       id: "pragma-dev-test-plugin.hello",
