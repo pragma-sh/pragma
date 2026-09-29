@@ -655,8 +655,12 @@ pub struct BrowserScreenshotArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AgentCommand {
-    /// Start an agent in a new terminal tab. Brokered through the app.
+    /// Start an agent in a new terminal tab, optionally with a model, mode,
+    /// permission mode, and slash command. Goes through the gateway, so it
+    /// works with the app closed when the worktree is known to the host.
     Start(AgentStartArgs),
+    /// List an agent's models, modes, permission modes, and slash commands.
+    Options(AgentOptionsArgs),
     /// Print one row per agent with its tabId. Direct to the server (works with
     /// the app closed). `--watch` keeps the subscription open and prints deltas.
     Status(AgentStatusArgs),
@@ -748,15 +752,37 @@ pub struct AgentStartArgs {
     /// Target worktree. Defaults to `$PRAGMA_WORKTREE_ID`.
     #[arg(long, value_name = "ID")]
     pub worktree: Option<String>,
-    /// Agent id from a Pragma plugin agent definition.
+    /// Agent id from the plugin catalog (unqualified built-in ids are accepted).
     #[arg(long)]
     pub agent: String,
     /// Model id to launch with (optional).
     #[arg(long)]
     pub model: Option<String>,
+    /// Reasoning effort for `--model` (optional).
+    #[arg(long, value_name = "ID", requires = "model")]
+    pub reasoning: Option<String>,
+    /// Agent mode / primary agent to start in. Defaults to the agent's first mode.
+    #[arg(long, value_name = "ID")]
+    pub mode: Option<String>,
+    /// Permission mode to start in. Defaults to the agent's first permission mode.
+    #[arg(long, value_name = "ID")]
+    pub permission_mode: Option<String>,
+    /// Slash command (without the `/`) to run; `--prompt` becomes its input.
+    #[arg(long, value_name = "NAME")]
+    pub slash_command: Option<String>,
     /// Prompt prefill to send once the agent is ready (optional).
     #[arg(long)]
     pub prompt: Option<String>,
+    /// Launch on the host server without opening a desktop tab.
+    #[arg(long)]
+    pub headless: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentOptionsArgs {
+    /// Agent id from the plugin catalog (unqualified built-in ids are accepted).
+    #[arg(long)]
+    pub agent: String,
 }
 
 #[derive(Debug, Args)]

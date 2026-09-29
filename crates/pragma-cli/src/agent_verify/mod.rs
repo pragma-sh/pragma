@@ -2,7 +2,7 @@
 
 mod engine;
 mod events;
-mod gateway;
+pub(crate) mod gateway;
 mod prompts;
 mod report;
 mod scenarios;
@@ -37,7 +37,17 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
     }
 
     validate_scenario_filters(&args.scenarios).map_err(CliError::config)?;
-    if args.scenarios == ["catalog"] {
+    // Scenarios that only read the catalog launch nothing, so they need no
+    // worktree, workspace snapshot, or event stream.
+    if !args.scenarios.is_empty()
+        && args
+            .scenarios
+            .iter()
+            .all(|id| CATALOG_SCENARIOS.contains(&id.as_str()))
+    {
+        if args.scenarios.iter().any(|id| id == "slash-commands") {
+            results.push(slash_commands_result(catalog_agent));
+        }
         return finish(out, args.agent.clone(), results, Vec::new());
     }
     let prompts = Prompts::load(args.prompts.as_deref()).map_err(CliError::config)?;
@@ -312,6 +322,36 @@ fn catalog_result(api: &dyn VerifyApi, agent: &CatalogAgent) -> ScenarioResult {
     }
 }
 
+/// Scenario ids answered from the catalog alone.
+const CATALOG_SCENARIOS: [&str; 2] = ["catalog", "slash-commands"];
+
+/// The `slash-commands` scenario evaluated against an already-fetched catalog
+/// entry, honouring the agent's `excludeFeatures`.
+fn slash_commands_result(agent: &CatalogAgent) -> ScenarioResult {
+    let scenario = definitions()
+        .iter()
+        .find(|scenario| scenario.id == "slash-commands")
+        .expect("slash-commands scenario is defined");
+    if excludes_scenario(scenario, agent.exclude_features.as_deref()) {
+        return skipped_result(scenario, "agent declares this feature unsupported");
+    }
+    let started = Instant::now();
+    let result = scenarios::validate_slash_commands(agent);
+    ScenarioResult {
+        id: scenario.id.to_string(),
+        name: scenario.name.to_string(),
+        status: if result.is_ok() {
+            ScenarioStatus::Passed
+        } else {
+            ScenarioStatus::Failed
+        },
+        attempts: 1,
+        duration_ms: started.elapsed().as_millis(),
+        failure: result.err(),
+        evidence: Vec::new(),
+    }
+}
+
 fn validate_catalog_agent(api: &dyn VerifyApi, agent: &CatalogAgent) -> Result<(), String> {
     if agent.models.is_empty() {
         return Err("catalog agent has no models".to_string());
@@ -325,6 +365,7 @@ fn validate_catalog_agent(api: &dyn VerifyApi, agent: &CatalogAgent) -> Result<(
     {
         return Err("catalog agent has empty launch command".to_string());
     }
+    validate_launch_options(agent)?;
     let icon = agent
         .icon
         .as_ref()
@@ -332,7 +373,47 @@ fn validate_catalog_agent(api: &dyn VerifyApi, agent: &CatalogAgent) -> Result<(
     api.asset_exists(&icon.hash)
 }
 
-fn resolve_agent<'a>(
+/// Every declared mode and permission mode must be unique and carry resolved
+/// launch args, or selecting it in a launcher silently does nothing.
+fn validate_launch_options(agent: &CatalogAgent) -> Result<(), String> {
+    let modes = agent.modes.iter().map(|mode| mode.id.as_str());
+    let mode_args = agent.launch.mode_args.iter().map(|entry| entry.id.as_str());
+    check_option_ids("mode", modes, mode_args)?;
+    let permission_modes = agent.permission_modes.iter().map(|mode| mode.id.as_str());
+    let permission_args = agent
+        .launch
+        .permission_mode_args
+        .iter()
+        .map(|entry| entry.id.as_str());
+    check_option_ids("permission mode", permission_modes, permission_args)
+}
+
+fn check_option_ids<'a>(
+    label: &str,
+    declared: impl Iterator<Item = &'a str>,
+    with_args: impl Iterator<Item = &'a str>,
+) -> Result<(), String> {
+    let with_args: HashSet<&str> = with_args.collect();
+    let mut seen = HashSet::new();
+    for id in declared {
+        if !seen.insert(id) {
+            return Err(format!("duplicate {label}: {id}"));
+        }
+        if !with_args.contains(id) {
+            return Err(format!(
+                "{label} {id} has no launch args (define args.{})",
+                if label == "mode" {
+                    "mode"
+                } else {
+                    "permissionMode"
+                }
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_agent<'a>(
     agents: &'a [CatalogAgent],
     requested: &str,
 ) -> Result<&'a CatalogAgent, String> {
@@ -382,7 +463,10 @@ fn resolve_model_cmd(requested: Option<&str>) -> Result<Option<&str>, String> {
     }
 }
 
-fn project_for_worktree(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> Result<String, String> {
+pub(crate) fn project_for_worktree(
+    snapshot: &WorkspaceSnapshot,
+    worktree_id: &str,
+) -> Result<String, String> {
     let project_id = snapshot
         .worktrees
         .iter()
@@ -562,6 +646,67 @@ mod tests {
             }
         }))
         .expect("catalog agent fixture")
+    }
+
+    fn options_agent(extra: &serde_json::Value) -> CatalogAgent {
+        let mut agent = serde_json::json!({
+            "id": "agent",
+            "name": "Agent",
+            "pluginId": "plugin",
+            "models": [],
+            "launch": { "commands": [] }
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            if key == "launch" {
+                for (launch_key, launch_value) in value.as_object().expect("launch object") {
+                    agent["launch"][launch_key] = launch_value.clone();
+                }
+            } else {
+                agent[key] = value.clone();
+            }
+        }
+        serde_json::from_value(agent).expect("options fixture")
+    }
+
+    #[test]
+    fn slash_commands_must_be_present_and_typeable() {
+        use scenarios::validate_slash_commands;
+        assert!(validate_slash_commands(&options_agent(&serde_json::json!({}))).is_err());
+        let valid = serde_json::json!({ "slashCommands": [
+            { "name": "review", "invocation": "/review" },
+            { "name": "prompts:fix" }
+        ] });
+        assert!(validate_slash_commands(&options_agent(&valid)).is_ok());
+        for bad in [
+            serde_json::json!({ "slashCommands": [{ "name": "/review" }] }),
+            serde_json::json!({ "slashCommands": [{ "name": "two words" }] }),
+            serde_json::json!({ "slashCommands": [{ "name": "a" }, { "name": "a" }] }),
+            serde_json::json!({ "slashCommands": [{ "name": "a", "invocation": " " }] }),
+        ] {
+            assert!(validate_slash_commands(&options_agent(&bad)).is_err());
+        }
+    }
+
+    #[test]
+    fn modes_and_permission_modes_need_launch_args() {
+        let valid = serde_json::json!({
+            "modes": [{ "id": "build", "name": "Build" }],
+            "permissionModes": [{ "id": "auto", "name": "Auto" }],
+            "launch": {
+                "modeArgs": [{ "id": "build", "args": [] }],
+                "permissionModeArgs": [{ "id": "auto", "args": ["--yolo"] }]
+            }
+        });
+        assert!(validate_launch_options(&options_agent(&valid)).is_ok());
+        let missing = serde_json::json!({ "modes": [{ "id": "plan", "name": "Plan" }] });
+        assert!(validate_launch_options(&options_agent(&missing))
+            .unwrap_err()
+            .contains("args.mode"));
+        let duplicate = serde_json::json!({
+            "permissionModes": [{ "id": "a", "name": "A" }, { "id": "a", "name": "A" }],
+            "launch": { "permissionModeArgs": [{ "id": "a", "args": [] }] }
+        });
+        assert!(validate_launch_options(&options_agent(&duplicate)).is_err());
     }
 
     #[test]

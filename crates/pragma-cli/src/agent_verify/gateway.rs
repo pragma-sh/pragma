@@ -25,8 +25,12 @@ pub struct LaunchSpec<'a> {
     pub worktree_id: &'a str,
     pub agent_id: &'a str,
     pub model_id: Option<&'a str>,
+    pub reasoning_id: Option<&'a str>,
     /// Raw model command overriding `model_id` at launch.
     pub model_cmd: Option<&'a str>,
+    pub mode_id: Option<&'a str>,
+    pub permission_mode_id: Option<&'a str>,
+    pub slash_command: Option<&'a str>,
     /// Launch server-side without opening a desktop tab.
     pub headless: bool,
     pub prompt: &'a str,
@@ -166,10 +170,21 @@ impl VerifyApi for HttpVerifyApi {
             "newWorktree": null,
             "agentId": spec.agent_id,
             "modelId": spec.model_id,
-            "reasoningId": null,
+            "reasoningId": spec.reasoning_id,
             "modelCmd": spec.model_cmd,
             "prompt": spec.prompt,
         });
+        // Launch options are only sent when chosen, so a launch that picks none
+        // keeps the exact payload older hosts accept.
+        for (key, value) in [
+            ("modeId", spec.mode_id),
+            ("permissionModeId", spec.permission_mode_id),
+            ("slashCommand", spec.slash_command),
+        ] {
+            if let Some(value) = value {
+                body[key] = json!(value);
+            }
+        }
         // Only sent when requested so headed launches keep the exact payload the
         // desktop broker has always received.
         if spec.headless {
