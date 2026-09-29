@@ -1,7 +1,10 @@
 import {
+  commandAndSkillDirs,
   defineAgent,
   definePlugin,
   defineUsageLimitProvider,
+  slashCommandProvider,
+  type AgentMode,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
@@ -12,6 +15,24 @@ import { pluginCwd } from "./cwd";
 import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
+
+/** OpenCode's own primary agents, used when `opencode agent list` is unavailable. */
+const DEFAULT_MODES: AgentMode[] = [
+  { id: "build", name: "Build" },
+  { id: "plan", name: "Plan" },
+];
+/** Primary agents OpenCode runs internally and never offers in its Tab cycle. */
+const HIDDEN_AGENTS = new Set(["compaction", "summary", "title"]);
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "init", description: "Create or update AGENTS.md" },
+  { name: "review", description: "Review changes", argumentHint: "[commit|branch|pr]" },
+];
+/** Fallback when the ACP list is unavailable (OpenCode also accepts singular `command`). */
+const SLASH_COMMAND_SOURCES = [
+  ...commandAndSkillDirs([".opencode", "~/.config/opencode"]),
+  { dir: ".opencode/command", layout: "files" as const },
+  { dir: "~/.config/opencode/command", layout: "files" as const },
+];
 
 /**
  * Pragma plugin for OpenCode, bundled to `dist/pragma-plugin.mjs` and loaded by
@@ -56,10 +77,16 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
           ),
         ),
       permissionModes: [],
+      modes: async (ctx) =>
+        parseOpenCodeAgents(await execFirst(ctx, "opencode agent list 2>/dev/null")),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["opencode", "acp"] },
+      }),
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: () => [],
         permissionMode: () => [],
+        mode: (modeId: string) => ["--agent", modeId],
       },
     }),
   ],
@@ -70,6 +97,29 @@ export default opencodeAgentPlugin;
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const [result] = await ctx.sdk.exec.run({ cwd: pluginCwd(ctx), commands: [command] });
   return result?.stdout ?? "";
+}
+
+/**
+ * Parses `opencode agent list` (`name (mode)` header lines, each followed by
+ * its permission JSON) into the primary agents Tab cycles through, with
+ * `build` and `plan` first. Falls back to those two when nothing parses.
+ */
+export function parseOpenCodeAgents(output: string): AgentMode[] {
+  const names = output
+    .replaceAll(ansiEscapePattern, "")
+    .split("\n")
+    .flatMap((line) => {
+      const match = /^(\S+) \((primary|all|subagent)\)$/.exec(line.trim());
+      return match && match[2] !== "subagent" && !HIDDEN_AGENTS.has(match[1]!) ? [match[1]!] : [];
+    });
+  if (names.length === 0) return DEFAULT_MODES;
+  const rank = (name: string) => {
+    const index = DEFAULT_MODES.findIndex((mode) => mode.id === name);
+    return index === -1 ? DEFAULT_MODES.length : index;
+  };
+  return [...new Set(names)]
+    .toSorted((a, b) => rank(a) - rank(b))
+    .map((id) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) }));
 }
 
 /** Parses OpenCode's `models` output (JSON or table form) into model entries. */

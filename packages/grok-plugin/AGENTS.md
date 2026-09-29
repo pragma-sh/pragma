@@ -176,8 +176,11 @@ no limit — grok enforces a free ceiling ("You've reached your free Grok Build 
 for now") that this API does not expose. That is reported as `unsupported` with the tier
 name rather than a row of zeros.
 
-Grok has **no permission-mode flag**; the launcher's three modes map to real launch flags:
-`default` -> none, `no-plan` -> `--no-plan`, `always-approve` -> `--always-approve`.
+Permission modes map to `--permission-mode <id>` (`acceptEdits`, `auto`, `plan`, `dontAsk`,
+`bypassPermissions`); the first, `default`, passes no flag so Grok's own config decides.
+Slash commands come from `grok agent stdio` (ACP `available_commands_update`), with three
+built-ins plus the skill and command roots Grok scans (`.grok`, `.agents`, `.claude`) as the
+fallback.
 
 ## Branding provenance
 
