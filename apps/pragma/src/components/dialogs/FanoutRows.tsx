@@ -1,5 +1,5 @@
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
+import { type Dispatch, type SetStateAction, useState } from "react";
 import { constants } from "@pragma-sh/constants";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
@@ -8,6 +8,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AgentSelection } from "@/hooks/use-agent-selection";
+import type { AutoRegistry, AutoSelectTarget } from "@/hooks/use-auto-agent-selection";
 import type { AgentModelSelection } from "@/lib/tauri";
 
 /** One requested attempt in the create dialog's fanout mode. */
@@ -28,8 +29,13 @@ const MIN_FANOUT_ROWS = constants.fanout.minMembers;
 
 interface FanoutRowsProps {
   rows: FanoutRow[];
-  onChange: (rows: FanoutRow[]) => void;
+  /** Takes an updater too: several Auto rows resolve in one submit. */
+  onChange: Dispatch<SetStateAction<FanoutRow[]>>;
   selection: AgentSelection;
+  /** What a row set to Auto decides for (the shared fanout prompt). */
+  autoTarget?: AutoSelectTarget;
+  /** Where rows set to Auto register, to be decided when the dialog submits. */
+  autoRegistry?: AutoRegistry;
 }
 
 /**
@@ -40,7 +46,13 @@ interface FanoutRowsProps {
  * it does everywhere else. Duplicates are allowed on purpose: sampling one model
  * twice is a supported use.
  */
-export function FanoutRows({ rows, onChange, selection }: FanoutRowsProps) {
+export function FanoutRows({
+  rows,
+  onChange,
+  selection,
+  autoTarget,
+  autoRegistry,
+}: FanoutRowsProps) {
   return (
     <div className="space-y-2">
       <Label>Attempts</Label>
@@ -51,9 +63,11 @@ export function FanoutRows({ rows, onChange, selection }: FanoutRowsProps) {
               agents={selection.agents}
               modelsByAgent={selection.modelsByAgent}
               value={{ agentId: row.agentId, selection: row.selection }}
+              // An updater, not `rows`: each Auto row lands in the same batch,
+              // and mapping this render's rows would drop the others' picks.
               onChange={(agentId, next) =>
-                onChange(
-                  rows.map((candidate) =>
+                onChange((current) =>
+                  current.map((candidate) =>
                     candidate.key === row.key
                       ? { ...candidate, agentId, selection: next }
                       : candidate,
@@ -61,6 +75,11 @@ export function FanoutRows({ rows, onChange, selection }: FanoutRowsProps) {
                 )
               }
               onLoadModels={selection.loadModels}
+              autoTarget={autoTarget}
+              autoRegistry={autoRegistry}
+              // Attempts exist to differ; Auto on every row would pick the same
+              // thing everywhere, so a row only uses it when chosen explicitly.
+              rememberAuto={false}
             />
           </div>
           <IconButton
@@ -103,7 +122,7 @@ export interface FanoutMode {
    */
   switchMode: (next: "single" | "fanout", seed: FanoutRow) => void;
   rows: FanoutRow[];
-  setRows: (rows: FanoutRow[]) => void;
+  setRows: Dispatch<SetStateAction<FanoutRow[]>>;
   /** True when the fanout form is complete enough to submit. */
   ready: (prompt: string, branch: string) => boolean;
 }

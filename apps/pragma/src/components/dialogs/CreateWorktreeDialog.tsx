@@ -10,6 +10,12 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgentSelection, type AgentSelection } from "@/hooks/use-agent-selection";
+import {
+  type AutoRegistry,
+  type AutoSelectTarget,
+  useAutoSubmit,
+} from "@/hooks/use-auto-agent-selection";
+import { useAutoTarget } from "@/hooks/use-auto-target";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { EMPTY_MODEL_SELECTION, rememberModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
@@ -221,8 +227,9 @@ export function CreateWorktreeDialog({
   useEscapeToClose(isOpen && !busy, () => onOpenChange(false));
 
   const isFanout = fanoutMode.isFanout;
-  const canSubmit = isFanout ? fanoutMode.ready(message, branch) : branch.trim().length > 0;
   const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
+  const autoTarget = useAutoTarget(message, parentId);
+  const canSubmit = formReady(fanoutMode, { message, branch });
   const parent = (workspace.worktrees[workspace.selectedProjectId ?? ""] ?? []).find(
     (worktree) => worktree.id === parentId,
   );
@@ -257,7 +264,8 @@ export function CreateWorktreeDialog({
     workspace,
   });
 
-  const handleKeyDown = submitOnModEnter(canSubmit, () => void submit());
+  const { autoRegistry, ready, submitForm } = useFormAutoSubmit({ submit, message, canSubmit });
+  const handleKeyDown = submitOnModEnter(ready, () => void submitForm());
 
   return (
     <AnimatePresence>
@@ -277,8 +285,12 @@ export function CreateWorktreeDialog({
                 value={{ agentId, selection: modelSelection }}
                 onChange={handleAgentChange}
                 onLoadModels={loadModels}
+                autoTarget={autoTarget}
+                autoRegistry={autoRegistry}
               />
             }
+            autoTarget={autoTarget}
+            autoRegistry={autoRegistry}
             agentSelection={{
               agents,
               modelsByAgent,
@@ -293,13 +305,13 @@ export function CreateWorktreeDialog({
             error={error}
             fanout={fanoutMode}
             message={message}
-            ready={canSubmit}
+            ready={ready}
             title={title}
             onBranchChange={setBranch}
             onCancel={() => onOpenChange(false)}
             onKeyDown={handleKeyDown}
             onMessageChange={setMessage}
-            onSubmit={submit}
+            onSubmit={() => void submitForm()}
             onTitleChange={setTitle}
           />
           <MainBehindAlert
@@ -542,6 +554,36 @@ function useSubmission(input: SubmissionInput): {
   };
 }
 
+/**
+ * Routes the form's submit through its Auto pickers. With no prompt no agent
+ * starts, so there is nothing for Auto to decide and the submit goes straight
+ * through.
+ */
+function useFormAutoSubmit({
+  submit,
+  message,
+  canSubmit,
+}: {
+  submit: () => Promise<void>;
+  message: string;
+  canSubmit: boolean;
+}): { autoRegistry: AutoRegistry; ready: boolean; submitForm: () => Promise<void> } {
+  const auto = useAutoSubmit(submit);
+  return {
+    autoRegistry: auto.registry,
+    ready: canSubmit && !auto.resolving,
+    submitForm: () => (message.trim() ? auto.submit() : submit()),
+  };
+}
+
+/** Whether the form can submit: what its mode needs (a branch, plus the attempts for a fanout). */
+function formReady(
+  fanout: FanoutMode,
+  { message, branch }: { message: string; branch: string },
+): boolean {
+  return fanout.isFanout ? fanout.ready(message, branch) : branch.trim().length > 0;
+}
+
 /** Props for {@link CreateWorktreeForm}. */
 interface CreateWorktreeFormProps {
   fanout: FanoutMode;
@@ -551,6 +593,10 @@ interface CreateWorktreeFormProps {
   /** The single-mode agent picker; ignored in fanout mode. */
   agentPicker: ReactNode;
   agentSelection: AgentSelection;
+  /** What an attempt row set to Auto decides for. */
+  autoTarget: AutoSelectTarget;
+  /** Where attempt rows set to Auto register, to be decided on submit. */
+  autoRegistry: AutoRegistry;
   error: string | null;
   busy: boolean;
   ready: boolean;
@@ -580,10 +626,14 @@ function modeCopy(isFanout: boolean): { submitLabel: string; promptPlaceholder: 
 function FanoutFields({
   fanout,
   agentSelection,
+  autoTarget,
+  autoRegistry,
   children,
 }: {
   fanout: FanoutMode;
   agentSelection: AgentSelection;
+  autoTarget: AutoSelectTarget;
+  autoRegistry: AutoRegistry;
   /** The identity fields, rendered above the rows. */
   children: ReactNode;
 }) {
@@ -593,7 +643,13 @@ function FanoutFields({
   return (
     <>
       {children}
-      <FanoutRows rows={fanout.rows} selection={agentSelection} onChange={fanout.setRows} />
+      <FanoutRows
+        autoRegistry={autoRegistry}
+        autoTarget={autoTarget}
+        rows={fanout.rows}
+        selection={agentSelection}
+        onChange={fanout.setRows}
+      />
     </>
   );
 }
@@ -611,7 +667,12 @@ function CreateWorktreeForm(props: CreateWorktreeFormProps): ReactNode {
         props.onSubmit();
       }}
     >
-      <FanoutFields agentSelection={props.agentSelection} fanout={fanout}>
+      <FanoutFields
+        agentSelection={props.agentSelection}
+        autoRegistry={props.autoRegistry}
+        autoTarget={props.autoTarget}
+        fanout={fanout}
+      >
         <IdentityFields
           agent={isFanout ? null : props.agentPicker}
           branch={branch}

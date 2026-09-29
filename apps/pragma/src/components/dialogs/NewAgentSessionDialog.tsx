@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useAgentModels } from "@/hooks/use-agent-models";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
+import { useAutoTarget } from "@/hooks/use-auto-target";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import {
   EMPTY_MODEL_SELECTION,
@@ -86,7 +88,6 @@ interface SessionFormApi extends SessionFormState, SessionFormSelection {
   markAgentManuallyChanged: () => void;
   markWorktreeManuallyChanged: () => void;
   submit: () => Promise<void>;
-  handleKeyDown: (event: KeyboardEvent) => void;
 }
 
 type WorktreeLike = { id: string; isMain: boolean; title: string | null; branch: string };
@@ -541,7 +542,6 @@ function useSessionFormHandlers({
   markAgentManuallyChanged: () => void;
   markWorktreeManuallyChanged: () => void;
   submit: () => Promise<void>;
-  handleKeyDown: (event: KeyboardEvent) => void;
 } {
   const handleAgentChange = useCallback(
     (nextAgentId: string, nextSelection: AgentModelSelection) => {
@@ -591,17 +591,12 @@ function useSessionFormHandlers({
     setMessage,
     setError,
   ]);
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => handleSessionKeyDown(event, selection.canSubmit, submit),
-    [selection.canSubmit, submit],
-  );
   return {
     handleAgentChange,
     handleWorktreeChange,
     markAgentManuallyChanged,
     markWorktreeManuallyChanged,
     submit,
-    handleKeyDown,
   };
 }
 
@@ -618,6 +613,9 @@ export function NewAgentSessionDialog({
 }: NewAgentSessionDialogProps) {
   const workspace = useWorkspace();
   const form = useNewAgentSessionForm({ isOpen, onOpenChange, initial, workspace });
+  const autoTarget = useAutoTarget(form.message, form.effectiveWorktreeId);
+  const auto = useAutoSubmit(form.submit);
+  const canSubmit = form.canSubmit && !auto.resolving;
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
@@ -635,7 +633,7 @@ export function NewAgentSessionDialog({
             className="mt-5 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void form.submit();
+              if (canSubmit) void auto.submit();
             }}
           >
             <div className="space-y-2">
@@ -643,7 +641,7 @@ export function NewAgentSessionDialog({
               <MarkdownEditor
                 value={form.message}
                 onChange={form.setMessage}
-                onKeyDown={form.handleKeyDown}
+                onKeyDown={(event) => handleSessionKeyDown(event, canSubmit, auto.submit)}
                 placeholder="Describe what you want the agent to do…"
                 className="min-h-40"
               />
@@ -658,6 +656,8 @@ export function NewAgentSessionDialog({
                   onChange={form.handleAgentChange}
                   onLoadModels={form.loadModels}
                   onInteract={form.markAgentManuallyChanged}
+                  autoTarget={autoTarget}
+                  autoRegistry={auto.registry}
                 />
               </div>
               <div className="space-y-2">
@@ -706,7 +706,7 @@ export function NewAgentSessionDialog({
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!form.canSubmit}>
+              <Button type="submit" disabled={!canSubmit}>
                 Start session
                 <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
               </Button>

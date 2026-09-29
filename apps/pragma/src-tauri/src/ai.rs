@@ -226,7 +226,7 @@ fn sidecar_command() -> Command {
 
 /// Run a one-shot sidecar command, optionally writing `stdin_data`, and return
 /// the final NDJSON event. Maps an `error` event to an `AppError`.
-fn run_oneshot(args: &[&str], stdin_data: Option<&str>) -> AppResult<Value> {
+pub(crate) fn run_oneshot(args: &[&str], stdin_data: Option<&str>) -> AppResult<Value> {
     let mut command = sidecar_command();
     command.args(args);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());

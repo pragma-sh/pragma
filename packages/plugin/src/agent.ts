@@ -24,7 +24,14 @@ export interface AgentReasoning {
 export interface AgentModelEntry {
   id: string;
   name: string;
+  /** Reasoning levels, ordered lowest effort first (auto mode maps task difficulty onto them). */
   reasoning?: AgentReasoning[];
+  /**
+   * Provider-qualified model id (for example `anthropic/claude-sonnet-5-5`) when
+   * `id` is an alias such as `sonnet`. Pragma's auto mode matches it against
+   * public benchmark catalogs; it is never passed to the agent.
+   */
+  canonicalId?: string;
 }
 
 /** One selectable permission mode for an agent. */

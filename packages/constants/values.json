@@ -381,5 +381,21 @@
   "projects": {
     "nonGitWarning": true,
     "nonGitRootLabel": "root"
+  },
+  "system1": {
+    "defaultBaseUrl": "https://api.typesafe.ai",
+    "defaultModel": "jev-latest",
+    "evaluatePath": "/v1/systemone",
+    "credentialFileName": "system1-key",
+    "autoModeFileName": ".pragma/automode.md",
+    "requestTimeoutMs": 5000,
+    "promptCharLimit": 6000,
+    "preferencesCharLimit": 4000,
+    "hostModels": [
+      {
+        "host": "openrouter.ai",
+        "model": "~typesafe/jev-latest"
+      }
+    ]
   }
 }

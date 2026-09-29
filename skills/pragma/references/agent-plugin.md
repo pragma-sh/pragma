@@ -158,8 +158,14 @@ Model discovery rules:
 - Never emit a provider-level Auto model in static `models` or provider output. When a
   selected model has `reasoning` entries, Pragma shows an Auto reasoning choice for
   model-only launch, which appends `args.model` and no reasoning arguments.
-- Provider entries are `{ id, name, reasoning?: [{ id, name }] }`. Omit `reasoning` when
-  the host has none or cannot expose levels reliably for that model.
+- Provider entries are `{ id, name, reasoning?: [{ id, name }], canonicalId? }`. Omit
+  `reasoning` when the host has none or cannot expose levels reliably for that model.
+  List `reasoning` **lowest effort first**: auto mode maps task difficulty onto it by
+  position.
+- When a model id is a moving alias (`sonnet`, `opus`), set `canonicalId` to the
+  provider-qualified model it currently resolves to (`anthropic/claude-sonnet-5-5`).
+  Auto mode matches it against public benchmark catalogs; it is never passed to the host.
+  Ids that already name a concrete model (`openai/gpt-6-astra`) need none.
 - Emit fast variants as separate model entries. Never collapse them into a fast toggle.
 - Discovery is lazy: Pragma calls the provider when the selector submenu is focused,
   shows cached results immediately, then updates with the refreshed result.

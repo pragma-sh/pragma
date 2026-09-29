@@ -24,6 +24,26 @@ export function rememberModelSelection(agentId: string, selection: AgentModelSel
   }
 }
 
+const AUTO_MODE_KEY = "pragma:agent-auto-mode";
+
+/** Whether the user last left agent pickers on Auto (System 1 picks). */
+export function readAutoModePreference(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_MODE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+/** Remembers whether pickers should open on Auto next time. */
+export function rememberAutoModePreference(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(AUTO_MODE_KEY, enabled ? "on" : "off");
+  } catch {
+    // Cosmetic preference only, like the remembered model selection.
+  }
+}
+
 /** Validates a requested model/reasoning selection, falling back to no model on mismatch. */
 export function validateModelSelection(
   models: AgentModel[],

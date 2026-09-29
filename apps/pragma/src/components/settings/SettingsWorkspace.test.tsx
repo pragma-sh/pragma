@@ -53,6 +53,10 @@ vi.mock("@/components/ai/AiAuthOptions", () => ({
   AiAuthOptions: () => <div>AI auth options</div>,
 }));
 
+vi.mock("@/components/settings/System1Section", () => ({
+  System1Section: ({ scope }: { scope: string }) => <div>System 1 settings ({scope})</div>,
+}));
+
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({ closeSettings }),
 }));
@@ -194,6 +198,21 @@ describe("SettingsWorkspace", () => {
       refresh: vi.fn(),
       dismissSetup: vi.fn(),
     });
+  });
+
+  it("keeps other settings reachable when the optional system1 block is malformed", async () => {
+    vi.mocked(readConfig).mockResolvedValue({
+      exists: true,
+      path: "/home/user/.pragma/config.json",
+      contents: JSON.stringify({
+        plugins: [{ path: "./plugins/two" }],
+        system1: { baseUrl: 42 },
+      }),
+    });
+    render(<SettingsWorkspace />);
+
+    expect(await screen.findByText("Loaded plugins")).toBeInTheDocument();
+    expect(screen.queryByText("config.json needs attention")).not.toBeInTheDocument();
   });
 
   it("shows loaded plugins by name with delete controls only", async () => {
@@ -435,10 +454,11 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     expect(await screen.findByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("AI auth options")).toBeInTheDocument();
+    expect(screen.getByText("System 1 settings (global)")).toBeInTheDocument();
   });
 
   it("signs out one AI provider and re-reads status", async () => {
@@ -455,7 +475,7 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     // Providers with no auth-method entry still render (and sign out) by id.
     fireEvent.click(await screen.findByRole("button", { name: "Sign out of openai-codex" }));
@@ -470,7 +490,7 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     const button = await screen.findByRole("button", { name: "Sign out of Anthropic" });
     fireEvent.click(button);
