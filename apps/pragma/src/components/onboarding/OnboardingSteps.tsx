@@ -8,6 +8,7 @@ import { constants } from "@pragma-sh/constants";
 import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
+import { System1OnboardingCard } from "@/components/ai/System1OnboardingCard";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { OnboardingFrame } from "@/components/onboarding/OnboardingFrame";
 import { PreviewVideo } from "@/components/onboarding/PreviewVideo";
@@ -129,7 +130,10 @@ export function AiStep({ onBack, onNext }: StepProps) {
       onSkip={skip}
       title="Connect an AI provider"
     >
-      <AiAuthOptions />
+      <div className="flex w-full flex-col gap-4">
+        <System1OnboardingCard />
+        <AiAuthOptions />
+      </div>
     </OnboardingFrame>
   );
 }
