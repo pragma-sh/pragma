@@ -129,6 +129,7 @@ than no guide.
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── sidecar-kit/             # `@pragma-sh/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
+│   ├── system1/                 # `@pragma-sh/system1` typed client for System 1 models (Jev) → see packages/system1/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
@@ -166,7 +167,8 @@ than no guide.
 
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
-  `agentStatus` = `{ notificationsEnabled, soundName }`, the "Created with Pragma"
+  `agentStatus` = `{ notificationsEnabled, soundName }`, the System 1 endpoint under
+  `system1` = `{ baseUrl, model }` (its key is an owner-only file, never config), the "Created with Pragma"
   pull-request footer under `github` = `{ prSignature }`, desktop auto-update overrides
   under `updates` = `{ checkUrl, autoDownload }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
@@ -178,7 +180,8 @@ than no guide.
   The Pragma skill it can install globally is `skills/pragma`, compiled into the app.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
-  and Agent Status have both a global and a project scope (project wins); GitHub, AI,
+  and Agent Status have both a global and a project scope (project wins). AI has both too:
+  providers and the System 1 connection are global, `automode.md` is per scope. GitHub,
   Other (update server/download), and mobile pairing/gateway history are global-only.
   Storage also has both scopes, but as a _view_ (every project vs. the current one's
   worktrees); only its reminder is persisted, under global `storage.reminder`.
@@ -208,6 +211,18 @@ than no guide.
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma-sh/sdk`).
+- Anything that talks to a System 1 model (Jev's `systemone` evaluate endpoint) →
+  `packages/system1` (`@pragma-sh/system1`), which knows nothing about Pragma. **Auto
+  mode** — picking an agent, model, and reasoning effort for a launch — is built on it
+  in `packages/ai-helpers/src/auto-select.ts` (run by the `pragma-ai auto-select`
+  sidecar command), fed by model benchmarks (`model-insights.ts`), Terminal-Bench harness
+  results (`harness-insights.ts`), and `automode.md` (`automode.ts`, global
+  `~/.pragma/automode.md` overridden by `<project>/.pragma/automode.md`). The key lives in
+  `apps/pragma/src-tauri/src/system1.rs` (owner-only `SecretFile`, like the GitHub token)
+  and never crosses IPC back to the webview. The **Auto** row is part of
+  `AgentModelSelector` itself; a launching dialog wraps its submit in `useAutoSubmit(submit)`
+  and passes the picker `autoRegistry` plus `autoTarget` (via `useAutoTarget(prompt)`).
+  System 1 is asked only on submit — the picker shows just "Auto", never a live preview.
 - The Pragma mark itself — its geometry, or the colours it is painted in →
   `packages/brand` (`@pragma-sh/brand`), which emits SVG strings and knows nothing
   about platforms. Which icon slots exist and what each demands stays with the

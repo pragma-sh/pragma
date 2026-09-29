@@ -1,0 +1,25 @@
+{
+  "name": "@pragma-sh/system1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed client for System 1 models (TypeSafe Jev and Jev-compatible APIs): noul, choice, and score questions with calibrated probabilities.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
