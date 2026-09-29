@@ -1,0 +1,109 @@
+---
+title: Auto mode
+description: Let a System 1 model (TypeSafe Jev) pick the agent, model, and reasoning effort for every launch, guided by live benchmarks and your own automode.md.
+---
+
+Every agent picker in Pragma — new session, new worktree, fanout attempts, board drafts,
+review fix-its, and design mode — has an **Auto** row at the top. Choose it and Pragma asks
+a **System 1 model** which agent, model, and reasoning effort fit the prompt you wrote.
+The picker just says **Auto**: nothing is asked while you type. The pick is made when you
+submit, from the final prompt, and the launch goes ahead with it in well under a second. To
+choose yourself, pick an agent and model from the same menu instead.
+
+## What a System 1 model is
+
+A System 1 model is a fast classifier rather than a chat model. It does not write text: it
+reads a state and answers typed questions with calibrated probabilities. Pragma uses
+[TypeSafe's Jev](https://docs.typesafe.ai) by default, and any API that speaks the same
+`systemone` contract works.
+
+## Setup
+
+Open **Settings → AI** (global scope), or the card at the top of the AI step in
+onboarding:
+
+1. **Base URL or endpoint** — leave it empty for TypeSafe (`https://api.typesafe.ai`),
+   or paste another Jev-compatible URL. A full endpoint URL such as OpenRouter's
+   `https://openrouter.ai/api/alpha/decisions` is used exactly as written; a bare origin
+   gets `/v1/systemone` appended.
+2. **Model** — leave it empty to use the endpoint's default: `~typesafe/jev-latest` on
+   OpenRouter and `jev-latest` everywhere else. Set it to pin a release such as
+   `typesafe/jev-1.13`.
+3. **API key** — a TypeSafe key from the [TypeSafe console](https://console.typesafe.ai),
+   or your OpenRouter key when using OpenRouter.
+4. **Test connection**, then **Save**.
+
+The key is stored in an owner-only file in Pragma's app data directory, the same way as the
+GitHub token. It never goes back to the UI, and it is only sent to the base URL you set.
+
+## How a pick is made
+
+Pragma makes **one** request per pick. In it, the model sees:
+
+| Input              | Source                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Your prompt        | The launch prompt (or an empty-prompt note: Auto still picks your best default).                                                |
+| Where it runs      | Project, worktree, and branch.                                                                                                  |
+| Harness benchmarks | [Terminal-Bench](https://www.tbench.ai) results per agent × model: accuracy, minutes per task, tokens and cost per solved task. |
+| Model benchmarks   | The same catalog Pragma's own AI helpers use (modelgrep / Artificial Analysis): intelligence, coding, speed, latency, price.    |
+| Your preferences   | `automode.md`, project over global (below).                                                                                     |
+
+Alongside "which agent?", the same request asks "which model?" once for **every** candidate
+agent, plus how hard the task is. All of these questions are evaluated in parallel, so the
+model answer for the winning agent costs no second round-trip. Task difficulty then maps
+onto that model's reasoning levels: a trivial change gets the lowest effort, and very hard
+work gets the highest.
+
+Benchmark data is cached for a day under `~/.pragma/cache/`. If the leaderboards cannot be
+reached, Auto still works from your preferences and whatever data is cached.
+
+<Callout>
+  Terminal-Bench does not cover every harness. Agents without harness results are judged on their
+  models' benchmarks and on your notes, so `automode.md` matters most for them.
+</Callout>
+
+## `automode.md`
+
+Your own rules, in two places:
+
+- `~/.pragma/automode.md` — global.
+- `<project>/.pragma/automode.md` — per project. It wins over the global file.
+
+Edit either one in **Settings → AI**, switching the scope at the top.
+
+```md
+---
+agents:
+  include: [claude-code, codex]
+  exclude: [cursor]
+models:
+  include: ["codex/gpt-6*"]
+  exclude: ["*haiku*"]
+priority: accuracy
+---
+
+Use Codex for quick scripted fixes and CI failures.
+Use Claude Code with Opus for multi-file refactors and anything touching Rust.
+```
+
+**Frontmatter** holds hard filters. They are enforced in Pragma _before_ the model is asked,
+so an excluded agent can never be picked:
+
+| Key                                 | Meaning                                                                                                                                                                |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents.include` / `agents.exclude` | Agent ids — the short id (`claude-code`, `opencode`, `codex`) or the full plugin-qualified one. `*` matches anything. A bare list (`agents: [codex]`) means `include`. |
+| `models.include` / `models.exclude` | `model` for any agent, or `agent/model` for one agent. An agent-scoped include only narrows that agent.                                                                |
+| `priority`                          | `accuracy`, `speed`, `efficiency`, or `balanced`: the tie-breaker when nothing else decides.                                                                           |
+
+When the files are merged, excludes from both scopes apply, a project `include` replaces the
+global one, and a project `priority` overrides the global one.
+
+**The body** is free text passed to the model as your priorities. The project notes come
+first and are marked as overriding the global notes. Write it the way you would brief a
+colleague: say when to use which harness, which models to avoid for which work, and what you
+care about.
+
+## Fanouts
+
+Fanout attempt rows default to manual picks. Attempts exist to differ, and Auto on every row
+would pick the same thing each time. You can still set any single row to Auto.
