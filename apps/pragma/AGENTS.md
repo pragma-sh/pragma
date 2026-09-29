@@ -757,7 +757,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 (`cargo build -p pragma-server`, `cargo build -p pragma-gateway`, plus copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
-it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`bun run --filter pragma sidecar:server` before `cargo check` because Tauri validates
+`externalBin` paths during compilation. Use the package script rather than bare `bash`
+so Windows resolves Git Bash instead of WSL's launcher.
 Release jobs run natively on each architecture, including `windows-11-arm`, so the host
 triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
 the app shell.

@@ -50,6 +50,7 @@ export interface MarkdownEditorHandle {
  * (re-seeded only when it changes while the editor is blurred), so typing is
  * never interrupted by the parent echoing state back.
  */
+// fallow-ignore-next-line complexity -- TipTap lifecycle, imperative handle, and caret popover share one editor.
 export function MarkdownEditor({
   value,
   onChange,

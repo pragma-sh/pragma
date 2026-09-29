@@ -412,7 +412,8 @@ Shared rules:
 - **pre-commit:** `lint-staged` auto-fixes staged files (`oxlint --fix`, `oxfmt --write`,
   `rustfmt`). Fixing — not just checking — is the local behavior.
 - **commit-msg:** commitlint validates the message.
-- **pre-push:** full `typecheck` + `cargo fmt --check` + sidecar staging +
+- **pre-push:** full `typecheck` + `cargo fmt --check` + sidecar staging via
+  `bun run --filter pragma sidecar:server` (resolves Git Bash on Windows) +
   `cargo check` + `fallow:check` (fallow audit, blocks on TS/JS issues this branch
   introduces vs `main`).
 

@@ -11,6 +11,7 @@ import type { ActiveContextProvider } from "@/plugins/context-providers";
  * rewrites the tail. Use it with
  * `vi.mock("@/components/github/MarkdownEditor", async () => ({ MarkdownEditor: (await import("@/test/prompt-editor")).MarkdownEditorStub }))`.
  */
+// fallow-ignore-next-line unused-export -- loaded by dynamic imports in dialog vi.mock factories.
 export function MarkdownEditorStub({
   onChange,
   onKeyDown,

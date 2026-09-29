@@ -1,7 +1,7 @@
 import { defineContextProvider } from "@pragma-sh/plugin";
 
 /** Canned `@` mentions for exercising the prompt context picker end to end. */
-export const TEST_MENTIONS = [
+const TEST_MENTIONS = [
   {
     id: "hello",
     displayName: "dev-hello",

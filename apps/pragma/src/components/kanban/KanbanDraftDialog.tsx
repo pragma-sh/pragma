@@ -392,6 +392,7 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
 }
 
 /** Owns all draft-form state, effects, and handlers. */
+// fallow-ignore-next-line complexity -- composes draft state, model syncing, prompt context, and submit handlers.
 function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps) {
   const kanban = useKanban();
   const workspace = useWorkspace();

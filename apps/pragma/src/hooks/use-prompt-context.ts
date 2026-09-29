@@ -78,6 +78,7 @@ export interface PromptContextState {
  * picked mention, and injects the resolved context on submit. `project` and
  * `worktree` may be fresh objects every render; they are compared by value.
  */
+// fallow-ignore-next-line complexity -- composes picker state, provider search, and attachment callbacks.
 export function usePromptContext({
   isOpen,
   project: projectInput,
@@ -95,14 +96,10 @@ export function usePromptContext({
   const [caretText, setCaretText] = useState("");
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
-  const attached = useRef(new Map<string, Attachment>());
+  const { attached, attachContext, seedPrompt } = usePromptAttachments(isOpen);
 
-  // A fresh dialog forgets what the previous prompt attached.
   useEffect(() => {
-    if (!isOpen) {
-      attached.current.clear();
-      setCaretText("");
-    }
+    if (!isOpen) setCaretText("");
   }, [isOpen]);
 
   const typed = isOpen ? contextQuery(caretText) : null;
@@ -160,7 +157,7 @@ export function usePromptContext({
       });
       editor.current?.replaceBeforeCaret(typed.length + 1, `${mention} `);
     },
-    [editor, typed, project, worktree],
+    [attached, editor, typed, project, worktree],
   );
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -177,6 +174,31 @@ export function usePromptContext({
     },
     [open, options, index, select],
   );
+
+  return {
+    open,
+    query,
+    loading,
+    groups,
+    options,
+    notices,
+    index,
+    setIndex,
+    select,
+    dismiss,
+    onCaretTextChange: setCaretText,
+    handleKeyDown,
+    attachContext,
+    seedPrompt,
+  };
+}
+
+/** Resolves picked mentions and retains saved context blocks across prompt edits. */
+function usePromptAttachments(isOpen: boolean) {
+  const attached = useRef(new Map<string, Attachment>());
+  useEffect(() => {
+    if (!isOpen) attached.current.clear();
+  }, [isOpen]);
 
   const attachContext = useCallback(async (prompt: string) => {
     const plain = unescapeMarkdown(prompt);
@@ -208,22 +230,7 @@ export function usePromptContext({
     return prompt;
   }, []);
 
-  return {
-    open,
-    query,
-    loading,
-    groups,
-    options,
-    notices,
-    index,
-    setIndex,
-    select,
-    dismiss,
-    onCaretTextChange: setCaretText,
-    handleKeyDown,
-    attachContext,
-    seedPrompt,
-  };
+  return { attached, attachContext, seedPrompt };
 }
 
 function useStableProject(project: PluginProject | null | undefined): PluginProject | null {

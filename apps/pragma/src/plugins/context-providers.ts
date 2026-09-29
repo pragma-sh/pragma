@@ -30,7 +30,7 @@ export interface ActiveContextProvider {
 }
 
 /** Binds built-in and plugin providers for the prompt fields. Built-ins come first. */
-export function bindContextProviders(
+function bindContextProviders(
   records: readonly PluginRecord[],
   runtime: Pick<PluginContext, "sdk" | "project"> | null,
 ): ActiveContextProvider[] {
@@ -38,26 +38,31 @@ export function bindContextProviders(
     bindProvider(`builtin:${provider.id}`, provider, null, () => null),
   );
   if (!runtime) return bound;
-  for (const record of records) {
-    if (record.status !== "loaded" || !record.definition) continue;
-    const ctx: PluginContext = {
-      pluginId: record.pluginId,
-      ...(record.dir === undefined ? {} : { pluginDir: record.dir }),
-      config: record.config,
-      project: runtime.project,
-      sdk: runtime.sdk,
-      notify: notifyFromPlugin,
-    };
-    for (const provider of record.definition.contextProviders ?? []) {
-      if (provider.when && !provider.when(ctx)) continue;
-      bound.push(
-        bindProvider(`${record.pluginId}:${provider.id}`, provider, ctx, (path) =>
-          resolvePluginAssetPath(path, record),
-        ),
-      );
-    }
-  }
+  for (const record of records) bound.push(...bindPluginProviders(record, runtime));
   return bound;
+}
+
+/** Bind one loaded plugin's providers with its scoped runtime and asset paths. */
+function bindPluginProviders(
+  record: PluginRecord,
+  runtime: Pick<PluginContext, "sdk" | "project">,
+): ActiveContextProvider[] {
+  if (record.status !== "loaded" || !record.definition) return [];
+  const ctx: PluginContext = {
+    pluginId: record.pluginId,
+    ...(record.dir === undefined ? {} : { pluginDir: record.dir }),
+    config: record.config,
+    project: runtime.project,
+    sdk: runtime.sdk,
+    notify: notifyFromPlugin,
+  };
+  return (record.definition.contextProviders ?? [])
+    .filter((provider) => !provider.when || provider.when(ctx))
+    .map((provider) =>
+      bindProvider(`${record.pluginId}:${provider.id}`, provider, ctx, (path) =>
+        resolvePluginAssetPath(path, record),
+      ),
+    );
 }
 
 function bindProvider(

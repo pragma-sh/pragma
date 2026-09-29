@@ -21,7 +21,7 @@ export function promptCaretPopover(
 }
 
 /** The `@` context picker shown under the prompt's caret, grouped by provider. */
-export function PromptContextMenu({ context }: { context: PromptContextState }) {
+function PromptContextMenu({ context }: { context: PromptContextState }) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "nearest" });

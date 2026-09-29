@@ -217,6 +217,7 @@ function useFanoutSubmit(): (input: {
  * adds a second attempt row: the single-agent path stays the default, and the
  * two share every control they can.
  */
+// fallow-ignore-next-line complexity -- coordinates independent form, history, fanout, and submission hooks.
 export function CreateWorktreeDialog({
   open: isOpen,
   onOpenChange,
