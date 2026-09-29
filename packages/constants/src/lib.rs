@@ -54,12 +54,13 @@ pub use generated::{
     ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource, ScriptRunStatus,
     Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
     SplitVertical, StorageDefaults, StorageFile, StorageFolder, StorageReminderSettings,
-    StorageSettings, StorageTreeEntry, StorageTreeEntryKind, Tab, TabKind, TerminalBackend,
-    TerminalDefaults, TerminalSettings, Tunnel, UpdateApplyMode, UpdatePlatform, Updates,
-    Whiteboard, WhiteboardCreateInput, WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput,
-    WhiteboardListInput, WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, WorktreeStorage, Wsl,
-    WslDistro, WslDistroList,
+    StorageSettings, StorageTreeEntry, StorageTreeEntryKind, System1, System1Settings,
+    System1Status, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel,
+    UpdateApplyMode, UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput,
+    WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput, WhiteboardListInput,
+    WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
+    WorktreeCommit, WorktreeCommitList, WorktreeStatus, WorktreeStorage, Wsl, WslDistro,
+    WslDistroList,
 };
 
 /// The parsed, shared constants.
