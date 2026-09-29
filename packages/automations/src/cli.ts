@@ -3,7 +3,7 @@ import { builtinModules } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { readStdinLines } from "@pragma-sh/sidecar-kit";
+import { freshImportSpecifier, readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import { findFiles } from "./find.ts";
 import { defineAutomation, type AutomationContext, type AutomationDefinition } from "./index.ts";
@@ -225,7 +225,7 @@ async function load(command: LoadCommand): Promise<void> {
   const root = cacheDir();
   await ensurePackages(root, bareImports(source));
   const entry = await copyEntry(command, source, root);
-  const imported = (await import(`${pathToFileURL(entry).href}?v=${Date.now()}`)) as {
+  const imported = (await import(freshImportSpecifier(entry, Date.now()))) as {
     default?: unknown;
   };
   const definition = validateAutomation(imported.default);
