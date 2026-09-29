@@ -120,9 +120,7 @@ function toAgentConfig(
   definition: AgentDefinition,
   record: PluginRecord,
 ): AgentConfig {
-  const staticModels = Array.isArray(definition.models)
-    ? definition.models.map(toRawAgentModel)
-    : [];
+  const staticModels = Array.isArray(definition.models) ? definition.models.map(toAgentModel) : [];
   return {
     id: pluginAgentId(pluginId, definition.id),
     name: definition.name,
@@ -138,17 +136,18 @@ function toAgentConfig(
   };
 }
 
-export function pluginAgentId(pluginId: string, agentId: string): string {
+function pluginAgentId(pluginId: string, agentId: string): string {
   if (pluginId === `pragma.${agentId}`) return pluginId;
   return agentId.includes(".") ? agentId : `${pluginId}.${agentId}`;
 }
 
-function toRawAgentModel(model: RawAgentModel): RawAgentModel {
-  return { id: model.id, name: model.name, reasoning: model.reasoning ?? [] };
-}
-
 function toAgentModel(model: RawAgentModel): AgentModel {
-  return { id: model.id, name: model.name, reasoning: model.reasoning ?? [] };
+  return {
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning ?? [],
+    ...(model.canonicalId ? { canonicalId: model.canonicalId } : {}),
+  };
 }
 
 function pluginContext(record: PluginAgentRecord): PluginContext {
