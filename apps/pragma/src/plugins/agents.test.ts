@@ -5,7 +5,9 @@ import type { PluginDefinition } from "@pragma-sh/plugin";
 import {
   listPluginAgents,
   pluginAgentLaunchArgs,
+  pluginAgentPrompt,
   resolvePluginAgentModels,
+  resolvePluginAgentOptions,
   setPluginAgents,
 } from "./agents";
 import type { PluginRecord } from "./registry";
@@ -26,6 +28,55 @@ function record(definition: PluginDefinition): PluginRecord {
 }
 
 describe("plugin agents", () => {
+  it("applies modes, permission modes, and slash-command invocations", async () => {
+    setPluginAgents(
+      [
+        record({
+          name: "Plugin A",
+          agents: [
+            {
+              id: "agent",
+              name: "Agent",
+              icon: () => null,
+              launch: { command: ["agent"] },
+              models: [],
+              modes: [
+                { id: "build", name: "Build" },
+                { id: "plan", name: "Plan" },
+              ],
+              permissionModes: [{ id: "auto", name: "Auto" }],
+              slashCommands: [{ name: "fix" }, { name: "review" }],
+              args: {
+                model: () => [],
+                reasoning: () => [],
+                mode: (modeId) => ["--agent", modeId],
+                permissionMode: (permissionModeId) => ["--permission", permissionModeId],
+                slashCommand: (name) => (name === "fix" ? "/prompts:fix" : `/${name}`),
+              },
+            },
+          ],
+          __apiVersion: "1.0.0",
+        } as PluginDefinition),
+      ],
+      { sdk: null, project: null },
+    );
+
+    expect(pluginAgentLaunchArgs("plugin-a.agent", null)).toEqual([
+      "--agent",
+      "build",
+      "--permission",
+      "auto",
+    ]);
+    expect(
+      pluginAgentLaunchArgs("plugin-a.agent", { modelId: null, reasoningId: null, modeId: "plan" }),
+    ).toEqual(["--agent", "plan", "--permission", "auto"]);
+    expect(pluginAgentPrompt("plugin-a.agent", "fix", "the bug")).toBe("/prompts:fix the bug");
+    expect(pluginAgentPrompt("plugin-a.agent", null, "/review now")).toBe("/review now");
+    await expect(resolvePluginAgentOptions("plugin-a.agent")).resolves.toMatchObject({
+      slashCommands: [{ name: "fix" }, { name: "review" }],
+    });
+  });
+
   it("resolves static models and launch args", async () => {
     setPluginAgents(
       [

@@ -109,7 +109,11 @@ import {
   type WorkspaceChangedEvent,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
-import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import {
+  listPluginAgents,
+  resolvePluginAgentModels,
+  resolvePluginAgentOptions,
+} from "@/plugins/agents";
 import { disposeTab as disposeEditorTab } from "@/state/editor-dirty-store";
 import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
@@ -3560,17 +3564,31 @@ function useProjectLoading(
       void setTabAgentCommand(request.tabId, agent.id, agent.name).catch((cause) => {
         dispatch({ type: "load-error", error: errorMessage(cause) });
       });
-      void startBackgroundAgentSession(
-        request.tabId,
-        request.worktreeId,
-        request.worktreePath,
-        agent,
-        request.prompt ?? undefined,
-        { modelId: request.modelId, reasoningId: request.reasoningId, modelCmd: request.modelCmd },
-      ).catch((cause: unknown) => {
-        console.warn(`failed to launch remote agent ${agent.id}`, cause);
-        toast.error("Couldn't launch agent session from your phone.");
-      });
+      // Resolve the agent's modes first so an unselected mode or permission
+      // mode falls back to the agent's own default rather than to no flag.
+      void resolvePluginAgentOptions(agent.id)
+        .catch(() => null)
+        .then(() =>
+          startBackgroundAgentSession(
+            request.tabId,
+            request.worktreeId,
+            request.worktreePath,
+            agent,
+            request.prompt ?? undefined,
+            {
+              modelId: request.modelId,
+              reasoningId: request.reasoningId,
+              modelCmd: request.modelCmd,
+              modeId: request.modeId,
+              permissionModeId: request.permissionModeId,
+              slashCommand: request.slashCommand,
+            },
+          ),
+        )
+        .catch((cause: unknown) => {
+          console.warn(`failed to launch remote agent ${agent.id}`, cause);
+          toast.error("Couldn't launch agent session from your phone.");
+        });
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();

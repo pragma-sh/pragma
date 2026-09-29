@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { errorMessage } from "@/lib/errors";
+import { announceBackgroundSession, resolvePromptCommands } from "@/lib/prelaunch-commands";
 import {
   createWorktree,
   githubPullBranch,
@@ -267,6 +268,44 @@ function useFailureRecovery({
  * the user has answered everything, and the shell can show a full-frame
  * progress screen instead of a blocking modal.
  */
+/**
+ * Starts the requested agent in a just-created worktree. The prompt's `!!`
+ * lines run there first and the agent gets their output; a run slow enough to
+ * be warned about may have outlasted the user's attention, so it launches in
+ * the background and offers to open it instead of stealing focus.
+ */
+async function startAgentInCreatedWorktree(
+  workspace: ReturnType<typeof useWorkspace>,
+  worktree: Worktree,
+  agent: AgentConfig,
+  prompt: string,
+  options: {
+    projectId: string;
+    focus: boolean;
+    worktreePath: string;
+    modelSelection?: AgentModelSelection;
+  },
+): Promise<void> {
+  const { modelSelection, ...target } = options;
+  const resolved = await resolvePromptCommands(worktree.id, prompt, agent.name);
+  const focus = target.focus && !resolved.warned;
+  const tab = await workspace.startSession(
+    worktree.id,
+    agent,
+    resolved.prompt.trim() || undefined,
+    modelSelection,
+    { ...target, focus },
+  );
+  if (!tab) {
+    throw new Error("Couldn't start an agent session for the new worktree.");
+  }
+  if (target.focus && !focus) {
+    announceBackgroundSession(agent.name, () => {
+      void workspace.activateTabLocation(tab.projectId, tab.worktreeId, tab.id);
+    });
+  }
+}
+
 export function WorktreeCreationProvider({ children }: { children: ReactNode }) {
   const workspace = useWorkspace();
   const [creation, setCreation] = useState<WorktreeCreationState | null>(null);
@@ -309,16 +348,10 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
       const options = { projectId: request.projectId, focus, worktreePath: worktree.path };
       const prompt = request.prompt?.trim();
       if (prompt && request.agent) {
-        const tab = await workspace.startSession(
-          worktree.id,
-          request.agent,
-          prompt,
-          request.modelSelection,
-          options,
-        );
-        if (!tab) {
-          throw new Error("Couldn't start an agent session for the new worktree.");
-        }
+        await startAgentInCreatedWorktree(workspace, worktree, request.agent, prompt, {
+          ...options,
+          modelSelection: request.modelSelection,
+        });
         return;
       }
       if (focus) {

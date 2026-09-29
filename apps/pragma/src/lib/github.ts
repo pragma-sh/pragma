@@ -1149,3 +1149,68 @@ export async function mergePullRequestStack(
   if (result.status === "failed") throw new Error(result.details.message);
   invalidateMergedStack(repo, stack);
 }
+
+/** An issue or pull request listed for the prompt's `@` picker. */
+export interface IssueListing {
+  number: number;
+  title: string;
+  kind: "issue" | "pull";
+  state: string;
+}
+
+/** An issue or pull request with the body an agent prompt carries. */
+export interface IssueDetail extends IssueListing {
+  body: string;
+  htmlUrl: string;
+  author: string | null;
+}
+
+/**
+ * The origin repo's open issues and pull requests, most recently updated
+ * first. GitHub's issues endpoint returns both; `kind` tells them apart.
+ */
+export const listRecentIssues = (repo: GitHubRepoRef): Promise<IssueListing[]> =>
+  cachedRepoFetch(
+    githubCacheKeys(repo).issueList(),
+    async (octokit) => {
+      const { data } = await octokit.rest.issues.listForRepo({
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "open",
+        sort: "updated",
+        per_page: 100,
+      });
+      // `state: "open"` already filters; keep the guarantee explicit for callers.
+      return data
+        .filter((issue) => issue.state === "open")
+        .map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          kind: issue.pull_request ? "pull" : "issue",
+          state: issue.state,
+        }));
+    },
+    { ttlMs: 60_000 },
+  );
+
+/** One issue or pull request by number, including its body and web URL. */
+export const getIssueDetail = defineCachedRepoRead(
+  (keys, issueNumber: number) => keys.issueDetail(issueNumber),
+  async (octokit, repo, issueNumber): Promise<IssueDetail> => {
+    const { data } = await octokit.rest.issues.get({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: issueNumber,
+    });
+    return {
+      number: data.number,
+      title: data.title,
+      kind: data.pull_request ? "pull" : "issue",
+      state: data.state,
+      body: data.body ?? "",
+      htmlUrl: data.html_url,
+      author: data.user?.login ?? null,
+    };
+  },
+  { ttlMs: 60_000 },
+);

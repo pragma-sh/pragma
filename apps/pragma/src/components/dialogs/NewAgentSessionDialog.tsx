@@ -12,14 +12,22 @@ import {
 import { AnimatePresence } from "motion/react";
 import { GitBranch } from "lucide-react";
 
+import { AgentLaunchOptionsBar } from "@/components/agents/AgentLaunchOptions";
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
-import { MarkdownEditor } from "@/components/github/MarkdownEditor";
+import { promptCaretPopover } from "@/components/agents/PromptContextMenu";
+import { MarkdownEditor, type MarkdownEditorHandle } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import {
+  type AgentLaunchOptionsState,
+  slashPicker,
+  useAgentLaunchOptions,
+  useEscapeClosesPickerFirst,
+} from "@/hooks/use-agent-launch-options";
 import { useAgentModels } from "@/hooks/use-agent-models";
-import { useEscapeToClose } from "@/hooks/use-escape-to-close";
+import { type PromptContextState, usePromptContext } from "@/hooks/use-prompt-context";
 import {
   EMPTY_MODEL_SELECTION,
   defaultModelSelection,
@@ -29,6 +37,7 @@ import {
 } from "@/lib/agent-model-selection";
 import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 import { isMacPlatform } from "@/lib/platform";
+import { splitPromptCommands, startSessionAfterCommands } from "@/lib/prelaunch-commands";
 import type { AgentConfig, AgentModelSelection } from "@/lib/tauri";
 import { listPluginAgents } from "@/plugins/agents";
 import { worktreeDisplayLabel } from "@/lib/non-git-project";
@@ -69,7 +78,7 @@ interface SessionFormSelection {
   effectiveAgentId: string | null;
   effectiveWorktreeId: string | null;
   selectedAgent: AgentConfig | null;
-  selectedWorktree: { id: string; isMain: boolean; title: string | null; branch: string } | null;
+  selectedWorktree: WorktreeLike | null;
   worktreeSelectValue: string;
   canSubmit: boolean;
 }
@@ -80,6 +89,9 @@ interface SessionFormApi extends SessionFormState, SessionFormSelection {
   loadModels: ReturnType<typeof useAgentModels>["loadModels"];
   worktrees: WorktreeLike[];
   error: string | null;
+  launch: AgentLaunchOptionsState;
+  context: PromptContextState;
+  editorRef: RefObject<MarkdownEditorHandle | null>;
   setMessage: (message: string) => void;
   handleAgentChange: (nextAgentId: string, nextSelection: AgentModelSelection) => void;
   handleWorktreeChange: (nextWorktreeId: string) => void;
@@ -89,7 +101,13 @@ interface SessionFormApi extends SessionFormState, SessionFormSelection {
   handleKeyDown: (event: KeyboardEvent) => void;
 }
 
-type WorktreeLike = { id: string; isMain: boolean; title: string | null; branch: string };
+type WorktreeLike = {
+  id: string;
+  isMain: boolean;
+  title: string | null;
+  branch: string;
+  path: string;
+};
 
 /** Load the configured agents whenever the dialog opens. */
 function useAgentSessionAgents(isOpen: boolean, setAgents: (agents: AgentConfig[]) => void): void {
@@ -289,6 +307,8 @@ interface SubmitContext {
   selectedAgent: AgentConfig | null;
   message: string;
   modelSelection: AgentModelSelection;
+  applyLaunch: AgentLaunchOptionsState["applyToLaunch"];
+  attachContext: PromptContextState["attachContext"];
   workspace: ReturnType<typeof useWorkspace>;
   onOpenChange: (open: boolean) => void;
   setMessage: (message: string) => void;
@@ -298,27 +318,56 @@ interface SubmitContext {
   setError: (error: string | null) => void;
 }
 
-/** Persist the model choice, start the session, then reset the form on success. */
+/**
+ * Persist the model choice, start the session, then reset the form on success.
+ * With `!!` command chips in the prompt the dialog closes at once: the commands
+ * run headlessly in the worktree and the session starts once they finish, with
+ * the rest of the prompt followed by each command's output.
+ */
 async function submitAgentSession(ctx: SubmitContext): Promise<void> {
-  if (!ctx.effectiveWorktreeId || !ctx.selectedAgent) return;
+  const worktreeId = ctx.effectiveWorktreeId;
+  const agent = ctx.selectedAgent;
+  if (!worktreeId || !agent) return;
   try {
-    rememberModelSelection(ctx.selectedAgent.id, ctx.modelSelection);
-    const tab = await ctx.workspace.startSession(
-      ctx.effectiveWorktreeId,
-      ctx.selectedAgent,
-      ctx.message.trim() ? ctx.message : undefined,
-      ctx.modelSelection,
-    );
+    rememberModelSelection(agent.id, ctx.modelSelection);
+    // A leading `/command` becomes the launch's slash command; mode and
+    // permission mode ride along on the selection.
+    // `!!` chips are commands to run first, not part of what the agent reads.
+    const { prompt: text, commands } = splitPromptCommands(ctx.message);
+    const launch = ctx.applyLaunch(ctx.modelSelection, text);
+    // `@` mentions still in the prompt carry their resolved context along.
+    const prompt = await ctx.attachContext(launch.prompt);
+    const start = (message: string | undefined, focus: boolean) =>
+      ctx.workspace.startSession(worktreeId, agent, message, launch.selection, { focus });
+    if (commands.length > 0) {
+      closeSessionForm(ctx);
+      void startSessionAfterCommands({
+        worktreeId,
+        agentLabel: agent.name,
+        commands,
+        prompt,
+        start,
+        open: (tab) =>
+          void ctx.workspace.activateTabLocation(tab.projectId, tab.worktreeId, tab.id),
+      });
+      return;
+    }
+    const tab = await start(prompt.trim() ? prompt : undefined, true);
     if (!tab) return;
-    ctx.onOpenChange(false);
-    ctx.setMessage("");
-    ctx.setAgentId(null);
-    ctx.setModelSelection(EMPTY_MODEL_SELECTION);
-    ctx.setWorktreeId(null);
-    ctx.setError(null);
+    closeSessionForm(ctx);
   } catch (cause) {
     ctx.setError(cause instanceof Error ? cause.message : String(cause));
   }
+}
+
+/** Close the dialog and clear every field for the next session. */
+function closeSessionForm(ctx: SubmitContext): void {
+  ctx.onOpenChange(false);
+  ctx.setMessage("");
+  ctx.setAgentId(null);
+  ctx.setModelSelection(EMPTY_MODEL_SELECTION);
+  ctx.setWorktreeId(null);
+  ctx.setError(null);
 }
 
 /** Launch the session on ⌘/Ctrl+↵ (no shift/alt) when the form is submittable. */
@@ -399,7 +448,7 @@ function useNewAgentSessionForm({
     loadedWorktrees,
   );
 
-  const handlers = useSessionFormHandlers({
+  const handlers = useSessionFormHandlers(isOpen, {
     refs,
     selection,
     message,
@@ -510,39 +559,77 @@ function useSessionFormEffects({
   }, [isOpen, initial, worktreeId, selectedWorktreeId, setters.setWorktreeId]);
 }
 
-/** Builds the form's stable event handlers (agent/worktree changes, submit, shortcuts). */
-function useSessionFormHandlers({
-  refs,
-  selection,
-  message,
-  modelSelection,
-  workspace,
-  onOpenChange,
-  setAgentId,
-  setModelSelection,
-  setWorktreeId,
-  setMessage,
-  setError,
-}: {
-  refs: RefObject<SessionFormRefs>;
-  selection: SessionFormSelection;
-  message: string;
-  modelSelection: AgentModelSelection;
-  workspace: ReturnType<typeof useWorkspace>;
-  onOpenChange: (open: boolean) => void;
-  setAgentId: (id: string | null) => void;
-  setModelSelection: (selection: AgentModelSelection) => void;
-  setWorktreeId: (id: string | null) => void;
-  setMessage: (message: string) => void;
-  setError: (error: string | null) => void;
-}): {
+/**
+ * Launch options for the selected agent and the `@` context picker for the
+ * selected worktree, plus the prompt editor they both rewrite.
+ */
+function useSessionLaunchOptions(
+  agent: AgentConfig | null,
+  isOpen: boolean,
+  message: string,
+  worktree: WorktreeLike | null,
+  project: ReturnType<typeof useWorkspace>["activeProject"],
+): {
+  launch: AgentLaunchOptionsState;
+  context: PromptContextState;
+  editorRef: RefObject<MarkdownEditorHandle | null>;
+} {
+  const editorRef = useRef<MarkdownEditorHandle | null>(null);
+  const launch = useAgentLaunchOptions(agent?.id ?? null, isOpen, message, editorRef);
+  const context = usePromptContext({ isOpen, project, worktree, editor: editorRef });
+  return { launch, context, editorRef };
+}
+
+/**
+ * Builds the form's stable event handlers (agent/worktree changes, submit,
+ * shortcuts) and owns the selected agent's launch options, which both submit
+ * and the prompt's key handling read.
+ */
+function useSessionFormHandlers(
+  isOpen: boolean,
+  {
+    refs,
+    selection,
+    message,
+    modelSelection,
+    workspace,
+    onOpenChange,
+    setAgentId,
+    setModelSelection,
+    setWorktreeId,
+    setMessage,
+    setError,
+  }: {
+    refs: RefObject<SessionFormRefs>;
+    selection: SessionFormSelection;
+    message: string;
+    modelSelection: AgentModelSelection;
+    workspace: ReturnType<typeof useWorkspace>;
+    onOpenChange: (open: boolean) => void;
+    setAgentId: (id: string | null) => void;
+    setModelSelection: (selection: AgentModelSelection) => void;
+    setWorktreeId: (id: string | null) => void;
+    setMessage: (message: string) => void;
+    setError: (error: string | null) => void;
+  },
+): {
   handleAgentChange: (nextAgentId: string, nextSelection: AgentModelSelection) => void;
   handleWorktreeChange: (nextWorktreeId: string) => void;
   markAgentManuallyChanged: () => void;
   markWorktreeManuallyChanged: () => void;
   submit: () => Promise<void>;
   handleKeyDown: (event: KeyboardEvent) => void;
+  launch: AgentLaunchOptionsState;
+  context: PromptContextState;
+  editorRef: RefObject<MarkdownEditorHandle | null>;
 } {
+  const { launch, context, editorRef } = useSessionLaunchOptions(
+    selection.selectedAgent,
+    isOpen,
+    message,
+    selection.selectedWorktree,
+    workspace.activeProject,
+  );
   const handleAgentChange = useCallback(
     (nextAgentId: string, nextSelection: AgentModelSelection) => {
       refs.current.agentManuallyChanged = true;
@@ -554,7 +641,9 @@ function useSessionFormHandlers({
   );
   const handleWorktreeChange = useCallback(
     (nextWorktreeId: string) => {
-      setWorktreeId(nextWorktreeId);
+      // Radix's hidden native <select> reports "" when its options are not
+      // mounted (e.g. under jsdom); never let that clear a real selection.
+      if (nextWorktreeId) setWorktreeId(nextWorktreeId);
     },
     [setWorktreeId],
   );
@@ -570,6 +659,8 @@ function useSessionFormHandlers({
       selectedAgent: selection.selectedAgent,
       message,
       modelSelection,
+      applyLaunch: launch.applyToLaunch,
+      attachContext: context.attachContext,
       workspace,
       onOpenChange,
       setMessage,
@@ -583,6 +674,8 @@ function useSessionFormHandlers({
     selection.selectedAgent,
     message,
     modelSelection,
+    launch.applyToLaunch,
+    context.attachContext,
     workspace,
     onOpenChange,
     setAgentId,
@@ -591,9 +684,17 @@ function useSessionFormHandlers({
     setMessage,
     setError,
   ]);
+  const launchKeyDown = launch.handleKeyDown;
+  const contextKeyDown = context.handleKeyDown;
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => handleSessionKeyDown(event, selection.canSubmit, submit),
-    [selection.canSubmit, submit],
+    (event: KeyboardEvent) => {
+      contextKeyDown(event);
+      if (event.defaultPrevented) return;
+      launchKeyDown(event);
+      if (event.defaultPrevented) return;
+      handleSessionKeyDown(event, selection.canSubmit, submit);
+    },
+    [contextKeyDown, launchKeyDown, selection.canSubmit, submit],
   );
   return {
     handleAgentChange,
@@ -602,6 +703,9 @@ function useSessionFormHandlers({
     markWorktreeManuallyChanged,
     submit,
     handleKeyDown,
+    launch,
+    context,
+    editorRef,
   };
 }
 
@@ -619,7 +723,9 @@ export function NewAgentSessionDialog({
   const workspace = useWorkspace();
   const form = useNewAgentSessionForm({ isOpen, onOpenChange, initial, workspace });
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
-  useEscapeToClose(isOpen, () => onOpenChange(false));
+  useEscapeClosesPickerFirst(isOpen, [form.context, slashPicker(form.launch)], () =>
+    onOpenChange(false),
+  );
 
   return (
     <AnimatePresence>
@@ -628,7 +734,9 @@ export function NewAgentSessionDialog({
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">New agent session</h2>
             <p className="text-sm text-muted-foreground">
-              Write a prompt, pick an agent and a worktree, then launch a session.
+              Write a prompt, pick an agent and a worktree, then launch a session. Type / for
+              commands, @ to attach files, issues, or pull requests, and !! for a shell command to
+              run first — the agent gets its output.
             </p>
           </div>
           <form
@@ -644,8 +752,12 @@ export function NewAgentSessionDialog({
                 value={form.message}
                 onChange={form.setMessage}
                 onKeyDown={form.handleKeyDown}
-                placeholder="Describe what you want the agent to do…"
+                handleRef={form.editorRef}
+                onCaretTextChange={form.context.onCaretTextChange}
+                caretPopover={promptCaretPopover(form.context, form.launch)}
+                placeholder="Describe what you want the agent to do. Type / for commands, @ for context, !! to run a shell command first…"
                 className="min-h-40"
+                shellCommands
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -702,7 +814,10 @@ export function NewAgentSessionDialog({
               </div>
             </div>
             {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center gap-2">
+              <div className="mr-auto min-w-0">
+                <AgentLaunchOptionsBar launch={form.launch} />
+              </div>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
