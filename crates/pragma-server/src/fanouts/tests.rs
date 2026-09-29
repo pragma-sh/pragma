@@ -15,6 +15,7 @@ use pragma_constants::{
     FanoutMemberStatus, FanoutNewParent, FanoutNewParentKind, FanoutParentSpec, FanoutReadRequest,
     FanoutRef, FanoutSendRequest, FanoutSendTarget, FanoutSendTargetKind, FanoutStatus,
 };
+use pragma_core::exec::CommandResult;
 use pragma_core::fanout::{CatalogAgentView, CatalogModelView};
 
 use super::{
@@ -31,6 +32,10 @@ struct FakeState {
     files: HashMap<(String, String), String>,
     scratchpads: HashMap<String, Vec<ScratchpadCopy>>,
     launches: Vec<LaunchSpec>,
+    /// `(worktree id, commands, run id)` per pre-launch command run.
+    command_runs: Vec<(String, Vec<String>, Option<String>)>,
+    /// Makes every command run come back cancelled, as a user's Skip would.
+    cancel_commands: bool,
     deliveries: Vec<(DeliveryTarget, String, String)>,
     stopped: Vec<String>,
     deleted: Vec<String>,
@@ -54,6 +59,8 @@ impl Default for FakeState {
             files: HashMap::new(),
             scratchpads: HashMap::new(),
             launches: Vec::new(),
+            command_runs: Vec::new(),
+            cancel_commands: false,
             deliveries: Vec::new(),
             stopped: Vec::new(),
             deleted: Vec::new(),
@@ -208,6 +215,32 @@ impl FanoutHost for FakeHost {
         Ok(worktree)
     }
 
+    fn run_commands(
+        &self,
+        worktree: &WorktreeView,
+        commands: &[String],
+        run_id: Option<&str>,
+    ) -> HostResult<Vec<CommandResult>> {
+        let mut state = self.state();
+        state.command_runs.push((
+            worktree.id.clone(),
+            commands.to_vec(),
+            run_id.map(str::to_string),
+        ));
+        let cancelled = state.cancel_commands;
+        Ok(commands
+            .iter()
+            .map(|command| CommandResult {
+                command: command.clone(),
+                stdout: format!("ran in {}", worktree.path),
+                stderr: String::new(),
+                status: (!cancelled).then_some(0),
+                duration_ms: 10,
+                cancelled,
+            })
+            .collect())
+    }
+
     fn launch_agent(&self, spec: &LaunchSpec) -> HostResult<String> {
         let mut state = self.state();
         if state
@@ -348,6 +381,7 @@ fn request(selectors: &[&str]) -> FanoutCreateRequest {
             .collect(),
         jobs: None,
         idempotency_key: None,
+        command_run_id: None,
     }
 }
 
@@ -395,6 +429,69 @@ fn creates_one_attempt_per_selector_from_one_captured_commit() {
         );
         assert_eq!(worktree.parent_id.as_deref(), Some("wt-main"));
     }
+}
+
+#[test]
+fn prelaunch_commands_run_in_each_attempt_worktree_before_its_agent() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    let mut create = two_members();
+    create.prompt = "Fix what !!`bun run test` reports".to_string();
+    create.command_run_id = Some("run-1".to_string());
+    let result = store.create(&host, &create).expect("creates");
+
+    // The title reads the chip as its plain code span.
+    assert_eq!(result.fanout.title, "Fix what `bun run test` reports");
+    // The record keeps the prompt verbatim, so a retry runs the commands again.
+    assert_eq!(result.fanout.prompt, "Fix what !!`bun run test` reports");
+    let runs = host.state().command_runs.clone();
+    let worktrees: Vec<String> = result
+        .fanout
+        .members
+        .iter()
+        .map(|member| member.worktree_id.clone().expect("worktree"))
+        .collect();
+    assert_eq!(runs.len(), 2);
+    for ((worktree_id, commands, run_id), expected) in runs.iter().zip(&worktrees) {
+        assert_eq!(worktree_id, expected);
+        assert_eq!(commands, &["bun run test".to_string()]);
+        assert_eq!(run_id.as_deref(), Some("run-1"));
+    }
+    let launches = host.state().launches.clone();
+    for launch in &launches {
+        assert!(launch
+            .prompt
+            .starts_with("Fix what `bun run test` reports\n\nBefore this session started"));
+        assert!(launch.prompt.contains(&format!("ran in {}", launch.cwd)));
+        assert!(!launch.prompt.contains("!!"));
+    }
+}
+
+#[test]
+fn a_skipped_command_run_skips_the_attempts_still_waiting() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    host.state().cancel_commands = true;
+    let mut create = two_members();
+    create.prompt = "Fix it after !!`sleep 600`".to_string();
+    store.create(&host, &create).expect("creates");
+
+    // Only the first attempt ran its commands; the second never started them.
+    assert_eq!(host.state().command_runs.len(), 1);
+    let launches = host.state().launches.clone();
+    assert_eq!(launches.len(), 2);
+    assert!(launches[0].prompt.contains("skipped=\"true\""));
+    assert!(launches[1]
+        .prompt
+        .contains("(skipped by the user; never ran)"));
+}
+
+#[test]
+fn a_prompt_without_commands_runs_nothing() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    store.create(&host, &two_members()).expect("creates");
+    assert!(host.state().command_runs.is_empty());
 }
 
 #[test]
