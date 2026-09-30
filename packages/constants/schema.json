@@ -597,6 +597,10 @@
         "idempotencyKey": {
           "type": ["string", "null"],
           "description": "Repeating a create with the same key returns the existing fanout instead of provisioning a second one."
+        },
+        "commandRunId": {
+          "type": ["string", "null"],
+          "description": "Names the `exec` runs of the prompt's pre-launch commands, so a concurrent `exec` cancel with this id skips them: the running attempt's commands stop and later attempts skip theirs."
         }
       }
     },
@@ -2066,6 +2070,67 @@
         }
       }
     },
+    "AgentSlashCommand": {
+      "title": "AgentSlashCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "One slash command an agent accepts in its prompt (`/review`, `/init`, a project command). Applied at launch by prefixing the prompt with `invocation`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Command name without the leading slash, as typed after `/` (for example `review` or `frontend:component`)."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "One-line description shown in the slash-command picker."
+        },
+        "argumentHint": {
+          "type": ["string", "null"],
+          "description": "Hint for the text expected after the command (for example `[pr-number]`)."
+        },
+        "invocation": {
+          "type": ["string", "null"],
+          "description": "Text the agent's TUI expects to invoke the command; the launch prompt becomes `<invocation> <input>`. Defaults to `/<name>`."
+        }
+      }
+    },
+    "AgentMode": {
+      "title": "AgentMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One primary agent/mode the host tool can start in (opencode's `build`/`plan`, a Claude Code `--agent`). The first entry is the tool's default.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "AgentPermissionMode": {
+      "title": "AgentPermissionMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One permission mode an agent can start in. The first entry is the default applied when a launch selects none.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
     "AgentIcon": {
       "title": "AgentIcon",
       "type": "object",
@@ -2095,7 +2160,8 @@
         "abort",
         "interrupt",
         "usageLimits",
-        "sessionName"
+        "sessionName",
+        "slashCommands"
       ]
     },
     "CatalogAgent": {
@@ -2144,6 +2210,27 @@
             "$ref": "#/definitions/AgentModelEntry"
           }
         },
+        "slashCommands": {
+          "type": "array",
+          "description": "Slash commands the agent accepts, for a `/` picker. Applied through `AgentSessionLaunchPayload.slashCommand`.",
+          "items": {
+            "$ref": "#/definitions/AgentSlashCommand"
+          }
+        },
+        "modes": {
+          "type": "array",
+          "description": "Primary agents/modes the agent can start in (Shift+Tab in the launcher). Selected through `AgentSessionLaunchPayload.modeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentMode"
+          }
+        },
+        "permissionModes": {
+          "type": "array",
+          "description": "Permission modes the agent can start in. Selected through `AgentSessionLaunchPayload.permissionModeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentPermissionMode"
+          }
+        },
         "excludeFeatures": {
           "type": "array",
           "description": "Capabilities the agent declares unsupported; agent verification skips matching scenarios.",
@@ -2189,6 +2276,20 @@
         "prefillSubmitDelayMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "modeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.modes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
+        },
+        "permissionModeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.permissionModes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
         }
       }
     },
@@ -2205,6 +2306,24 @@
           "type": ["string", "null"]
         },
         "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AgentLaunchArgs": {
+      "title": "AgentLaunchArgs",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "args"],
+      "description": "Resolved launch arguments for one mode or permission-mode id, appended after the model/reasoning command.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "args": {
           "type": "array",
           "items": {
             "type": "string"
@@ -2440,7 +2559,13 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Shared agent-launch timing used by both the frontend's terminal-write scheduling and the Rust CLI/broker launch path.",
-      "required": ["startDelayMs", "altScreenExtraWaitMs", "altScreenSettleMs"],
+      "required": [
+        "startDelayMs",
+        "altScreenExtraWaitMs",
+        "altScreenSettleMs",
+        "prelaunchCommandPrefix",
+        "prelaunchOutputLimit"
+      ],
       "properties": {
         "startDelayMs": {
           "type": "integer",
@@ -2456,6 +2581,16 @@
           "type": "integer",
           "minimum": 0,
           "description": "Delay after a late alternate-screen entry before sending the prompt, allowing the TUI input widget to mount."
+        },
+        "prelaunchCommandPrefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prefix of an inline shell command in an agent prompt, written `!!` + a code span (``!!`bun run test` ``). The command runs headlessly in the agent's worktree before it starts; the agent reads it as a plain code span, followed by its output. Read by the prompt editor, the desktop launch paths, and the host's fanout provisioning."
+        },
+        "prelaunchOutputLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most characters of each pre-launch command stream (stdout, stderr) handed to the agent; the tail is kept."
         }
       }
     },
@@ -3456,6 +3591,18 @@
         },
         "reasoningId": {
           "type": ["string", "null"]
+        },
+        "modeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.modes`. Omitted selects the agent's first (default) mode."
+        },
+        "permissionModeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.permissionModes`. Omitted selects the agent's first (default) permission mode."
+        },
+        "slashCommand": {
+          "type": ["string", "null"],
+          "description": "Name from `CatalogAgent.slashCommands`. The launch prompt becomes the command's invocation followed by `prompt`."
         },
         "modelCmd": {
           "type": ["string", "null"],

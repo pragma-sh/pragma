@@ -26,6 +26,11 @@ pragma-cli agent await-answer --agent <id> --request-id <id> [--timeout 300]
 pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismiss
 # Interject: publish free-form input to a running agent (the controlling-client side).
 pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
+# Launch through the gateway (desktop open: a tab; `--headless` or app closed: host-owned).
+pragma-cli agent start --agent <id> [--model <id> [--reasoning <id>]] [--mode <id>] \
+  [--permission-mode <id>] [--slash-command <name>] [--prompt "<text>"] [--headless]
+# What an agent can start with: models, modes, permission modes, slash commands.
+pragma-cli agent options --agent <id>
 # End-to-end integration verification through the gateway/mobile API surface.
 pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b'] \
   [--model <id> | --pick-model-cmd "<raw model args>"] [--jobs <n>] [--headed]
@@ -103,7 +108,10 @@ server broadcasts `cleared` for a tab's agent statuses when its session is kille
 exits on its own (a SIGKILLed agent's own hooks never run), so the scenario passes for
 every agent, not just those whose plugin can report its own death.
 Agent catalog `excludeFeatures` entries skip matching optional scenario groups with an
-explicit reason. `command-no-permission` verifies a safe shell command completes and
+explicit reason. The catalog gate also fails a mode or permission mode without resolved
+launch args (a plugin that declares `modes` but no `args.mode`). `slash-commands` checks
+the catalog lists well-formed slash commands; it and `catalog` launch nothing, so
+`--scenario slash-commands` alone needs no worktree, workspace, or event stream. `command-no-permission` verifies a safe shell command completes and
 raises no command-attention event; command approval remains a separate capability group.
 Approval scenarios request an explicit external `workdir` rather than putting `$HOME` in
 the command: OpenCode 1.18 treats command-argument external paths as advisory and cannot

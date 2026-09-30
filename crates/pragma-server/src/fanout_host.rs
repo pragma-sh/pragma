@@ -15,6 +15,7 @@ use pragma_protocol::AgentInput;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::agent_options::AgentLaunchOptions;
 use crate::fanouts::{
     DeliveryTarget, FanoutHost, HostError, HostResult, LaunchSpec, ScratchpadCopy, WorktreeView,
 };
@@ -213,6 +214,22 @@ impl FanoutHost for Registry {
         Ok(view(&worktree))
     }
 
+    fn run_commands(
+        &self,
+        worktree: &WorktreeView,
+        commands: &[String],
+        run_id: Option<&str>,
+    ) -> HostResult<Vec<CommandResult>> {
+        let project_root = FanoutHost::project_root(self, &worktree.project_id)?;
+        run_exec(&ExecRequest {
+            cwd: worktree.path.clone(),
+            commands: commands.to_vec(),
+            env: worktree_env(&project_root, &worktree.path, &worktree.id),
+            max_concurrent: 1,
+            run_id: run_id.map(str::to_string),
+        })
+    }
+
     fn launch_agent(&self, spec: &LaunchSpec) -> HostResult<String> {
         self.launch_agent_session(&AgentLaunch {
             project_id: spec.project_id.clone(),
@@ -222,6 +239,7 @@ impl FanoutHost for Registry {
             model_id: spec.model_id.clone(),
             reasoning_id: spec.reasoning_id.clone(),
             model_cmd: None,
+            options: AgentLaunchOptions::default(),
             prompt: Some(spec.prompt.clone()),
             fanout: Some(FanoutMembership {
                 fanout_id: spec.fanout_id.clone(),
@@ -454,25 +472,13 @@ fn run_setup_scripts(project_root: &str, worktree_root: &str, worktree_id: &str)
     if commands.is_empty() {
         return Ok(());
     }
-    let request = ExecRequest {
+    let results = run_exec(&ExecRequest {
         cwd: worktree_root.to_string(),
         commands,
-        env: vec![
-            (
-                "PRAGMA_WORKTREE_PATH".to_string(),
-                worktree_root.to_string(),
-            ),
-            ("PRAGMA_PROJECT_PATH".to_string(), project_root.to_string()),
-            ("PRAGMA_WORKTREE_ID".to_string(), worktree_id.to_string()),
-        ],
+        env: worktree_env(project_root, worktree_root, worktree_id),
         max_concurrent: u32::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).unwrap_or(1),
-    };
-    let payload = serde_json::to_value(&request)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
-    let value = pragma_core::exec::handle(payload)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
-    let results: Vec<CommandResult> = serde_json::from_value(value)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
+        run_id: None,
+    })?;
     let failures: Vec<&CommandResult> = results
         .iter()
         .filter(|result| result.status != Some(0))
@@ -498,6 +504,33 @@ fn run_setup_scripts(project_root: &str, worktree_root: &str, worktree_id: &str)
         FanoutFailureCode::SetupFailed,
         format!("setup scripts failed: {detail}"),
     ))
+}
+
+/// Environment every headless command in a worktree receives.
+fn worktree_env(
+    project_root: &str,
+    worktree_root: &str,
+    worktree_id: &str,
+) -> Vec<(String, String)> {
+    vec![
+        (
+            "PRAGMA_WORKTREE_PATH".to_string(),
+            worktree_root.to_string(),
+        ),
+        ("PRAGMA_PROJECT_PATH".to_string(), project_root.to_string()),
+        ("PRAGMA_WORKTREE_ID".to_string(), worktree_id.to_string()),
+    ]
+}
+
+/// Runs an `exec` batch in-process through the same handler the RPC uses, so
+/// a cancel arriving over the socket finds its run registered.
+fn run_exec(request: &ExecRequest) -> HostResult<Vec<CommandResult>> {
+    let payload = serde_json::to_value(request)
+        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
+    let value = pragma_core::exec::handle(payload)
+        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
+    serde_json::from_value(value)
+        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))
 }
 
 /// The project's `setup` commands, or none when it has no scripts file. A

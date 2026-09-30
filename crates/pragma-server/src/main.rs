@@ -1,3 +1,4 @@
+mod agent_options;
 mod automations;
 mod fanout_host;
 mod fanouts;

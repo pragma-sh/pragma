@@ -9,12 +9,15 @@ const startSessionMock = vi.fn();
 const refreshProjectMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const createTerminalTabMock = vi.fn();
+const runWorktreeCommandsMock = vi.fn();
 let emitStage: ((stage: { projectId: string; worktreeId: string; stage: string }) => void) | null =
   null;
 
 vi.mock("@/lib/tauri", () => ({
   createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
   githubPullBranch: (...args: unknown[]) => githubPullBranchMock(...args),
+  runWorktreeCommands: (...args: unknown[]) => runWorktreeCommandsMock(...args),
+  cancelWorktreeCommands: vi.fn(),
   onWorktreeCreateStage: (handler: (stage: never) => void) => {
     emitStage = handler as typeof emitStage;
     return Promise.resolve(() => {
@@ -350,6 +353,34 @@ describe("WorktreeCreationProvider", () => {
     // Left before completion, so opening the new worktree must not steal focus.
     expect(selectWorktreeMock).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("runs the prompt's !! commands in the new worktree before starting the agent", async () => {
+    runWorktreeCommandsMock.mockResolvedValue([
+      {
+        command: "git log -1",
+        stdout: "abc\n",
+        stderr: "",
+        status: 0,
+        durationMs: 5,
+        cancelled: false,
+      },
+    ]);
+    renderHarness(null, "Fix the bug in !!`git log -1`", testAgent);
+
+    await waitFor(() => expect(startSessionMock).toHaveBeenCalled());
+    expect(runWorktreeCommandsMock).toHaveBeenCalledWith(
+      "wt-new",
+      ["git log -1"],
+      expect.any(String),
+    );
+    const [worktreeId, agent, prompt, , options] = startSessionMock.mock.calls[0]!;
+    expect(worktreeId).toBe("wt-new");
+    expect(agent).toBe(testAgent);
+    expect(prompt).toMatch(/^Fix the bug in `git log -1`\n\nBefore this session started/);
+    expect(prompt).toContain('<command-output command="git log -1" exit-code="0"');
+    expect(prompt).not.toContain("!!");
+    expect(options).toMatchObject({ projectId: "p", focus: true });
   });
 
   it("keeps the screen and retries when refreshing the created worktree fails", async () => {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pragma_constants::{AgentAttentionKind, AgentFeature, AgentStatus};
+use pragma_constants::{AgentAttentionKind, AgentFeature, AgentStatus, CatalogAgent};
 
 use super::engine::ScenarioCtx;
 use super::events::VerifyEvent;
@@ -146,6 +146,13 @@ pub fn definitions() -> &'static [ScenarioDef] {
             slow: false,
             features: &[],
             run: crash_exit,
+        },
+        ScenarioDef {
+            id: "slash-commands",
+            name: "slash commands",
+            slow: false,
+            features: &[AgentFeature::SlashCommands],
+            run: slash_commands,
         },
         ScenarioDef {
             id: "usage-limits",
@@ -515,6 +522,47 @@ fn crash_exit(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, Strin
     session.kill()?;
     session.await_settled()?;
     Ok(Outcome::Passed)
+}
+
+/// The agent exposes a non-empty, well-formed slash-command list in the catalog
+/// (what the launcher's `/` picker and `agentSessionLaunch.slashCommand` use).
+fn slash_commands(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome, String> {
+    let catalog = ctx.api.catalog()?;
+    let agent = catalog
+        .agents
+        .iter()
+        .find(|agent| agent.id == ctx.catalog_agent_id)
+        .ok_or_else(|| format!("agent vanished from catalog: {}", ctx.catalog_agent_id))?;
+    validate_slash_commands(agent)?;
+    Ok(Outcome::Passed)
+}
+
+/// Checks that an agent lists slash commands and that each one can be typed:
+/// a bare, unique name and, when present, a single-line invocation.
+pub fn validate_slash_commands(agent: &CatalogAgent) -> Result<(), String> {
+    if agent.slash_commands.is_empty() {
+        return Err("catalog agent exposes no slash commands".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for command in &agent.slash_commands {
+        let name = command.name.as_str();
+        if name.is_empty() || name.starts_with('/') || name.contains(char::is_whitespace) {
+            return Err(format!(
+                "slash command name must be bare and space-free: {name:?}"
+            ));
+        }
+        if !seen.insert(name) {
+            return Err(format!("duplicate slash command: {name}"));
+        }
+        if let Some(invocation) = command.invocation.as_deref() {
+            if invocation.trim().is_empty() || invocation.contains('\n') {
+                return Err(format!(
+                    "slash command {name} has an untypeable invocation: {invocation:?}"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn usage_limits(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome, String> {

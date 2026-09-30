@@ -149,16 +149,16 @@ models because parallel sub-agents can exceed 60 seconds.
 
 ## Launch
 
-The base launch is `kimi -y` (yolo): Kimi's manual mode gates **Bash** behind a TUI
-approval prompt (Bash is not in kimi's default-approve tool set), so a plain `kimi` never
-completes a safe shell command headlessly and `pragma-cli agent verify`'s
-`command-no-permission` scenario times out. Baking `-y` into the base command mirrors
-Claude Code's `--permission-mode auto`; `-y` auto-approves regular tool calls while the
-agent may still ask questions. The declared permission modes are `yolo` = `-y` (default,
-already in the base command), `default` = ask (no flag), `auto` = `--auto` (fully
-autonomous), `plan` = `--plan` (plan mode). The host does not apply `permissionMode` args
-yet, so the base command is the effective launch; when the selector gets wired, the base
-`-y` and the per-mode args must be reconciled (an "ask" selection currently cannot strip
-the baked-in `-y`). `--model <alias>` selects the model. Outside a Pragma terminal
+The base launch is plain `kimi`; the permission mode supplies the approval flag, and the
+first mode is the default every launch applies when none is selected. That default is
+`yolo` = `-y`: Kimi's manual mode gates **Bash** behind a TUI approval prompt (Bash is not
+in kimi's default-approve tool set), so without `-y` a safe shell command never completes
+headlessly and `pragma-cli agent verify`'s `command-no-permission` scenario times out.
+`-y` auto-approves regular tool calls while the agent may still ask questions. The other
+modes are `default` = ask (no flag), `auto` = `--auto` (fully autonomous), `plan` =
+`--plan`. Modes (Shift+Tab in the launcher) are `default` plus agent profiles discovered
+in `.kimi-code/agents` / `.agents/agents` (project and home), started with `--agent
+<name>`. Slash commands come from `kimi acp` (ACP `available_commands_update`, skills as
+`/skill:<name>`), with `/init`, `/compact`, and the skill folders as the fallback. `--model <alias>` selects the model. Outside a Pragma terminal
 `PRAGMA_SERVER_SOCKET`/`PRAGMA_DAEMON_SOCKET` are unset and every hook is a silent no-op
 (exit 0), so the plugin is harmless in plain terminals.

@@ -82,8 +82,11 @@ describe("grokAgentPlugin", () => {
 
   it("maps each permission mode to a real grok launch flag", () => {
     expect(agent?.args.permissionMode("default")).toEqual([]);
-    expect(agent?.args.permissionMode("no-plan")).toEqual(["--no-plan"]);
-    expect(agent?.args.permissionMode("always-approve")).toEqual(["--always-approve"]);
+    expect(agent?.args.permissionMode("plan")).toEqual(["--permission-mode", "plan"]);
+    expect(agent?.args.permissionMode("bypassPermissions")).toEqual([
+      "--permission-mode",
+      "bypassPermissions",
+    ]);
     expect(agent?.args.model("grok-4.5")).toEqual(["--model", "grok-4.5"]);
     expect(agent?.args.reasoning("high")).toEqual(["--reasoning-effort", "high"]);
   });

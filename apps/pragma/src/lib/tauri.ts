@@ -162,6 +162,12 @@ export interface AgentModelSelection {
    * `modelId`/`reasoningId` when set. Brokered launches only — the UI never sets it.
    */
   modelCmd?: string | null;
+  /** Mode id from the agent's `modes`; absent selects the first (default) mode. */
+  modeId?: string | null;
+  /** Permission mode id; absent selects the agent's first (default) permission mode. */
+  permissionModeId?: string | null;
+  /** Slash command name; the prefill becomes its invocation followed by the prompt. */
+  slashCommand?: string | null;
 }
 
 /** Subscribes to daemon-forwarded agent status reports. */
@@ -275,6 +281,9 @@ export interface AgentSessionLaunchRequest {
   reasoningId: string | null;
   /** Raw model command overriding catalog model args; see {@link AgentModelSelection.modelCmd}. */
   modelCmd?: string | null;
+  modeId?: string | null;
+  permissionModeId?: string | null;
+  slashCommand?: string | null;
   prompt: string | null;
 }
 
@@ -524,6 +533,40 @@ export function getProjectsDirectory(): Promise<string> {
 /** Loads optional `.pragma/scripts.json` for a project from its persisted root path. */
 export function loadProjectScripts(projectId: string): Promise<ProjectScriptsConfig> {
   return invoke<ProjectScriptsConfig>("load_project_scripts", { projectId });
+}
+
+/** One headless command's captured result, from the host's `exec` RPC. */
+export interface WorktreeCommandResult {
+  command: string;
+  stdout: string;
+  stderr: string;
+  /** Exit code; null when killed by a signal, cancelled before it ran, or it failed to spawn. */
+  status: number | null;
+  durationMs: number;
+  /** The batch was cancelled before this command finished (or started). */
+  cancelled: boolean;
+}
+
+/**
+ * Runs `commands` one after another in a worktree on its host, without a tab,
+ * returning every result whatever its exit code. `runId` names the batch for
+ * {@link cancelWorktreeCommands}.
+ */
+export function runWorktreeCommands(
+  worktreeId: string,
+  commands: string[],
+  runId: string,
+): Promise<WorktreeCommandResult[]> {
+  return invoke<WorktreeCommandResult[]>("run_worktree_commands", {
+    worktreeId,
+    commands,
+    runId,
+  });
+}
+
+/** Kills a {@link runWorktreeCommands} batch's running command and skips the rest. */
+export function cancelWorktreeCommands(worktreeId: string, runId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_worktree_commands", { worktreeId, runId });
 }
 
 /**

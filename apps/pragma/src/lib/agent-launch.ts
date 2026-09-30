@@ -1,7 +1,7 @@
 import { constants } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
-import { modelLaunchArgs } from "@/lib/agent-model-selection";
+import { launchPrompt, modelLaunchArgs } from "@/lib/agent-model-selection";
 import {
   type AgentConfig,
   type AgentModelSelection,
@@ -74,7 +74,8 @@ export function startAgentInTab(
   selection?: AgentModelSelection,
 ): void {
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
   // Start the clocks only once the PTY is connected. A slow connect (e.g. a
   // freshly created worktree) would otherwise queue the command, paste, and
@@ -225,7 +226,8 @@ export async function startBackgroundAgentSession(
   const cols = Math.min(BACKGROUND_TERMINAL_COLS, MAX_TERMINAL_COLS);
   const rows = Math.min(BACKGROUND_TERMINAL_ROWS, MAX_TERMINAL_ROWS);
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
 
   const write = (data: string) => {
     void ptyWrite(tabId, data).catch((error: unknown) => {

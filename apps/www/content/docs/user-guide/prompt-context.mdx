@@ -1,0 +1,98 @@
+---
+title: Prompt context
+description: Type @ in any agent prompt to attach files, GitHub issues, and pull requests, or !! to run a shell command first and send the agent its output.
+---
+
+Every prompt that launches an agent accepts `@` mentions: **New agent session**, **New
+worktree** (single and **Fan out**), and **Agent board** drafts. Type `@` at the start of a line or
+after a space, and a picker opens under the cursor, grouped by source. Keep typing to narrow
+it; **↑**/**↓** move, **Enter** or **Tab** insert the highlighted item, **Esc** closes the
+picker.
+
+| Source            | Mention | What the agent receives                                                                               |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| **GitHub issues** | `@#123` | The issue's title, state, author, **full body**, and a link (plus `gh issue view 123 --comments`).    |
+| **Pull requests** | `@#45`  | The pull request's title, state, author, **full body**, and a link (plus `gh pr view 45 --comments`). |
+| **Files**         | `@path` | The worktree-relative path, with a note to read the file.                                             |
+
+The picker lists **issues and pull requests first, then files**, even for a bare `@`:
+the most recently updated open issues and pull requests, then the worktree's top-level
+folders and files (dotfiles hidden). Keep typing to search. Folders can be mentioned too
+(`@src/`). When nothing matches, the picker says so instead of closing.
+
+Files are searched in the worktree the agent will work from: the one picked in **New agent
+session**, the parent a **New worktree** branches from, or, for a board draft, the worktree
+already on the draft's branch (the selected worktree when the branch is new). Issues and pull requests list the
+100 most recently updated open ones in the worktree's `origin` repository; only open ones are ever
+offered. Type an exact number (`@#12`) to reach an open one older than that. GitHub sources need you to be
+[signed in to GitHub](/docs/user-guide/github); until then the picker shows a sign-in note
+where issues and pull requests would be.
+
+## What gets sent
+
+Your prompt is sent as written. When you launch, every mention **still in the prompt** is
+resolved and appended as a `<context>` block the agent can tell apart from your request:
+
+```text
+Fix the crash described in @#123
+
+<context mention="@#123" source="GitHub issues">
+GitHub issue #123: Crash on launch (open)
+Author: @octo
+Link: https://github.com/acme/app/issues/123
+Open the link (or run `gh issue view 123 --comments`) for the discussion and further details.
+
+Steps to reproduce…
+</context>
+```
+
+Delete a mention from the prompt and its context is not sent.
+
+Where the prompt is saved for later, the context is resolved **when you save**: a board
+draft stores it with the card, and a fanout sends it to every attempt. Reopening a draft
+(or retrying a failed **New worktree**) shows only your text; the mentions still in it
+keep their saved context, so it is not fetched again.
+
+## Run commands first
+
+An agent prompt can also hand the agent a command's output. In **New agent session** or **New
+worktree** (single or **Fan out**), type `!!` anywhere — even mid-sentence — and a small `$`
+chip opens where you are typing. Type the command, then press **Enter** or **→** to leave the
+chip and carry on with the sentence; **Backspace** straight after `!!` gives you the two
+characters back. Add as many commands as you like. `@` and `/` inside a command are just part
+of the command. In the saved prompt a chip is written `` !!`command` ``.
+
+When you start, the commands run one after another, headlessly, in the worktree the agent will
+work in, on the machine that owns it, so an [SSH](/docs/user-guide/ssh) project runs them on
+the remote host. For **New worktree** that's the new worktree, once it exists. For **Fan out**
+it's every attempt's own worktree, so each agent sees its own checkout's output. Once they
+finish, the agent starts with your prompt, each chip read as a plain `` `command` ``, followed
+by each command and its output. Typing `Fix what !!bun run test` then **→** ` reports` sends:
+
+```text
+Fix what `bun run test` reports
+
+Before this session started, I ran these commands in the worktree. Their output follows.
+
+<command-output command="bun run test" exit-code="1" duration="12.4s">
+✗ auth › refreshes an expired token
+[stderr]
+error: 1 test failed
+</command-output>
+```
+
+A failing command does not stop the launch; its exit code is included for the agent to read.
+Very long output is trimmed to its last 20,000 characters per stream.
+
+If the commands are still running after **30 seconds**, Pragma shows a notification with a
+**Skip** button. Skip stops the running command, skips the ones after it, and starts the
+agent right away with the output captured so far, marking those commands `skipped="true"`.
+A session launched after that warning opens in the background, so it doesn't pull you away
+from what you're doing, and a notification with **Open** takes you to it.
+
+In a **Fan out**, Skip applies to the whole fanout: the attempt running its commands stops, and
+the attempts still waiting start straight away with their commands marked as never run. Retrying
+a failed attempt runs its commands again. Fanouts created with `pragma-cli fanout create` or the
+SDK honour `` !!`command` `` chips too.
+
+Plugins can add their own sources — see [Prompt context providers](/docs/plugins/context).

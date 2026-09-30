@@ -130,6 +130,15 @@ pragma-cli agent verify --agent <catalog-id>
 pragma-cli agent verify --agent <catalog-id> --scenario <id> --jobs 1
 pragma-cli agent verify --agent <catalog-id> --model <model-id>
 pragma-cli agent verify --agent <catalog-id> --pick-model-cmd "--model provider/model"
+pragma-cli agent verify --agent <catalog-id> --scenario slash-commands   # catalog-only, no launch
+```
+
+Launch and inspect an agent's options:
+
+```sh
+pragma-cli agent options --agent <id>        # models, modes, permission modes, slash commands
+pragma-cli agent start --agent <id> [--model <id> [--reasoning <id>]] [--mode <id>] \
+  [--permission-mode <id>] [--slash-command <name>] [--prompt "<text>"] [--headless]
 ```
 
 Verification launches real sessions and can consume model tokens. Default is headless;

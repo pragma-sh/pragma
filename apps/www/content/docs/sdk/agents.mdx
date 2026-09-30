@@ -97,9 +97,28 @@ Pass `prompt` in `ConnectOptions` to attach **and** deliver an initial prompt.
 ## Catalog and launching
 
 - `client.agents.catalog()` — `GET /v1/agents/catalog`: every registered agent with its
-  models, reasoning levels, and permission modes (assembled by the plugin host).
+  models, reasoning levels, modes, permission modes, and slash commands (assembled by the
+  plugin host).
+- `client.agents.launchOptions(agentId)` — one catalog agent's `{ slashCommands, modes,
+permissionModes }`.
 - `client.agents.launch(payload)` — `POST /v1/control/agentSessionLaunch`: create a
   worktree/tab and start an agent session, optionally `headless: true` (works while the
-  desktop is closed). Returns `{ worktreeId, tabId }`.
+  desktop is closed). Returns `{ worktreeId, tabId }`. Optional `modeId` and
+  `permissionModeId` pick from the agent's lists (omitted = its first, default entry);
+  `slashCommand` runs a command with `prompt` as its input.
+
+```ts
+const { slashCommands, modes } = await client.agents.launchOptions("pragma.opencode");
+await client.agents.launch({
+  projectId,
+  worktreeId,
+  newWorktree: null,
+  agentId: "pragma.opencode",
+  modeId: "plan",
+  slashCommand: "review",
+  prompt: "the auth module",
+});
+```
+
 - `client.agents.markAgentsSeen({ tabId })` — clear the "seen" latch for a tab, the same
   call the desktop makes when you view it.

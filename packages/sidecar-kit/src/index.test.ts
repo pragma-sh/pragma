@@ -1,7 +1,10 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import { readStdinLines } from "./index.ts";
+import { freshImportSpecifier, readStdinLines } from "./index.ts";
 
 describe("readStdinLines", () => {
   it("emits trimmed, non-empty lines split on newlines across chunks", () => {
@@ -45,5 +48,17 @@ describe("readStdinLines", () => {
     } finally {
       Object.defineProperty(process, "stdin", { value: originalStdin, configurable: true });
     }
+  });
+});
+
+describe("freshImportSpecifier", () => {
+  it("re-imports a rewritten file once its version changes", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "sidecar-kit-")), "bundle.mjs");
+    writeFileSync(path, 'export default "v1";');
+    const first = (await import(freshImportSpecifier(path, 1))) as { default: string };
+    writeFileSync(path, 'export default "v2";');
+    const same = (await import(freshImportSpecifier(path, 1))) as { default: string };
+    const fresh = (await import(freshImportSpecifier(path, 2))) as { default: string };
+    expect([first.default, same.default, fresh.default]).toEqual(["v1", "v1", "v2"]);
   });
 });

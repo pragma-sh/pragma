@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use pragma_constants::{FileContents, Project, ProtocolRpcMethod, Worktree, CONSTANTS};
-use pragma_core::exec::{CommandResult, ExecRequest};
+use pragma_core::exec::{CommandResult, ExecCancel, ExecRequest};
 use pragma_core::fs::FsRequest;
 use serde_json::Value;
 use tauri::State;
@@ -115,14 +115,11 @@ pub fn run_headless_commands(
     let request = ExecRequest {
         cwd: worktree.path.clone(),
         commands: commands.to_vec(),
-        env: vec![
-            ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
-            ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
-            ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
-        ],
+        env: worktree_env(project, worktree),
         max_concurrent: u32::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).map_err(
             |_| AppError::InvalidInput("script concurrency limit is too large".to_string()),
         )?,
+        run_id: None,
     };
     let payload = serde_json::to_value(request)?;
     let value = pty.rpc(ProtocolRpcMethod::Exec, payload)?;
@@ -162,12 +159,9 @@ pub fn run_headless_command(
     let request = ExecRequest {
         cwd: worktree.path.clone(),
         commands: vec![command.to_string()],
-        env: vec![
-            ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
-            ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
-            ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
-        ],
+        env: worktree_env(project, worktree),
         max_concurrent: 1,
+        run_id: None,
     };
     let payload = serde_json::to_value(request)?;
     let value = pty.rpc(ProtocolRpcMethod::Exec, payload)?;
@@ -182,6 +176,61 @@ pub fn run_headless_command(
         status: result.status,
         duration: Duration::from_millis(result.duration_ms),
     })
+}
+
+/// Runs the new-session dialog's "run first" commands one after another in a
+/// worktree on its host, returning every result whatever its exit code. A
+/// concurrent [`cancel_worktree_commands`] with the same `run_id` stops the
+/// batch; the results then report which commands were cut short or skipped.
+#[tauri::command(async)]
+pub fn run_worktree_commands(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    commands: Vec<String>,
+    run_id: String,
+) -> AppResult<Vec<CommandResult>> {
+    let worktree = db.worktree(&worktree_id)?;
+    let project = db.project(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let request = ExecRequest {
+        cwd: worktree.path.clone(),
+        commands,
+        env: worktree_env(&project, &worktree),
+        max_concurrent: 1,
+        run_id: Some(run_id),
+    };
+    let value = pty.rpc(ProtocolRpcMethod::Exec, serde_json::to_value(request)?)?;
+    Ok(serde_json::from_value(value)?)
+}
+
+/// Cancels a [`run_worktree_commands`] batch: kills its running command and
+/// skips the rest. Returns whether the batch was still running.
+#[tauri::command(async)]
+pub fn cancel_worktree_commands(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    run_id: String,
+) -> AppResult<bool> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let payload = serde_json::to_value(ExecCancel {
+        cancel_run_id: run_id,
+    })?;
+    let value = pty.rpc(ProtocolRpcMethod::Exec, payload)?;
+    Ok(value
+        .get("cancelled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false))
+}
+
+/// Environment every headless worktree command receives.
+fn worktree_env(project: &Project, worktree: &Worktree) -> Vec<(String, String)> {
+    vec![
+        ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
+        ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
+        ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
+    ]
 }
 
 fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {

@@ -1393,6 +1393,8 @@ pub fn run() {
             worktrees::hide_worktree,
             worktrees::delete_worktree,
             scripts::load_project_scripts,
+            scripts::run_worktree_commands,
+            scripts::cancel_worktree_commands,
             script_migration::detect_script_migration,
             script_migration::apply_script_migration,
             script_migration::dismiss_script_migration,

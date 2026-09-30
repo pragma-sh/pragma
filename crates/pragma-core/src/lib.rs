@@ -17,6 +17,7 @@ pub mod fanout;
 pub mod fs;
 pub mod git;
 pub mod merge_conflicts;
+pub mod prelaunch;
 pub mod process_env;
 pub mod rpc;
 pub mod scratchpads;

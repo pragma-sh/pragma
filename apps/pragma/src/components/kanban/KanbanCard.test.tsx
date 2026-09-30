@@ -62,6 +62,14 @@ describe("KanbanCard", () => {
     expect(props.onOpen).toHaveBeenCalledWith(completedCard);
   });
 
+  it("previews only the prompt text, not its attached @ context", () => {
+    const prompt =
+      'Fix @#12\n\n<context mention="@#12" source="GitHub issues">\nIssue body\n</context>';
+    render(<KanbanCard card={card({ prompt })} {...noopProps()} />);
+    expect(screen.getByText("Fix @#12")).toBeInTheDocument();
+    expect(screen.queryByText(/Issue body/)).not.toBeInTheDocument();
+  });
+
   it("opens a draft for editing when clicked", () => {
     const props = noopProps();
     render(<KanbanCard card={card()} {...props} />);
