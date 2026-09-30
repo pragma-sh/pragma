@@ -1,8 +1,10 @@
 import {
   defineAgent,
   definePlugin,
+  slashCommandProvider,
   type AgentFeature,
   type AgentModelEntry,
+  type MarkdownSource,
   type PluginContext,
   type PluginDefinition,
   type UsageLimitProviderDefinition,
@@ -15,6 +17,21 @@ const CLEAR_INPUT = "\x15";
 const PI_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(
   (id) => ({ id, name: id === "xhigh" ? "Extra High" : `${id[0]?.toUpperCase()}${id.slice(1)}` }),
 );
+
+/** Pi built-ins worth starting a session with; prompt templates and skills are discovered. */
+const PI_BUILTIN_SLASH_COMMANDS = [
+  { name: "compact", description: "Compact the session context", argumentHint: "[instructions]" },
+  { name: "session", description: "Show session info and stats" },
+];
+/** Pi's prompt templates (`/<name>`) and skills (`/skill:<name>`). */
+export const PI_SLASH_COMMAND_SOURCES: MarkdownSource[] = [
+  { dir: ".pi/prompts", layout: "files", recursive: false },
+  { dir: ".pi/skills", layout: "skills", prefix: "skill:" },
+  { dir: ".agents/skills", layout: "skills", prefix: "skill:" },
+  { dir: "~/.pi/agent/prompts", layout: "files", recursive: false },
+  { dir: "~/.pi/agent/skills", layout: "skills", prefix: "skill:" },
+  { dir: "~/.agents/skills", layout: "skills", prefix: "skill:" },
+];
 
 /** Product-specific settings for one Pragma launcher backed by a Pi-compatible CLI. */
 export interface PiPragmaPluginOptions {
@@ -29,6 +46,8 @@ export interface PiPragmaPluginOptions {
     command: string[];
     modelListCommand: string;
     excludeFeatures: AgentFeature[];
+    /** Where this CLI reads prompt templates and skills. Defaults to Pi's directories. */
+    slashCommandSources?: MarkdownSource[];
   };
   usageLimits?: UsageLimitProviderDefinition[];
 }
@@ -87,6 +106,10 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
         prefillSubmit: KITTY_ENTER,
         models: async (ctx) => parsePiModels(await execFirst(ctx, agent.modelListCommand)),
         permissionModes: [],
+        slashCommands: slashCommandProvider(
+          PI_BUILTIN_SLASH_COMMANDS,
+          agent.slashCommandSources ?? PI_SLASH_COMMAND_SOURCES,
+        ),
         args: {
           model: (modelId: string) => ["--model", modelId],
           reasoning: (reasoningId: string) => ["--thinking", reasoningId],

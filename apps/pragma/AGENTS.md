@@ -766,7 +766,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 (`cargo build -p pragma-server`, `cargo build -p pragma-gateway`, plus copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
-it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`bun run --filter pragma sidecar:server` before `cargo check` because Tauri validates
+`externalBin` paths during compilation. Use the package script rather than bare `bash`
+so Windows resolves Git Bash instead of WSL's launcher.
 Release jobs run natively on each architecture, including `windows-11-arm`, so the host
 triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
 the app shell.
@@ -1547,6 +1549,36 @@ without pulling, or pull then create. A single-worktree run hands off to
 `worktree-creation-context` and closes. A fanout stays open and busy until the host has
 provisioned its worktrees/tabs and the desktop has adopted and refreshed them, so every
 attempt row can immediately attach to its live agent session.
+
+Both it and `NewAgentSessionDialog` take agent launch options through
+`hooks/use-agent-launch-options.ts` + `components/agents/AgentLaunchOptions.tsx`: `/` at
+the start of the prompt opens the agent's slash-command picker — rendered through
+`MarkdownEditor`'s `caretPopover`, positioned under the caret from TipTap's
+`coordsAtPos` — Shift+Tab in the prompt cycles its modes, and the footer dropdown sets the
+permission mode. A mode or permission control with fewer than two choices is not shown. The hook resolves the
+lists through `resolvePluginAgentOptions` (plugins/agents.ts), whose cache also supplies
+the default mode/permission mode when `pluginAgentLaunchArgs` runs for a launch that picked
+none. The new-session dialog turns a leading known `/command` into
+`AgentModelSelection.slashCommand`; the create-worktree dialog keeps the prompt verbatim
+(a failed run restores it as a draft) and sends only the mode and permission mode.
+Escape closes an open picker before the dialog (`useEscapeToClose` runs in the capture
+phase, so `useEscapeClosesPickerFirst` takes the list of pickers and checks them first).
+
+Every agent prompt has the `@` context picker — `NewAgentSessionDialog`,
+`CreateWorktreeDialog` (single and fanout), and `KanbanDraftDialog` — through
+`hooks/use-prompt-context.ts` + `components/agents/PromptContextMenu.tsx`
+(`promptCaretPopover` picks `@` over `/`). `MarkdownEditor`'s `onCaretTextChange` feeds the
+text before the caret, `contextQuery` detects the mention, and every provider from
+`plugins/context-providers.ts` (built-ins in `lib/builtin-context-providers.ts` first, then
+plugin `contextProviders`) is searched, debounced and aborted when superseded. Picking
+inserts `@displayName` via the handle's `replaceBeforeCaret`; on submit `attachContext`
+resolves the attached mentions still in the prompt (`hasMention` on the markdown-unescaped
+text) and appends them with `formatPromptWithContext`. A prompt that is **stored and shown
+again** (a Kanban card, a failed worktree run's draft) goes back into the editor through
+`seedPrompt`, which splits the blocks off with `splitPromptContext` and keeps them attached,
+so the editor shows only the user's text and a re-save does not re-fetch. Anything that
+displays a stored prompt (e.g. `KanbanCard`) shows `splitPromptContext(prompt).prompt`.
+Dialog tests share the textarea editor stub and a fake provider from `src/test/prompt-editor.tsx`.
 
 Its **Fan out** mode is the same form with the single agent picker swapped for the
 repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display

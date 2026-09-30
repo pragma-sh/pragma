@@ -1276,6 +1276,9 @@ struct AgentSessionLaunchArgs {
     /// Raw model command snippet (for example `--model moonshot/kimi-k3`)
     /// appended to the base launch command instead of catalog model args.
     model_cmd: Option<String>,
+    mode_id: Option<String>,
+    permission_mode_id: Option<String>,
+    slash_command: Option<String>,
     prompt: Option<String>,
 }
 
@@ -1378,6 +1381,9 @@ fn agent_session_launch(
             "modelId": args.model_id,
             "reasoningId": args.reasoning_id,
             "modelCmd": args.model_cmd,
+            "modeId": args.mode_id,
+            "permissionModeId": args.permission_mode_id,
+            "slashCommand": args.slash_command,
             "prompt": args.prompt,
         }),
     );

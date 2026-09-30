@@ -41,6 +41,7 @@ build, ci, chore, revert. Scope = package/app name (`pragma`, `constants`, `ci`)
 
 - pre-commit → lint-staged auto-fixes staged files.
 - commit-msg → commitlint.
-- pre-push → typecheck + cargo fmt check + sidecar staging + cargo check.
+- pre-push → typecheck + cargo fmt check + sidecar staging via
+  `bun run --filter pragma sidecar:server` + cargo check + fallow audit.
 
 If a hook blocks you, fix the underlying issue — don't bypass with `--no-verify`.

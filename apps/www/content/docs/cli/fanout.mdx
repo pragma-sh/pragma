@@ -31,6 +31,12 @@ pragma-cli fanout create [PROMPT] \
 - Partial provisioning exits non-zero **and** prints the persisted members, so a script
   can retry the failed ones.
 
+A `` !!`command` `` anywhere in the prompt is a shell command: each attempt runs it in its
+own worktree before its agent starts, and the agent reads `` `command` `` in the sentence
+followed by its output (see
+[Run commands first](/docs/user-guide/prompt-context#run-commands-first)). A retried attempt
+runs its commands again.
+
 The created attempt sessions get `PRAGMA_FANOUT_ID` and `PRAGMA_FANOUT_MEMBER_ID` in
 their environment — an attempt agent knows it is racing.
 

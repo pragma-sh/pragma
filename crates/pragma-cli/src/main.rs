@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
+mod agent_launch;
 mod agent_verify;
 mod broker;
 mod cli;
@@ -61,7 +62,8 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
         TopCommand::Split { split } => commands::split(split, out),
         TopCommand::Browser { browser } => commands::browser(browser, out),
         TopCommand::Agent { agent } => match agent {
-            AgentCommand::Start(args) => commands::agent_start(args, out),
+            AgentCommand::Start(args) => agent_launch::start(args, out),
+            AgentCommand::Options(args) => agent_launch::options(args, out),
             AgentCommand::Status(args) => direct::agent_status(args, out),
             AgentCommand::Report(args) => direct::agent_report(args, out),
             AgentCommand::Message(args) => direct::agent_message(args, out),

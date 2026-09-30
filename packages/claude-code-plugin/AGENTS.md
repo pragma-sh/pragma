@@ -341,10 +341,16 @@ session.
 ## Plugin launcher
 
 The launchable Claude Code entry is defined **here** in `src/pragma-plugin.ts`; it starts
-`claude --permission-mode auto`. This is single source of truth. After user installs this
+`claude` plus the selected permission mode (`--permission-mode <id>`), whose first entry,
+`auto`, is the default every launch applies when none is selected. Modes (Shift+Tab in the
+launcher) come from Claude Code itself: `claude -p --agent <unknown>` prints
+`Available agents: claude, …` (built-in, user, project, and plugin agents) and exits before
+any model call. `claude` is the default (no flag), `statusline-setup` is hidden, and the rest
+start with `--agent <name>`; `.claude/agents` files are the fallback; slash commands are `/init`, `/review`, `/security-review`
+plus project and user commands and skills. This is single source of truth. After user installs this
 integration, desktop and `pragma-plugins` load same configured bundle. Its icon asset stays
 in this package under `assets/`, not in Pragma core.
-Because plugin launcher runs `--permission-mode auto`, shell commands are
+Because the default permission mode is `auto`, shell commands are
 auto-approved and **never raise a command-approval attention** — `pragma-cli agent
 verify`'s `command-allow`/`command-deny` (and `decision-timeout`/`abort-mid-approval`)
 cannot pass for a launched session, so the agent declares

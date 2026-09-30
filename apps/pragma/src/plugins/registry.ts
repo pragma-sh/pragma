@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 import type { PluginDefinition } from "@pragma-sh/plugin";
 
@@ -130,10 +130,16 @@ function usePlugins(): PluginRecord[] {
 
 /** React hook: records visible to the active project. */
 export function useActivePlugins(activeProjectId: string | null): PluginRecord[] {
-  return preferHigherScope(
-    usePlugins().filter(
-      (record) => record.scope !== "project" || record.projectId === activeProjectId,
-    ),
+  const records = usePlugins();
+  // Memoized on the registry snapshot so consumers can key effects on the result.
+  return useMemo(
+    () =>
+      preferHigherScope(
+        records.filter(
+          (record) => record.scope !== "project" || record.projectId === activeProjectId,
+        ),
+      ),
+    [records, activeProjectId],
   );
 }
 

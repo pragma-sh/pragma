@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentModel, AgentModelSelection } from "@/lib/tauri";
-import { pluginAgentLaunchArgs } from "@/plugins/agents";
+import { pluginAgentLaunchArgs, pluginAgentPrompt } from "@/plugins/agents";
 
 const STORAGE_PREFIX = "pragma:agent-model-selection:";
 
@@ -88,7 +88,12 @@ export function modelLaunchArgs(
   // plugin/catalog arg builders entirely.
   const modelCmd = selection?.modelCmd?.trim();
   if (modelCmd) {
-    return modelCmd.split(/\s+/);
+    const optionArgs = pluginAgentLaunchArgs(agent.id, {
+      ...selection,
+      modelId: null,
+      reasoningId: null,
+    });
+    return [...modelCmd.split(/\s+/), ...(optionArgs ?? [])];
   }
   const pluginArgs = pluginAgentLaunchArgs(agent.id, selection);
   if (pluginArgs !== null) {
@@ -109,6 +114,15 @@ export function modelLaunchArgs(
     args.push(...interpolateArgs(agent.models.reasoningArg, model, reasoning));
   }
   return args;
+}
+
+/** The prefill for a launch, with the selected slash command applied. */
+export function launchPrompt(
+  agent: AgentConfig,
+  prompt: string | undefined,
+  selection: AgentModelSelection | null | undefined,
+): string | undefined {
+  return pluginAgentPrompt(agent.id, selection?.slashCommand, prompt);
 }
 
 /** Resolves explicit or compact deep-link selectors against loaded model metadata. */

@@ -36,6 +36,10 @@ and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
 - **`DevTestDiagnosticsPage`** (`src/diagnostics-page.tsx`) — a second Settings page,
   so Settings → Plugins shows **two** nested options under this plugin. Reports
   `useProject` / `useTheme` and counts checks through `useStoredState`.
+- **`testMentionsProvider`** (`src/test-mentions.ts`) — an `@` context provider
+  (`defineContextProvider`) offering `@dev-hello` (fixed text asking the agent to
+  reply PINEAPPLE) and `@dev-project` (the prompt's project/worktree), for testing
+  the prompt `@` picker end to end.
 - One `defineCommand` greeting (`pragma-dev-test-plugin.hello`).
 - One `defineCommand` web view opener (`pragma-dev-test-plugin.report.open`).
 
@@ -61,6 +65,7 @@ SDK event async generator). Cover:
   host bridge action with the `defineWebView` handle and dedupe metadata.
 - `src/settings-page.test.tsx` — Settings form forwards all board-draft fields and
   reports the created card through `useNotify`.
+- `src/test-mentions.test.ts` — provider lists both mentions and resolves their text.
 - `src/diagnostics-page.test.tsx` — host state renders and a recorded check
   increments the counter and notifies.
 

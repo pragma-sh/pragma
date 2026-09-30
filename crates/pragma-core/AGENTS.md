@@ -32,6 +32,18 @@ Tauri or client presentation code.
 - GitHub API/auth and AI are intentionally kept as local sidecars, not core RPC.
   Worktree-scoped git operations that support the GitHub PR flow still belong in the
   `git` RPC, because they must execute on the host that owns the worktree path.
+- `exec` batches are cancellable: an `ExecRequest` carrying a `runId` is
+  registered for its lifetime, and a second `exec` call with `{ "cancelRunId" }`
+  (on its own pooled connection, so it is served concurrently) kills the batch's
+  live process trees and skips its queued commands; those results come back with
+  `cancelled: true`. Agent prompts' `!!` pre-launch commands use this for
+  their **Skip** action.
+- `prelaunch.rs` holds the pure `!!` rules (split the inline `` !!`command` ``
+  chips out of a prompt, format each command's output for the agent). Its TypeScript twin is
+  `apps/pragma/src/lib/prelaunch-commands.ts` — the desktop runs single launches,
+  the host runs fanout attempts — and the two must stay byte-identical; both
+  test suites pin the same cases. The prefix and output limit are shared
+  constants (`agents.prelaunchCommandPrefix`, `agents.prelaunchOutputLimit`).
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`,
   `scratchpads::ScratchpadsRequest`, `whiteboards::WhiteboardsRequest`) are the client↔core contract; both sides
   depend on this crate to build/parse them.

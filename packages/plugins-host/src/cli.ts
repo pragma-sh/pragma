@@ -1,10 +1,9 @@
 /** `pragma-plugins` host-side sidecar: resolves the agent catalog + icon assets. */
 import { stat } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 
 import type { PluginContext, PluginDefinition } from "@pragma-sh/plugin";
 import { PragmaClient } from "@pragma-sh/sdk";
-import { readStdinLines } from "@pragma-sh/sidecar-kit";
+import { freshImportSpecifier, readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import {
   assembleCatalog,
@@ -86,19 +85,19 @@ async function loadPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | 
 }
 
 /**
- * Builds the import URL for a plugin bundle with its mtime as a query
- * parameter. The sidecar is long-lived and `reload` re-imports every bundle;
- * without cache-busting, the ESM module cache would keep serving the bytes
- * from the first import even after the bundle is rebuilt on disk.
+ * The import specifier for a plugin bundle, versioned by its mtime. The sidecar
+ * is long-lived and `reload` re-imports every bundle; without cache-busting the
+ * ESM module cache keeps serving the bytes from the first import after the
+ * bundle is rebuilt on disk (see `freshImportSpecifier` for why a `file:` URL
+ * cannot carry the version).
  */
 async function bundleImportUrl(mainPath: string): Promise<string> {
-  const url = pathToFileURL(mainPath);
   try {
-    url.searchParams.set("mtime", String((await stat(mainPath)).mtimeMs));
+    return freshImportSpecifier(mainPath, (await stat(mainPath)).mtimeMs);
   } catch {
     // A missing bundle fails at import() below with the real error.
+    return mainPath;
   }
-  return url.href;
 }
 
 async function resolvePlugins(roots: string[]): Promise<ResolvedPlugin[]> {
@@ -150,6 +149,8 @@ class StdinLines {
   /** Last successfully assembled catalog, the fallback for flaky providers. */
   private lastCatalog: CatalogResult | undefined;
   private queue = Promise.resolve();
+  /** Counts `load` commands, so a follow-up never outruns a newer load. */
+  private loadGeneration = 0;
   private lifecycleQueue = Promise.resolve();
 
   constructor() {
@@ -161,26 +162,45 @@ class StdinLines {
     );
   }
 
-  private async dispatch(line: string): Promise<void> {
+  private async dispatch(line: string, followUp = false): Promise<void> {
     try {
       const command = JSON.parse(line) as Command;
       if (command.type === "load") {
-        const loaded = await load(command, this.lastCatalog);
-        this.loaded = loaded.state;
-        this.lastCatalog = loaded.catalog;
-        emit({
-          type: "catalog",
-          catalog: loaded.catalog.catalog,
-          assets: loaded.catalog.assets,
-          watchers: loaded.watchers,
-        });
-        this.scheduleLifecycles(command, loaded.state);
+        await this.handleLoad(command, line, followUp);
         return;
       }
       await this.handleUsageLimits(command);
     } catch (error) {
       emitError(error);
     }
+  }
+
+  /** Assembles and publishes the catalog; a follow-up reuses the load's generation. */
+  private async handleLoad(command: LoadCommand, line: string, followUp: boolean): Promise<void> {
+    const generation = followUp ? this.loadGeneration : ++this.loadGeneration;
+    const loaded = await load(command, this.lastCatalog);
+    this.loaded = loaded.state;
+    this.lastCatalog = loaded.catalog;
+    emit({
+      type: "catalog",
+      catalog: loaded.catalog.catalog,
+      assets: loaded.catalog.assets,
+      watchers: loaded.watchers,
+    });
+    this.scheduleLifecycles(command, loaded.state);
+    if (!followUp) this.scheduleFollowUp(line, generation, loaded.catalog.pending);
+  }
+
+  /**
+   * Options that overran their budget finish in the background; reload once
+   * they have (a single follow-up), unless a newer load superseded this one.
+   */
+  private scheduleFollowUp(line: string, generation: number, pending?: Promise<void>): void {
+    void pending?.then(() => {
+      if (generation !== this.loadGeneration) return undefined;
+      this.queue = this.queue.then(() => this.dispatch(line, true));
+      return undefined;
+    });
   }
 
   private scheduleLifecycles(command: LoadCommand, state: LoadedState): void {

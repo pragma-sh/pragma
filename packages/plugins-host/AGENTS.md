@@ -16,6 +16,18 @@ commands on stdin, and emits NDJSON events on stdout:
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
   correlated `usageLimits`, `error`, `log`.
 
+**Re-importing rebuilt bundles.** Each `load` re-imports every bundle through
+`freshImportSpecifier(mainPath, mtime)` (`@pragma-sh/sidecar-kit`). Do not go back to a
+`file:` URL with a `?mtime=` query: Bun ignores the query on `file:` URLs, so the sidecar kept
+serving the first-imported bundle and a `reload` silently returned stale definitions.
+
+**Launch options have a time budget.** An agent's modes, permission modes, and slash
+commands may start the tool itself (an ACP probe), so `assembleCatalog` waits at most
+`OPTIONS_BUDGET_MS` for them and otherwise uses, in order, a late result from an earlier
+load (the work is not cancelled), the agent's last-good catalog options, or its static lists.
+The ACP probes themselves are cached per project for `ACP_COMMANDS_TTL_MS` and limited to two
+at a time in `@pragma-sh/plugin`, so only the first load after a sidecar start waits on them.
+
 Supervisor stdin is the ownership boundary: EOF must terminate the Bun process so imported plugin timers cannot outlive `pragma-server`.
 
 On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
