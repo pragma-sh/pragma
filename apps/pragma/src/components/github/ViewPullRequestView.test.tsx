@@ -38,6 +38,7 @@ const {
   workspace: {
     deleteWorktree: vi.fn(),
     openReviewTab: vi.fn(),
+    remoteWorktrees: {},
     worktrees: {
       project: [
         {

@@ -18,6 +18,7 @@ use pragma_constants::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::merge_conflicts::{self, MergeIdentity, ResolutionWrite};
 use crate::process_env;
 use crate::{CoreError, CoreResult};
 
@@ -190,6 +191,25 @@ pub enum GitRequest {
     GithubMergeInProgress { root: String },
     /// Lists paths Git still marks as unmerged (conflicted) in the index.
     GithubUnmergedPaths { root: String },
+    /// Reads every conflicted file of the active merge, with the commits that
+    /// touched it on each side and the merge's identity.
+    MergeConflictInputs { root: String },
+    /// Writes and stages resolved files, only into the merge in `identity`.
+    ApplyMergeResolutions {
+        root: String,
+        identity: MergeIdentity,
+        resolutions: Vec<ResolutionWrite>,
+    },
+    /// Reads the staged diff a merge commit message is written from; fails
+    /// while any file is still conflicted.
+    MergeCommitContext { root: String },
+    /// Commits the merge, provided `identity` and the index `tree` are unchanged.
+    CommitMerge {
+        root: String,
+        identity: MergeIdentity,
+        tree: String,
+        message: String,
+    },
     /// Pushes the current branch to `origin`, setting the upstream.
     GithubPushBranch { root: String },
     /// Deletes the current branch from `origin`.
@@ -375,6 +395,32 @@ fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
             to_value(github_merge_in_progress(Path::new(root))?)?
         }
         GitRequest::GithubUnmergedPaths { root } => to_value(unmerged_paths(Path::new(root))?)?,
+        GitRequest::MergeConflictInputs { root } => {
+            to_value(merge_conflicts::conflict_inputs(Path::new(root))?)?
+        }
+        GitRequest::ApplyMergeResolutions {
+            root,
+            identity,
+            resolutions,
+        } => to_value(merge_conflicts::apply_resolutions(
+            Path::new(root),
+            identity,
+            resolutions,
+        )?)?,
+        GitRequest::MergeCommitContext { root } => {
+            to_value(merge_conflicts::merge_commit_context(Path::new(root))?)?
+        }
+        GitRequest::CommitMerge {
+            root,
+            identity,
+            tree,
+            message,
+        } => to_value(merge_conflicts::commit_merge(
+            Path::new(root),
+            identity,
+            tree,
+            message,
+        )?)?,
         GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
         GitRequest::GithubDeleteRemoteBranch { root } => {
             to_value(github_delete_remote_branch(Path::new(root))?)?
@@ -2036,13 +2082,13 @@ fn default_branch(root: &Path) -> String {
     .unwrap_or_else(|| "main".to_string())
 }
 
-fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
+pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
     Ok(String::from_utf8_lossy(&run_git(root, args)?)
         .trim()
         .to_string())
 }
 
-fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
+pub(crate) fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
     let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))

@@ -41,6 +41,8 @@ export interface ConflictHunk {
 export interface ParsedConflictFile {
   segments: Array<{ kind: "text"; text: string } | { kind: "conflict"; hunk: ConflictHunk }>;
   hunks: ConflictHunk[];
+  /** Distinct marker widths the file's conflicts use (git's `conflict-marker-size`). */
+  markerSizes: number[];
   /** The file's lines with endings kept, for context excerpts. */
   lines: string[];
 }
@@ -55,24 +57,43 @@ export class MalformedConflictError extends Error {
 
 type Marker = "start" | "base" | "separator" | "end";
 
-const MARKERS: ReadonlyArray<[Marker, string]> = [
-  ["start", "<<<<<<<"],
-  ["base", "|||||||"],
-  ["separator", "======="],
-  ["end", ">>>>>>>"],
-];
+/** Git's default marker width, and the shortest one it will ever write. */
+const DEFAULT_MARKER_SIZE = 7;
 
-/** Identifies a marker line and returns its label (text after the marker). */
-function markerOf(line: string): { marker: Marker; label: string } | null {
+const MARKER_CHARS: Readonly<Record<string, Marker>> = {
+  "<": "start",
+  "|": "base",
+  "=": "separator",
+  ">": "end",
+};
+
+interface FoundMarker {
+  marker: Marker;
+  label: string;
+  size: number;
+}
+
+/**
+ * Identifies a marker line and returns its label (text after the marker).
+ *
+ * Git writes markers `conflict-marker-size` characters wide (7 unless a path
+ * sets the attribute), so the width is not fixed. With `size` given only a run
+ * of exactly that width counts — a longer or shorter run inside a conflict is
+ * content. With `null` (outside any conflict) any run of at least seven
+ * `<` opens one, and its width becomes that conflict's size.
+ */
+function markerOf(line: string, size: number | null): FoundMarker | null {
   const text = line.replace(/\r?\n$/, "");
-  for (const [marker, prefix] of MARKERS) {
-    if (!text.startsWith(prefix)) continue;
-    const rest = text.slice(prefix.length);
-    // Exactly seven characters, then end of line or a space — a longer run
-    // (`========`) is content, not a marker.
-    if (rest === "" || rest.startsWith(" ")) return { marker, label: rest.trim() };
-  }
-  return null;
+  const char = text.charAt(0);
+  const marker = MARKER_CHARS[char];
+  if (!marker) return null;
+  let run = 0;
+  while (text.charAt(run) === char) run += 1;
+  if (size === null ? marker !== "start" || run < DEFAULT_MARKER_SIZE : run !== size) return null;
+  // The run must be followed by end of line or a space.
+  const rest = text.slice(run);
+  if (rest !== "" && !rest.startsWith(" ")) return null;
+  return { marker, label: rest.trim(), size: run };
 }
 
 /** Splits text into lines, each keeping its own line ending. */
@@ -82,6 +103,8 @@ function splitLines(content: string): string[] {
 
 interface OpenHunk {
   startLine: number;
+  /** Marker width this conflict was opened with; every marker inside must match. */
+  size: number;
   oursLabel: string;
   ours: string;
   base: string | null;
@@ -141,17 +164,17 @@ function applyMarker(
 class ConflictParser {
   readonly segments: ParsedConflictFile["segments"] = [];
   readonly hunks: ConflictHunk[] = [];
+  private readonly sizes: number[] = [];
   private text = "";
   private open: OpenHunk | null = null;
 
   feed(line: string, lineNumber: number): void {
-    const found = markerOf(line);
-    if (this.open === null) this.feedOutside(line, lineNumber, found);
-    else this.feedInside(this.open, line, lineNumber, found);
+    if (this.open === null) this.feedOutside(line, lineNumber, markerOf(line, null));
+    else this.feedInside(this.open, line, lineNumber, markerOf(line, this.open.size));
   }
 
   /** Untouched text, until a `<<<<<<<` opens a conflict. */
-  private feedOutside(line: string, lineNumber: number, found: ReturnType<typeof markerOf>): void {
+  private feedOutside(line: string, lineNumber: number, found: FoundMarker | null): void {
     if (found?.marker !== "start") {
       this.text += line;
       return;
@@ -159,6 +182,7 @@ class ConflictParser {
     this.flushText();
     this.open = {
       startLine: lineNumber,
+      size: found.size,
       oursLabel: found.label,
       ours: "",
       base: null,
@@ -172,7 +196,7 @@ class ConflictParser {
     open: OpenHunk,
     line: string,
     lineNumber: number,
-    found: ReturnType<typeof markerOf>,
+    found: FoundMarker | null,
   ): void {
     if (!found) {
       appendToHunk(open, line);
@@ -182,8 +206,14 @@ class ConflictParser {
     const hunk = applyMarker(open, found.marker, found.label, lineNumber, id);
     if (!hunk) return;
     this.hunks.push(hunk);
+    this.sizes.push(open.size);
     this.segments.push({ kind: "conflict", hunk });
     this.open = null;
+  }
+
+  /** Distinct marker widths of the conflicts read so far. */
+  get markerSizes(): number[] {
+    return [...new Set(this.sizes)];
   }
 
   private flushText(): void {
@@ -211,7 +241,12 @@ export function parseConflicts(content: string): ParsedConflictFile {
   const parser = new ConflictParser();
   for (const [index, line] of lines.entries()) parser.feed(line, index + 1);
   parser.finish();
-  return { segments: parser.segments, hunks: parser.hunks, lines };
+  return {
+    segments: parser.segments,
+    hunks: parser.hunks,
+    markerSizes: parser.markerSizes,
+    lines,
+  };
 }
 
 /** Joins two sides, making sure the first ends on a line break. */
@@ -257,12 +292,20 @@ export function applyResolutions(
     .join("");
 }
 
-/** Whether text still contains a conflict start or end marker line. */
-export function hasConflictMarkers(content: string): boolean {
-  return splitLines(content).some((line) => {
-    const found = markerOf(line);
-    return found?.marker === "start" || found?.marker === "end";
-  });
+/**
+ * Whether text still contains a conflict start or end marker line of any of
+ * `sizes` — pass the widths the original file used (`ParsedConflictFile.markerSizes`).
+ */
+export function hasConflictMarkers(
+  content: string,
+  sizes: readonly number[] = [DEFAULT_MARKER_SIZE],
+): boolean {
+  return splitLines(content).some((line) =>
+    sizes.some((size) => {
+      const found = markerOf(line, size);
+      return found?.marker === "start" || found?.marker === "end";
+    }),
+  );
 }
 
 /** Up to `count` lines before and after a hunk, markers of other hunks included. */

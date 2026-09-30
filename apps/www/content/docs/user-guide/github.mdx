@@ -66,8 +66,9 @@ base in first.
 Resolved files are written and staged. Binary files and rename or delete conflicts are
 left for you, with a note saying which. Once nothing is left conflicted, the button
 becomes **Commit and Push Fixes**: it writes a commit message that says the commit fixes
-merge conflicts with the base, commits, and pushes. Review the staged changes first.
-**Abort Merge** still discards everything.
+merge conflicts with the base, commits, and pushes. Review the staged changes first. Without
+built-in AI you commit the merge yourself. If the push fails after the commit, the button
+becomes **Push Fixes** and retries only the push. **Abort Merge** still discards everything.
 
 Like the other AI helpers, this runs on local worktrees only, not over SSH.
 

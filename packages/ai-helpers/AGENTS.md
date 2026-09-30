@@ -137,8 +137,11 @@ agent CLI, one of that agent's models, and a reasoning effort — with a System 
 ## Merge-conflict resolution (`merge-conflicts.ts`)
 
 The pull request pane's **Resolve Merge Conflicts**. The git side (gathering files and
-per-file commit logs, writing, staging, the concluding commit) lives in
-`apps/pragma/src-tauri/src/merge_conflicts.rs`.
+per-file commit logs, writing, staging, the concluding commit) runs on the owning host in
+`crates/pragma-core/src/merge_conflicts.rs`; `apps/pragma/src-tauri/src/merge_conflicts.rs`
+only sequences those `git` RPCs around the model calls and never holds the project git lock
+across one. The host refuses a write for a different merge (`HEAD`/`MERGE_HEAD`) or a
+changed conflicted index entry, and a commit whose staged tree moved.
 
 - **One System 1 request per file, all files at once** (`Promise.all`). Per conflict:
   a choice `c<n>` (`ours` / `theirs` / `both_ours_first` / `both_theirs_first`) phrased
@@ -150,6 +153,9 @@ per-file commit logs, writing, staging, the concluding commit) lives in
   cut at `maxSideChars` sends the whole file to the `high` tier with read-only tools
   (`INLINE_EDIT_TOOLS`), System 1's answers, and the same context. The verifier may answer
   `custom` with replacement text; markers in it are rejected.
+- **Marker width is per conflict.** Git writes markers `conflict-marker-size` wide (7 by
+  default); the `<<<<<<<` run that opens a conflict sets the width its other markers must
+  match, and `ParsedConflictFile.markerSizes` feeds the still-has-markers check.
 - **A failed file never fails the run.** Binary, marker-free (rename or delete), or
   malformed files come back `skipped`; model failures come back `failed`.
 

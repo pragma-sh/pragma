@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequestSummary } from "@/lib/github";
 import type { MergeConflictProgress, MergeConflictResolution } from "@/lib/tauri";
 
-const { ai, system1, tauri, toast } = vi.hoisted(() => ({
+const { ai, system1, tauri, toast, workspace } = vi.hoisted(() => ({
   ai: { available: true },
+  workspace: { remoteWorktrees: {} as Record<string, boolean> },
   system1: {
     current: { configured: true, baseUrl: "", model: "" } as { configured: boolean } | null,
   },
@@ -25,6 +26,7 @@ const { ai, system1, tauri, toast } = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/lib/tauri", () => tauri);
 vi.mock("@/state/ai-context", () => ({ useAi: () => ai }));
+vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
 vi.mock("@/state/system1", () => ({ useSystem1Status: () => system1.current }));
 
 import { MergeConflictControls } from "./MergeConflictControls";
@@ -69,6 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   ai.available = true;
   system1.current = { configured: true };
+  workspace.remoteWorktrees = {};
 });
 
 afterEach(cleanup);
@@ -147,6 +150,43 @@ describe("MergeConflictControls", () => {
     await waitFor(() => expect(tauri.githubPushBranch).toHaveBeenCalledWith("wt"));
     expect(tauri.aiCommitMergeResolution).toHaveBeenCalledWith("wt", "main", "feature");
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("offers no AI action on a remote worktree, even once conflicts are resolved", async () => {
+    workspace.remoteWorktrees = { wt: true };
+    mergeState(true, []);
+    renderControls();
+    expect(await screen.findByRole("button", { name: "Abort Merge" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Commit and Push Fixes/ })).toBeNull();
+  });
+
+  it("leaves the commit to the user without built-in AI", async () => {
+    ai.available = false;
+    mergeState(true, []);
+    renderControls();
+    expect(await screen.findByText(/Commit the merge, then push/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Commit and Push Fixes/ })).toBeNull();
+  });
+
+  it("retries only the push after a push fails following a successful commit", async () => {
+    mergeState(true, []);
+    tauri.aiCommitMergeResolution.mockResolvedValue("fix: resolve merge conflicts with main");
+    tauri.githubPushBranch.mockRejectedValueOnce(new Error("network down"));
+    tauri.githubPushBranch.mockResolvedValueOnce(undefined);
+    const onChanged = renderControls();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Commit and Push Fixes" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Committed, but the push failed: network down"),
+    );
+
+    // The commit concluded the merge, so git no longer reports one in progress.
+    mergeState(false, []);
+    fireEvent.click(await screen.findByRole("button", { name: "Push Fixes" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(tauri.aiCommitMergeResolution).toHaveBeenCalledTimes(1);
+    expect(tauri.githubPushBranch).toHaveBeenCalledTimes(2);
+    expect(tauri.githubMergeBaseBranch).not.toHaveBeenCalled();
   });
 
   it("warns about files left for a human", async () => {

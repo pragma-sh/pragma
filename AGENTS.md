@@ -225,7 +225,9 @@ than no guide.
   System 1 is asked only on submit — the picker shows just "Auto", never a live preview.
   **AI merge-conflict resolution** (the PR pane's Resolve Merge Conflicts) is the second
   System 1 consumer: `packages/ai-helpers/src/merge-conflicts.ts` decides,
-  `apps/pragma/src-tauri/src/merge_conflicts.rs` owns the git side, and
+  `crates/pragma-core/src/merge_conflicts.rs` owns the git side (host `git` RPCs that
+  re-check the merge identity and index before writing or committing),
+  `apps/pragma/src-tauri/src/merge_conflicts.rs` drives the model calls, and
   `apps/pragma/src/components/github/MergeConflictControls.tsx` is the card. It requires
   both built-in AI and a System 1 key.
 - The Pragma mark itself — its geometry, or the colours it is painted in →

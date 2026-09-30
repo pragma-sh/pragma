@@ -58,6 +58,23 @@ describe("parseConflicts", () => {
     expect(hunks[0]?.ours).toBe("========\n");
   });
 
+  it("reads markers as wide as the file's conflict-marker-size", () => {
+    const wide = [
+      "a\n",
+      "<<<<<<<<<< HEAD\n",
+      "x\n",
+      "=======\n",
+      "==========\n",
+      "y\n",
+      ">>>>>>>>>> m\n",
+      "b\n",
+    ].join("");
+    const parsed = parseConflicts(wide);
+    expect(parsed.markerSizes).toEqual([10]);
+    expect(parsed.hunks[0]).toMatchObject({ ours: "x\n=======\n", theirs: "y\n" });
+    expect(resolveAll(wide, { kind: "theirs" })).toBe("a\ny\nb\n");
+  });
+
   it("rejects unterminated and nested markers", () => {
     expect(() => parseConflicts("<<<<<<< HEAD\na\n=======\n")).toThrow(MalformedConflictError);
     expect(() => parseConflicts("<<<<<<< HEAD\n<<<<<<< HEAD\n")).toThrow(MalformedConflictError);
@@ -94,5 +111,11 @@ describe("hasConflictMarkers", () => {
   it("detects start and end markers only", () => {
     expect(hasConflictMarkers(TWO_CONFLICTS)).toBe(true);
     expect(hasConflictMarkers("Title\n=======\n")).toBe(false);
+  });
+
+  it("checks only the widths it is given", () => {
+    const wide = "<<<<<<<<<< HEAD\nx\n==========\ny\n>>>>>>>>>> m\n";
+    expect(hasConflictMarkers(wide)).toBe(false);
+    expect(hasConflictMarkers(wide, [10])).toBe(true);
   });
 });

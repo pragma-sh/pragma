@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { GitHubRepoRef } from "@pragma-sh/constants";
-import { GitCommitHorizontal, Loader2, Sparkles, TriangleAlert } from "lucide-react";
+import { ArrowUp, GitCommitHorizontal, Loader2, Sparkles, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -29,6 +29,7 @@ import {
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
 import { useSystem1Status } from "@/state/system1";
+import { useWorkspace } from "@/state/workspace-context";
 
 /** Where the worktree's merge stands; `null` until the first read resolves. */
 interface MergeStatus {
@@ -112,6 +113,8 @@ function useAiConflictResolution({
   onChanged: () => void;
 }) {
   const [phase, setPhase] = useState<AiPhase | null>(null);
+  /** A merge commit exists locally that has not reached the remote yet. */
+  const [unpushed, setUnpushed] = useState(false);
 
   const resolve = useCallback(async () => {
     try {
@@ -146,22 +149,31 @@ function useAiConflictResolution({
   }, [onChanged, pr, refresh, repo, status?.inProgress, worktreeId]);
 
   const commitAndPush = useCallback(async () => {
+    let message: string | null = null;
     try {
-      setPhase("committing");
-      const message = await aiCommitMergeResolution(worktreeId, pr.baseRef, pr.headRef);
+      if (!unpushed) {
+        setPhase("committing");
+        message = await aiCommitMergeResolution(worktreeId, pr.baseRef, pr.headRef);
+        // The commit is local now: if the push fails, only the push is retried.
+        setUnpushed(true);
+      }
       setPhase("pushing");
       await githubPushBranch(worktreeId);
-      toast.success(`Committed and pushed: ${message.split("\n")[0]}`);
+      setUnpushed(false);
+      toast.success(
+        message ? `Committed and pushed: ${message.split("\n")[0]}` : `Pushed ${pr.headRef}`,
+      );
       onChanged();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      const reason = errorMessage(cause);
+      toast.error(message ? `Committed, but the push failed: ${reason}` : reason);
     } finally {
       await refresh();
       setPhase(null);
     }
-  }, [onChanged, pr.baseRef, pr.headRef, refresh, worktreeId]);
+  }, [onChanged, pr.baseRef, pr.headRef, refresh, unpushed, worktreeId]);
 
-  return { phase, resolve, commitAndPush };
+  return { phase, unpushed, resolve, commitAndPush };
 }
 
 /** Manual sync and abort, independent of the AI flow. */
@@ -218,31 +230,32 @@ function useManualMergeActions({
   return { merging, syncWithBase, abortMerge };
 }
 
-/** The AI action: Resolve Merge Conflicts, or Commit and Push Fixes once nothing is left. */
+/** What the primary button does next. */
+type AiAction = "resolve" | "commit" | "push";
+
+const AI_ACTIONS: Record<AiAction, { icon: ReactNode; label: string }> = {
+  resolve: { icon: <Sparkles />, label: "Resolve Merge Conflicts" },
+  commit: { icon: <GitCommitHorizontal />, label: "Commit and Push Fixes" },
+  push: { icon: <ArrowUp />, label: "Push Fixes" },
+};
+
+/** The primary action: Resolve Merge Conflicts, Commit and Push Fixes, or a push-only retry. */
 function AiMergeButton({
+  action,
   phase,
-  readyToCommit,
   disabled,
-  onResolve,
-  onCommit,
+  onAction,
 }: {
+  action: AiAction;
   phase: AiPhase | null;
-  readyToCommit: boolean;
   disabled: boolean;
-  onResolve: () => void;
-  onCommit: () => void;
+  onAction: () => void;
 }) {
-  const idleIcon = readyToCommit ? <GitCommitHorizontal /> : <Sparkles />;
-  const idleLabel = readyToCommit ? "Commit and Push Fixes" : "Resolve Merge Conflicts";
+  const { icon, label } = AI_ACTIONS[action];
   return (
-    <Button
-      className="w-full"
-      disabled={disabled}
-      onClick={readyToCommit ? onCommit : onResolve}
-      size="sm"
-    >
-      {phase ? <Loader2 className="animate-spin" /> : idleIcon}
-      {phase ? AI_PHASE_LABELS[phase] : idleLabel}
+    <Button className="w-full" disabled={disabled} onClick={onAction} size="sm">
+      {phase ? <Loader2 className="animate-spin" /> : icon}
+      {phase ? AI_PHASE_LABELS[phase] : label}
     </Button>
   );
 }
@@ -292,11 +305,20 @@ function MergeConflictHeader({ pr }: { pr: PullRequestSummary }) {
   );
 }
 
-/** Whether both built-in AI and a System 1 model are set up. */
-function useAiResolutionEnabled(): boolean {
+/**
+ * What the AI actions can run. Committing needs built-in AI for the message;
+ * resolving also needs a System 1 model. Both inspect the worktree from this
+ * machine, so neither is offered for a remote project.
+ */
+function useAiCapabilities(worktreeId: string): { commit: boolean; resolve: boolean } {
   const { available } = useAi();
   const system1 = useSystem1Status();
-  return available && system1?.configured === true;
+  const workspace = useWorkspace();
+  const local = workspace.remoteWorktrees[worktreeId] !== true;
+  return {
+    commit: available && local,
+    resolve: available && local && system1?.configured === true,
+  };
 }
 
 /**
@@ -318,10 +340,12 @@ export function MergeConflictControls({
   const { status, refresh } = useMergeStatus(worktreeId);
   const ai = useAiConflictResolution({ pr, repo, worktreeId, status, refresh, onChanged });
   const manual = useManualMergeActions({ pr, repo, worktreeId, refresh, onChanged });
-  const aiEnabled = useAiResolutionEnabled();
+  const capabilities = useAiCapabilities(worktreeId);
   const inProgress = status?.inProgress === true;
   const readyToCommit = inProgress && status.unmerged.length === 0;
   const busy = manual.merging || ai.phase !== null || status === null;
+  const action: AiAction = ai.unpushed ? "push" : readyToCommit ? "commit" : "resolve";
+  const actionAvailable = action === "push" || capabilities[action];
 
   return (
     <>
@@ -329,13 +353,17 @@ export function MergeConflictControls({
       {inProgress && !readyToCommit ? (
         <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
       ) : null}
-      {readyToCommit || aiEnabled ? (
+      {action === "commit" && !actionAvailable ? (
+        <p className="text-center text-xs font-medium">
+          Conflicts resolved. Commit the merge, then push {pr.headRef}.
+        </p>
+      ) : null}
+      {actionAvailable ? (
         <AiMergeButton
+          action={action}
           disabled={busy}
-          onCommit={() => void ai.commitAndPush()}
-          onResolve={() => void ai.resolve()}
+          onAction={() => void (action === "resolve" ? ai.resolve() : ai.commitAndPush())}
           phase={ai.phase}
-          readyToCommit={readyToCommit}
         />
       ) : null}
       <Button

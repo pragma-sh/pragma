@@ -455,7 +455,7 @@ async function decideFile(
   }
   const { resolutions, hunks } = decideHunks(parsed, picks, verified);
   const resolved = applyResolutions(parsed, resolutions);
-  if (hasConflictMarkers(resolved)) {
+  if (hasConflictMarkers(resolved, parsed.markerSizes)) {
     return {
       path: input.path,
       status: "failed",

@@ -3,34 +3,35 @@
 //! The decisions are made in the `pragma-ai` sidecar
 //! (`packages/ai-helpers/src/merge-conflicts.ts`): one System 1 request per
 //! conflicted file, all in flight at once, with low-scoring files verified by
-//! the built-in AI. This module owns the git side — gathering each file and the
-//! commits that touched it, then writing and staging what comes back — and the
-//! follow-up commit that concludes the merge.
+//! the built-in AI. All git work — reading each conflicted file, writing and
+//! staging what comes back, and the follow-up commit that concludes the merge —
+//! runs on the worktree's owning host through `pragma-core`'s `git` RPC
+//! (`pragma_core::merge_conflicts`). Only the model calls stay here.
 //!
-//! The project git lock is held only while reading and while writing, never
-//! across the model calls, so a slow verification cannot stall every other git
-//! operation in the project. A file edited in between is left alone.
+//! The project git lock is held only around those RPCs, never across a model
+//! call, so a slow verification or commit-message request cannot stall every
+//! other git operation in the project. The host re-checks the merge's identity
+//! and the conflicted index entries (or, for the commit, the staged tree) on
+//! the way back in, so a merge that was aborted and restarted meanwhile is
+//! left alone.
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::HashMap;
 
+use pragma_core::git::GitRequest;
+use pragma_core::merge_conflicts::{
+    ConflictFile, MergeCommitContext, MergeConflictInputs, ResolutionResult, ResolutionWrite,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::ai::{
-    ensure_local_ai_worktree, git_output, git_output_bytes, git_output_optional, git_run_owned,
-    run_oneshot, run_streaming,
-};
+use crate::ai::{ensure_local_ai_worktree, run_oneshot, run_streaming};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::git::GitLocks;
+use crate::git::{host_rpc, GitLocks};
 use crate::hosts::Hosts;
 use crate::system1::{configured_endpoint, System1KeyStore};
-
-/// Commit subjects gathered per branch per file.
-const COMMITS_PER_SIDE: &str = "20";
 
 /// The pull request whose conflicts are being resolved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,16 +45,6 @@ pub struct ConflictPullRequest {
     base_ref: String,
 }
 
-/// One conflicted file as sent to the sidecar.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ConflictFileInput {
-    path: String,
-    content: Option<String>,
-    head_commits: Vec<String>,
-    base_commits: Vec<String>,
-}
-
 /// What the frontend gets back: every file's outcome (without the resolved
 /// text) and whatever is still conflicted afterwards.
 #[derive(Debug, Serialize)]
@@ -63,119 +54,73 @@ pub struct MergeConflictResolution {
     remaining: Vec<String>,
 }
 
-/// Paths git still marks as unmerged, sorted.
-fn unmerged_paths(cwd: &str) -> AppResult<Vec<String>> {
-    let stdout = git_output_bytes(cwd, &["diff", "--name-only", "-z", "--diff-filter=U"])?;
-    let mut paths: Vec<String> = stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8_lossy(path).into_owned())
-        .collect();
-    paths.sort();
-    paths.dedup();
-    Ok(paths)
+/// One conflicted file as the sidecar takes it (the index entries stay here).
+fn sidecar_file(file: &ConflictFile) -> Value {
+    json!({
+        "path": file.path,
+        "content": file.content,
+        "headCommits": file.head_commits,
+        "baseCommits": file.base_commits,
+    })
 }
 
-/// The merge base of `HEAD` and `MERGE_HEAD`, or an error when no merge is running.
-fn merge_base(cwd: &str) -> AppResult<String> {
-    if git_output_optional(cwd, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])?.is_none() {
-        return Err(AppError::InvalidInput(
-            "No merge is in progress. Sync with the base branch first.".to_string(),
-        ));
-    }
-    Ok(git_output(cwd, &["merge-base", "HEAD", "MERGE_HEAD"])?
-        .trim()
-        .to_string())
+/// Outcome for a file that was not written.
+fn failed(path: &str, reason: &str) -> Value {
+    json!({ "path": path, "status": "failed", "reason": reason })
 }
 
-/// `<sha> <subject>` for commits in `range` touching `path`, newest first.
-fn commits_touching(cwd: &str, range: &str, path: &str) -> Vec<String> {
-    git_output(
-        cwd,
-        &[
-            "log",
-            "--format=%h %s",
-            "-n",
-            COMMITS_PER_SIDE,
-            range,
-            "--",
-            path,
-        ],
-    )
-    .map(|log| log.lines().map(str::to_string).collect())
-    .unwrap_or_default()
-}
-
-/// A file's text, or `None` when it is missing, binary, or not UTF-8.
-fn read_text(root: &Path, path: &str) -> Option<String> {
-    let absolute = crate::fs::resolve_in_worktree(root, path).ok()?;
-    let bytes = std::fs::read(absolute).ok()?;
-    if bytes.contains(&0) {
-        return None;
-    }
-    String::from_utf8(bytes).ok()
-}
-
-/// Every conflicted file with its content and the commits on each side.
-fn gather_conflicts(cwd: &str) -> AppResult<Vec<ConflictFileInput>> {
-    let base = merge_base(cwd)?;
-    let head_range = format!("{base}..HEAD");
-    let base_range = format!("{base}..MERGE_HEAD");
-    let root = Path::new(cwd);
-    Ok(unmerged_paths(cwd)?
-        .into_iter()
-        .map(|path| ConflictFileInput {
-            content: read_text(root, &path),
-            head_commits: commits_touching(cwd, &head_range, &path),
-            base_commits: commits_touching(cwd, &base_range, &path),
-            path,
-        })
-        .collect())
-}
-
-/// Writes and stages one resolved file, unless it changed since it was read.
-/// Returns why it was not written, if it was not.
-fn write_resolution(cwd: &str, path: &str, sent: Option<&str>, resolved: &str) -> Option<String> {
-    let root = Path::new(cwd);
-    if read_text(root, path).as_deref() != sent {
-        return Some("The file changed while it was being resolved; left untouched.".to_string());
-    }
-    let written = crate::fs::resolve_in_worktree(root, path)
-        .and_then(|absolute| std::fs::write(absolute, resolved).map_err(AppError::from))
-        .and_then(|()| {
-            git_run_owned(
-                cwd,
-                &["add".to_string(), "--".to_string(), path.to_string()],
-            )
-        });
-    written.err().map(|error| error.to_string())
-}
-
-/// Applies the sidecar's outcomes to disk, returning them without the file text.
-fn apply_outcomes(cwd: &str, sent: &[ConflictFileInput], outcomes: Vec<Value>) -> Vec<Value> {
-    outcomes
-        .into_iter()
-        .map(|mut outcome| {
-            let resolved = outcome
-                .as_object_mut()
-                .and_then(|object| object.remove("content"));
-            let path = outcome
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let original = sent
-                .iter()
-                .find(|file| file.path == path)
-                .and_then(|file| file.content.as_deref());
-            if let Some(text) = resolved.as_ref().and_then(Value::as_str) {
-                if let Some(reason) = write_resolution(cwd, &path, original, text) {
-                    return json!({ "path": path, "status": "failed", "reason": reason });
+/// Splits the sidecar's outcomes into writes for the host and outcomes that
+/// need no write, each without the resolved text. `writes[i]` belongs to
+/// `outcomes[slots[i]]`.
+fn plan_writes(
+    sent: &[ConflictFile],
+    outcomes: Vec<Value>,
+) -> (Vec<Value>, Vec<ResolutionWrite>, Vec<usize>) {
+    let by_path: HashMap<&str, &ConflictFile> =
+        sent.iter().map(|file| (file.path.as_str(), file)).collect();
+    let mut kept = Vec::with_capacity(outcomes.len());
+    let mut writes = Vec::new();
+    let mut slots = Vec::new();
+    for mut outcome in outcomes {
+        let resolved = outcome
+            .as_object_mut()
+            .and_then(|object| object.remove("content"));
+        let path = outcome
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if let Some(text) = resolved.as_ref().and_then(Value::as_str) {
+            match by_path.get(path.as_str()) {
+                Some(file) => {
+                    slots.push(kept.len());
+                    writes.push(ResolutionWrite {
+                        path,
+                        sent: file.content.clone(),
+                        index: file.index.clone(),
+                        content: text.to_string(),
+                    });
                 }
+                None => outcome = failed(&path, "Not a conflicted file of this merge."),
             }
-            outcome
-        })
-        .collect()
+        }
+        kept.push(outcome);
+    }
+    (kept, writes, slots)
+}
+
+/// Replaces the outcome of every write the host refused with a failure.
+fn apply_results(
+    mut outcomes: Vec<Value>,
+    slots: &[usize],
+    results: &[ResolutionResult],
+) -> Vec<Value> {
+    for (slot, result) in slots.iter().zip(results) {
+        if let (Some(reason), Some(outcome)) = (&result.error, outcomes.get_mut(*slot)) {
+            *outcome = failed(&result.path, reason);
+        }
+    }
+    outcomes
 }
 
 /// Resolves every conflicted file in the worktree's in-progress merge with
@@ -197,15 +142,16 @@ pub async fn ai_resolve_merge_conflicts(
     ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let endpoint = configured_endpoint(&app, &store)?;
     let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let lock = locks.lock_for(&worktree.project_id)?;
     let cwd = worktree.path;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let files = {
+        let inputs: MergeConflictInputs = {
             let _guard = lock.lock()?;
-            gather_conflicts(&cwd)?
+            host_rpc(&pty, &GitRequest::MergeConflictInputs { root: cwd.clone() })?
         };
-        if files.is_empty() {
+        if inputs.files.is_empty() {
             return Ok(MergeConflictResolution {
                 files: Vec::new(),
                 remaining: Vec::new(),
@@ -214,7 +160,7 @@ pub async fn ai_resolve_merge_conflicts(
         let request = json!({
             "endpoint": endpoint,
             "pullRequest": pull_request,
-            "files": files,
+            "files": inputs.files.iter().map(sidecar_file).collect::<Vec<_>>(),
         });
         let value = run_streaming(
             &["resolve-conflicts", "--cwd", &cwd],
@@ -229,31 +175,25 @@ pub async fn ai_resolve_merge_conflicts(
             .cloned()
             .ok_or_else(|| AppError::Ai("resolve-conflicts returned no files".to_string()))?;
 
+        let (outcomes, writes, slots) = plan_writes(&inputs.files, outcomes);
         let _guard = lock.lock()?;
-        let files = apply_outcomes(&cwd, &files, outcomes);
+        let results: Vec<ResolutionResult> = host_rpc(
+            &pty,
+            &GitRequest::ApplyMergeResolutions {
+                root: cwd.clone(),
+                identity: inputs.identity,
+                resolutions: writes,
+            },
+        )?;
+        let remaining: Vec<String> =
+            host_rpc(&pty, &GitRequest::GithubUnmergedPaths { root: cwd })?;
         Ok(MergeConflictResolution {
-            files,
-            remaining: unmerged_paths(&cwd)?,
+            files: apply_results(outcomes, &slots, &results),
+            remaining,
         })
     })
     .await
     .map_err(|error| AppError::Ai(format!("merge conflict task failed: {error}")))?
-}
-
-/// Files both branches changed since the merge base — the ones the merge had
-/// to reconcile, and so the ones the commit message should describe.
-fn files_changed_on_both_sides(cwd: &str, base: &str) -> AppResult<Vec<String>> {
-    let ours: HashSet<String> = git_output(cwd, &["diff", "--name-only", base, "HEAD"])?
-        .lines()
-        .map(str::to_string)
-        .collect();
-    let mut both: Vec<String> = git_output(cwd, &["diff", "--name-only", base, "MERGE_HEAD"])?
-        .lines()
-        .filter(|path| ours.contains(*path))
-        .map(str::to_string)
-        .collect();
-    both.sort();
-    Ok(both)
 }
 
 /// The note that tells the commit-message model this is a conflict resolution.
@@ -273,9 +213,34 @@ fn merge_note(base_ref: &str, head_ref: &str, files: &[String]) -> String {
     )
 }
 
+/// The commit message for a resolved merge: the model's, or the plain merge
+/// message when every conflict resolved back to the branch's own text.
+fn merge_message(
+    cwd: &str,
+    context: &MergeCommitContext,
+    base_ref: &str,
+    head_ref: &str,
+) -> AppResult<String> {
+    if context.diff.trim().is_empty() {
+        // Nothing for a model to describe, but the merge still needs its commit.
+        return Ok(format!("Merge branch '{base_ref}' into {head_ref}"));
+    }
+    let note = merge_note(base_ref, head_ref, &context.files);
+    let value = run_oneshot(
+        &["commit-message", "--cwd", cwd, "--note", &note],
+        Some(&context.diff),
+    )?;
+    value
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| AppError::Ai("ai sidecar returned no message".to_string()))
+}
+
 /// Commits the resolved merge with an AI-written message that says it fixes
 /// merge conflicts, returning the message. Refuses while any file is still
-/// conflicted. Pushing is left to `github_push_branch`.
+/// conflicted, and when the merge or staged changes move while the message is
+/// being written. Pushing is left to `github_push_branch`.
 #[tauri::command]
 pub async fn ai_commit_merge_resolution(
     db: State<'_, Db>,
@@ -287,47 +252,27 @@ pub async fn ai_commit_merge_resolution(
 ) -> AppResult<String> {
     ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let lock = locks.lock_for(&worktree.project_id)?;
     let cwd = worktree.path;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = lock.lock()?;
-        let base = merge_base(&cwd)?;
-        let remaining = unmerged_paths(&cwd)?;
-        if !remaining.is_empty() {
-            return Err(AppError::InvalidInput(format!(
-                "Resolve the remaining conflicts first: {}",
-                remaining.join(", ")
-            )));
-        }
-        let files = files_changed_on_both_sides(&cwd, &base)?;
-        let mut args = vec!["diff".to_string(), "--cached".to_string()];
-        if !files.is_empty() {
-            args.push("--".to_string());
-            args.extend(files.iter().cloned());
-        }
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let diff = git_output(&cwd, &args)?;
-
-        let message = if diff.trim().is_empty() {
-            // Every conflict resolved back to the branch's own text: nothing
-            // for a model to describe, but the merge still needs its commit.
-            format!("Merge branch '{base_ref}' into {head_ref}")
-        } else {
-            let note = merge_note(&base_ref, &head_ref, &files);
-            let value = run_oneshot(
-                &["commit-message", "--cwd", &cwd, "--note", &note],
-                Some(&diff),
-            )?;
-            value
-                .get("message")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| AppError::Ai("ai sidecar returned no message".to_string()))?
+        let context: MergeCommitContext = {
+            let _guard = lock.lock()?;
+            host_rpc(&pty, &GitRequest::MergeCommitContext { root: cwd.clone() })?
         };
-        git_run_owned(
-            &cwd,
-            &["commit".to_string(), "-m".to_string(), message.clone()],
+        // The lock is free while the model writes the message; the host
+        // re-validates the merge and index when the commit comes back.
+        let message = merge_message(&cwd, &context, &base_ref, &head_ref)?;
+        let _guard = lock.lock()?;
+        host_rpc::<()>(
+            &pty,
+            &GitRequest::CommitMerge {
+                root: cwd,
+                identity: context.identity,
+                tree: context.tree,
+                message: message.clone(),
+            },
         )?;
         Ok(message)
     })
@@ -337,95 +282,53 @@ pub async fn ai_commit_merge_resolution(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-    use std::process::Command;
-
-    use super::{apply_outcomes, files_changed_on_both_sides, gather_conflicts, merge_base};
+    use pragma_core::merge_conflicts::{ConflictFile, ResolutionResult};
     use serde_json::json;
 
-    fn run(cwd: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    use super::{apply_results, merge_note, plan_writes};
 
-    /// A repo mid-merge: `feature` and `main` both edited `a.txt`.
-    fn conflicted_repo() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        run(root, &["init", "-b", "main"]);
-        run(root, &["config", "user.email", "t@example.com"]);
-        run(root, &["config", "user.name", "T"]);
-        run(root, &["config", "core.autocrlf", "false"]);
-        run(root, &["config", "core.eol", "lf"]);
-        std::fs::write(root.join("a.txt"), "base\n").expect("write");
-        run(root, &["add", "."]);
-        run(root, &["commit", "-m", "base"]);
-        run(root, &["checkout", "-b", "feature"]);
-        std::fs::write(root.join("a.txt"), "feature\n").expect("write");
-        run(root, &["commit", "-am", "feat: feature edit"]);
-        run(root, &["checkout", "main"]);
-        std::fs::write(root.join("a.txt"), "main\n").expect("write");
-        run(root, &["commit", "-am", "fix: main edit"]);
-        run(root, &["checkout", "feature"]);
-        let merged = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["merge", "main"])
-            .output()
-            .expect("merge");
-        assert!(!merged.status.success(), "merge should conflict");
-        dir
+    fn file(path: &str) -> ConflictFile {
+        ConflictFile {
+            path: path.to_string(),
+            content: Some("<<<<<<< HEAD\n".to_string()),
+            head_commits: Vec::new(),
+            base_commits: Vec::new(),
+            index: "100644 abc 1".to_string(),
+        }
     }
 
     #[test]
-    fn gathers_conflicts_with_commits_from_each_side() {
-        let dir = conflicted_repo();
-        let cwd = dir.path().to_string_lossy().to_string();
-        let files = gather_conflicts(&cwd).expect("gather");
-        assert_eq!(files.len(), 1);
-        let file = &files[0];
-        assert_eq!(file.path, "a.txt");
-        assert!(file.content.as_deref().unwrap_or("").contains("<<<<<<<"));
-        assert!(file.head_commits[0].ends_with("feat: feature edit"));
-        assert!(file.base_commits[0].ends_with("fix: main edit"));
-        let base = merge_base(&cwd).expect("merge base");
-        assert_eq!(
-            files_changed_on_both_sides(&cwd, &base).expect("both"),
-            vec!["a.txt"]
-        );
+    fn plans_a_write_per_resolved_file_and_strips_the_text() {
+        let sent = vec![file("a.txt"), file("b.txt")];
+        let outcomes = vec![
+            json!({ "path": "a.txt", "status": "resolved", "content": "merged\n" }),
+            json!({ "path": "b.txt", "status": "failed", "reason": "low confidence" }),
+            json!({ "path": "c.txt", "status": "resolved", "content": "x" }),
+        ];
+        let (kept, writes, slots) = plan_writes(&sent, outcomes);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].path, "a.txt");
+        assert_eq!(writes[0].index, "100644 abc 1");
+        assert_eq!(slots, vec![0]);
+        assert!(kept[0].get("content").is_none());
+        assert_eq!(kept[2]["status"], "failed");
     }
 
     #[test]
-    fn applies_resolution_and_stages_it_unless_the_file_changed() {
-        let dir = conflicted_repo();
-        let cwd = dir.path().to_string_lossy().to_string();
-        let files = gather_conflicts(&cwd).expect("gather");
-        let outcome = json!({ "path": "a.txt", "status": "resolved", "content": "merged\n" });
-
-        std::fs::write(dir.path().join("a.txt"), "edited meanwhile\n").expect("write");
-        let skipped = apply_outcomes(&cwd, &files, vec![outcome.clone()]);
-        assert_eq!(skipped[0]["status"], "failed");
-
-        let files = gather_conflicts(&cwd).expect("gather again");
-        let applied = apply_outcomes(&cwd, &files, vec![outcome]);
-        assert_eq!(applied[0]["status"], "resolved");
-        assert!(applied[0].get("content").is_none());
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("a.txt")).expect("read"),
-            "merged\n"
-        );
-        assert!(super::unmerged_paths(&cwd).expect("unmerged").is_empty());
+    fn a_refused_write_becomes_a_failed_outcome() {
+        let outcomes = vec![json!({ "path": "a.txt", "status": "resolved" })];
+        let results = vec![ResolutionResult {
+            path: "a.txt".to_string(),
+            error: Some("The merge changed".to_string()),
+        }];
+        let applied = apply_results(outcomes, &[0], &results);
+        assert_eq!(applied[0]["status"], "failed");
+        assert_eq!(applied[0]["reason"], "The merge changed");
     }
 
     #[test]
-    fn merge_base_requires_a_merge_in_progress() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        run(dir.path(), &["init"]);
-        assert!(merge_base(&dir.path().to_string_lossy()).is_err());
+    fn note_names_both_branches_and_the_files() {
+        let note = merge_note("main", "feature", &["a.txt".to_string()]);
+        assert!(note.contains("`main`") && note.contains("`feature`") && note.contains("a.txt"));
     }
 }
