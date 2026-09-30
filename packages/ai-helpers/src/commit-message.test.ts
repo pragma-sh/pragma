@@ -10,18 +10,11 @@ const mocks = vi.hoisted(() => ({
     },
   })),
   runPromptToText: vi.fn(async () => "fix: update commit generation"),
-  selectModelCandidates: vi.fn(() => [{ id: "fast-model" }]),
-}));
-
-vi.mock("./pick-model.ts", () => ({
-  selectModelCandidates: mocks.selectModelCandidates,
-}));
-
-vi.mock("./model-insights.ts", () => ({
-  loadModelInsights: vi.fn(async () => new Map()),
+  selectModelCandidates: vi.fn((_kind: string) => [{ id: "fast-model" }]),
 }));
 
 vi.mock("./session.ts", () => ({
+  loadModelCandidates: async (kind: string) => mocks.selectModelCandidates(kind),
   createPragmaSession: mocks.createPragmaSession,
   runPromptToText: mocks.runPromptToText,
 }));

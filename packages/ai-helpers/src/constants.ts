@@ -176,3 +176,46 @@ export const AUTO_SELECT = {
   /** Below this agent-choice confidence the UI flags the pick as a guess. */
   lowConfidence: 0.35,
 } as const;
+
+/** Knobs for AI merge-conflict resolution (see `merge-conflicts.ts`). */
+export const MERGE_CONFLICTS = {
+  /**
+   * A conflict's combined score is `confidence × (1 − riskWeight × risk)`,
+   * with `risk` normalized to `0..1`. Risk only nudges the bar: a critical
+   * conflict needs ~1.3× the confidence of a trivial one, not twice as much.
+   */
+  riskWeight: 0.25,
+  /**
+   * Below this combined score on **any** conflict, the whole file goes to the
+   * built-in AI for verification. Deliberately permissive: with four real
+   * options 0.25 is chance, and System 1 escalates on its own by answering
+   * `combine` when no pick is correct. So this bar only has to catch a
+   * genuine coin-flip, not every less-than-certain answer.
+   */
+  minCombinedScore: 0.35,
+  /**
+   * A `combine` answer (System 1 says the sides need a hand merge) escalates
+   * only at or above this normalized risk — 0.25 is the "Low" level. On a
+   * trivial conflict (wording, formatting, comments) a hand merge is not worth
+   * an LLM call, so System 1's best real option is taken instead.
+   */
+  combineMinRisk: 0.25,
+  /**
+   * Per-file System 1 request timeout. Longer than auto mode's, because a
+   * conflicted file is a much larger state than a launch prompt.
+   */
+  system1TimeoutMs: 30_000,
+  /** Lines of unconflicted code shown around each conflict, per side. */
+  contextLines: 12,
+  /**
+   * Most characters of one conflict side sent to System 1. A side cut here is
+   * a conflict System 1 did not fully see, so its file is always verified.
+   */
+  maxSideChars: 6_000,
+  /** Commit messages per branch per file, newest first. */
+  maxCommitsPerSide: 20,
+  /** Pull request description characters included as intent. */
+  maxDescriptionChars: 4_000,
+  /** Conflicted-file characters included in the verification prompt. */
+  maxVerifyFileChars: 60_000,
+} as const;

@@ -32,7 +32,7 @@ use crate::pty::{sidecar_executable, workspace_root};
 /// prevents inspecting an unrelated checkout at the same absolute path, or
 /// failing with a confusing missing-directory error. Host-routed AI is not
 /// wired yet; keep this guard until it is.
-fn ensure_local_ai_worktree(db: &Db, hosts: &Hosts, worktree_id: &str) -> AppResult<()> {
+pub(crate) fn ensure_local_ai_worktree(db: &Db, hosts: &Hosts, worktree_id: &str) -> AppResult<()> {
     refuse_remote_ai_host(&hosts.host_id_for_worktree(db, worktree_id)?)
 }
 
@@ -227,6 +227,16 @@ fn sidecar_command() -> Command {
 /// Run a one-shot sidecar command, optionally writing `stdin_data`, and return
 /// the final NDJSON event. Maps an `error` event to an `AppError`.
 pub(crate) fn run_oneshot(args: &[&str], stdin_data: Option<&str>) -> AppResult<Value> {
+    run_streaming(args, stdin_data, |_| {})
+}
+
+/// Like [`run_oneshot`], but hands every non-terminal NDJSON event (progress)
+/// to `on_event` as it arrives.
+pub(crate) fn run_streaming(
+    args: &[&str],
+    stdin_data: Option<&str>,
+    mut on_event: impl FnMut(&Value),
+) -> AppResult<Value> {
     let mut command = sidecar_command();
     command.args(args);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -242,18 +252,47 @@ pub(crate) fn run_oneshot(args: &[&str], stdin_data: Option<&str>) -> AppResult<
             stdin.write_all(data.as_bytes())?;
         }
     }
-    let output = child.wait_with_output()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let last = stdout
-        .lines()
-        .map(str::trim)
-        .rfind(|line| !line.is_empty())
-        .ok_or_else(|| {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            AppError::Ai(format!("ai sidecar produced no output ({})", stderr.trim()))
-        })?;
+    // Drain stderr on its own thread so a chatty sidecar cannot fill the pipe
+    // and stall while this thread waits on stdout. Each line is also written to
+    // the app log, so sidecar diagnostics show up in the dev terminal.
+    let stderr = child.stderr.take().map(|pipe| {
+        thread::spawn(move || {
+            let mut text = String::new();
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                log::info!(target: "pragma_ai", "{line}");
+                text.push_str(&line);
+                text.push('\n');
+            }
+            text
+        })
+    });
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Ai("failed to capture ai sidecar stdout".to_string()))?;
 
-    let value: Value = serde_json::from_str(last)?;
+    let mut last: Option<Value> = None;
+    for line in BufReader::new(stdout).lines() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // A stray non-protocol line (a dependency logging to stdout) is not an event.
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        if let Some(previous) = last.replace(value) {
+            on_event(&previous);
+        }
+    }
+    child.wait()?;
+    let stderr = stderr
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default();
+    let value = last.ok_or_else(|| {
+        AppError::Ai(format!("ai sidecar produced no output ({})", stderr.trim()))
+    })?;
     if value.get("type").and_then(Value::as_str) == Some("error") {
         let message = value
             .get("error")
@@ -529,7 +568,7 @@ pub async fn ai_commit_all_and_generate_pull_request_draft(
     .map_err(|error| AppError::Ai(error.to_string()))?
 }
 
-fn staged_diff(cwd: &str) -> AppResult<String> {
+pub(crate) fn staged_diff(cwd: &str) -> AppResult<String> {
     git_output(cwd, &["diff", "--cached"])
 }
 
@@ -683,11 +722,11 @@ fn base_ref_candidates(parent_branch: &str, parent_path: Option<&str>) -> AppRes
     Ok(candidates)
 }
 
-fn git_output(cwd: &str, args: &[&str]) -> AppResult<String> {
+pub(crate) fn git_output(cwd: &str, args: &[&str]) -> AppResult<String> {
     git_output_bytes(cwd, args).map(|stdout| String::from_utf8_lossy(&stdout).to_string())
 }
 
-fn git_output_bytes(cwd: &str, args: &[&str]) -> AppResult<Vec<u8>> {
+pub(crate) fn git_output_bytes(cwd: &str, args: &[&str]) -> AppResult<Vec<u8>> {
     let output = crate::process_env::command("git")
         .arg("-C")
         .arg(cwd)
@@ -701,7 +740,7 @@ fn git_output_bytes(cwd: &str, args: &[&str]) -> AppResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn git_run(cwd: &str, args: &[&str]) -> AppResult<()> {
+pub(crate) fn git_run(cwd: &str, args: &[&str]) -> AppResult<()> {
     let output = crate::process_env::command("git")
         .arg("-C")
         .arg(cwd)
@@ -715,7 +754,7 @@ fn git_run(cwd: &str, args: &[&str]) -> AppResult<()> {
     Ok(())
 }
 
-fn git_run_owned(cwd: &str, args: &[String]) -> AppResult<()> {
+pub(crate) fn git_run_owned(cwd: &str, args: &[String]) -> AppResult<()> {
     let output = crate::process_env::command("git")
         .arg("-C")
         .arg(cwd)
@@ -729,7 +768,7 @@ fn git_run_owned(cwd: &str, args: &[String]) -> AppResult<()> {
     Ok(())
 }
 
-fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
+pub(crate) fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
     let output = crate::process_env::command("git")
         .arg("-C")
         .arg(cwd)

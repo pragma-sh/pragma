@@ -1252,6 +1252,11 @@ export function githubMergeInProgress(worktreeId: string): Promise<boolean> {
   return invoke<boolean>("github_merge_in_progress", { worktreeId });
 }
 
+/** Lists the paths Git still marks as conflicted in this worktree. */
+export function githubUnmergedPaths(worktreeId: string): Promise<string[]> {
+  return invoke<string[]>("github_unmerged_paths", { worktreeId });
+}
+
 /** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */
 export function githubPushBranch(worktreeId: string): Promise<void> {
   return invoke("github_push_branch", { worktreeId });
@@ -2050,6 +2055,76 @@ export function aiAsk(
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("ai_ask", { id, worktreeId, question, onEvent: channel });
+}
+
+/** How one merge conflict was resolved (see `packages/ai-helpers/src/merge-conflicts.ts`). */
+export interface MergeConflictHunkDecision {
+  id: string;
+  startLine: number;
+  resolution: "ours" | "theirs" | "both_ours_first" | "both_theirs_first" | "custom";
+  source: "system1" | "verified";
+  /** System 1's pick: `confidence` a human would agree, `risk` of a wrong pick (0–1). */
+  system1: { choice: string; confidence: number; risk: number; combined: number } | null;
+  reason: string | null;
+}
+
+/** One conflicted file's outcome. */
+export type MergeConflictFileOutcome =
+  | {
+      path: string;
+      status: "resolved";
+      method: "system1" | "verified";
+      escalation: string | null;
+      hunks: MergeConflictHunkDecision[];
+    }
+  | { path: string; status: "skipped" | "failed"; reason: string };
+
+/** Every file's outcome, plus the paths still conflicted afterwards. */
+export interface MergeConflictResolution {
+  files: MergeConflictFileOutcome[];
+  remaining: string[];
+}
+
+/** Progress streamed while conflicts are resolved. */
+export type MergeConflictProgress =
+  | { type: "progress"; phase: "system1"; files: number }
+  | { type: "progress"; phase: "verifying"; path: string };
+
+/** The pull request whose merge is being resolved; its text is intent for the models. */
+export interface MergeConflictPullRequest {
+  title: string;
+  body: string;
+  headRef: string;
+  baseRef: string;
+}
+
+/**
+ * Resolves every conflicted file of the worktree's in-progress merge with
+ * System 1 (verifying low-scoring files with the built-in AI), writing and
+ * staging each resolution.
+ */
+export function aiResolveMergeConflicts(
+  worktreeId: string,
+  pullRequest: MergeConflictPullRequest,
+  onProgress: (event: MergeConflictProgress) => void,
+): Promise<MergeConflictResolution> {
+  const channel = new Channel<MergeConflictProgress>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+  channel.onmessage = onProgress;
+  return invoke<MergeConflictResolution>("ai_resolve_merge_conflicts", {
+    worktreeId,
+    pullRequest,
+    onEvent: channel,
+  });
+}
+
+/** Commits the resolved merge with an AI message that says it fixes merge conflicts. */
+export function aiCommitMergeResolution(
+  worktreeId: string,
+  baseRef: string,
+  headRef: string,
+): Promise<string> {
+  return invoke<string>("ai_commit_merge_resolution", { worktreeId, baseRef, headRef });
 }
 
 /** Aborts an in-flight palette Ask AI run and drops its sidecar. */

@@ -36,6 +36,12 @@ and speaks newline-delimited JSON ("NDJSON") on stdout:
   endpoint on stdin from `system1.rs`; a `System1Error` is reported with the code
   `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …) and an `AutoSelectError`
   (every agent filtered out) as `auto-unavailable`.
+- **`resolve-conflicts`** streams `{ type: "progress", phase: "system1", files }` once,
+  then `{ type: "progress", phase: "verifying", path }` per file handed to the verifier,
+  then one `result` with every file's outcome. The app writes and stages the files; the
+  sidecar never touches the worktree.
+- **`commit-message --note <text>`** adds what the change _is_ when the diff cannot say
+  it (the merge-conflict commit uses this).
 - **`ask`** streams assistant text: `{ type: "delta", text }`, optional
   `{ type: "reset" }` when a model attempt is abandoned, then
   `{ type: "result", text }` or `error`. JSON context on stdin lists the question
@@ -57,27 +63,29 @@ The Rust side parses the last non-empty line.
 
 ## Module map (`src/`)
 
-| File                  | Responsibility                                                                      |
-| --------------------- | ----------------------------------------------------------------------------------- |
-| `cli.ts`              | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch      |
-| `index.ts`            | Public package surface — re-exports only; import from here, not deep paths          |
-| `auth.ts`             | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys         |
-| `pick-model.ts`       | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)              |
-| `constants.ts`        | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)        |
-| `model-date.ts`       | Parses release dates out of model ids for the recency filter                        |
-| `model-insights.ts`   | modelgrep client + disk cache — throughput, latency, benchmark scores               |
-| `harness-insights.ts` | Terminal-Bench leaderboard (agent × model) — accuracy, time, tokens/cost per solve  |
-| `disk-cache.ts`       | Versioned, TTL-bound JSON cache envelope shared by both insight feeds               |
-| `automode.ts`         | Parses/merges `automode.md` and applies its include/exclude globs                   |
-| `auto-select.ts`      | Auto mode: one fan-out System 1 request → agent, model, reasoning effort            |
-| `prompts.ts`          | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested        |
-| `session.ts`          | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                 |
-| `run-failure.ts`      | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`             |
-| `commit-message.ts`   | `git diff --cached` → one commit message (fast model)                               |
-| `commit-plan.ts`      | Whole-worktree diff → a multi-commit plan (standard model)                          |
-| `pull-request.ts`     | Committed branch diff → PR title + body (standard model, tools enabled)             |
-| `inline-edit.ts`      | Editor buffer + instruction → exact-text replacements (standard, read-only tools)   |
-| `ask-ai.ts`           | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project) |
+| File                  | Responsibility                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `cli.ts`              | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch       |
+| `index.ts`            | Public package surface — re-exports only; import from here, not deep paths           |
+| `auth.ts`             | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys          |
+| `pick-model.ts`       | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)               |
+| `constants.ts`        | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)         |
+| `model-date.ts`       | Parses release dates out of model ids for the recency filter                         |
+| `model-insights.ts`   | modelgrep client + disk cache — throughput, latency, benchmark scores                |
+| `harness-insights.ts` | Terminal-Bench leaderboard (agent × model) — accuracy, time, tokens/cost per solve   |
+| `disk-cache.ts`       | Versioned, TTL-bound JSON cache envelope shared by both insight feeds                |
+| `automode.ts`         | Parses/merges `automode.md` and applies its include/exclude globs                    |
+| `auto-select.ts`      | Auto mode: one fan-out System 1 request → agent, model, reasoning effort             |
+| `conflict-markers.ts` | Parses/applies git conflict markers (`merge` + `diff3`/`zdiff3`), byte-exact endings |
+| `merge-conflicts.ts`  | AI merge-conflict resolution: per-file System 1 requests, high-tier verification     |
+| `prompts.ts`          | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested         |
+| `session.ts`          | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                  |
+| `run-failure.ts`      | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`              |
+| `commit-message.ts`   | `git diff --cached` → one commit message (fast model)                                |
+| `commit-plan.ts`      | Whole-worktree diff → a multi-commit plan (standard model)                           |
+| `pull-request.ts`     | Committed branch diff → PR title + body (standard model, tools enabled)              |
+| `inline-edit.ts`      | Editor buffer + instruction → exact-text replacements (standard, read-only tools)    |
+| `ask-ai.ts`           | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project)  |
 
 **`inline-edit` never writes.** Its tools are pinned to `INLINE_EDIT_TOOLS`
 (`read`, `grep`, `find`, `ls`) — the buffer it is editing is usually **unsaved**, so a
@@ -125,6 +133,25 @@ agent CLI, one of that agent's models, and a reasoning effort — with a System 
   chunks and bracket-matches the `"rows":[…]` array. If Terminal-Bench changes its page,
   the parse returns nothing and auto mode degrades to model benchmarks. The fixture test
   builds the page the way Next.js does; update it when the real shape moves.
+
+## Merge-conflict resolution (`merge-conflicts.ts`)
+
+The pull request pane's **Resolve Merge Conflicts**. The git side (gathering files and
+per-file commit logs, writing, staging, the concluding commit) lives in
+`apps/pragma/src-tauri/src/merge_conflicts.rs`.
+
+- **One System 1 request per file, all files at once** (`Promise.all`). Per conflict:
+  a choice `c<n>` (`ours` / `theirs` / `both_ours_first` / `both_theirs_first`) phrased
+  as "what would an experienced engineer pick", so its calibrated `confidence` _is_ "would
+  a human pick this", and a score `c<n>_risk` over `RISK_LEVELS`. Questions in one request
+  are evaluated in isolation, so never ask a follow-up that assumes the choice's answer.
+- **Escalation is per file.** `confidence × (1 − riskWeight × risk)` below
+  `MERGE_CONFLICTS.minCombinedScore` on any conflict, a System 1 error, or a conflict side
+  cut at `maxSideChars` sends the whole file to the `high` tier with read-only tools
+  (`INLINE_EDIT_TOOLS`), System 1's answers, and the same context. The verifier may answer
+  `custom` with replacement text; markers in it are rejected.
+- **A failed file never fails the run.** Binary, marker-free (rename or delete), or
+  malformed files come back `skipped`; model failures come back `failed`.
 
 ## Model selection
 
