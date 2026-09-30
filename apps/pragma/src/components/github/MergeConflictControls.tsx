@@ -321,6 +321,60 @@ function useAiCapabilities(worktreeId: string): { commit: boolean; resolve: bool
   };
 }
 
+/** Which action the merge needs next, and whether this machine can run it. */
+function nextAction(
+  unpushed: boolean,
+  status: MergeStatus | null,
+  capabilities: { commit: boolean; resolve: boolean },
+): { action: AiAction; available: boolean; hint: string | null } {
+  const ready = status?.inProgress === true && status.unmerged.length === 0;
+  if (unpushed) return { action: "push", available: true, hint: null };
+  if (ready) {
+    return {
+      action: "commit",
+      available: capabilities.commit,
+      hint: capabilities.commit ? null : "Conflicts resolved. Commit the merge, then push.",
+    };
+  }
+  return {
+    action: "resolve",
+    available: capabilities.resolve,
+    hint: status?.inProgress ? "Resolve the Merge Conflict and Commit" : null,
+  };
+}
+
+/** The primary button and the guidance around it, for whatever the merge needs next. */
+function PrimaryMergeAction({
+  ai,
+  busy,
+  status,
+  worktreeId,
+}: {
+  ai: ReturnType<typeof useAiConflictResolution>;
+  busy: boolean;
+  status: MergeStatus | null;
+  worktreeId: string;
+}) {
+  const { action, available, hint } = nextAction(
+    ai.unpushed,
+    status,
+    useAiCapabilities(worktreeId),
+  );
+  return (
+    <>
+      {hint ? <p className="text-center text-xs font-medium">{hint}</p> : null}
+      {available ? (
+        <AiMergeButton
+          action={action}
+          disabled={busy}
+          onAction={() => void (action === "resolve" ? ai.resolve() : ai.commitAndPush())}
+          phase={ai.phase}
+        />
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The merge-conflict card: sync the base branch in, optionally let System 1
  * (verified by the built-in AI) resolve the conflicts, then commit and push.
@@ -340,32 +394,13 @@ export function MergeConflictControls({
   const { status, refresh } = useMergeStatus(worktreeId);
   const ai = useAiConflictResolution({ pr, repo, worktreeId, status, refresh, onChanged });
   const manual = useManualMergeActions({ pr, repo, worktreeId, refresh, onChanged });
-  const capabilities = useAiCapabilities(worktreeId);
   const inProgress = status?.inProgress === true;
-  const readyToCommit = inProgress && status.unmerged.length === 0;
   const busy = manual.merging || ai.phase !== null || status === null;
-  const action: AiAction = ai.unpushed ? "push" : readyToCommit ? "commit" : "resolve";
-  const actionAvailable = action === "push" || capabilities[action];
 
   return (
     <>
       <MergeConflictHeader pr={pr} />
-      {inProgress && !readyToCommit ? (
-        <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
-      ) : null}
-      {action === "commit" && !actionAvailable ? (
-        <p className="text-center text-xs font-medium">
-          Conflicts resolved. Commit the merge, then push {pr.headRef}.
-        </p>
-      ) : null}
-      {actionAvailable ? (
-        <AiMergeButton
-          action={action}
-          disabled={busy}
-          onAction={() => void (action === "resolve" ? ai.resolve() : ai.commitAndPush())}
-          phase={ai.phase}
-        />
-      ) : null}
+      <PrimaryMergeAction ai={ai} busy={busy} status={status} worktreeId={worktreeId} />
       <Button
         className="w-full"
         disabled={busy}
