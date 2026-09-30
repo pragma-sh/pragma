@@ -881,6 +881,15 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
   return invoke("write_file", { worktreeId, path, contents });
 }
 
+/** Saves a bundled HTML scratchpad export and opens its local exports folder. */
+export function exportScratchpadHtml(
+  worktreeId: string,
+  title: string,
+  html: string,
+): Promise<string> {
+  return invoke("export_scratchpad_html", { worktreeId, title, html });
+}
+
 /**
  * Copies one base64-encoded file dropped onto a terminal to the host that runs
  * the worktree's shells, resolving to the absolute path to paste into the PTY.
