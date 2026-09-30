@@ -1,8 +1,11 @@
 export {
   buildScratchpadViewerHtml,
+  buildScratchpadExportHtml,
+  type ScratchpadExportHtmlOptions,
   scratchpadThemeCss,
   type ScratchpadViewerHtmlOptions,
 } from "./html";
+export { installScratchpadFrameRuntime } from "./frame-runtime";
 export { prepareMdxSource } from "./mdx-source";
 // The file contract itself lives in `@pragma-sh/scratchpad-contract` (the SDK
 // depends on it too, and cannot depend on this renderer). Re-exported so a host
