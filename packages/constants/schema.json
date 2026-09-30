@@ -2799,10 +2799,25 @@
       "description": "Managed scratchpad file contract shared by the CLI, desktop host, and editor.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["directory", "extension", "frontmatterKey", "version"],
+      "required": [
+        "directory",
+        "exportsDirectory",
+        "exportHomepageUrl",
+        "extension",
+        "frontmatterKey",
+        "version"
+      ],
       "properties": {
         "directory": {
           "type": "string"
+        },
+        "exportsDirectory": {
+          "type": "string",
+          "description": "Worktree-relative directory for standalone HTML exports."
+        },
+        "exportHomepageUrl": {
+          "type": "string",
+          "description": "Pragma homepage linked from the standalone export watermark."
         },
         "extension": {
           "type": "string"
