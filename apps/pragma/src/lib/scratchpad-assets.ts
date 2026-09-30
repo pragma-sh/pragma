@@ -77,31 +77,34 @@ export async function inlineScratchpadAssets(
       const id = node.attributes?.find((attribute) => attribute.name === "id")?.value;
       if (typeof id === "string") jobs.push(inlineWhiteboard(node, worktreeId, id));
     }
-    if (
-      node.url &&
-      (node.type === "image" ||
-        (node.type === "definition" && imageReferences.has(node.identifier ?? "")))
-    ) {
-      jobs.push(
-        read(node.url).then((url) => {
-          node.url = url;
-          return undefined;
-        }),
-      );
-    }
-    if (!["img", "video", "audio", "source", "iframe"].includes(node.name ?? "")) continue;
-    for (const attribute of node.attributes ?? []) {
-      if (["src", "poster"].includes(attribute.name ?? "") && typeof attribute.value === "string") {
-        jobs.push(
-          read(attribute.value).then((url) => {
-            attribute.value = url;
-            return undefined;
-          }),
-        );
-      }
-    }
+    jobs.push(inlineMarkdownImage(node, imageReferences, read), inlineMediaAttributes(node, read));
   }
   await Promise.all(jobs);
+}
+
+async function inlineMarkdownImage(
+  node: AssetNode,
+  imageReferences: Set<string>,
+  read: (url: string) => Promise<string>,
+): Promise<void> {
+  const isImage =
+    node.type === "image" ||
+    (node.type === "definition" && imageReferences.has(node.identifier ?? ""));
+  if (node.url && isImage) node.url = await read(node.url);
+}
+
+async function inlineMediaAttributes(
+  node: AssetNode,
+  read: (url: string) => Promise<string>,
+): Promise<void> {
+  if (!["img", "video", "audio", "source", "iframe"].includes(node.name ?? "")) return;
+  await Promise.all(
+    (node.attributes ?? []).map(async (attribute) => {
+      if (["src", "poster"].includes(attribute.name ?? "") && typeof attribute.value === "string") {
+        attribute.value = await read(attribute.value);
+      }
+    }),
+  );
 }
 
 async function inlineWhiteboard(node: AssetNode, worktreeId: string, id: string): Promise<void> {

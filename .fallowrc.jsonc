@@ -37,6 +37,7 @@
     // (`packages/scratchpad-viewer/scripts/build.ts`) bundled into a string and
     // inlined into the generated document — never imported by a module graph.
     "packages/scratchpad-viewer/src/runtime/main.tsx",
+    "packages/scratchpad-viewer/src/runtime/export.ts",
     // Metro platform extensions: `apps/pragma-go` ships a `*.web.ts(x)` twin
     // beside each of these, and fallow's resolver follows the `.web` file — so
     // the native original looks unreachable even though it is exactly what an
