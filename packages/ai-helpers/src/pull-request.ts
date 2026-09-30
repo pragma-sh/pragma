@@ -6,9 +6,7 @@ import {
   type PullRequestDraft,
   type PullRequestPromptContext,
 } from "./prompts.ts";
-import { loadModelInsights } from "./model-insights.ts";
-import { selectModelCandidates } from "./pick-model.ts";
-import { createPragmaSession, runPromptToText } from "./session.ts";
+import { createPragmaSession, loadModelCandidates, runPromptToText } from "./session.ts";
 
 /** Options for {@link generatePullRequestDraft}. */
 export interface GeneratePullRequestDraftOptions extends PullRequestPromptContext {
@@ -39,13 +37,7 @@ export async function generatePullRequestDraft(
   }
 
   const prompt = buildPullRequestPrompt(options);
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates("standard", options.registry.getAvailable(), {
-    insights,
-  });
-  if (candidates.length === 0) {
-    throw new Error("No standard model is available. Sign in to a provider that offers one.");
-  }
+  const candidates = await loadModelCandidates("standard", options.registry);
 
   let lastError: unknown;
   for (const model of candidates) {
