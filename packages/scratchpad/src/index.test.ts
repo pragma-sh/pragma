@@ -24,6 +24,13 @@ function installBridge(
 }
 
 describe("promptAgent", () => {
+  it("never contacts the host when standalone feedback is disabled", async () => {
+    const bridge = installBridge(["sent"]);
+    bridge.agentFeedbackEnabled = false;
+    await expect(promptAgent("feedback")).resolves.toBe(false);
+    expect(bridge.promptAgent).not.toHaveBeenCalled();
+    expect(bridge.requestAgentAttachment).not.toHaveBeenCalled();
+  });
   it("sends directly when an agent is attached", async () => {
     const bridge = installBridge(["sent"]);
     await expect(promptAgent("  address comments  ")).resolves.toBe(true);

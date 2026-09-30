@@ -21,6 +21,8 @@ export interface ScratchpadWhiteboardSnapshot {
 
 /** Host bridge installed only inside a rendered Pragma scratchpad. */
 export interface ScratchpadBridge {
+  /** False in standalone exports, which cannot send feedback to agents. */
+  agentFeedbackEnabled?: boolean;
   /** Delivers text, or reports a missing attachment or reader cancellation. */
   promptAgent(text: string): Promise<"sent" | "missing-agent" | "cancelled">;
   requestAgentAttachment(): Promise<boolean>;
@@ -78,6 +80,7 @@ export async function promptAgent(
   const value = text.trim();
   if (!value) return false;
   const host = bridge();
+  if (host.agentFeedbackEnabled === false) return false;
   const firstResult = await host.promptAgent(value);
   if (firstResult === "sent") return true;
   if (firstResult === "cancelled") return false;
