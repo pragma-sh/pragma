@@ -81,7 +81,12 @@ script and inlined, so a `file://` export never needs a Vite server or Pragma.
 
 ## Commands
 
+The root `bun run generate` also generates both viewer and export runtime modules
+before static analysis. Its Turbo task builds workspace dependencies first and
+tracks source inputs, so runtime edits invalidate the generated-module cache.
+
 ```bash
+bun run --filter @pragma-sh/scratchpad-viewer generate   # runtime modules only
 bun run --filter @pragma-sh/scratchpad-viewer build      # runtime bundle + dist
 bun run --filter @pragma-sh/scratchpad-viewer typecheck
 bun run --filter @pragma-sh/scratchpad-viewer test
