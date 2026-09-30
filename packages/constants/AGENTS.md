@@ -111,6 +111,18 @@ Two things that break the tarball if changed carelessly:
   attempt session exports. The whole fanout wire contract (`Fanout`,
   `FanoutMember`, statuses, finalize stages, request/result types) lives in
   `schema.json` so the host, the CLI, the SDK, and the desktop share one shape.
+- `system1.*` — System 1 (Jev) defaults: `defaultBaseUrl`, `defaultModel`,
+  `evaluatePath` (skipped when the configured URL already ends in `/systemone` or
+  `/decisions`, e.g. OpenRouter's `/api/alpha/decisions`), `hostModels` (the model a
+  blank `system1.model` resolves to per API host — OpenRouter names Jev
+  `~typesafe/jev-latest`; read by both `system1.rs` and `lib/system1-settings.ts`),
+  the owner-only `credentialFileName` under the app data dir,
+  `autoModeFileName` (`.pragma/automode.md`, home- or project-relative), the request
+  timeout, and the prompt / `automode.md` character caps. User overrides for the URL and
+  model live in the global `config.json` `system1` block (`System1Settings`);
+  `System1Status` is what the backend reports to the UI (never the key).
+- `AgentModelEntry.canonicalId` — optional provider-qualified id for an aliased model,
+  used only by auto mode's benchmark matching.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

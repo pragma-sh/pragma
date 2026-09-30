@@ -42,6 +42,7 @@ import type {
   Whiteboard,
   WhiteboardViewResult,
   WslDistroList,
+  System1Status,
 } from "@pragma-sh/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -133,6 +134,8 @@ export interface AgentModel {
   id: string;
   name: string;
   reasoning: AgentReasoning[];
+  /** Provider-qualified id for benchmark matching when `id` is an alias (auto mode only). */
+  canonicalId?: string | null;
 }
 
 /** Optional reasoning effort for a model. */
@@ -146,6 +149,7 @@ export interface RawAgentModel {
   id: string;
   name: string;
   reasoning?: AgentReasoning[];
+  canonicalId?: string | null;
 }
 
 /** Selected model/reasoning for an agent launch; `modelId: null` means no model args. */
@@ -1902,6 +1906,94 @@ export function aiSetApiKey(provider: string, apiKey: string): Promise<AiStatus>
 /** Removes all stored credentials for a provider, returning the refreshed status. */
 export function aiLogout(provider: string): Promise<AiStatus> {
   return invoke<AiStatus>("ai_logout", { provider });
+}
+
+export type { System1Status } from "@pragma-sh/constants";
+
+/** Whether a System 1 key is stored, plus the effective base URL and model route. */
+export function system1Status(): Promise<System1Status> {
+  return invoke<System1Status>("system1_status");
+}
+
+/** Stores the System 1 API key in the owner-only credential file. */
+export function system1SetApiKey(apiKey: string): Promise<System1Status> {
+  return invoke<System1Status>("system1_set_api_key", { apiKey });
+}
+
+/** Removes the stored System 1 API key. */
+export function system1ClearApiKey(): Promise<System1Status> {
+  return invoke<System1Status>("system1_clear_api_key");
+}
+
+/**
+ * Sends the cheapest possible System 1 request and resolves with the model
+ * version that answered. Omitted arguments use the saved key and configured URL.
+ */
+export function system1Check(
+  options: { baseUrl?: string; apiKey?: string; model?: string } = {},
+): Promise<string> {
+  return invoke<string>("system1_check", {
+    baseUrl: options.baseUrl ?? null,
+    apiKey: options.apiKey ?? null,
+    model: options.model ?? null,
+  });
+}
+
+/** One launch candidate offered to auto mode. */
+export interface AutoSelectAgentInput {
+  id: string;
+  name: string;
+  models: AgentModel[];
+}
+
+/** An auto-mode request: pick among `agents` for `prompt`. */
+export interface AutoSelectInput {
+  /** Project whose `.pragma/automode.md` applies. */
+  projectId: string | null;
+  prompt: string;
+  context: { project?: string | null; worktree?: string | null; branch?: string | null };
+  agents: AutoSelectAgentInput[];
+}
+
+/** Auto mode's pick and the evidence behind it. */
+export interface AutoSelection {
+  agentId: string;
+  modelId: string | null;
+  reasoningId: string | null;
+  /** Confidence of the agent choice, 0-1. */
+  confidence: number;
+  lowConfidence: boolean;
+  /** Estimated task difficulty, 0 (trivial) to 1 (very hard). */
+  difficulty: number;
+  agentProbabilities: Record<string, number>;
+  modelProbabilities: Record<string, number>;
+  /** One-line explanation, e.g. `Codex 72% · GPT-6 Astra 64% · hard task → High`. */
+  reason: string;
+  /** Problems reading or parsing `automode.md`. */
+  warnings: string[];
+  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean };
+}
+
+/** Reads global or project `.pragma/automode.md`; a missing file has empty contents. */
+export function readAutoMode(
+  scope: ConfigScope,
+  projectId?: string | null,
+): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_automode", { scope, projectId: projectId ?? null });
+}
+
+/** Writes global or project `.pragma/automode.md`. */
+export function writeAutoMode(
+  scope: ConfigScope,
+  contents: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke("write_automode", { scope, projectId: projectId ?? null, contents });
+}
+
+/** Asks the configured System 1 model to pick an agent, model, and reasoning effort. */
+export function system1AutoSelect(input: AutoSelectInput): Promise<AutoSelection> {
+  return invoke<AutoSelection>("system1_auto_select", { input });
 }
 
 /** Whether the user has dismissed AI setup. */

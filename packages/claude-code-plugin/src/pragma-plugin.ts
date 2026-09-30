@@ -94,11 +94,34 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/claude-code.svg",
       launch: { command: ["claude"] },
+      // `claude --model` takes aliases that always resolve to the newest model in
+      // the family; `canonicalId` names that model so auto mode can find its
+      // benchmarks. Update it when an alias moves to a new release.
       models: [
-        { id: "sonnet", name: "Sonnet", reasoning: reasoningFull },
-        { id: "opus", name: "Opus", reasoning: reasoningStandard },
-        { id: "fable", name: "Fable", reasoning: reasoningFull },
-        { id: "haiku", name: "Haiku", reasoning: reasoningStandard },
+        {
+          id: "sonnet",
+          name: "Sonnet",
+          canonicalId: "anthropic/claude-sonnet-5-5",
+          reasoning: reasoningFull,
+        },
+        {
+          id: "opus",
+          name: "Opus",
+          canonicalId: "anthropic/claude-opus-5-5",
+          reasoning: reasoningStandard,
+        },
+        {
+          id: "fable",
+          name: "Fable",
+          canonicalId: "anthropic/claude-fable-5-1",
+          reasoning: reasoningFull,
+        },
+        {
+          id: "haiku",
+          name: "Haiku",
+          canonicalId: "anthropic/claude-haiku-4-5",
+          reasoning: reasoningStandard,
+        },
       ],
       // First entry is the default: `auto` keeps unattended launches moving.
       permissionModes: [

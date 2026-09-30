@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAutoTarget } from "@/hooks/use-auto-target";
+import type { AutoRegistry } from "@/hooks/use-auto-agent-selection";
 import type { FixLauncher } from "@/hooks/use-fix-launcher";
 
 /**
@@ -15,8 +17,18 @@ import type { FixLauncher } from "@/hooks/use-fix-launcher";
  * single-comment and fix-it-list dialogs. Purely presentational — all state lives
  * in the `FixLauncher`.
  */
-export function FixAgentControls({ launcher }: { launcher: FixLauncher }) {
+export function FixAgentControls({
+  launcher,
+  prompt,
+  autoRegistry,
+}: {
+  launcher: FixLauncher;
+  /** The fix prompt the agent will get — what Auto decides for. */
+  prompt: string;
+  autoRegistry?: AutoRegistry;
+}) {
   const { selection, newWorktree, setNewWorktreeEnabled, setBranch, setTitle } = launcher;
+  const autoTarget = useAutoTarget(prompt);
   const branchId = useId();
   const titleId = useId();
 
@@ -30,6 +42,8 @@ export function FixAgentControls({ launcher }: { launcher: FixLauncher }) {
           onChange={selection.handleAgentChange}
           onLoadModels={selection.loadModels}
           value={{ agentId: selection.agentId, selection: selection.modelSelection }}
+          autoTarget={autoTarget}
+          autoRegistry={autoRegistry}
         />
       </div>
 

@@ -33,8 +33,10 @@ mod pty;
 mod scratchpads;
 mod script_migration;
 mod scripts;
+mod secret_file;
 mod ssh_host;
 mod storage;
+mod system1;
 mod updates;
 mod whiteboards;
 mod window_chrome;
@@ -1191,6 +1193,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
+    app.manage(system1::System1KeyStore::new(&data_dir));
     let resource_dir = app.path().resource_dir().ok();
     let pty = PtyClient::new(app_data_dir, channel, resource_dir);
     // The local client stays managed for host-agnostic consumers (agent event
@@ -1500,6 +1503,13 @@ pub fn run() {
             ai::ai_login,
             ai::ai_login_respond,
             ai::ai_login_cancel,
+            system1::system1_status,
+            system1::system1_set_api_key,
+            system1::system1_clear_api_key,
+            system1::system1_check,
+            system1::system1_auto_select,
+            system1::read_automode,
+            system1::write_automode,
             automations::register_automation_roots,
             automations::list_automations,
             automations::approve_automation,

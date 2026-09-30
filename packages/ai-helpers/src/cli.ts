@@ -18,10 +18,16 @@
  *   inline-edit --cwd <path>      (JSON context on stdin) → { type: "result", summary, edits } | error
  *   ask --cwd <path>              (JSON context on stdin) → streams delta/reset; → { type: "result", text } | error
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
+ *   auto-select                   (AutoSelectRequest JSON on stdin) → { type: "result", selection } | error
+ *   system1-check                 (System1Endpoint JSON on stdin) → { type: "result", model } | error
  */
 import { readStdinLines } from "@pragma-sh/sidecar-kit";
+import { checkEndpoint, System1Error, type System1Endpoint } from "@pragma-sh/system1";
 
 import {
+  autoSelect,
+  AutoSelectError,
+  parseAutoSelectRequest,
   type AiAuthMethod,
   createAuthStorage,
   createModelRegistry,
@@ -317,6 +323,19 @@ async function runAsk(args: string[]): Promise<number> {
   return 0;
 }
 
+async function runAutoSelect(): Promise<number> {
+  const selection = await autoSelect(parseAutoSelectRequest(await readAllStdin()));
+  emit({ type: "result", selection });
+  return 0;
+}
+
+async function runSystem1Check(): Promise<number> {
+  const endpoint = JSON.parse(await readAllStdin()) as System1Endpoint;
+  const model = await checkEndpoint(endpoint, { signal: AbortSignal.timeout(10_000) });
+  emit({ type: "result", model });
+  return 0;
+}
+
 async function runLoginCommand(args: string[]): Promise<number> {
   const provider = flag(args, "provider");
   if (!provider) throw new Error("--provider is required");
@@ -335,6 +354,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   "inline-edit": runInlineEdit,
   ask: runAsk,
   login: runLoginCommand,
+  "auto-select": runAutoSelect,
+  "system1-check": runSystem1Check,
 };
 
 async function main(): Promise<number> {
@@ -362,10 +383,17 @@ const TYPED_ERROR_CODES: ReadonlyArray<[new (...args: never[]) => Error, string]
   [NoWorktreeChangesError, "no-changes"],
   [NoInstructionError, "no-instruction"],
   [NoQuestionError, "no-question"],
+  [AutoSelectError, "auto-unavailable"],
 ];
 
 /** Maps a thrown error to its NDJSON `code` for the "nothing to do" cases. */
 function emitCommandError(error: unknown): void {
+  // `system1-auth`, `system1-rate-limit`, … let the UI say "check your key"
+  // rather than showing a raw HTTP status.
+  if (error instanceof System1Error) {
+    emitError(error, `system1-${error.kind}`);
+    return;
+  }
   for (const [ErrorClass, code] of TYPED_ERROR_CODES) {
     if (error instanceof ErrorClass) {
       emitError(error, code);

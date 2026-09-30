@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
 import {
   type AgentLaunchOptionsState,
   slashPicker,
@@ -27,6 +28,7 @@ import {
   useEscapeClosesPickerFirst,
 } from "@/hooks/use-agent-launch-options";
 import { useAgentModels } from "@/hooks/use-agent-models";
+import { useAutoTarget } from "@/hooks/use-auto-target";
 import { type PromptContextState, usePromptContext } from "@/hooks/use-prompt-context";
 import {
   EMPTY_MODEL_SELECTION,
@@ -98,7 +100,6 @@ interface SessionFormApi extends SessionFormState, SessionFormSelection {
   markAgentManuallyChanged: () => void;
   markWorktreeManuallyChanged: () => void;
   submit: () => Promise<void>;
-  handleKeyDown: (event: KeyboardEvent) => void;
 }
 
 type WorktreeLike = {
@@ -618,7 +619,6 @@ function useSessionFormHandlers(
   markAgentManuallyChanged: () => void;
   markWorktreeManuallyChanged: () => void;
   submit: () => Promise<void>;
-  handleKeyDown: (event: KeyboardEvent) => void;
   launch: AgentLaunchOptionsState;
   context: PromptContextState;
   editorRef: RefObject<MarkdownEditorHandle | null>;
@@ -684,25 +684,12 @@ function useSessionFormHandlers(
     setMessage,
     setError,
   ]);
-  const launchKeyDown = launch.handleKeyDown;
-  const contextKeyDown = context.handleKeyDown;
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      contextKeyDown(event);
-      if (event.defaultPrevented) return;
-      launchKeyDown(event);
-      if (event.defaultPrevented) return;
-      handleSessionKeyDown(event, selection.canSubmit, submit);
-    },
-    [contextKeyDown, launchKeyDown, selection.canSubmit, submit],
-  );
   return {
     handleAgentChange,
     handleWorktreeChange,
     markAgentManuallyChanged,
     markWorktreeManuallyChanged,
     submit,
-    handleKeyDown,
     launch,
     context,
     editorRef,
@@ -722,6 +709,14 @@ export function NewAgentSessionDialog({
 }: NewAgentSessionDialogProps) {
   const workspace = useWorkspace();
   const form = useNewAgentSessionForm({ isOpen, onOpenChange, initial, workspace });
+  const autoTarget = useAutoTarget(form.message, form.effectiveWorktreeId);
+  const auto = useAutoSubmit(form.submit);
+  const canSubmit = form.canSubmit && !auto.resolving;
+  const handleEditorKeyDown = (event: KeyboardEvent) => {
+    form.context.handleKeyDown(event);
+    if (!event.defaultPrevented) form.launch.handleKeyDown(event);
+    if (!event.defaultPrevented) handleSessionKeyDown(event, canSubmit, auto.submit);
+  };
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeClosesPickerFirst(isOpen, [form.context, slashPicker(form.launch)], () =>
     onOpenChange(false),
@@ -743,7 +738,7 @@ export function NewAgentSessionDialog({
             className="mt-5 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void form.submit();
+              if (canSubmit) void auto.submit();
             }}
           >
             <div className="space-y-2">
@@ -751,7 +746,7 @@ export function NewAgentSessionDialog({
               <MarkdownEditor
                 value={form.message}
                 onChange={form.setMessage}
-                onKeyDown={form.handleKeyDown}
+                onKeyDown={handleEditorKeyDown}
                 handleRef={form.editorRef}
                 onCaretTextChange={form.context.onCaretTextChange}
                 caretPopover={promptCaretPopover(form.context, form.launch)}
@@ -770,6 +765,8 @@ export function NewAgentSessionDialog({
                   onChange={form.handleAgentChange}
                   onLoadModels={form.loadModels}
                   onInteract={form.markAgentManuallyChanged}
+                  autoTarget={autoTarget}
+                  autoRegistry={auto.registry}
                 />
               </div>
               <div className="space-y-2">
@@ -821,7 +818,7 @@ export function NewAgentSessionDialog({
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!form.canSubmit}>
+              <Button type="submit" disabled={!canSubmit}>
                 Start session
                 <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
               </Button>

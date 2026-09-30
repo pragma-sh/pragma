@@ -52,6 +52,14 @@ installs it straight from there and notifies you when a new one ships.
 Updates arrive the same way: Obtainium checks in the background, notifies you, and
 installs the new APK over the old one with your data intact.
 
+<Callout title="Releases that skip the store">
+  A release that changes no native code is also delivered to the app itself, on both Android and
+  iOS: Pragma Go downloads it in the background and switches to it the next time you open the app,
+  with no new App Store build and no new APK to install. Such a release still carries the same APK
+  as the one before it, so a fresh Obtainium install works as usual; if Obtainium offers it to you,
+  installing it changes nothing.
+</Callout>
+
 ## Pairing a device
 
 Settings → **Pragma Go**:

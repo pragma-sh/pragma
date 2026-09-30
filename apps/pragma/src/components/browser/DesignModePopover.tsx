@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { X } from "lucide-react";
 import { toast } from "sonner";
@@ -14,14 +14,10 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useAgentModels } from "@/hooks/use-agent-models";
-import { useAgentsList } from "@/hooks/use-agents-list";
+import { useAgentSelection } from "@/hooks/use-agent-selection";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
+import { useAutoTarget } from "@/hooks/use-auto-target";
 import { startBackgroundAgentSession } from "@/lib/agent-launch";
-import {
-  EMPTY_MODEL_SELECTION,
-  defaultModelSelection,
-  rememberModelSelection,
-} from "@/lib/agent-model-selection";
 import { buildDesignPrompt } from "@/lib/design-mode";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { defaultTabTitle } from "@/lib/tab-title";
@@ -52,38 +48,95 @@ export function DesignModePopover({
   onRemove,
   onApplied,
 }: DesignModePopoverProps) {
-  const workspace = useWorkspace();
-  const agents = useAgentsList();
-  const { modelsByAgent, loadModels, primeFromCache } = useAgentModels();
   const [open, setOpen] = useState(false);
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const [selection, setSelection] = useState<AgentModelSelection>(EMPTY_MODEL_SELECTION);
-  const [launching, setLaunching] = useState(false);
   useSuppressNativeOverlayWhile(open);
+  const plural = changes.length === 1 ? "change" : "changes";
 
-  useEffect(() => {
-    primeFromCache(agents.map((agent) => agent.id));
-  }, [agents, primeFromCache]);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={`${changes.length} staged design ${plural}`}
+          className="h-6 min-w-6 rounded-full px-1.5 text-xs tabular-nums"
+          size="sm"
+          variant="secondary"
+        >
+          {changes.length}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96">
+        <PopoverHeader>
+          <PopoverTitle>Staged changes</PopoverTitle>
+        </PopoverHeader>
+        <StagedChangeList changes={changes} onRemove={onRemove} />
+        <DesignAgentPanel
+          changes={changes}
+          pageUrl={pageUrl}
+          onLaunched={() => {
+            setOpen(false);
+            onApplied();
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
-  // Seed the picker with the first configured agent (and its remembered model)
-  // so applying is one click when the user does not care which agent runs.
-  useEffect(() => {
-    const first = agents[0];
-    if (agentId || !first) {
-      return;
-    }
-    setAgentId(first.id);
-    setSelection(defaultModelSelection(first.id, modelsByAgent[first.id] ?? []));
-  }, [agents, agentId, modelsByAgent]);
+function StagedChangeList({
+  changes,
+  onRemove,
+}: {
+  changes: StagedDesignChange[];
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <ol className="max-h-64 space-y-2 overflow-y-auto">
+      {changes.map((change, index) => (
+        <li className="flex items-start gap-2 text-sm" key={change.id}>
+          <span className="w-4 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
+            {index + 1}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block break-words text-foreground">{change.prompt}</span>
+            <span className="block truncate font-mono text-xs text-muted-foreground">
+              {change.route} · {change.selector}
+            </span>
+          </span>
+          <IconButton
+            aria-label={`Remove staged change ${index + 1}`}
+            className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+            label="Remove change"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => onRemove(change.id)}
+          >
+            <X />
+          </IconButton>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-  const handleAgentChange = useCallback((nextAgentId: string, next: AgentModelSelection) => {
-    setAgentId(nextAgentId);
-    setSelection(next);
-    rememberModelSelection(nextAgentId, next);
-  }, []);
+/** The agent picker (with Auto) and the button that launches the staged changes. */
+function DesignAgentPanel({
+  changes,
+  pageUrl,
+  onLaunched,
+}: {
+  changes: StagedDesignChange[];
+  pageUrl: string;
+  onLaunched: () => void;
+}) {
+  const workspace = useWorkspace();
+  // Mounted only while the popover is open, so the picker is always active.
+  const picker = useAgentSelection(true);
+  const [launching, setLaunching] = useState(false);
+  const designPrompt = useMemo(() => buildDesignPrompt(changes, pageUrl), [changes, pageUrl]);
+  const autoTarget = useAutoTarget(designPrompt);
 
-  const apply = useCallback(async () => {
-    const agent = agents.find((candidate) => candidate.id === agentId);
+  async function apply() {
+    const agent = picker.selectedAgent;
     const worktree = workspace.selectedWorktree;
     const projectId = workspace.selectedProjectId;
     if (!agent || !worktree || !projectId) {
@@ -96,13 +149,12 @@ export function DesignModePopover({
         projectId,
         worktreeId: worktree.id,
         worktreePath: worktree.path,
-        prompt: buildDesignPrompt(changes, pageUrl),
-        selection,
+        prompt: designPrompt,
+        selection: picker.modelSelection,
         refreshProject: workspace.refreshProject,
         markTabAgent: workspace.markTabAgent,
       });
-      setOpen(false);
-      onApplied();
+      onLaunched();
       toast.success(
         `Sent ${changes.length} change${changes.length === 1 ? "" : "s"} to ${agent.name}`,
       );
@@ -111,66 +163,29 @@ export function DesignModePopover({
     } finally {
       setLaunching(false);
     }
-  }, [agents, agentId, workspace, changes, pageUrl, selection, onApplied]);
+  }
 
-  const canApply = Boolean(agentId) && Boolean(workspace.selectedWorktree) && !launching;
+  const auto = useAutoSubmit(apply);
+  // Auto choosing for this submit holds the button, like a launch does.
+  const busy = launching || auto.resolving;
+  const canApply = Boolean(picker.selectedAgent) && Boolean(workspace.selectedWorktree) && !busy;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={`${changes.length} staged design ${changes.length === 1 ? "change" : "changes"}`}
-          className="h-6 min-w-6 rounded-full px-1.5 text-xs tabular-nums"
-          size="sm"
-          variant="secondary"
-        >
-          {changes.length}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-96">
-        <PopoverHeader>
-          <PopoverTitle>Staged changes</PopoverTitle>
-        </PopoverHeader>
-        <ol className="max-h-64 space-y-2 overflow-y-auto">
-          {changes.map((change, index) => (
-            <li className="flex items-start gap-2 text-sm" key={change.id}>
-              <span className="w-4 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
-                {index + 1}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block break-words text-foreground">{change.prompt}</span>
-                <span className="block truncate font-mono text-xs text-muted-foreground">
-                  {change.route} · {change.selector}
-                </span>
-              </span>
-              <IconButton
-                aria-label={`Remove staged change ${index + 1}`}
-                className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                label="Remove change"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => onRemove(change.id)}
-              >
-                <X />
-              </IconButton>
-            </li>
-          ))}
-        </ol>
-        <div className="mt-3 space-y-2 border-t border-border pt-3">
-          <AgentModelSelector
-            agents={agents}
-            label="Agent"
-            modelsByAgent={modelsByAgent}
-            onChange={handleAgentChange}
-            onLoadModels={loadModels}
-            value={{ agentId, selection }}
-          />
-          <Button className="w-full" disabled={!canApply} size="sm" onClick={() => void apply()}>
-            {launching ? "Starting agent..." : "Apply changes with agent"}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div className="mt-3 space-y-2 border-t border-border pt-3">
+      <AgentModelSelector
+        agents={picker.agents}
+        label="Agent"
+        modelsByAgent={picker.modelsByAgent}
+        onChange={picker.handleAgentChange}
+        onLoadModels={picker.loadModels}
+        value={{ agentId: picker.agentId, selection: picker.modelSelection }}
+        autoTarget={autoTarget}
+        autoRegistry={auto.registry}
+      />
+      <Button className="w-full" disabled={!canApply} size="sm" onClick={() => void auto.submit()}>
+        {launching ? "Starting agent..." : "Apply changes with agent"}
+      </Button>
+    </div>
   );
 }
 

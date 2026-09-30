@@ -23,6 +23,39 @@ export {
   type StreamAskAiOptions,
 } from "./ask-ai.ts";
 export {
+  autoSelect,
+  type AutoSelectAgent,
+  type AutoSelectDeps,
+  AutoSelectError,
+  type AutoSelectInsights,
+  type AutoSelectModel,
+  type AutoSelectReasoning,
+  type AutoSelectRequest,
+  type AutoSelectResult,
+  DIFFICULTY_LEVELS,
+  harnessMatchesAgent,
+  modelInsightFor,
+  parseAutoSelectRequest,
+  reasoningForDifficulty,
+  rowMatchesModel,
+  type Tier,
+  tier,
+} from "./auto-select.ts";
+export {
+  applyAutoModeFilters,
+  type AutoModeCandidate,
+  type AutoModeFilter,
+  type AutoModePreferences,
+  type AutoModePriority,
+  EMPTY_AUTO_MODE,
+  globToRegExp,
+  mergeAutoMode,
+  type MergedAutoModePreferences,
+  parseAutoMode,
+  shortAgentId,
+  type ParsedAutoMode,
+} from "./automode.ts";
+export {
   generateCommitMessage,
   type GenerateCommitMessageOptions,
   NoStagedChangesError,
@@ -33,6 +66,8 @@ export {
   NoWorktreeChangesError,
 } from "./commit-plan.ts";
 export {
+  AUTO_SELECT,
+  HARNESS_INSIGHTS,
   MODEL_INSIGHTS,
   type ModelKind,
   PICK_MODEL,
@@ -51,6 +86,14 @@ export {
   isOlderThanMonths,
   parseModelReleaseDate,
 } from "./model-date.ts";
+export {
+  harnessCachePath,
+  type HarnessInsight,
+  type HarnessInsights,
+  loadHarnessInsights,
+  NO_HARNESS_INSIGHTS,
+  parseLeaderboardHtml,
+} from "./harness-insights.ts";
 export {
   indexInsights,
   insightCachePath,

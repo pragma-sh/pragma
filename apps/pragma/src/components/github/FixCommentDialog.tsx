@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
 import { useFixLauncher } from "@/hooks/use-fix-launcher";
 import { buildSingleFixPrompt, commentLocation } from "@/lib/fix-it-prompt";
 import type { FixItComment } from "@/state/fix-it-store";
@@ -32,17 +33,19 @@ export function FixCommentDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const launcher = useFixLauncher(open, worktreeId);
+  const prompt = comment ? buildSingleFixPrompt(comment) : "";
 
   async function submit() {
     if (!comment) {
       return;
     }
-    const ok = await launcher.launch(buildSingleFixPrompt(comment));
+    const ok = await launcher.launch(prompt);
     if (ok) {
       toast.success("Launched agent to fix the comment");
       onOpenChange(false);
     }
   }
+  const auto = useAutoSubmit(submit);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open && comment !== null}>
@@ -63,7 +66,7 @@ export function FixCommentDialog({
           </blockquote>
         ) : null}
 
-        <FixAgentControls launcher={launcher} />
+        <FixAgentControls launcher={launcher} prompt={prompt} autoRegistry={auto.registry} />
 
         {launcher.error ? <p className="text-xs text-destructive">{launcher.error}</p> : null}
 
@@ -71,7 +74,11 @@ export function FixCommentDialog({
           <Button onClick={() => onOpenChange(false)} size="sm" variant="outline">
             Cancel
           </Button>
-          <Button disabled={!launcher.canLaunch} onClick={() => void submit()} size="sm">
+          <Button
+            disabled={!launcher.canLaunch || auto.resolving}
+            onClick={() => void auto.submit()}
+            size="sm"
+          >
             {launcher.busy ? <Loader2 className="animate-spin" /> : null}
             {launcher.newWorktree.enabled ? "Create worktree & fix" : "Launch fix"}
           </Button>

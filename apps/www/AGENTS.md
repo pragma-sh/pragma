@@ -101,7 +101,8 @@ apps/www/
   `ignoreCommand` runs `scripts/should-deploy.ts`, whose decision lives in the unit-tested
   `lib/deploy.ts`: any non-production deployment builds, and a production deployment builds
   only for a Release Please commit (the squashed `chore(main): release …` subject, or a
-  merge commit whose subject names the `release-please--branches--*` source branch).
+  merge commit whose subject names the `release-please--branches--*` source branch), or
+  for a merge whose pull request carries the **`deploy:www`** label (`DEPLOY_LABEL`).
   Every pattern is anchored and read against the **subject line only** — an unanchored
   search over the whole message lets any commit that merely quotes a release branch in
   its body deploy production. The site is the
@@ -109,6 +110,12 @@ apps/www/
   change when a release changes it — not on every merge to `main`. Both failure modes are
   deliberately "build": an unreadable commit message, and a broken script (Vercel treats a
   failing Ignored Build Step as build). Override a skip by redeploying from the dashboard.
+  The label is the opposite: `fetchPrLabels` asks GitHub for the PR whose
+  `merge_commit_sha` is `VERCEL_GIT_COMMIT_SHA`, and any failure there returns no labels,
+  so an unconfirmed opt-in falls back to the release rule instead of shipping. Use it only
+  for content that can go live on its own (a blog post, landing copy, a docs fix for a
+  shipped feature) — never docs for an unreleased feature. It must be applied **before**
+  merging: adding it afterwards does not re-run the push deployment.
   This assumes the Vercel project's Root Directory is `apps/www`, which is where
   `vercel.json` has to live for it to be read at all.
 - **Two environment variables are required in production, and neither fails loudly.**

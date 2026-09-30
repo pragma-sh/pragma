@@ -27,6 +27,7 @@ import {
   type TerminalSettings,
   type OtherSettings,
   type StorageSettings,
+  type System1Settings,
 } from "@pragma-sh/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
@@ -40,6 +41,7 @@ import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { OtherSection } from "@/components/settings/OtherSection";
 import { StorageSection } from "@/components/settings/storage/StorageSection";
+import { System1Section } from "@/components/settings/System1Section";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +51,7 @@ import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import { resetPrSignatureCache, validateGitHubSettings } from "@/lib/pr-signature";
+import { applySystem1Patch, sanitizeSystem1Settings } from "@/lib/system1-settings";
 import {
   aiAuthMethods,
   aiLogout,
@@ -92,6 +95,7 @@ const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "terminal",
   "agentStatus",
   "storage",
+  "ai",
 ]);
 
 const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
@@ -145,6 +149,7 @@ interface PragmaConfig {
   updates?: { checkUrl?: string; autoDownload?: boolean };
   terminal?: TerminalSettings;
   storage?: StorageSettings;
+  system1?: System1Settings;
   [key: string]: unknown;
 }
 
@@ -171,6 +176,9 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateGitHubSettings(config.github);
   validateOtherSettings(config.other);
   validateStorageSettings(config.storage);
+  // System 1 is optional and Auto treats a malformed block as defaults, so a
+  // typo there must not clear the whole document and lock every Settings section.
+  config.system1 = sanitizeSystem1Settings(config.system1);
   return config;
 }
 
@@ -522,6 +530,13 @@ function SettingsNavigation({
       >
         Storage
       </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "ai"}
+        icon={<Sparkles />}
+        onClick={() => setSection("ai")}
+      >
+        AI
+      </SettingsNavItem>
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
       ) : null}
@@ -544,13 +559,6 @@ function GlobalSettingsNavigation({
         onClick={() => setSection("github")}
       >
         GitHub
-      </SettingsNavItem>
-      <SettingsNavItem
-        active={section === "ai"}
-        icon={<Sparkles />}
-        onClick={() => setSection("ai")}
-      >
-        AI Providers
       </SettingsNavItem>
       <SettingsNavItem
         active={section === "mobile"}
@@ -736,7 +744,19 @@ function SettingsContent({
             settings={loaded.value.github ?? {}}
           />
         ) : null}
-        {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
+        {section === "ai" ? (
+          <div className="space-y-5">
+            {scope === "global" ? <AiProvidersSection /> : null}
+            {loaded ? (
+              <System1Section
+                projectId={projectId}
+                projectName={projectName}
+                saveSettings={(patch) => persist((current) => applySystem1Patch(current, patch))}
+                scope={scope}
+              />
+            ) : null}
+          </div>
+        ) : null}
         {loaded && section === "mobile" && scope === "global" ? (
           <MobileSection config={loaded.value} persist={persist} />
         ) : null}

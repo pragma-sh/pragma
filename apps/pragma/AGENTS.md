@@ -586,6 +586,15 @@ Pragma SDK is not connected yet" card, even though `useRuntimeSdk` retries every
 connects seconds later. A crash card that _survives_ connection is a real failure: check the
 console for `plugin SDK bridge: gateway unavailable, retrying`.
 
+**AI** is in `PROJECT_SECTIONS` and holds both the AI providers and System 1
+(`System1Section.tsx`). Global scope shows the connected providers, the System 1 connection (`components/ai/System1ConnectionForm.tsx`, shared with the
+onboarding AI step's `System1OnboardingCard`) and the global `automode.md` editor;
+project scope shows only that project's `automode.md`. The key is written through
+`system1_set_api_key` and is never read back — the UI only sees `System1Status`, cached
+in `state/system1.ts` so every picker shows or hides **Auto** together. `system1.baseUrl`
+goes through the page's queued `persist`; onboarding (no Settings page mounted) patches
+the global file with `saveGlobalSystem1Settings`.
+
 **Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
 `other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
 `updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default

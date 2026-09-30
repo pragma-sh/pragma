@@ -19,8 +19,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
 import { useEscapeClosesPickerFirst } from "@/hooks/use-agent-launch-options";
 import { useAgentModels } from "@/hooks/use-agent-models";
+import { useAutoTarget } from "@/hooks/use-auto-target";
 import { type PromptContextState, usePromptContext } from "@/hooks/use-prompt-context";
 import {
   EMPTY_MODEL_SELECTION,
@@ -304,10 +306,9 @@ interface DraftHandlersContext {
   setAgentId: (value: string | null) => void;
   setModelSelection: (value: AgentModelSelection) => void;
   attachContext: PromptContextState["attachContext"];
-  canSubmit: boolean;
 }
 
-/** Submit/discard/agent-change/keyboard handlers for the draft form. */
+/** Submit/discard/agent-change handlers for the draft form. */
 function useDraftHandlers(ctx: DraftHandlersContext) {
   const {
     setAgentId,
@@ -321,7 +322,6 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
     prompt,
     modelSelection,
     card,
-    canSubmit,
     attachContext,
   } = ctx;
   const handleAgentChange = useCallback(
@@ -384,11 +384,7 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
       setBusy(false);
     }
   }, [card, kanban, onOpenChange, setBusy, setError]);
-  const handleKeyDown = useCallback(
-    (event: SubmitKeyEvent) => submitOnModEnter(event, canSubmit, () => void submit()),
-    [canSubmit, submit],
-  );
-  return { handleAgentChange, submit, discard, handleKeyDown };
+  return { handleAgentChange, submit, discard };
 }
 
 /** Owns all draft-form state, effects, and handlers. */
@@ -448,7 +444,6 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
   const handlers = useDraftHandlers({
     agentId: state.agentId,
     branch: state.branch,
-    canSubmit,
     card,
     kanban,
     modelSelection: state.modelSelection,
@@ -460,16 +455,6 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
     setModelSelection: state.setModelSelection,
     attachContext: context.attachContext,
   });
-  const submitKeyDown = handlers.handleKeyDown;
-  const contextKeyDown = context.handleKeyDown;
-  const handleEditorKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      contextKeyDown(event);
-      if (!event.defaultPrevented) submitKeyDown(event);
-    },
-    [contextKeyDown, submitKeyDown],
-  );
-
   return {
     agents: state.agents,
     modelsByAgent: state.modelsByAgent,
@@ -486,7 +471,6 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
     branchOptions,
     context,
     editorRef,
-    handleEditorKeyDown,
     ...handlers,
   };
 }
@@ -520,6 +504,15 @@ function useDraftPromptContext(
  */
 export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDraftDialogProps) {
   const form = useKanbanDraftForm({ open: isOpen, onOpenChange, card });
+  const autoTarget = useAutoTarget(form.prompt);
+  const auto = useAutoSubmit(form.submit);
+  const canSubmit = form.canSubmit && !auto.resolving;
+  const handleKeyDown = (event: SubmitKeyEvent) =>
+    submitOnModEnter(event, canSubmit, () => void auto.submit());
+  const handleEditorKeyDown = (event: KeyboardEvent) => {
+    form.context.handleKeyDown(event);
+    if (!event.defaultPrevented) handleKeyDown(event);
+  };
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeClosesPickerFirst(isOpen, [form.context], () => onOpenChange(false));
 
@@ -538,7 +531,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
             className="mt-5 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void form.submit();
+              if (canSubmit) void auto.submit();
             }}
           >
             <div className="grid grid-cols-2 gap-3">
@@ -548,7 +541,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                   branch={form.branch}
                   branchOptions={form.branchOptions}
                   onBranchChange={form.setBranch}
-                  onKeyDown={form.handleKeyDown}
+                  onKeyDown={handleKeyDown}
                 />
               </div>
               <div className="space-y-2">
@@ -559,6 +552,8 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                   value={{ agentId: form.agentId, selection: form.modelSelection }}
                   onChange={form.handleAgentChange}
                   onLoadModels={form.loadModels}
+                  autoTarget={autoTarget}
+                  autoRegistry={auto.registry}
                 />
               </div>
             </div>
@@ -567,7 +562,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
               <MarkdownEditor
                 value={form.prompt}
                 onChange={form.setPrompt}
-                onKeyDown={form.handleEditorKeyDown}
+                onKeyDown={handleEditorKeyDown}
                 handleRef={form.editorRef}
                 onCaretTextChange={form.context.onCaretTextChange}
                 caretPopover={promptCaretPopover(form.context)}
@@ -593,7 +588,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                 <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={!form.canSubmit}>
+                <Button type="submit" disabled={!canSubmit}>
                   {card ? "Save draft" : "Add draft"}
                   <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
                 </Button>

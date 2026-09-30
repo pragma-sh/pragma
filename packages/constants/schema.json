@@ -30,7 +30,8 @@
     "updates",
     "onboarding",
     "storage",
-    "projects"
+    "projects",
+    "system1"
   ],
   "properties": {
     "app": {
@@ -110,6 +111,9 @@
     },
     "projects": {
       "$ref": "#/definitions/ProjectDefaults"
+    },
+    "system1": {
+      "$ref": "#/definitions/System1"
     }
   },
   "definitions": {
@@ -2059,6 +2063,10 @@
           "items": {
             "$ref": "#/definitions/AgentReasoning"
           }
+        },
+        "canonicalId": {
+          "type": "string",
+          "description": "Optional provider-qualified model id (for example `anthropic/claude-sonnet-5-5`) used to match an alias such as `sonnet` against public benchmark catalogs. Auto mode falls back to `id` when absent."
         }
       }
     },
@@ -4861,6 +4869,120 @@
             "$ref": "#/definitions/StorageTreeEntry"
           },
           "description": "Always empty today: the treemap stops at top-level folders. Kept so a deeper tree can be added without a wire change."
+        }
+      }
+    },
+    "System1": {
+      "title": "System1",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for System 1 models (TypeSafe Jev or any API that speaks its `systemone` evaluation contract). Auto mode uses one to pick an agent, model, and reasoning effort for a launch.",
+      "required": [
+        "defaultBaseUrl",
+        "defaultModel",
+        "evaluatePath",
+        "credentialFileName",
+        "autoModeFileName",
+        "requestTimeoutMs",
+        "promptCharLimit",
+        "preferencesCharLimit",
+        "hostModels"
+      ],
+      "properties": {
+        "defaultBaseUrl": {
+          "type": "string",
+          "description": "Base URL used when `system1.baseUrl` is not set in the global `.pragma/config.json`."
+        },
+        "defaultModel": {
+          "type": "string",
+          "description": "Model route sent with every request when `system1.model` is not set."
+        },
+        "evaluatePath": {
+          "type": "string",
+          "description": "Path of the evaluation endpoint, appended to the base URL."
+        },
+        "credentialFileName": {
+          "type": "string",
+          "description": "File under the app data directory holding the API key, written owner-only like the GitHub token."
+        },
+        "autoModeFileName": {
+          "type": "string",
+          "description": "Auto-mode preference file, resolved against the home directory (global) or the project's main worktree (project). Project wins."
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on one System 1 request; auto mode falls back rather than stalling a launch."
+        },
+        "promptCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest launch prompt sent to the System 1 model; longer prompts are truncated."
+        },
+        "preferencesCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest `automode.md` body sent to the System 1 model, per scope."
+        },
+        "hostModels": {
+          "type": "array",
+          "description": "Model route to use when `system1.model` is not set, keyed by the API host. Resellers name Jev differently than TypeSafe (OpenRouter wants `~typesafe/jev-latest`); any other host gets `defaultModel`.",
+          "items": {
+            "$ref": "#/definitions/System1HostModel"
+          }
+        }
+      }
+    },
+    "System1Settings": {
+      "title": "System1Settings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `system1` block of the global `.pragma/config.json`. Global-only. The API key is never stored here; it lives in the owner-only credential file.",
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL of a Jev-compatible API. Empty/omitted uses `system1.defaultBaseUrl`."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route to request. Empty/omitted uses `system1.defaultModel`."
+        }
+      }
+    },
+    "System1Status": {
+      "title": "System1Status",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether a System 1 model is configured, as reported to the desktop UI. The key itself never leaves the backend.",
+      "required": ["configured", "baseUrl", "model"],
+      "properties": {
+        "configured": {
+          "type": "boolean",
+          "description": "True when an API key is stored."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Effective base URL (configured or default)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Effective model route (configured or default)."
+        }
+      }
+    },
+    "System1HostModel": {
+      "title": "System1HostModel",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "model"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname, matched exactly or as a parent domain (`openrouter.ai` matches `api.openrouter.ai`)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route that host expects."
         }
       }
     }

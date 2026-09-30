@@ -129,6 +129,7 @@ than no guide.
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── sidecar-kit/             # `@pragma-sh/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
+│   ├── system1/                 # `@pragma-sh/system1` typed client for System 1 models (Jev) → see packages/system1/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
@@ -166,7 +167,8 @@ than no guide.
 
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
-  `agentStatus` = `{ notificationsEnabled, soundName }`, the "Created with Pragma"
+  `agentStatus` = `{ notificationsEnabled, soundName }`, the System 1 endpoint under
+  `system1` = `{ baseUrl, model }` (its key is an owner-only file, never config), the "Created with Pragma"
   pull-request footer under `github` = `{ prSignature }`, desktop auto-update overrides
   under `updates` = `{ checkUrl, autoDownload }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
@@ -178,7 +180,8 @@ than no guide.
   The Pragma skill it can install globally is `skills/pragma`, compiled into the app.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
-  and Agent Status have both a global and a project scope (project wins); GitHub, AI,
+  and Agent Status have both a global and a project scope (project wins). AI has both too:
+  providers and the System 1 connection are global, `automode.md` is per scope. GitHub,
   Other (update server/download), and mobile pairing/gateway history are global-only.
   Storage also has both scopes, but as a _view_ (every project vs. the current one's
   worktrees); only its reminder is persisted, under global `storage.reminder`.
@@ -208,6 +211,18 @@ than no guide.
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma-sh/sdk`).
+- Anything that talks to a System 1 model (Jev's `systemone` evaluate endpoint) →
+  `packages/system1` (`@pragma-sh/system1`), which knows nothing about Pragma. **Auto
+  mode** — picking an agent, model, and reasoning effort for a launch — is built on it
+  in `packages/ai-helpers/src/auto-select.ts` (run by the `pragma-ai auto-select`
+  sidecar command), fed by model benchmarks (`model-insights.ts`), Terminal-Bench harness
+  results (`harness-insights.ts`), and `automode.md` (`automode.ts`, global
+  `~/.pragma/automode.md` overridden by `<project>/.pragma/automode.md`). The key lives in
+  `apps/pragma/src-tauri/src/system1.rs` (owner-only `SecretFile`, like the GitHub token)
+  and never crosses IPC back to the webview. The **Auto** row is part of
+  `AgentModelSelector` itself; a launching dialog wraps its submit in `useAutoSubmit(submit)`
+  and passes the picker `autoRegistry` plus `autoTarget` (via `useAutoTarget(prompt)`).
+  System 1 is asked only on submit — the picker shows just "Auto", never a live preview.
 - The Pragma mark itself — its geometry, or the colours it is painted in →
   `packages/brand` (`@pragma-sh/brand`), which emits SVG strings and knows nothing
   about platforms. Which icon slots exist and what each demands stays with the
@@ -474,7 +489,8 @@ keeps it out of `node-workspace`: as a `node` package it was released — with A
 iOS store builds — every time the desktop group bumped a package it depends on.
 Merging the release PR is also what deploys the website: production Vercel builds are
 gated on a Release Please commit (see `apps/www/AGENTS.md`), so a merge to `main` that is
-not a release only produces previews.
+not a release only produces previews — unless its PR carries the `deploy:www` label, which
+ships content that can go live on its own (a blog post, copy) right away.
 
 **Nine packages are published to npm on every desktop release** — `@pragma-sh/sdk`,
 `@pragma-sh/plugin`, `@pragma-sh/automations`, `@pragma-sh/scratchpad`,
@@ -532,10 +548,10 @@ it doesn't read), and the default task timeout is **10 minutes**, so any long ta
 an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
 validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
 
-The **fallow** audit is the one Linux check that is _not_ an RWX task: it lives in
+The **fallow** audit is a Linux check that is _not_ an RWX task: it lives in
 `.github/workflows/fallow.yml`. It scopes to the diff against the base ref and fails on
-issues the change introduces. **It runs on GitHub Actions because it is the only check
-that writes back to GitHub.** Posting the sticky PR comment needs `pull_requests: write`,
+issues the change introduces. **It runs on GitHub Actions because it writes back to
+GitHub.** Posting the sticky PR comment needs `pull_requests: write`,
 and RWX cannot mint a token that has it (see below) — so the job uses GitHub's own
 `GITHUB_TOKEN`, which makes the comment authored by `github-actions[bot]` instead of by
 whichever personal access token happened to be in the RWX vault. `--format
@@ -546,7 +562,11 @@ findings live in the job log and the comment. The job needs `fetch-depth: 0` (fa
 diffs against a real base) _and_ `bun run generate` (fallow resolves imports statically,
 so the gitignored `src/generated/**` modules must exist first). It is skipped on
 `release-please--branches--*`, which carry only generated version bumps and CHANGELOGs —
-no hand-written code to audit and no author to advise.
+no hand-written code to audit and no author to advise. The **Pragma Go ship plan**
+(`.github/workflows/pragma-go-ship-plan.yml`) is the other GitHub-writing check and the
+mirror image: it runs _only_ on a release PR that bumps `apps/pragma-go/version.txt`, and
+keeps a sticky comment saying whether each platform will ship as an OTA update or a new
+binary (see _Releases: update or new binary_ in `apps/pragma-go/AGENTS.md`).
 
 **CI clones and fetches with no token — `pragma-sh/pragma` is public.** RWX's
 `${{ github.token }}` context is not to be relied on: it can vanish mid-run with
