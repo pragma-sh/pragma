@@ -54,17 +54,18 @@ data dir); that directory is prepended to `PATH` in Pragma terminals.
 Checked in (worktree copies are never scanned for automations; the worktrees and
 scratchpads directories are git-excluded via `$GIT_DIR/info/exclude`).
 
-| Path               | Purpose                                                   |
-| ------------------ | --------------------------------------------------------- |
-| `config.json`      | Project settings: `plugins[]`, `terminal`, `agentStatus`. |
-| `keybindings.json` | Project keybinding overrides (win over global).           |
-| `theme.json`       | Project colour overrides (win over global).               |
-| `automode.md`      | Project auto-mode preferences (win over global).          |
-| `scripts.json`     | `setup` / `teardown` / `runScripts` definitions.          |
-| `automations/`     | Project automations (approval required).                  |
-| `assets/sounds/`   | Project agent alert clips.                                |
-| `worktrees/`       | Created worktrees (git-excluded).                         |
-| `scratchpads/`     | Agent-authored MDX + comment threads (git-excluded).      |
+| Path                   | Purpose                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `config.json`          | Project settings: `plugins[]`, `terminal`, `agentStatus`.                          |
+| `keybindings.json`     | Project keybinding overrides (win over global).                                    |
+| `theme.json`           | Project colour overrides (win over global).                                        |
+| `automode.md`          | Project auto-mode preferences (win over global).                                   |
+| `scripts.json`         | `setup` / `teardown` / `runScripts` definitions.                                   |
+| `automations/`         | Project automations (approval required).                                           |
+| `assets/sounds/`       | Project agent alert clips.                                                         |
+| `worktrees/`           | Created worktrees (git-excluded).                                                  |
+| `scratchpads/`         | Agent-authored MDX + comment threads (git-excluded).                               |
+| `scratchpads/exports/` | Standalone HTML exports (git-excluded); unique filenames preserve earlier exports. |
 
 ## `PRAGMA_*` environment variables
 

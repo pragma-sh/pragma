@@ -9,11 +9,22 @@ existing `@pragma-sh/scratchpad-viewer` import of `parseScratchpadDocument`,
 `attachScratchpadAgent`, or the comment helpers keeps working.
 
 `buildScratchpadViewerHtml({ source, comments, mode, themeCss })` returns one
-self-contained HTML string. Today its consumer is `apps/pragma-go`
-(`react-native-webview`); the desktop keeps its own editor and only imports the
-contract helpers.
+self-contained HTML string for `apps/pragma-go` (`react-native-webview`). Desktop
+exports use `buildScratchpadExportHtml` with an esbuild-compiled document. Both the
+desktop preview and the export share `installScratchpadFrameRuntime` in
+`src/frame-runtime.tsx`; the export runtime is prebundled by the same esbuild build
+script and inlined, so a `file://` export never needs a Vite server or Pragma.
 
 ## Rules
+
+- Standalone exports install a disconnected bridge with `agentFeedbackEnabled: false`.
+  Never include the desktop's parent-message bridge or mobile comment picker in exports.
+- `offline-sdk.ts` replaces SDK constructors and host operations in the export scope
+  with inert stubs; pure local helpers stay usable. The desktop resolver directs root,
+  version-qualified, and CDN SDK imports to that same scope. Normal previews keep the
+  real SDK. Only built-in send/decision buttons are disabled, never local inputs or
+  custom React controls. `buildScratchpadExportHtml` adds the Created with Pragma watermark,
+  linked to `constants.scratchpads.exportHomepageUrl` with visible keyboard focus.
 
 - **The document is self-contained, always.** A web view loading HTML from a
   string has no origin to resolve a relative URL against, and a phone reading a

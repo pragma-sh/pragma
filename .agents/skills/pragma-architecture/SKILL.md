@@ -30,6 +30,10 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/sdk/` — `@pragma-sh/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
 - `packages/scratchpad/` — `@pragma-sh/scratchpad`, browser-safe interaction/runtime APIs and
   UI components for agent-authored MDX scratchpads.
+- `packages/scratchpad-viewer/` — shared viewer/standalone-export HTML builders and
+  prebundled browser runtimes. Desktop previews share its frame scope; exports stub
+  SDK host calls, disable only built-in agent-send/decision buttons, add a Created with
+  Pragma watermark, and are saved by the host's `scratchpads::ExportHtml` operation.
 - `packages/plugin/` — `@pragma-sh/plugin`, the public TS API/runtime stub for pure Pragma
   plugins loaded from `.pragma/config.json`.
 - `packages/automations/` — `@pragma-sh/automations`, the authoring API plus
