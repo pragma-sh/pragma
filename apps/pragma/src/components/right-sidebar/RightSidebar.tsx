@@ -28,8 +28,10 @@ import {
 } from "@/lib/motion";
 import { usePlainProjectId } from "@/hooks/use-plain-project-id";
 import { useAi } from "@/state/ai-context";
+import { storeGeneratedPullRequestDraft } from "@/state/pull-request-draft-store";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 import {
   RenderPluginContribution,
   usePluginSidebarTabs,
@@ -115,7 +117,12 @@ function useCommitAndPrRun(
     }
     setRunningWorktrees((prev) => new Set(prev).add(worktreeId));
     try {
-      const result = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
+      const result = await trackWorktreeActivity(worktreeId, "commit-and-draft", () =>
+        aiCommitAllAndGeneratePullRequestDraft(worktreeId),
+      );
+      // Stored right away so the sidebar reports the worktree ready for a PR
+      // even when its PR form is not mounted.
+      storeGeneratedPullRequestDraft(worktreeId, result);
       setGeneratedPrDrafts((prev) => ({
         ...prev,
         [worktreeId]: { key: Date.now(), draft: { title: result.title, body: result.body } },
