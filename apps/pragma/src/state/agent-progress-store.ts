@@ -170,7 +170,10 @@ function restartedRunning(previous: AgentStatus | undefined, status: AgentStatus
 export class AgentProgressTracker {
   private readonly transcripts = new Map<string, Transcript>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly inFlight = new Set<string>();
+  /** The run generation each in-flight request was asked for. */
+  private readonly inFlight = new Map<string, number>();
+  /** Bumped when a key is forgotten, so a stale request cannot reach the next run. */
+  private readonly generations = new Map<string, number>();
   private readonly rerun = new Set<string>();
   private readonly lastStatus = new Map<string, AgentStatus>();
   private backoffUntil = 0;
@@ -208,6 +211,20 @@ export class AgentProgressTracker {
     if (message.role === "system") return;
     recordAgentOutput(transcript, message);
     if (this.enabled) this.schedule(key);
+  }
+
+  /**
+   * Replays stored messages when the tracker mounts. Only an agent that still
+   * has a live status is mid-run; a message for one without it belongs to a
+   * finished run, and replaying it would make that run's prompt the next
+   * task's.
+   */
+  replayMessages(messages: readonly AgentMessage[]): void {
+    for (const message of messages) {
+      if (this.lastStatus.has(agentProgressKey(message.worktreeId, message.tabId, message.agent))) {
+        this.handleMessage(message);
+      }
+    }
   }
 
   /**
@@ -249,12 +266,17 @@ export class AgentProgressTracker {
 
   private forget(key: string): void {
     this.lastStatus.delete(key);
+    this.generations.set(key, this.generationOf(key) + 1);
     this.transcripts.delete(key);
     this.rerun.delete(key);
     const timer = this.timers.get(key);
     if (timer) clearTimeout(timer);
     this.timers.delete(key);
     setProgress(key, null);
+  }
+
+  private generationOf(key: string): number {
+    return this.generations.get(key) ?? 0;
   }
 
   private cancelAll(): void {
@@ -296,7 +318,7 @@ export class AgentProgressTracker {
   /** The request to send for `key` now, or null when it should not be asked. */
   private prepare(key: string): AgentProgressInput | null {
     if (this.disposed || !this.enabled || this.now() < this.backoffUntil) return null;
-    if (this.inFlight.has(key)) {
+    if (this.inFlight.get(key) === this.generationOf(key)) {
       // Picked up by the in-flight request's `finally`.
       this.rerun.add(key);
       return null;
@@ -308,19 +330,21 @@ export class AgentProgressTracker {
   private async run(key: string): Promise<void> {
     const input = this.prepare(key);
     if (!input) return;
-    this.inFlight.add(key);
+    const generation = this.generationOf(key);
+    this.inFlight.set(key, generation);
     try {
-      this.store(key, await this.deps.estimate(input));
+      const estimate = await this.deps.estimate(input);
+      if (generation === this.generationOf(key)) this.store(key, estimate);
     } catch (cause) {
       this.backoffUntil = this.now() + this.deps.errorBackoffMs;
       console.warn("agent progress: System 1 estimate failed; pausing", cause);
     } finally {
-      this.inFlight.delete(key);
-      if (this.rerun.delete(key)) this.schedule(key);
+      if (this.inFlight.get(key) === generation) this.inFlight.delete(key);
+      if (generation === this.generationOf(key) && this.rerun.delete(key)) this.schedule(key);
     }
   }
 
-  /** Publishes an estimate unless the agent was forgotten while it was asked. */
+  /** Publishes an estimate unless the agent is gone or the tracker is off. */
   private store(key: string, estimate: AgentProgressEstimate): void {
     if (this.disposed || !this.enabled || !this.transcripts.has(key)) return;
     setProgress(key, { ...estimate, updatedAt: this.now() });
@@ -357,7 +381,7 @@ export function useAgentProgressTracking(): void {
     // Seed from what the store already holds: the daemon's snapshot replay may
     // have landed before this mounted.
     current.handleStatuses(agentStatusSnapshot());
-    for (const message of allAgentMessages()) current.handleMessage(message);
+    current.replayMessages(allAgentMessages());
     const stopMessages = subscribeAgentMessageEvents((message) => current.handleMessage(message));
     const stopStatuses = subscribeAgentStatuses(() =>
       current.handleStatuses(agentStatusSnapshot()),

@@ -913,11 +913,11 @@ function useWorktreeRowDetailsSlot(worktreeId: string, prLifecycle: GitHubPrLife
   const compact = useCompactWorktreeRows();
   const prNumbers = useContext(WorktreePrNumbersContext);
   const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
-  const hasPr = prLifecycle !== undefined && prLifecycle !== "none";
+  // Only a live PR suppresses "Ready for PR"; a closed or merged one is history.
   const data = useWorktreeRowDetails(
     worktreeId,
     prOpen ? (prNumbers[worktreeId] ?? null) : null,
-    hasPr,
+    prOpen,
   );
   if (compact || !hasWorktreeRowDetails(data)) return undefined;
   return <WorktreeRowDetails data={data} worktreeId={worktreeId} />;

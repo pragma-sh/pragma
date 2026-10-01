@@ -177,6 +177,49 @@ describe("AgentProgressTracker", () => {
       followUp: null,
     });
   });
+
+  it("does not show a forgotten run's in-flight estimate on the next run", async () => {
+    const stale = deferred<AgentProgressEstimate>();
+    current.estimate.mockImplementationOnce(() => stale.promise);
+    current.tracker.setEnabled(true);
+    current.tracker.handleMessage(message("user", "Old task"));
+    current.tracker.handleMessage(message("assistant", "Working on old task"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    current.tracker.handleStatuses([]);
+    current.tracker.handleStatuses([
+      { worktreeId: "wt-1", tabId: "tab-1", agent: "claude", status: "running" },
+    ]);
+    current.tracker.handleMessage(message("user", "New task"));
+    current.tracker.handleMessage(message("assistant", "Starting new task"));
+    await vi.advanceTimersByTimeAsync(100);
+    // The new run is not blocked behind the old request.
+    expect(current.estimate).toHaveBeenCalledTimes(2);
+    expect(current.estimate.mock.calls[1]?.[0]).toMatchObject({ prompt: "New task" });
+
+    stale.resolve({ progress: 0.9, activity: "testing", confidence: 0.9 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(progress()?.progress).toBe(0.4);
+  });
+
+  it("replays only messages of agents that still have a live status", async () => {
+    current.tracker.handleStatuses([]);
+    current.tracker.replayMessages([
+      message("user", "Old task"),
+      message("assistant", "Finished old task"),
+    ]);
+    current.tracker.handleStatuses([
+      { worktreeId: "wt-1", tabId: "tab-1", agent: "claude", status: "running" },
+    ]);
+    current.tracker.setEnabled(true);
+    current.tracker.handleMessage(message("user", "New task"));
+    current.tracker.handleMessage(message("assistant", "Starting"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(current.estimate.mock.calls.at(-1)?.[0]).toMatchObject({
+      prompt: "New task",
+      followUp: null,
+    });
+  });
 });
 
 describe("agentActivityLabel", () => {
