@@ -155,10 +155,9 @@ mod tests {
 
     #[test]
     fn agents_without_options_add_no_args() {
-        assert!(
-            option_args(&json!({ "launch": {} }), &AgentLaunchOptions::default())
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            option_args(&json!({ "launch": {} }), &AgentLaunchOptions::default()).unwrap(),
+            [] as [std::string::String; 0]
         );
     }
 

@@ -1040,7 +1040,7 @@ mod tests {
     fn parse_status_defaults_missing_fields() {
         let status = parse_status(&json!({ "type": "status" }));
         assert!(!status.available);
-        assert!(status.signed_in.is_empty());
+        assert_eq!(status.signed_in, [] as [std::string::String; 0]);
     }
 
     #[test]

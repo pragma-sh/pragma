@@ -213,7 +213,10 @@ mod tests {
             .output()
             .expect("check-ignore");
         assert!(ignored.status.success());
-        assert!(list(&root.to_string_lossy()).expect("list").is_empty());
+        assert_eq!(
+            list(&root.to_string_lossy()).expect("list"),
+            [] as [pragma_constants::ScratchpadFile; 0]
+        );
     }
 
     fn scratchpad(id: &str, extra: &str) -> String {
@@ -291,6 +294,6 @@ mod tests {
     fn missing_directory_lists_nothing() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let files = list(&temporary.path().to_string_lossy()).expect("list should succeed");
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [pragma_constants::ScratchpadFile; 0]);
     }
 }

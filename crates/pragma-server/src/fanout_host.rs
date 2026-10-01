@@ -691,14 +691,14 @@ mod tests {
     fn setup_commands_tolerate_a_missing_or_malformed_scripts_file() {
         let directory = tempfile::tempdir().expect("temp dir");
         let root = directory.path().to_string_lossy().into_owned();
-        assert!(setup_commands(&root).is_empty());
+        assert_eq!(setup_commands(&root), [] as [std::string::String; 0]);
 
         let scripts = directory
             .path()
             .join(pragma_constants::CONSTANTS.scripts.config_path.as_str());
         std::fs::create_dir_all(scripts.parent().expect("parent")).expect("dirs");
         std::fs::write(&scripts, "{ not json").expect("write");
-        assert!(setup_commands(&root).is_empty());
+        assert_eq!(setup_commands(&root), [] as [std::string::String; 0]);
 
         std::fs::write(&scripts, r#"{ "setup": ["bun install", "  "] }"#).expect("write");
         assert_eq!(setup_commands(&root), vec!["bun install".to_string()]);

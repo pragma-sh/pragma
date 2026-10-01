@@ -329,7 +329,7 @@ mod tests {
             split.prompt,
             "Wow!! it works\n\n!!`unclosed\n\nempty  here\n\n```sh\n!!`inside`\n```"
         );
-        assert!(split.commands.is_empty());
+        assert_eq!(split.commands, [] as [std::string::String; 0]);
     }
 
     #[test]

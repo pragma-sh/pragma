@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn app_name_is_present() {
-        assert!(!CONSTANTS.app.name.is_empty());
+        assert_ne!(CONSTANTS.app.name, "");
     }
 
     #[test]
@@ -95,9 +95,18 @@ mod tests {
 
     #[test]
     fn protocol_contract_names_are_present() {
-        assert!(!CONSTANTS.protocol.rpc_methods.is_empty());
-        assert!(!CONSTANTS.protocol.events.is_empty());
-        assert!(!CONSTANTS.protocol.errors.is_empty());
+        assert_ne!(
+            CONSTANTS.protocol.rpc_methods,
+            [] as [super::generated::ProtocolRpcMethod; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.events,
+            [] as [super::generated::ProtocolEventKind; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.errors,
+            [] as [super::generated::ProtocolErrorCode; 0]
+        );
     }
 
     #[test]
@@ -125,8 +134,8 @@ mod tests {
 
     #[test]
     fn updates_defaults_are_present() {
-        assert!(!CONSTANTS.updates.check_url.is_empty());
-        assert!(!CONSTANTS.updates.dev_check_url.is_empty());
+        assert_ne!(CONSTANTS.updates.check_url, "");
+        assert_ne!(CONSTANTS.updates.dev_check_url, "");
         assert!(CONSTANTS.updates.poll_interval_ms >= 1000);
     }
 }

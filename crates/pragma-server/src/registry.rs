@@ -2042,7 +2042,10 @@ mod tests {
         registry
             .set_tab_agent(tab, "pragma.codex", "Codex")
             .expect("agent metadata should persist");
-        assert!(registry.desired_watchers().is_empty());
+        assert_eq!(
+            registry.desired_watchers(),
+            [] as [crate::watchers::DesiredWatcher; 0]
+        );
 
         registry
             .spawn(

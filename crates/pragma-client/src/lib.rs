@@ -198,13 +198,13 @@ impl InputSender {
     fn try_send(&self, msg: InputMsg) -> Result<(), InputEnqueueError> {
         let bytes = msg.data.len();
         self.queued
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
                 (queued < self.capacity).then_some(queued + 1)
             })
             .map_err(|_| InputEnqueueError::Full)?;
         if self
             .queued_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
                 queued
                     .checked_add(bytes)
                     .filter(|next| *next <= self.byte_capacity)

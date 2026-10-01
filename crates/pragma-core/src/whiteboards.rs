@@ -550,7 +550,10 @@ mod tests {
             .create("wt-2", "Other", &scene("other"))
             .expect("create");
         assert_eq!(store.delete_for_worktree("wt-1").expect("delete"), 2);
-        assert!(store.list("wt-1", None).expect("list").is_empty());
+        assert_eq!(
+            store.list("wt-1", None).expect("list"),
+            [] as [pragma_constants::Whiteboard; 0]
+        );
         assert_eq!(store.list("wt-2", None).expect("list").len(), 1);
     }
 

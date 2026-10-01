@@ -243,7 +243,7 @@ mod tests {
         let path = dir.path().join("gateway-token");
 
         let first = read_or_create_token(&path).expect("create token");
-        assert!(!first.is_empty());
+        assert_ne!(first, "");
         let second = read_or_create_token(&path).expect("reuse token");
         assert_eq!(first, second, "token must survive across reads");
 

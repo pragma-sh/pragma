@@ -1037,9 +1037,10 @@ mod tests {
             vec!["alert.mp3".to_string(), "Chime.WAV".to_string()]
         );
         // A directory that does not exist yet lists empty rather than failing.
-        assert!(super::list_file_names(&root, ".pragma/assets/missing", &[])
-            .expect("list missing")
-            .is_empty());
+        assert_eq!(
+            super::list_file_names(&root, ".pragma/assets/missing", &[]).expect("list missing"),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

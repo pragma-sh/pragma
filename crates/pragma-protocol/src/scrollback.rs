@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn an_empty_buffer_yields_an_empty_window() {
-        assert!(window(b"", 10, 0, None).is_empty());
+        assert_eq!(window(b"", 10, 0, None), [] as [u8; 0]);
     }
 
     #[test]

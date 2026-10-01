@@ -417,7 +417,7 @@ mod tests {
             "largeFiles": [], "ignoredFolders": [], "truncated": false
         });
         let storage: pragma_constants::WorktreeStorage = serde_json::from_value(legacy).unwrap();
-        assert!(storage.tree.is_empty());
+        assert_eq!(storage.tree, [] as [pragma_constants::StorageTreeEntry; 0]);
         assert_eq!(storage.total_bytes, 10);
     }
 
