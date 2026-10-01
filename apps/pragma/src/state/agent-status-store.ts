@@ -11,6 +11,7 @@ type AgentWorktreeMessageMap = Map<string, AgentTabMessageMap>;
 
 const listeners = new Set<() => void>();
 const messageListeners = new Set<() => void>();
+const messageEventListeners = new Set<(message: AgentMessage) => void>();
 const statuses: WorktreeMap = new Map();
 const messages: AgentWorktreeMessageMap = new Map();
 export interface AgentStatusEntry {
@@ -82,6 +83,9 @@ export function applyAgentMessage(message: AgentMessage): void {
   }
   agents.set(message.agent, current);
   emitMessages();
+  for (const listener of messageEventListeners) {
+    listener(message);
+  }
 }
 
 /** Drops a single agent's entry, pruning empty tab/worktree maps. Returns its previous status. */
@@ -278,13 +282,34 @@ export function agentMessagesForWorktree(
     .toSorted((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
 }
 
+/** Every stored rich agent message, in arrival order per agent. */
+export function allAgentMessages(): AgentMessage[] {
+  const all: AgentMessage[] = [];
+  for (const tabs of messages.values()) {
+    for (const agents of tabs.values()) {
+      for (const list of agents.values()) all.push(...list);
+    }
+  }
+  return all;
+}
+
+/**
+ * Subscribes to each rich agent message as it is stored — including an upsert
+ * of an existing id — for consumers that react to the message itself rather
+ * than re-reading the whole store.
+ */
+export function subscribeAgentMessageEvents(listener: (message: AgentMessage) => void): () => void {
+  messageEventListeners.add(listener);
+  return () => messageEventListeners.delete(listener);
+}
+
 /** Subscribes to any agent-status change (used by the plugin hooks bridge). */
 export function subscribeAgentStatuses(listener: () => void): () => void {
   return subscribe(listener);
 }
 
 /** Returns stable all-entry runtime snapshot for project-level navigation surfaces. */
-function agentStatusSnapshot(): AgentStatusEntry[] {
+export function agentStatusSnapshot(): AgentStatusEntry[] {
   return statusSnapshot;
 }
 

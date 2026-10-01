@@ -36,6 +36,21 @@ onboarding:
 The key is stored in an owner-only file in Pragma's app data directory, the same way as the
 GitHub token. It never goes back to the UI, and it is only sent to the base URL you set.
 
+## Agent progress in the sidebar
+
+The same System 1 connection estimates how far each running agent is. After every new
+message an agent writes, Pragma sends the model the agent's **original prompt** (plus your
+latest follow-up, when there is one), the **last message the agent wrote**, and the tools
+it called most recently, and asks two questions at once: how much of the task is done, and
+which activity — planning, exploring, coding, testing, debugging, verifying, reviewing,
+documenting, waiting, or wrapping up — it is in. Each agent's line
+under its [worktree row](/docs/user-guide/worktrees#the-worktree-tree) shows the answer as a
+verb and a progress bar.
+
+Requests are coalesced: a burst of messages costs one request per agent, and a failed
+request (a bad key, a rate limit) pauses estimates for a minute rather than retrying on
+every message. Without a System 1 key the sidebar shows the plain status, with the bar held at 10% until the agent finishes.
+
 ## How a pick is made
 
 Pragma makes **one** request per pick. In it, the model sees:

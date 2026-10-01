@@ -1,4 +1,5 @@
 import type {
+  AgentProgressEstimate,
   Fanout,
   ScratchpadFile,
   FanoutPickResult,
@@ -1994,6 +1995,26 @@ export function writeAutoMode(
 /** Asks the configured System 1 model to pick an agent, model, and reasoning effort. */
 export function system1AutoSelect(input: AutoSelectInput): Promise<AutoSelection> {
   return invoke<AutoSelection>("system1_auto_select", { input });
+}
+
+/** What one agent-progress estimate is computed from (see `system1_agent_progress`). */
+export interface AgentProgressInput {
+  /** Display name of the agent. */
+  agent: string;
+  status: string | null;
+  /** The first prompt the agent was given. */
+  prompt: string;
+  /** The user's latest follow-up, when it differs from `prompt`. */
+  followUp: string | null;
+  /** The newest message the agent wrote back. */
+  lastMessage: string;
+  /** Tools the agent called most recently, newest last. */
+  recentTools: string[];
+}
+
+/** Asks the configured System 1 model how far along an agent is and what it is doing. */
+export function system1AgentProgress(input: AgentProgressInput): Promise<AgentProgressEstimate> {
+  return invoke<AgentProgressEstimate>("system1_agent_progress", { input });
 }
 
 /** Whether the user has dismissed AI setup. */

@@ -182,7 +182,8 @@ than no guide.
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
   and Agent Status have both a global and a project scope (project wins). AI has both too:
   providers and the System 1 connection are global, `automode.md` is per scope. GitHub,
-  Other (update server/download), and mobile pairing/gateway history are global-only.
+  Other (update server/download), Sidebar (row density, a per-device localStorage
+  preference rather than config), and mobile pairing/gateway history are global-only.
   Storage also has both scopes, but as a _view_ (every project vs. the current one's
   worktrees); only its reminder is persisted, under global `storage.reminder`.
 - Worktree disk usage is measured on the owning host: the walk, the gitignored-folder
@@ -223,6 +224,10 @@ than no guide.
   `AgentModelSelector` itself; a launching dialog wraps its submit in `useAutoSubmit(submit)`
   and passes the picker `autoRegistry` plus `autoTarget` (via `useAutoTarget(prompt)`).
   System 1 is asked only on submit — the picker shows just "Auto", never a live preview.
+  The same connection estimates **agent progress** for the sidebar
+  (`packages/ai-helpers/src/agent-progress.ts`, `pragma-ai agent-progress`), asked by the
+  desktop after each new agent message; its verbs and levels are
+  `system1.agentProgress` in `@pragma-sh/constants`.
 - The Pragma mark itself — its geometry, or the colours it is painted in →
   `packages/brand` (`@pragma-sh/brand`), which emits SVG strings and knows nothing
   about platforms. Which icon slots exist and what each demands stays with the
