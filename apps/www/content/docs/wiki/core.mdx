@@ -56,6 +56,9 @@ The host-side parser the desktop, gateway, and CLI all agree on:
   managed `pragmaScratchpad` frontmatter line (or with an unknown version) are skipped,
   which is exactly why hand-written files are invisible.
 - `comments_path(file)` is the sibling `<file>.mdx.comments.json`.
+- `exportHtml` writes a client-bundled standalone HTML document to the git-excluded
+  `.pragma/scratchpads/exports/` directory with a unique filename. Bundling and opening
+  the local file manager belong to the desktop client.
 - `detach_agent` nulls the attachment fields — used by fanout promotion before attempt
   worktrees are deleted.
 

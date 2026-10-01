@@ -32,6 +32,13 @@ The attached agent tab is what every interactive component talks back to — a u
 
 ## Authoring MDX
 
+Users can click **Export HTML** in the desktop toolbar (Editor or Raw). The current
+buffer is bundled into one standalone file under `.pragma/scratchpads/exports/`, which
+is git-excluded; local exports open in Finder/the system file manager. Exports embed
+the runtime, styles, static media, and literal whiteboard previews, with a Created with
+Pragma watermark. Only built-in agent-send/decision buttons are disabled; question
+inputs and local React interactions stay active. SDK host calls are no-op stubs.
+
 The frame bundles the document at open time (esbuild-wasm, MDX + GFM). Rules:
 
 - Markdown is markdown; GFM tables, task lists, footnotes work.

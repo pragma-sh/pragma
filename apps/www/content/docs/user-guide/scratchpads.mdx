@@ -27,6 +27,27 @@ The scratchpad tab has two modes sharing one buffer:
 If the file changes on disk (the agent updated it), a **Changed on disk — reload** button
 appears.
 
+## Exporting HTML
+
+Click **Export HTML** in either toolbar mode to export the current document, including
+unsaved edits, as one self-contained `.html` file. Pragma bundles the MDX and its imports
+with esbuild and embeds React, component styles, the current theme, static media, and
+literal whiteboard embeds. Open the file in a browser without running Pragma.
+
+Exports are written to `.pragma/scratchpads/exports/` in the document's worktree. Each
+export gets a unique filename, so earlier exports are preserved. The directory is
+git-excluded, and Finder (or your system file manager) opens after a local export.
+For SSH projects, the file is saved on the remote host.
+
+Only the built-in actions that send text to agents are disabled: **Send answer** and
+diff-review **Accept**/**Reject**. Question choices and text fields remain interactive,
+as do custom buttons, tabs, and local React state. Pragma SDK host calls are replaced
+with disconnected no-op stubs, including direct SDK imports and SDK APIs re-exported
+by the scratchpad library; subscriptions yield no events.
+
+Every exported file carries a **Created with Pragma** watermark linking to the
+[Pragma homepage](https://pragma-app.sh).
+
 ## Diagrams
 
 An agent can embed a [whiteboard](/docs/user-guide/whiteboards) with

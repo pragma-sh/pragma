@@ -1403,6 +1403,7 @@ pub fn run() {
             control::start_agent,
             control::exec_in_worktree,
             scratchpads::scratchpad_prompt_agent,
+            scratchpads::export_scratchpad_html,
             scratchpads::list_scratchpads,
             scratchpads::open_scratchpad_tab,
             whiteboards::create_whiteboard,

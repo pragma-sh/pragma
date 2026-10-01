@@ -1,4 +1,7 @@
+import { constants } from "@pragma-sh/constants";
+
 import { VIEWER_RUNTIME_SCRIPT } from "./generated/runtime-script";
+import { EXPORT_RUNTIME_SCRIPT } from "./generated/export-script";
 import type { ScratchpadComment } from "./messages";
 
 /** Id of the theme block the host rewrites in place when the theme changes. */
@@ -64,6 +67,53 @@ export function buildScratchpadViewerHtml(options: ScratchpadViewerHtmlOptions):
 <script>${VIEWER_RUNTIME_SCRIPT}</script>
 </body></html>`;
 }
+
+/** A compiled scratchpad and its theme, ready for offline standalone export. */
+export interface ScratchpadExportHtmlOptions {
+  code: string;
+  css: string;
+  title: string;
+  mode: "light" | "dark";
+  themeCss: string;
+}
+
+/** Inlines a compiled esbuild bundle and its runtime without any host bridge. */
+export function buildScratchpadExportHtml(options: ScratchpadExportHtmlOptions): string {
+  const title = options.title
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  return `<!doctype html>
+<html class="${options.mode}" lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>${safeStyle(options.themeCss)}${VIEWER_STYLES}${safeStyle(options.css)}${EXPORT_STYLES}</style>
+</head><body><div id="root"></div>
+<footer class="pragma-export-watermark" data-pragma-export-watermark><a href="${constants.scratchpads.exportHomepageUrl}" target="_blank" rel="noopener noreferrer">Created with Pragma</a></footer>
+<script>${RANDOM_UUID_POLYFILL}</script>
+<script>${EXPORT_RUNTIME_SCRIPT}</script>
+<script>${safeScript(options.code)}</script>
+</body></html>`;
+}
+
+function safeScript(code: string): string {
+  return code.replace(/<\/script/gi, "<\\/script");
+}
+
+function safeStyle(css: string): string {
+  return css.replace(/<\/style/gi, "<\\/style");
+}
+
+const EXPORT_STYLES = `
+.pragma-export-watermark{position:fixed;right:16px;bottom:12px;z-index:10;padding:4px 10px;
+  border:1px solid var(--border,#e4e4e7);border-radius:var(--radius-md,8px);
+  background:var(--background,#fff);color:var(--muted-foreground,#71717a);
+  font-size:12px;line-height:1.5}
+.pragma-export-watermark a{color:inherit;text-decoration:none}
+.pragma-export-watermark a:hover{text-decoration:underline}
+.pragma-export-watermark a:focus-visible{outline:2px solid var(--ring,currentColor);outline-offset:3px}
+`;
 
 /**
  * Serializes a value for embedding inside a `<script>` element.

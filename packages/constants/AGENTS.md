@@ -104,7 +104,9 @@ Two things that break the tarball if changed carelessly:
   base64 adds a third) and the frontend refuses to assemble anything past
   `maxBinaryBytes` in the webview's heap.
 - `scratchpads.*` — managed local MDX directory, extension, frontmatter key, and metadata
-  version shared by CLI, Rust host, and desktop editor.
+  version shared by CLI, Rust host, and desktop editor; `exportsDirectory` is the
+  worktree-relative destination for standalone HTML exports.
+  `exportHomepageUrl` is the homepage linked from their watermark.
 - `fanout.*` — the durable fanout state file, attempt branch prefix, the member
   floor (there is no ceiling), launch concurrency, follow-up delivery timeout, and the
   `PRAGMA_FANOUT_ID` / `PRAGMA_FANOUT_MEMBER_ID` environment variables every

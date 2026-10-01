@@ -134,14 +134,16 @@ export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): R
 /** A pending-aware send to the attached agent, shared by the interactive cards. */
 interface AgentAction {
   pending: boolean;
+  enabled: boolean;
   /** Resolves to whether the text reached an agent tab. */
   run: (text: string, onSent: () => void | Promise<void>) => Promise<boolean>;
 }
 
 function useAgentAction(options: PromptAgentOptions): AgentAction {
   const [pending, setPending] = useState(false);
+  const disabled = globalThis.pragmaScratchpad?.agentFeedbackEnabled === false;
   const run = async (text: string, onSent: () => void | Promise<void>): Promise<boolean> => {
-    if (pending) return false;
+    if (pending || disabled) return false;
     setPending(true);
     try {
       const delivered = await promptAgent(text, options);
@@ -151,7 +153,7 @@ function useAgentAction(options: PromptAgentOptions): AgentAction {
       setPending(false);
     }
   };
-  return { pending, run };
+  return { pending, enabled: !disabled, run };
 }
 
 /** One labeled answer option for {@link AskQuestion}. */
@@ -190,7 +192,7 @@ export function AskQuestion({
   onMissingAgent,
 }: AskQuestionProps): React.JSX.Element {
   const [sent, setSent] = useState<string | null>(null);
-  const { pending, run } = useAgentAction({ onMissingAgent });
+  const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const submit = (value: string): Promise<boolean> =>
     run(`Answer to scratchpad question "${question}": ${value}`, async () => {
@@ -206,14 +208,20 @@ export function AskQuestion({
       </div>
       <p className="pragma-title">{question}</p>
       {sent === null ? (
-        <AskQuestionControls
-          allowOpenResponse={allowOpenResponse}
-          options={options}
-          pending={pending}
-          submit={submit}
-          submitLabel={submitLabel}
-          type={type}
-        />
+        <>
+          <AskQuestionControls
+            allowOpenResponse={allowOpenResponse}
+            enabled={enabled}
+            options={options}
+            pending={pending}
+            submit={submit}
+            submitLabel={submitLabel}
+            type={type}
+          />
+          {!enabled ? (
+            <p className="pragma-hint">Agent feedback is disabled in this export.</p>
+          ) : null}
+        </>
       ) : (
         <SettledNotice
           detail={`Answered “${sent}”.`}
@@ -227,6 +235,7 @@ export function AskQuestion({
 
 interface AskQuestionControlsProps {
   allowOpenResponse: boolean;
+  enabled: boolean;
   options: readonly AskQuestionOption[];
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
@@ -237,6 +246,7 @@ interface AskQuestionControlsProps {
 /** Choice list or free-text form of an unanswered {@link AskQuestion}. */
 function AskQuestionControls({
   allowOpenResponse,
+  enabled,
   options,
   pending,
   submit,
@@ -244,12 +254,20 @@ function AskQuestionControls({
   type,
 }: AskQuestionControlsProps): React.JSX.Element {
   if (type === "text") {
-    return <AskQuestionForm pending={pending} submit={submit} submitLabel={submitLabel} />;
+    return (
+      <AskQuestionForm
+        enabled={enabled}
+        pending={pending}
+        submit={submit}
+        submitLabel={submitLabel}
+      />
+    );
   }
   return (
     <AskQuestionChoices
       allowOpenResponse={allowOpenResponse}
       choices={type === "yes-no" ? YES_NO_OPTIONS : options}
+      enabled={enabled}
       multiple={type === "multi-select"}
       pending={pending}
       submit={submit}
@@ -270,6 +288,7 @@ function choiceValue(option: AskQuestionOption): string {
 interface AskQuestionChoicesProps {
   allowOpenResponse: boolean;
   choices: readonly AskQuestionOption[];
+  enabled: boolean;
   multiple: boolean;
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
@@ -284,6 +303,7 @@ interface AskQuestionChoicesProps {
 function AskQuestionChoices({
   allowOpenResponse,
   choices,
+  enabled,
   multiple,
   pending,
   submit,
@@ -300,7 +320,7 @@ function AskQuestionChoices({
   const answer = composeAnswer(selected, other);
 
   const send = (): void => {
-    if (!answer) return;
+    if (!enabled || !answer) return;
     void submit(answer).then((delivered) => {
       if (delivered) {
         setSelected([]);
@@ -333,7 +353,7 @@ function AskQuestionChoices({
           />
         ))}
       </div>
-      <ChoiceSubmit answer={answer} label={submitLabel} pending={pending} />
+      <ChoiceSubmit answer={answer} enabled={enabled} label={submitLabel} pending={pending} />
     </form>
   );
 }
@@ -346,16 +366,18 @@ function choiceGroupRole(multiple: boolean): "group" | "radiogroup" {
 /** Submit row for {@link AskQuestionChoices}, disabled until something is selected. */
 function ChoiceSubmit({
   answer,
+  enabled,
   label,
   pending,
 }: {
   answer: string;
+  enabled: boolean;
   label: string;
   pending: boolean;
 }): React.JSX.Element {
   return (
     <div className="pragma-row pragma-row--end">
-      <Button disabled={pending || !answer} type="submit" variant="primary">
+      <Button disabled={!enabled || pending || !answer} type="submit" variant="primary">
         {pending ? "Sending…" : label}
       </Button>
     </div>
@@ -444,10 +466,12 @@ function Choice({
 
 /** Free-text answer field for a `text` {@link AskQuestion}. */
 function AskQuestionForm({
+  enabled,
   pending,
   submit,
   submitLabel,
 }: {
+  enabled: boolean;
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
   submitLabel: string;
@@ -455,7 +479,7 @@ function AskQuestionForm({
   const [answer, setAnswer] = useState("");
   const send = (): void => {
     const value = answer.trim();
-    if (!value) return;
+    if (!enabled || !value) return;
     void submit(value).then((delivered) => {
       if (delivered) setAnswer("");
       return delivered;
@@ -476,7 +500,7 @@ function AskQuestionForm({
         value={answer}
       />
       <div className="pragma-row pragma-row--end">
-        <Button disabled={pending || !answer.trim()} type="submit" variant="primary">
+        <Button disabled={!enabled || pending || !answer.trim()} type="submit" variant="primary">
           {pending ? "Sending…" : submitLabel}
         </Button>
       </div>
@@ -503,7 +527,7 @@ export function DiffReview({
   onMissingAgent,
 }: DiffReviewProps): React.JSX.Element {
   const [decision, setDecision] = useState<boolean | null>(null);
-  const { pending, run } = useAgentAction({ onMissingAgent });
+  const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const decide = (accepted: boolean): Promise<boolean> =>
     run(`Scratchpad diff${file ? ` for ${file}` : ""} was ${verdict(accepted)}.`, async () => {
@@ -516,7 +540,7 @@ export function DiffReview({
       <DiffHeader decision={decision} file={file} title={title} />
       <DiffPanes after={after} before={before} />
       {decision === null ? (
-        <DiffActions decide={decide} pending={pending} />
+        <DiffActions decide={decide} pending={pending || !enabled} />
       ) : (
         <SettledNotice
           detail={`Change ${verdict(decision)}.`}
