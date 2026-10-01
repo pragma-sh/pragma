@@ -2,6 +2,8 @@ import type { Tab, Whiteboard } from "@pragma-sh/constants";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { deferred } from "@/test/deferred";
+
 const mocks = vi.hoisted(() => ({
   editWhiteboard: vi.fn(),
   getWhiteboard: vi.fn(),
@@ -91,19 +93,6 @@ const tab: Tab = {
   orderIndex: 0,
   createdAt: "now",
 };
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  return {
-    promise: new Promise<T>((done) => {
-      resolve = done;
-    }),
-    resolve,
-  };
-}
 
 beforeEach(() => {
   vi.useFakeTimers();

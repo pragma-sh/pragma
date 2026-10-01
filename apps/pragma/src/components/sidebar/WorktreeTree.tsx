@@ -1,9 +1,11 @@
 import {
+  createContext,
   forwardRef,
   Fragment,
   type ComponentPropsWithoutRef,
   type RefObject,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -57,6 +59,7 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
+import { useCompactWorktreeRows } from "@/state/sidebar-preferences";
 import { toggleWorktreeCollapsed, useCollapsedWorktreeIds } from "@/state/worktree-collapsed";
 import {
   FanoutIndicator,
@@ -64,6 +67,11 @@ import {
   useFanoutForParent,
 } from "@/components/sidebar/FanoutGroup";
 import { PendingWorktreeSlot } from "@/components/sidebar/PendingWorktreeSlot";
+import {
+  hasWorktreeRowDetails,
+  useWorktreeRowDetails,
+  WorktreeRowDetails,
+} from "@/components/sidebar/WorktreeRowDetails";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
@@ -124,15 +132,30 @@ function applyMergedStatusFailure(
   return sameMergedStatus(previous, next) ? previous : next;
 }
 
-/** True when both maps hold the same worktree-id → PR lifecycle entries. */
-function samePrLifecycle(
-  a: Record<string, GitHubPrLifecycle>,
-  b: Record<string, GitHubPrLifecycle>,
-): boolean {
+/** A worktree's pull request as the sidebar shows it: lifecycle plus number. */
+interface WorktreePr {
+  lifecycle: GitHubPrLifecycle;
+  number: number | null;
+}
+
+/** True when both maps hold the same worktree-id → PR entries. */
+function samePrs(a: Record<string, WorktreePr>, b: Record<string, WorktreePr>): boolean {
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
-  return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every(
+      (key) => a[key]?.lifecycle === b[key]?.lifecycle && a[key]?.number === b[key]?.number,
+    )
+  );
 }
+
+/** Lifecycles whose PR is still open, so its number is worth showing on the row. */
+const OPEN_PR_LIFECYCLES: ReadonlySet<GitHubPrLifecycle> = new Set(["open", "draft", "merging"]);
+
+/** PR numbers by worktree id, for the detailed row layout. Provided by the tree
+ *  so the number is not threaded through every row like the lifecycle is. */
+const WorktreePrNumbersContext = createContext<Readonly<Record<string, number>>>({});
 
 /**
  * Icon color for the worktree merge glyph from PR lifecycle:
@@ -165,23 +188,23 @@ function worktreeGlyph(
 }
 
 /**
- * Poll GitHub PR lifecycle per child worktree (cached; background revalidate).
- * Green = open PR, purple = merged, red = closed. Same cadence as the PR tab.
+ * Poll GitHub PR lifecycle (and number) per child worktree (cached; background
+ * revalidate). Green = open PR, purple = merged, red = closed. Same cadence as
+ * the PR tab.
  */
 function useWorktreePrLifecycles(
   worktrees: Worktree[],
   authenticated: boolean,
-): Record<string, GitHubPrLifecycle> {
-  const [prLifecycleByWorktreeId, setPrLifecycleByWorktreeId] = useState<
-    Record<string, GitHubPrLifecycle>
-  >({});
+): {
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  prNumberByWorktreeId: Record<string, number>;
+} {
+  const [prByWorktreeId, setPrByWorktreeId] = useState<Record<string, WorktreePr>>({});
 
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
     if (!authenticated || childWorktrees.length === 0) {
-      setPrLifecycleByWorktreeId((previous) =>
-        Object.keys(previous).length === 0 ? previous : {},
-      );
+      setPrByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
       return;
     }
     let cancelled = false;
@@ -196,7 +219,10 @@ function useWorktreePrLifecycles(
             try {
               const repo = await githubRepoRef(worktree.id);
               const pr = await findPullRequestForBranch(repo, { includeClosed: true });
-              return [worktree.id, pullRequestLifecycle(pr)] as const;
+              return [
+                worktree.id,
+                { lifecycle: pullRequestLifecycle(pr), number: pr?.number ?? null },
+              ] as const;
             } catch {
               // Failed lookup: report no lifecycle at all rather than "none",
               // so a transient GitHub error can't sort the row into the no-PR
@@ -206,14 +232,14 @@ function useWorktreePrLifecycles(
           }),
         );
         if (cancelled) return;
-        setPrLifecycleByWorktreeId((previous) => {
-          const next: Record<string, GitHubPrLifecycle> = {};
-          for (const [id, lifecycle] of entries) {
+        setPrByWorktreeId((previous) => {
+          const next: Record<string, WorktreePr> = {};
+          for (const [id, pr] of entries) {
             // Carry the last known lifecycle forward across a failed refresh.
-            const resolved = lifecycle ?? previous[id];
+            const resolved = pr ?? previous[id];
             if (resolved !== undefined) next[id] = resolved;
           }
-          return samePrLifecycle(previous, next) ? previous : next;
+          return samePrs(previous, next) ? previous : next;
         });
       } finally {
         refreshInFlight = false;
@@ -230,7 +256,15 @@ function useWorktreePrLifecycles(
     };
   }, [worktrees, authenticated]);
 
-  return prLifecycleByWorktreeId;
+  return useMemo(() => {
+    const prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle> = {};
+    const prNumberByWorktreeId: Record<string, number> = {};
+    for (const [id, pr] of Object.entries(prByWorktreeId)) {
+      prLifecycleByWorktreeId[id] = pr.lifecycle;
+      if (pr.number !== null) prNumberByWorktreeId[id] = pr.number;
+    }
+    return { prLifecycleByWorktreeId, prNumberByWorktreeId };
+  }, [prByWorktreeId]);
 }
 
 /** Tracks local merged-into-parent status for child worktrees.
@@ -612,7 +646,10 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   );
   const hidden = worktrees.filter((w) => w.hidden);
   const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
-  const prLifecycleByWorktreeId = useWorktreePrLifecycles(worktrees, authenticated);
+  const { prLifecycleByWorktreeId, prNumberByWorktreeId } = useWorktreePrLifecycles(
+    worktrees,
+    authenticated,
+  );
   const { fanouts } = useFanouts();
   // Attempts are rendered under their fanout group, not as ordinary children:
   // a nested worktree and an attempt look identical from `parentId` alone.
@@ -641,16 +678,18 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   }
 
   return (
-    <WorktreeTreeContent
-      hidden={hidden}
-      mergedByWorktreeId={mergedByWorktreeId}
-      onCreateChild={onCreateChild}
-      onUnhide={(id) => void workspace.hideWorktree(id, false)}
-      pinTimes={pinTimes}
-      prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-      shortcutOrder={shortcutOrder}
-      tree={tree}
-    />
+    <WorktreePrNumbersContext.Provider value={prNumberByWorktreeId}>
+      <WorktreeTreeContent
+        hidden={hidden}
+        mergedByWorktreeId={mergedByWorktreeId}
+        onCreateChild={onCreateChild}
+        onUnhide={(id) => void workspace.hideWorktree(id, false)}
+        pinTimes={pinTimes}
+        prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+        shortcutOrder={shortcutOrder}
+        tree={tree}
+      />
+    </WorktreePrNumbersContext.Provider>
   );
 }
 
@@ -865,6 +904,25 @@ function WorktreeRowActions({
   );
 }
 
+/**
+ * The detailed layout's extra lines for a row — open PR number, git action or
+ * "Ready for PR", agents — or undefined in the compact layout or when there is
+ * nothing to add.
+ */
+function useWorktreeRowDetailsSlot(worktreeId: string, prLifecycle: GitHubPrLifecycle | undefined) {
+  const compact = useCompactWorktreeRows();
+  const prNumbers = useContext(WorktreePrNumbersContext);
+  const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
+  const hasPr = prLifecycle !== undefined && prLifecycle !== "none";
+  const data = useWorktreeRowDetails(
+    worktreeId,
+    prOpen ? (prNumbers[worktreeId] ?? null) : null,
+    hasPr,
+  );
+  if (compact || !hasWorktreeRowDetails(data)) return undefined;
+  return <WorktreeRowDetails data={data} worktreeId={worktreeId} />;
+}
+
 /** The row's visible label: expand caret, branch icon, name/rename input, actions. */
 const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
   function WorktreeRowLabel({ row, actions, rename, className, style, ...props }, ref) {
@@ -892,8 +950,10 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       openDelete,
     } = actions;
     const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
+    const details = useWorktreeRowDetailsSlot(worktreeId, prLifecycle);
     return (
       <WorktreeRowFrame
+        details={details}
         ref={ref}
         className={className}
         style={style}

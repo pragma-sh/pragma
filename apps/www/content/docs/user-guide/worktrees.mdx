@@ -20,6 +20,21 @@ The sidebar lists the selected project's worktrees:
   worktree.
 - Hovering a non-main row reveals three actions: **Pin**, **New child**, and
   **Delete worktree**.
+- Rows are **detailed** by default: under the title line a worktree shows its open pull
+  request (a GitHub mark with the PR number), any git action in progress (**Committing**,
+  **Writing commit message**, **Committing & drafting PR**, **Drafting PR**, **Pushing**,
+  **Opening PR**, **Merging**, then briefly whether it succeeded), **Ready for PR** once a
+  pull request has been drafted but not yet opened, and one line per agent —
+  click anywhere on the card to select the worktree, or on an agent line to open its tab.
+- Each agent line shows its status — **Running**, **Needs input**, or **Finished** — and a
+  progress bar in the same yellow / red / green as the status dots. The bar always shows
+  at least 10%. With a [System 1 model](/docs/user-guide/auto-mode) configured, a running
+  agent's status becomes what it is doing — **Planning**, **Exploring**, **Coding**,
+  **Testing**, **Debugging**, **Verifying**, **Reviewing**, **Documenting**, **Waiting**, or
+  **Wrapping up** — and the bar follows an estimate Pragma refreshes every time the agent
+  writes a new message.
+- **Settings → Sidebar → Compact rows** folds every row back to its title line; nesting,
+  the title, and the status dot are the same in both layouts.
 
 **Right-click a row** for the full menu: Rename · Pin / Unpin · Copy worktree path · Copy
 branch name · **Open in editor** (VS Code, Cursor, Windsurf, Zed, Sublime Text, IntelliJ

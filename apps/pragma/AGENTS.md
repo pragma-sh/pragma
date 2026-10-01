@@ -36,6 +36,9 @@ apps/pragma/
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
+│   │   ├── agent-progress-store.ts # System 1 progress/activity per agent (sidebar)
+│   │   ├── worktree-activity-store.ts # Commit/push/PR actions in flight per worktree
+│   │   ├── sidebar-preferences.ts  # Compact worktree rows (localStorage)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
@@ -361,6 +364,35 @@ from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the stor
 `done`** (`markAgentsSeen`, `MarkAgentsSeen` request) — both when the tab becomes
 on-screen and when a `done` report arrives for an already-visible tab. Closing a tab
 drops all its status (`removeAgentStatusForTab`).
+
+**Detailed sidebar rows.** Agents are listed only inside their worktree's row — there is no
+separate flat agents list. Worktree rows are **detailed** by default (`WorktreeRowFrame`'s
+`details` slot: a GitHub mark + open-PR number, git action, one line per agent with an
+always-drawn progress bar floored at 10%) and fold back to the one-line layout with the
+**Compact rows** switch in Settings → Sidebar (`components/settings/SidebarSection.tsx` over
+`state/sidebar-preferences.ts`, a persisted per-device `createToggleSetStore` — deliberately
+not `config.json`). The title line never changes shape between the two. Status colors and labels live once in
+`lib/agent-status-style.ts`, shared by `AgentStatusDot` and the progress bars.
+
+**System 1 agent progress is owned by Pragma, not the plugins.** `state/agent-progress-store.ts`
+listens to every rich message (`subscribeAgentMessageEvents` — the same stream Pragma Go renders) and,
+per agent, debounces (`system1.agentProgress.debounceMs`), keeps one request in flight (a
+message landing meanwhile re-runs it once), and pauses for `errorBackoffMs` after a failure.
+It sends the first user prompt, a differing latest follow-up, the last assistant reply, and
+recent tool names through `system1_agent_progress` (Rust adds the key, the activity verbs,
+and the progress levels from `CONSTANTS.system1.agentProgress`) to the `pragma-ai
+agent-progress` sidecar. An agent whose status disappears is forgotten, so its next prompt
+is a new task. The tracker is mounted once, in `ProjectSidebar`, and only runs while a
+System 1 key is configured.
+
+**Git actions report like agents.** Wrap commit / push / PR / merge work in
+`trackWorktreeActivity(worktreeId, kind, work)` (`state/worktree-activity-store.ts`); the
+sidebar shows it while it runs and briefly after it settles. Its wording per kind and
+state is the table in that file. New call sites that commit, push, or open a PR should be wrapped
+too. Between actions, a row says **Ready for PR** while an AI-drafted PR waits to be
+opened: the PR form is persisted per worktree by `state/pull-request-draft-store.ts`, whose
+`drafted` mark is set only by an AI draft (Commit & PR or Shift+Tab), survives edits, and
+clears when the PR opens or the form is emptied. Write PR form state through that store.
 
 **Alerts (chime + system notification) are gated by a latch separate from the dot
 store.** `lib/agent-alert.ts` keeps an `alertedStatusByKey` latch keyed by

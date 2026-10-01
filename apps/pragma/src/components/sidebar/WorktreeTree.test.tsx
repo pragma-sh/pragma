@@ -1,5 +1,13 @@
 import type { Worktree } from "@pragma-sh/constants";
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -126,7 +134,14 @@ vi.mock("@/state/github-context", () => ({
 }));
 
 import { WorktreeTree } from "./WorktreeTree";
+import { setCompactWorktreeRows } from "@/state/sidebar-preferences";
+import {
+  clearPullRequestDraft,
+  storeGeneratedPullRequestDraft,
+} from "@/state/pull-request-draft-store";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 import { useWorktreeShortcutOrder } from "@/lib/shortcut-hints";
+import { deferred } from "@/test/deferred";
 
 afterEach(() => {
   cleanup();
@@ -454,6 +469,61 @@ describe("WorktreeTree", () => {
     fireEvent.click(unpin);
 
     expect(screen.queryByRole("button", { name: "Unpin feature" })).toBeNull();
+  });
+
+  it("lists a worktree's agents under its title, and folds them away in compact rows", async () => {
+    localStorage.clear();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    applyAgentReport({ agent: "claude", worktreeId: "child", tabId: "tab-1", status: "running" });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    const open = await screen.findByRole("button", { name: "Open claude" });
+    expect(open).toHaveTextContent("Running");
+    // The bar is always drawn, floored at 10% before any estimate arrives.
+    expect(within(open).getByLabelText("Estimated progress")).toHaveValue(10);
+    fireEvent.click(open);
+    expect(activateTabLocationMock).toHaveBeenCalledWith("p", "child", "tab-1");
+    // The agent line opens its tab alone; the card's own select does not race it.
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    // Anywhere else on the card selects the worktree, not just the title.
+    const details = open.closest("[data-slot='worktree-row-details']");
+    fireEvent.click(details!);
+    expect(selectWorktreeMock).toHaveBeenCalledWith("child");
+
+    act(() => setCompactWorktreeRows(true));
+    expect(screen.queryByRole("button", { name: "Open claude" })).toBeNull();
+    // The title line, and its aggregate status dot, are the same in both layouts.
+    expect(screen.getByText("feature")).toBeInTheDocument();
+    expect(screen.getByTitle("Agent running")).toBeInTheDocument();
+    act(() => setCompactWorktreeRows(false));
+  });
+
+  it("shows the latest git action on the worktree's row", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await screen.findByText("feature");
+
+    const push = deferred<void>();
+    act(() => {
+      void trackWorktreeActivity("child", "push", () => push.promise);
+    });
+    expect(await screen.findByText("Pushing")).toBeInTheDocument();
+    await act(async () => push.resolve());
+    expect(await screen.findByText("Pushed")).toBeInTheDocument();
+  });
+
+  it("says a worktree is ready for a PR once one is drafted, until it is opened", async () => {
+    localStorage.clear();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await screen.findByText("feature");
+    expect(screen.queryByText("Ready for PR")).toBeNull();
+
+    act(() => storeGeneratedPullRequestDraft("child", { title: "Add refresh", body: "" }));
+    expect(await screen.findByText("Ready for PR")).toBeInTheDocument();
+
+    act(() => clearPullRequestDraft("child"));
+    expect(screen.queryByText("Ready for PR")).toBeNull();
   });
 });
 
