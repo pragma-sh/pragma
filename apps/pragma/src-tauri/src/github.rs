@@ -620,6 +620,27 @@ pub async fn github_merge_in_progress(
     .map_err(|error| AppError::GitHub(format!("merge status task failed: {error}")))?
 }
 
+/// Lists the paths Git still marks as conflicted in this worktree.
+#[tauri::command]
+pub async fn github_unmerged_paths(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<Vec<String>> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        host_git(
+            &pty,
+            &GitRequest::GithubUnmergedPaths {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("unmerged paths task failed: {error}")))?
+}
+
 /// Pushes the worktree's branch to `origin`, setting upstream, before opening a
 /// PR (`git push -u origin <branch>`).
 #[tauri::command]

@@ -1,14 +1,14 @@
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { buildCommitMessagePrompt, cleanCommitMessage } from "./prompts.ts";
-import { loadModelInsights } from "./model-insights.ts";
-import { selectModelCandidates } from "./pick-model.ts";
-import { createPragmaSession, runPromptToText } from "./session.ts";
+import { createPragmaSession, loadModelCandidates, runPromptToText } from "./session.ts";
 
 /** Options for {@link generateCommitMessage}. */
 export interface GenerateCommitMessageOptions {
   /** The staged diff (`git diff --cached`). */
   stagedDiff: string;
+  /** What the change is, when the diff cannot say (e.g. a merge-conflict resolution). */
+  note?: string;
   /** Worktree root — used for AGENTS.md/skill context. */
   cwd: string;
   authStorage: AuthStorage;
@@ -35,12 +35,8 @@ export async function generateCommitMessage(
     throw new NoStagedChangesError();
   }
 
-  const prompt = buildCommitMessagePrompt(options.stagedDiff);
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates("fast", options.registry.getAvailable(), { insights });
-  if (candidates.length === 0) {
-    throw new Error("No fast model is available. Sign in to a provider that offers one.");
-  }
+  const prompt = buildCommitMessagePrompt(options.stagedDiff, options.note);
+  const candidates = await loadModelCandidates("fast", options.registry);
 
   let lastError: unknown;
   for (const model of candidates) {

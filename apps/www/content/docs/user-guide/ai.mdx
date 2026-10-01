@@ -29,7 +29,8 @@ Your credentials, your accounts, your usage — nothing is proxied through a Pra
 service.
 
 The same step offers an optional **System 1 model** card at the top. That key powers
-[Auto mode](/docs/user-guide/auto-mode) in the agent pickers, not the helpers below.
+[Auto mode](/docs/user-guide/auto-mode) in the agent pickers and, together with these
+helpers, [AI merge-conflict resolution](/docs/user-guide/github#resolving-merge-conflicts-with-ai).
 
 ## Inline edit
 
@@ -52,6 +53,8 @@ not over SSH.
 - The PR create view: **Shift+Tab** drafts a title and body from the branch diff.
 - The **Commit & PR** button (right sidebar header) plans and makes all the commits,
   pushes, and drafts the PR in one action.
+- **Commit and Push Fixes** on a pull request's merge card tells the model the commit
+  resolves merge conflicts, so the message says so.
 - The [agent board's](/docs/user-guide/agent-board) "Commit all and open PR" and a
   fanout pick's final commit message use the same pipeline.
 
