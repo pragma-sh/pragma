@@ -31,11 +31,12 @@ and speaks newline-delimited JSON ("NDJSON") on stdout:
 
 - **One-shot commands** print a single terminal `result` / `error` line:
   `methods`, `status`, `set-key`, `logout`, `commit-message`, `commit-plan`,
-  `pull-request`, `inline-edit`, `auto-select`, `system1-check`. Input (diff / JSON
-  context / API key) arrives on **stdin**. The two System 1 commands take their key and
-  endpoint on stdin from `system1.rs`; a `System1Error` is reported with the code
-  `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …) and an `AutoSelectError`
-  (every agent filtered out) as `auto-unavailable`.
+  `pull-request`, `inline-edit`, `auto-select`, `system1-check`, `agent-progress`. Input
+  (diff / JSON context / API key) arrives on **stdin**. The three System 1 commands take
+  their key and endpoint on stdin from `system1.rs`; a `System1Error` is reported with the
+  code `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …), an `AutoSelectError`
+  (every agent filtered out) as `auto-unavailable`, and an `AgentProgressError` (a
+  malformed request) as `progress-unavailable`.
 - **`ask`** streams assistant text: `{ type: "delta", text }`, optional
   `{ type: "reset" }` when a model attempt is abandoned, then
   `{ type: "result", text }` or `error`. JSON context on stdin lists the question
@@ -70,6 +71,8 @@ The Rust side parses the last non-empty line.
 | `disk-cache.ts`       | Versioned, TTL-bound JSON cache envelope shared by both insight feeds               |
 | `automode.ts`         | Parses/merges `automode.md` and applies its include/exclude globs                   |
 | `auto-select.ts`      | Auto mode: one fan-out System 1 request → agent, model, reasoning effort            |
+| `agent-progress.ts`   | Sidebar progress: one System 1 request → progress (0..1) + activity verb            |
+| `truncate.ts`         | Head/tail character-budget truncation shared by the System 1 state builders         |
 | `prompts.ts`          | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested        |
 | `session.ts`          | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                 |
 | `run-failure.ts`      | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`             |

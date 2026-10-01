@@ -15,6 +15,15 @@ export {
   signedInProviders,
 } from "./auth.ts";
 export {
+  type AgentProgressActivity,
+  type AgentProgressDeps,
+  AgentProgressError,
+  type AgentProgressRequest,
+  type AgentProgressResult,
+  estimateAgentProgress,
+  parseAgentProgressRequest,
+} from "./agent-progress.ts";
+export {
   ASK_AI_TOOLS,
   type AskAiPromptContext,
   type AskAiWorktreeRef,
