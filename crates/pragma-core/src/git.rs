@@ -18,6 +18,7 @@ use pragma_constants::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::merge_conflicts::{self, MergeIdentity, ResolutionWrite};
 use crate::process_env;
 use crate::{CoreError, CoreResult};
 
@@ -188,6 +189,27 @@ pub enum GitRequest {
     GithubAbortMerge { root: String },
     /// Returns whether the worktree has an active merge.
     GithubMergeInProgress { root: String },
+    /// Lists paths Git still marks as unmerged (conflicted) in the index.
+    GithubUnmergedPaths { root: String },
+    /// Reads every conflicted file of the active merge, with the commits that
+    /// touched it on each side and the merge's identity.
+    MergeConflictInputs { root: String },
+    /// Writes and stages resolved files, only into the merge in `identity`.
+    ApplyMergeResolutions {
+        root: String,
+        identity: MergeIdentity,
+        resolutions: Vec<ResolutionWrite>,
+    },
+    /// Reads the staged diff a merge commit message is written from; fails
+    /// while any file is still conflicted.
+    MergeCommitContext { root: String },
+    /// Commits the merge, provided `identity` and the index `tree` are unchanged.
+    CommitMerge {
+        root: String,
+        identity: MergeIdentity,
+        tree: String,
+        message: String,
+    },
     /// Pushes the current branch to `origin`, setting the upstream.
     GithubPushBranch { root: String },
     /// Deletes the current branch from `origin`.
@@ -372,6 +394,33 @@ fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::GithubMergeInProgress { root } => {
             to_value(github_merge_in_progress(Path::new(root))?)?
         }
+        GitRequest::GithubUnmergedPaths { root } => to_value(unmerged_paths(Path::new(root))?)?,
+        GitRequest::MergeConflictInputs { root } => {
+            to_value(merge_conflicts::conflict_inputs(Path::new(root))?)?
+        }
+        GitRequest::ApplyMergeResolutions {
+            root,
+            identity,
+            resolutions,
+        } => to_value(merge_conflicts::apply_resolutions(
+            Path::new(root),
+            identity,
+            resolutions,
+        )?)?,
+        GitRequest::MergeCommitContext { root } => {
+            to_value(merge_conflicts::merge_commit_context(Path::new(root))?)?
+        }
+        GitRequest::CommitMerge {
+            root,
+            identity,
+            tree,
+            message,
+        } => to_value(merge_conflicts::commit_merge(
+            Path::new(root),
+            identity,
+            tree,
+            message,
+        )?)?,
         GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
         GitRequest::GithubDeleteRemoteBranch { root } => {
             to_value(github_delete_remote_branch(Path::new(root))?)?
@@ -1771,6 +1820,19 @@ fn remove_untracked(root: &Path, path: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// Worktree-relative paths Git still marks as unmerged, sorted.
+fn unmerged_paths(root: &Path) -> CoreResult<Vec<String>> {
+    let stdout = run_git(root, &["diff", "--name-only", "-z", "--diff-filter=U"])?;
+    let mut paths: Vec<String> = stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 fn has_unmerged_paths(root: &Path) -> CoreResult<bool> {
     let output = process_env::git()
         .args([
@@ -2020,13 +2082,13 @@ fn default_branch(root: &Path) -> String {
     .unwrap_or_else(|| "main".to_string())
 }
 
-fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
+pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
     Ok(String::from_utf8_lossy(&run_git(root, args)?)
         .trim()
         .to_string())
 }
 
-fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
+pub(crate) fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
     let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
@@ -2096,8 +2158,9 @@ mod tests {
         github_abort_merge, github_fetch_and_sync, github_merge_base_branch,
         github_merge_in_progress, github_pull_branch, github_sync_branch, has_unmerged_paths,
         init_repository, list_headless_worktrees, merge_worktree_to_parent, merged_status,
-        remove_worktree, repo_status, stage_file, unstage_file, worktree_changes, worktree_commits,
-        worktree_is_dirty, MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
+        remove_worktree, repo_status, stage_file, unmerged_paths, unstage_file, worktree_changes,
+        worktree_commits, worktree_is_dirty, MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE,
+        PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -2718,6 +2781,10 @@ mod tests {
         )
         .expect("merge base"));
         assert!(has_unmerged_paths(local.path()).expect("unmerged paths"));
+        assert_eq!(
+            unmerged_paths(local.path()).expect("unmerged paths"),
+            vec!["base.txt".to_string()]
+        );
         assert!(std::fs::read_to_string(local.path().join("base.txt"))
             .expect("read conflict")
             .contains("<<<<<<< HEAD"));

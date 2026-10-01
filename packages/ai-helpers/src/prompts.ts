@@ -2,6 +2,7 @@
  * Prompt text for Pragma's built-in AI features. Kept here so prompts are
  * versioned in one place and unit-testable, separate from the SDK plumbing.
  */
+import { MERGE_CONFLICTS } from "./constants.ts";
 
 /** Strip a surrounding markdown code fence from model output, if present. */
 function stripModelFence(raw: string): string {
@@ -37,17 +38,20 @@ export const INLINE_EDIT_WINDOW_LINES = 400;
 /**
  * Build the one-shot prompt that turns a staged git diff into a commit message.
  * All instructions live in the user prompt because the pi SDK owns the system
- * prompt.
+ * prompt. `note` says what the change is when the diff alone cannot (e.g. that
+ * it concludes a merge by resolving conflicts).
  */
-export function buildCommitMessagePrompt(stagedDiff: string): string {
+export function buildCommitMessagePrompt(stagedDiff: string, note = ""): string {
   const diff =
     stagedDiff.length > COMMIT_DIFF_CHAR_LIMIT
       ? `${stagedDiff.slice(0, COMMIT_DIFF_CHAR_LIMIT)}\n[... diff truncated ...]`
       : stagedDiff;
+  const context = note.trim() ? ["What these changes are:", note.trim(), ""] : [];
 
   return [
     "Write a git commit message for the following staged changes.",
     "",
+    ...context,
     "Before writing the message, determine the repository's commit convention:",
     "- Read AGENTS.md for a specific commit convention.",
     "- If AGENTS.md does not define one, inspect `git log` for an existing pattern.",
@@ -435,4 +439,149 @@ export function cleanInlineEditDraft(raw: string): InlineEditDraft {
     edits: cleaned,
     summary: typeof parsed.summary === "string" ? parsed.summary.trim() : "",
   };
+}
+
+/** One conflict as the verifier sees it, with System 1's pick when there is one. */
+export interface ConflictVerificationHunk {
+  id: string;
+  startLine: number;
+  ours: string;
+  base: string | null;
+  theirs: string;
+  system1: { choice: string; confidence: number; risk: number; combined: number } | null;
+}
+
+/** Everything the verification model is given for one conflicted file. */
+export interface ConflictVerificationPromptContext {
+  path: string;
+  /** The file exactly as git left it, conflict markers included. */
+  content: string;
+  headRef: string;
+  baseRef: string;
+  pullRequestTitle: string;
+  pullRequestBody: string;
+  headCommits: string[];
+  baseCommits: string[];
+  /** Why System 1's answer was not trusted on its own. */
+  escalation: string;
+  hunks: ConflictVerificationHunk[];
+}
+
+/** One conflict's verified resolution. */
+export interface ConflictVerificationAnswer {
+  id: string;
+  resolution: string;
+  /** Replacement text, present only when `resolution` is `custom`. */
+  content?: string;
+  reason: string;
+}
+
+function commitList(commits: string[]): string {
+  return commits.length > 0 ? commits.map((commit) => `- ${commit}`).join("\n") : "(none)";
+}
+
+/**
+ * Build the high-tier prompt that checks (and, where needed, overrides) System
+ * 1's merge-conflict picks for one file. The model gets exactly the context
+ * System 1 had, plus System 1's answers and read-only tools over the worktree.
+ */
+export function buildConflictVerificationPrompt(
+  context: ConflictVerificationPromptContext,
+): string {
+  const content =
+    context.content.length > MERGE_CONFLICTS.maxVerifyFileChars
+      ? `${context.content.slice(0, MERGE_CONFLICTS.maxVerifyFileChars)}\n[... file truncated ...]`
+      : context.content;
+  const hunks = context.hunks.map((hunk) => ({
+    id: hunk.id,
+    line: hunk.startLine,
+    ours: hunk.ours,
+    ...(hunk.base === null ? {} : { base: hunk.base }),
+    theirs: hunk.theirs,
+    system1: hunk.system1,
+  }));
+
+  return [
+    `Resolve the git merge conflicts in \`${context.path}\`.`,
+    "",
+    `The base branch \`${context.baseRef}\` was merged into the pull request branch \`${context.headRef}\`.`,
+    `- "ours" is the pull request branch (\`${context.headRef}\`).`,
+    `- "theirs" is the base branch (\`${context.baseRef}\`).`,
+    "",
+    "A fast classifier (System 1) already proposed a resolution for each conflict, with its",
+    "confidence (probability a careful engineer would pick the same) and semantic risk",
+    "(0 = harmless if wrong, 1 = critical if wrong). Its answer was not trusted on its own because:",
+    context.escalation,
+    "",
+    'A System 1 pick of "combine" means it judged that no side and no ordering of both is correct —',
+    'those conflicts usually need a "custom" resolution that merges both edits.',
+    "",
+    "Verify every conflict. Keep System 1's pick when it is right; override it when it is not.",
+    "You have read-only tools (read, grep, find, ls). Use them to check how the conflicting code",
+    "is used elsewhere before deciding. You cannot write files — answer only with JSON.",
+    "",
+    "Resolutions:",
+    '- "ours": keep only the pull request side.',
+    '- "theirs": keep only the base side.',
+    '- "both_ours_first": keep both, pull request side first.',
+    '- "both_theirs_first": keep both, base side first.',
+    '- "custom": neither side alone is correct; give the exact replacement text in "content"',
+    "  (the lines that replace the whole conflict block, markers excluded).",
+    "",
+    "Rules:",
+    "- Preserve the intent of both branches whenever they are compatible.",
+    '- Never leave conflict markers in "content".',
+    "- Answer for every conflict id exactly once.",
+    '- Output ONLY valid JSON: {"conflicts": [{"id": string, "resolution": string, "content"?: string, "reason": string}]}.',
+    "",
+    "Pull request:",
+    `Title: ${context.pullRequestTitle.trim() || "(none)"}`,
+    "Description:",
+    context.pullRequestBody.trim().slice(0, MERGE_CONFLICTS.maxDescriptionChars) || "(none)",
+    "",
+    `Commits on the pull request branch touching this file:`,
+    commitList(context.headCommits),
+    "",
+    `Commits on the base branch touching this file:`,
+    commitList(context.baseCommits),
+    "",
+    "Conflicts with System 1's picks:",
+    "```json",
+    JSON.stringify(hunks, null, 2),
+    "```",
+    "",
+    "The whole conflicted file:",
+    "```",
+    content,
+    "```",
+  ].join("\n");
+}
+
+/**
+ * Parse a verification answer, requiring exactly one answer per expected id.
+ *
+ * @throws {Error} when the JSON is malformed or an id is missing.
+ */
+export function cleanConflictVerification(
+  raw: string,
+  expectedIds: readonly string[],
+): ConflictVerificationAnswer[] {
+  const parsed = JSON.parse(extractJsonObject(stripModelFence(raw))) as {
+    conflicts?: Array<Partial<ConflictVerificationAnswer>>;
+  };
+  const byId = new Map<string, ConflictVerificationAnswer>();
+  for (const entry of Array.isArray(parsed.conflicts) ? parsed.conflicts : []) {
+    if (typeof entry.id !== "string" || typeof entry.resolution !== "string") continue;
+    byId.set(entry.id, {
+      id: entry.id,
+      resolution: entry.resolution,
+      ...(typeof entry.content === "string" ? { content: entry.content } : {}),
+      reason: typeof entry.reason === "string" ? entry.reason.trim() : "",
+    });
+  }
+  return expectedIds.map((id) => {
+    const answer = byId.get(id);
+    if (!answer) throw new Error(`The model did not resolve conflict ${id}.`);
+    return answer;
+  });
 }

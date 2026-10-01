@@ -23,6 +23,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod merge_conflicts;
 mod onboarding;
 mod plugin_distribution;
 mod plugins;
@@ -1402,6 +1403,7 @@ pub fn run() {
             control::start_agent,
             control::exec_in_worktree,
             scratchpads::scratchpad_prompt_agent,
+            scratchpads::export_scratchpad_html,
             scratchpads::list_scratchpads,
             scratchpads::open_scratchpad_tab,
             whiteboards::create_whiteboard,
@@ -1478,6 +1480,7 @@ pub fn run() {
             github::github_merge_base_branch,
             github::github_abort_merge,
             github::github_merge_in_progress,
+            github::github_unmerged_paths,
             github::github_push_branch,
             github::github_pr_file_diff,
             github::github_delete_remote_branch,
@@ -1488,6 +1491,8 @@ pub fn run() {
             ai::ai_setup_dismissed,
             ai::set_ai_setup_dismissed,
             ai::ai_generate_commit_message,
+            merge_conflicts::ai_resolve_merge_conflicts,
+            merge_conflicts::ai_commit_merge_resolution,
             git::worktree_changes_since,
             git::base_file_diff,
             scratchpads::list_scratchpad_files,

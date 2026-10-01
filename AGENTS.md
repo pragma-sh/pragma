@@ -228,6 +228,13 @@ than no guide.
   (`packages/ai-helpers/src/agent-progress.ts`, `pragma-ai agent-progress`), asked by the
   desktop after each new agent message; its verbs and levels are
   `system1.agentProgress` in `@pragma-sh/constants`.
+  **AI merge-conflict resolution** (the PR pane's Resolve Merge Conflicts) is another
+  System 1 consumer: `packages/ai-helpers/src/merge-conflicts.ts` decides,
+  `crates/pragma-core/src/merge_conflicts.rs` owns the git side (host `git` RPCs that
+  re-check the merge identity and index before writing or committing),
+  `apps/pragma/src-tauri/src/merge_conflicts.rs` drives the model calls, and
+  `apps/pragma/src/components/github/MergeConflictControls.tsx` is the card. It requires
+  both built-in AI and a System 1 key.
 - The Pragma mark itself — its geometry, or the colours it is painted in →
   `packages/brand` (`@pragma-sh/brand`), which emits SVG strings and knows nothing
   about platforms. Which icon slots exist and what each demands stays with the

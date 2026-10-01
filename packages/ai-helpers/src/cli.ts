@@ -12,7 +12,7 @@
  *   status                        → { type: "status", available, signedIn }
  *   set-key --provider <id>       (key on stdin)  → status
  *   logout --provider <id>        → status
- *   commit-message --cwd <path>   (diff on stdin) → { type: "result", message } | error
+ *   commit-message --cwd <path> [--note <text>]  (diff on stdin) → { type: "result", message } | error
  *   commit-plan --cwd <path>      (JSON context on stdin) → { type: "result", commits } | error
  *   pull-request --cwd <path>     (JSON context on stdin) → { type: "result", title, body } | error
  *   inline-edit --cwd <path>      (JSON context on stdin) → { type: "result", summary, edits } | error
@@ -21,6 +21,8 @@
  *   auto-select                   (AutoSelectRequest JSON on stdin) → { type: "result", selection } | error
  *   system1-check                 (System1Endpoint JSON on stdin) → { type: "result", model } | error
  *   agent-progress                (AgentProgressRequest JSON on stdin) → { type: "result", estimate } | error
+ *   resolve-conflicts --cwd <path> (ResolveConflictsRequest JSON on stdin) → streams progress;
+ *                                 → { type: "result", files } | error
  */
 import { readStdinLines } from "@pragma-sh/sidecar-kit";
 import { checkEndpoint, System1Error, type System1Endpoint } from "@pragma-sh/system1";
@@ -52,7 +54,13 @@ import {
   signedInProviders,
   streamAskAi,
   type AskAiWorktreeRef,
+  buildConflictVerificationPrompt,
+  cleanConflictVerification,
+  INLINE_EDIT_TOOLS,
+  parseResolveConflictsRequest,
+  resolveMergeConflicts,
 } from "./index.ts";
+import { runPromptWithFallback } from "./session.ts";
 
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -213,6 +221,7 @@ async function runCommitMessage(args: string[]): Promise<number> {
   const session = await withAuthSession(args);
   const message = await generateCommitMessage({
     stagedDiff: await readAllStdin(),
+    note: flag(args, "note") ?? "",
     ...session,
   });
   emit({ type: "result", message });
@@ -346,6 +355,31 @@ async function runAgentProgress(): Promise<number> {
   return 0;
 }
 
+async function runResolveConflicts(args: string[]): Promise<number> {
+  const { cwd, authStorage, registry } = await withAuthSession(args);
+  const request = parseResolveConflictsRequest(await readAllStdin());
+  const files = await resolveMergeConflicts(request, {
+    onProgress: (event) => emit({ type: "progress", ...event }),
+    // TEMPORARY: System 1's raw answers, for tuning the escalation bar. stderr
+    // is forwarded into the app log by `run_streaming` in `ai.rs`.
+    log: (entry) => process.stderr.write(`[system1] ${JSON.stringify(entry)}\n`),
+    // The verifier is the high tier with read-only tools, so it can check how
+    // the conflicting code is used before overriding System 1.
+    verify: (context) =>
+      runPromptWithFallback(
+        { modelKind: "high", cwd, authStorage, registry, tools: INLINE_EDIT_TOOLS },
+        buildConflictVerificationPrompt(context),
+        (raw) =>
+          cleanConflictVerification(
+            raw,
+            context.hunks.map((hunk) => hunk.id),
+          ),
+      ),
+  });
+  emit({ type: "result", files });
+  return 0;
+}
+
 async function runLoginCommand(args: string[]): Promise<number> {
   const provider = flag(args, "provider");
   if (!provider) throw new Error("--provider is required");
@@ -367,6 +401,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   "auto-select": runAutoSelect,
   "system1-check": runSystem1Check,
   "agent-progress": runAgentProgress,
+  "resolve-conflicts": runResolveConflicts,
 };
 
 async function main(): Promise<number> {

@@ -1364,6 +1364,17 @@ prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/c
 live in `@pragma-sh/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
 document contains MDX regions.
 
+**Scratchpad exports** use the toolbar's **Export HTML** action in either mode. The
+live buffer is compiled with the existing `esbuild-wasm` pipeline (automatic JSX for
+imported TSX/JSX), with static media
+and literal whiteboard embeds inlined. `@pragma-sh/scratchpad-viewer` supplies the
+prebundled standalone runtime and HTML builder; its shared `frame-runtime.tsx` is also
+used by desktop previews. Exports have no host bridge, stub SDK host calls, and disable
+only built-in send/decision buttons while keeping local controls active. Every export
+carries a Created with Pragma watermark. `scratchpads::ExportHtml` writes a uniquely named file on the owning host to
+`constants.scratchpads.exportsDirectory`, under the already git-excluded scratchpad
+directory. The desktop opens the local exports folder; SSH exports remain on their host.
+
 **A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
 this for every editor surface (plain, Markdown, scratchpad). Its `load()` — initial mount
 and the error-retry button — passes through `{ kind: "loading" }`, which tears the surface
@@ -1398,7 +1409,8 @@ Vite must allow CORS from the literal `null` origin in development: sandboxing r
 the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
 graph until production bundling. Keep that exception alongside Vite's restricted localhost
 origin matcher; never replace it with unrestricted `cors: true` or weaken the iframe with
-`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` dependencies
+`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` and
+`packages/scratchpad-viewer/dist` dependencies
 are also excluded from `@vitejs/plugin-react`: React Refresh expects the app's preamble
 and crashes when its injected HMR code runs in the isolated frame; Vite's standard
 TSX/JavaScript transforms are sufficient there. The frame bootstrap still defines

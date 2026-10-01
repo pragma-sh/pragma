@@ -205,6 +205,19 @@ fn endpoint(base_url: &str, model: &str, api_key: &str) -> Value {
     })
 }
 
+/// The configured System 1 endpoint object, key included, for a sidecar
+/// request. Errors when no key is stored.
+pub(crate) fn configured_endpoint(
+    app: &tauri::AppHandle,
+    store: &System1KeyStore,
+) -> AppResult<Value> {
+    let api_key = store.file.read().ok_or_else(|| {
+        AppError::InvalidInput("add a System 1 API key in Settings first".to_string())
+    })?;
+    let (base_url, model) = effective_settings(&global_settings(app)?);
+    Ok(endpoint(&base_url, &model, &api_key))
+}
+
 /// Runs one sidecar command off the async runtime.
 async fn run_sidecar(command: &'static str, stdin: String) -> AppResult<Value> {
     tauri::async_runtime::spawn_blocking(move || run_oneshot(&[command], Some(&stdin)))

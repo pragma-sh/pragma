@@ -47,6 +47,9 @@ Tauri or client presentation code.
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`,
   `scratchpads::ScratchpadsRequest`, `whiteboards::WhiteboardsRequest`) are the client↔core contract; both sides
   depend on this crate to build/parse them.
+- `scratchpads::ExportHtml` saves uniquely named standalone HTML exports under
+  `constants.scratchpads.exportsDirectory`, ensures Git excludes are present, and
+  uses the filesystem's path validation. Bundling stays in the client.
 - `scratchpads::list` is the **only** place scratchpad frontmatter is parsed on
   the host: the desktop's `list_scratchpads` command and the gateway's
   `GET /v1/scratchpads` both go through it, so the sidebar and a paired phone

@@ -141,6 +141,8 @@
   },
   "scratchpads": {
     "directory": ".pragma/scratchpads",
+    "exportsDirectory": ".pragma/scratchpads/exports",
+    "exportHomepageUrl": "https://pragma-app.sh",
     "extension": "mdx",
     "frontmatterKey": "pragmaScratchpad",
     "version": 1
