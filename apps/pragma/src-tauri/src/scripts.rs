@@ -489,9 +489,9 @@ mod tests {
     #[test]
     fn empty_object_is_empty_config() {
         let config = parse("{}").expect("parse");
-        assert!(config.setup.is_empty());
+        assert_eq!(config.setup, [] as [std::string::String; 0]);
         assert!(config.run_scripts.is_empty());
-        assert!(config.teardown.is_empty());
+        assert_eq!(config.teardown, [] as [std::string::String; 0]);
     }
 
     #[test]

@@ -2482,7 +2482,7 @@ mod tests {
     fn parentless_worktree_has_empty_committed_list() {
         let (_child_path, main_path) = project_with_child();
         let changes = worktree_changes(&main_path, None).expect("changes");
-        assert!(changes.committed.is_empty());
+        assert_eq!(changes.committed, [] as [pragma_constants::ChangedFile; 0]);
     }
 
     #[test]
@@ -2527,7 +2527,7 @@ mod tests {
 
         unstage_file(&child_path, "base.txt", None).expect("unstage");
         let changes = worktree_changes(&child_path, Some("main")).expect("changes");
-        assert!(changes.staged.is_empty());
+        assert_eq!(changes.staged, [] as [pragma_constants::ChangedFile; 0]);
         assert!(changes.unstaged.iter().any(|c| c.path == "base.txt"));
     }
 
@@ -2575,7 +2575,7 @@ mod tests {
         assert!(commit_staged(&child_path, "  \n ").is_err());
         commit_staged(&child_path, "add feature").expect("commit");
         let changes = worktree_changes(&child_path, Some("main")).expect("changes");
-        assert!(changes.staged.is_empty());
+        assert_eq!(changes.staged, [] as [pragma_constants::ChangedFile; 0]);
     }
 
     #[test]

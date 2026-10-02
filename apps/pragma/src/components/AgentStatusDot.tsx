@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 
 import type { AgentStatus } from "@pragma-sh/constants";
 
+import { AGENT_STATUS_FILL } from "@/lib/agent-status-style";
 import { motionTransition } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -24,11 +25,11 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
       transition={motionTransition.pop}
       className={cn(
         "inline-block size-2 shrink-0 rounded-full ring-1 ring-black/30",
-        status === "done" && "bg-success shadow-[0_0_6px_var(--color-success)]",
+        AGENT_STATUS_FILL[status],
+        status === "done" && "shadow-[0_0_6px_var(--color-success)]",
         status === "attention" &&
-          "animate-agent-attention bg-destructive shadow-[0_0_8px_var(--color-destructive)]",
-        status === "running" &&
-          "animate-agent-running bg-warning shadow-[0_0_6px_var(--color-warning)]",
+          "animate-agent-attention shadow-[0_0_8px_var(--color-destructive)]",
+        status === "running" && "animate-agent-running shadow-[0_0_6px_var(--color-warning)]",
         className,
       )}
       title={`Agent ${status}`}

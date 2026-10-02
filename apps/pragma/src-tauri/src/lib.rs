@@ -1513,6 +1513,7 @@ pub fn run() {
             system1::system1_clear_api_key,
             system1::system1_check,
             system1::system1_auto_select,
+            system1::system1_agent_progress,
             system1::read_automode,
             system1::write_automode,
             automations::register_automation_roots,

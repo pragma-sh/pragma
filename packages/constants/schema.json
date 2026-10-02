@@ -4901,7 +4901,8 @@
         "requestTimeoutMs",
         "promptCharLimit",
         "preferencesCharLimit",
-        "hostModels"
+        "hostModels",
+        "agentProgress"
       ],
       "properties": {
         "defaultBaseUrl": {
@@ -4945,6 +4946,100 @@
           "items": {
             "$ref": "#/definitions/System1HostModel"
           }
+        },
+        "agentProgress": {
+          "$ref": "#/definitions/System1AgentProgress"
+        }
+      }
+    },
+    "System1AgentProgress": {
+      "title": "System1AgentProgress",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sidebar agent progress: after each new agent message the desktop asks the System 1 model how far along the agent is and what it is doing, from the task prompt and the agent's latest reply.",
+      "required": [
+        "activities",
+        "progressLevels",
+        "messageCharLimit",
+        "debounceMs",
+        "errorBackoffMs"
+      ],
+      "properties": {
+        "activities": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Verbs the System 1 model chooses between to describe what the agent is doing right now. Ids are stable; labels are what the sidebar shows.",
+          "items": {
+            "$ref": "#/definitions/AgentActivityOption"
+          }
+        },
+        "progressLevels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "description": "Ordered progress descriptions, lowest first. The probability-weighted level is normalised to a 0..1 progress bar.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "messageCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest agent reply sent to the System 1 model; longer replies keep their tail, where the latest work is described."
+        },
+        "debounceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Quiet period after a new agent message before evaluating, so a burst (or a snapshot replay) costs one request per agent."
+        },
+        "errorBackoffMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long progress estimation pauses after a failed request, so a bad key or rate limit is not retried on every message."
+        }
+      }
+    },
+    "AgentActivityOption": {
+      "title": "AgentActivityOption",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "description"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "Present-participle verb shown in the sidebar, e.g. `Exploring`."
+        },
+        "description": {
+          "type": "string",
+          "description": "What the System 1 model is told this activity means."
+        }
+      }
+    },
+    "AgentProgressEstimate": {
+      "title": "AgentProgressEstimate",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The System 1 model's estimate of one agent's progress on its task.",
+      "required": ["progress", "activity", "confidence"],
+      "properties": {
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Estimated fraction of the task complete."
+        },
+        "activity": {
+          "type": "string",
+          "description": "Id of the chosen `system1.agentProgress.activities` entry."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence of the activity choice."
         }
       }
     },

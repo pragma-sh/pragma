@@ -291,7 +291,7 @@ mod tests {
         );
 
         registry.clear_push_token("device-1").expect("unregister");
-        assert!(registry.push_tokens().is_empty());
+        assert_eq!(registry.push_tokens(), [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -328,7 +328,7 @@ mod tests {
             .forget_push_token("ExponentPushToken[a]")
             .expect("forget");
 
-        assert!(registry.push_tokens().is_empty());
+        assert_eq!(registry.push_tokens(), [] as [std::string::String; 0]);
         assert_eq!(registry.list().len(), 1, "the device itself is kept");
     }
 }

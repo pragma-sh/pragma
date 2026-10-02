@@ -14,8 +14,13 @@
 //! - **`automode.md`** is read here for both scopes — the project copy through
 //!   the owning host, so an SSH project's preferences come from that host — and
 //!   handed to the sidecar verbatim.
+//! - **Agent progress** ([`system1_agent_progress`]) estimates how far a running
+//!   agent is through its task for the sidebar, from the task prompt and the
+//!   agent's latest reply on the rich message stream. The options the model
+//!   picks from come from `CONSTANTS.system1.agent_progress`, so the sidecar
+//!   and the sidebar labels share one list.
 
-use pragma_constants::{System1Settings, System1Status, CONSTANTS};
+use pragma_constants::{AgentProgressEstimate, System1Settings, System1Status, CONSTANTS};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{Manager, State};
@@ -464,6 +469,81 @@ pub async fn system1_auto_select(
     Ok(selection)
 }
 
+/// What the frontend sends for one progress estimate.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProgressInput {
+    /// Display name of the agent.
+    #[serde(default)]
+    agent: String,
+    /// The agent's live status (`running`, `attention`, `done`).
+    #[serde(default)]
+    status: Option<String>,
+    /// The first prompt the agent was given.
+    #[serde(default)]
+    prompt: String,
+    /// The user's latest follow-up, when it differs from `prompt`.
+    #[serde(default)]
+    follow_up: Option<String>,
+    /// The newest message the agent wrote back.
+    #[serde(default)]
+    last_message: String,
+    /// Tools the agent called most recently, newest last.
+    #[serde(default)]
+    recent_tools: Vec<String>,
+}
+
+/// The sidecar request for one progress estimate: the frontend's input plus
+/// the endpoint, the option lists, and the limits — all owned by this side.
+fn agent_progress_request(endpoint: Value, input: AgentProgressInput) -> Value {
+    let limits = &CONSTANTS.system1;
+    let progress = &limits.agent_progress;
+    json!({
+        "endpoint": endpoint,
+        "agent": input.agent,
+        "status": input.status,
+        "prompt": input.prompt,
+        "followUp": input.follow_up,
+        "lastMessage": input.last_message,
+        "recentTools": input.recent_tools,
+        "activities": progress.activities,
+        "progressLevels": progress.progress_levels,
+        "limits": {
+            "promptChars": limits.prompt_char_limit,
+            "messageChars": progress.message_char_limit,
+            "timeoutMs": limits.request_timeout_ms,
+        },
+    })
+}
+
+/// Estimates one agent's progress and current activity with the configured
+/// System 1 model, for the sidebar's agent list.
+#[tauri::command]
+pub async fn system1_agent_progress(
+    app: tauri::AppHandle,
+    store: State<'_, System1KeyStore>,
+    input: AgentProgressInput,
+) -> AppResult<AgentProgressEstimate> {
+    let store = store.inner().clone();
+    let (api_key, base_url, model) = tauri::async_runtime::spawn_blocking(move || {
+        let api_key = store
+            .file
+            .read()
+            .ok_or_else(|| AppError::InvalidInput("no System 1 API key".to_string()))?;
+        let (base_url, model) = effective_settings(&global_settings(&app)?);
+        Ok::<_, AppError>((api_key, base_url, model))
+    })
+    .await
+    .map_err(|error| AppError::Ai(format!("System 1 progress task failed: {error}")))??;
+    let request = agent_progress_request(endpoint(&base_url, &model, &api_key), input);
+    let value = run_sidecar("agent-progress", request.to_string()).await?;
+    let estimate = value
+        .get("estimate")
+        .cloned()
+        .ok_or_else(|| AppError::Ai("agent-progress returned no estimate".to_string()))?;
+    Ok(serde_json::from_value(estimate)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,5 +653,44 @@ mod tests {
             Some("claude-opus-5-5")
         );
         assert!(input.agents[0].models[0].reasoning.is_empty());
+    }
+
+    #[test]
+    fn agent_progress_request_carries_shared_options_and_limits() {
+        let input: AgentProgressInput = serde_json::from_value(json!({
+            "agent": "Claude Code",
+            "status": "running",
+            "prompt": "fix it",
+            "lastMessage": "Running the tests now.",
+            "recentTools": ["Bash"],
+        }))
+        .unwrap();
+        let request = agent_progress_request(json!({ "apiKey": "k" }), input);
+        let progress = &CONSTANTS.system1.agent_progress;
+        assert_eq!(request["lastMessage"], "Running the tests now.");
+        assert!(request["followUp"].is_null());
+        assert_eq!(
+            request["activities"].as_array().map(Vec::len),
+            Some(progress.activities.len())
+        );
+        assert_eq!(
+            request["progressLevels"].as_array().map(Vec::len),
+            Some(progress.progress_levels.len())
+        );
+        assert_eq!(
+            request["limits"]["messageChars"],
+            json!(progress.message_char_limit)
+        );
+    }
+
+    #[test]
+    fn agent_progress_estimate_parses_sidecar_output() {
+        let estimate: AgentProgressEstimate = serde_json::from_value(json!({
+            "progress": 0.5,
+            "activity": "coding",
+            "confidence": 0.8,
+        }))
+        .unwrap();
+        assert_eq!(estimate.activity, "coding");
     }
 }

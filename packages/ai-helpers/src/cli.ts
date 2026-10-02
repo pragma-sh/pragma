@@ -20,6 +20,7 @@
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
  *   auto-select                   (AutoSelectRequest JSON on stdin) → { type: "result", selection } | error
  *   system1-check                 (System1Endpoint JSON on stdin) → { type: "result", model } | error
+ *   agent-progress                (AgentProgressRequest JSON on stdin) → { type: "result", estimate } | error
  *   resolve-conflicts --cwd <path> (ResolveConflictsRequest JSON on stdin) → streams progress;
  *                                 → { type: "result", files } | error
  */
@@ -27,12 +28,14 @@ import { readStdinLines } from "@pragma-sh/sidecar-kit";
 import { checkEndpoint, System1Error, type System1Endpoint } from "@pragma-sh/system1";
 
 import {
+  AgentProgressError,
   autoSelect,
   AutoSelectError,
   parseAutoSelectRequest,
   type AiAuthMethod,
   createAuthStorage,
   createModelRegistry,
+  estimateAgentProgress,
   generateCommitMessage,
   generateCommitPlan,
   generateInlineEdit,
@@ -45,6 +48,7 @@ import {
   NoQuestionError,
   NoWorktreeChangesError,
   logout,
+  parseAgentProgressRequest,
   NoStagedChangesError,
   setApiKey,
   signedInProviders,
@@ -345,6 +349,12 @@ async function runSystem1Check(): Promise<number> {
   return 0;
 }
 
+async function runAgentProgress(): Promise<number> {
+  const estimate = await estimateAgentProgress(parseAgentProgressRequest(await readAllStdin()));
+  emit({ type: "result", estimate });
+  return 0;
+}
+
 async function runResolveConflicts(args: string[]): Promise<number> {
   const { cwd, authStorage, registry } = await withAuthSession(args);
   const request = parseResolveConflictsRequest(await readAllStdin());
@@ -390,6 +400,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   login: runLoginCommand,
   "auto-select": runAutoSelect,
   "system1-check": runSystem1Check,
+  "agent-progress": runAgentProgress,
   "resolve-conflicts": runResolveConflicts,
 };
 
@@ -419,6 +430,7 @@ const TYPED_ERROR_CODES: ReadonlyArray<[new (...args: never[]) => Error, string]
   [NoInstructionError, "no-instruction"],
   [NoQuestionError, "no-question"],
   [AutoSelectError, "auto-unavailable"],
+  [AgentProgressError, "progress-unavailable"],
 ];
 
 /** Maps a thrown error to its NDJSON `code` for the "nothing to do" cases. */

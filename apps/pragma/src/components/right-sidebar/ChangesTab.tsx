@@ -46,6 +46,7 @@ import {
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 
 type LoadState =
   | { kind: "loading" }
@@ -273,7 +274,7 @@ function useChangesCommit(
     if (!message) return;
     setCommitting(true);
     try {
-      await commitStaged(worktreeId, message);
+      await trackWorktreeActivity(worktreeId, "commit", () => commitStaged(worktreeId, message));
       setCommitMessage("");
       toast.success("Committed staged changes");
       await refresh();
@@ -292,7 +293,9 @@ function useChangesCommit(
     }
     setGenerating(true);
     try {
-      const message = await aiGenerateCommitMessage(worktreeId);
+      const message = await trackWorktreeActivity(worktreeId, "commit-message", () =>
+        aiGenerateCommitMessage(worktreeId),
+      );
       setCommitMessage(message);
     } catch (cause) {
       toast.error(errorMessage(cause));

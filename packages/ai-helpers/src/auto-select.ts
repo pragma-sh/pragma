@@ -49,6 +49,7 @@ import {
   type ModelInsight,
   type ModelInsights,
 } from "./model-insights.ts";
+import { truncate } from "./truncate.ts";
 
 /** One reasoning level, ordered lowest effort first in {@link AutoSelectModel.reasoning}. */
 export interface AutoSelectReasoning {
@@ -401,11 +402,6 @@ function modelCriterion(entry: ProfiledModel): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Request
 // ---------------------------------------------------------------------------
-
-function truncate(text: string, limit: number): string {
-  const trimmed = text.trim();
-  return trimmed.length > limit ? `${trimmed.slice(0, limit)}\n…(truncated)` : trimmed;
-}
 
 function buildState(
   request: AutoSelectRequest,

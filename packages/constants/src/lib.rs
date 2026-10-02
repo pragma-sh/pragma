@@ -27,41 +27,41 @@ mod generated {
 pub type ExcalidrawScene = serde_json::Value;
 
 pub use generated::{
-    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
-    AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentLaunchArgs, AgentMessage,
-    AgentMessageKind, AgentMessageRole, AgentMode, AgentModelEntry, AgentPermissionMode,
-    AgentQuestion, AgentReasoning, AgentReportKind, AgentReportPayload, AgentSessionLaunchPayload,
-    AgentSlashCommand, AgentSound, AgentSoundList, AgentStatus, AgentStatusDefaults,
-    AgentStatusSettings, AgentToolCall, AgentToolCallStatus, Agents, AppInfo, AutomationInfo,
-    AutomationPendingPayload, AutomationRootRegistration, AutomationScope, AutomationStatus,
-    AutomationTriggerKind, AutomationTrust, AutomationWorktreeRoot, AutomationsChangedPayload,
-    Bench, BoardDraftCreatePayload, BranchSyncStatus, CatalogAgent, ChangeStatus, ChangedFile,
-    Constants, ControlMethod, Daemon, DefaultShells, DiffSide, DirEntry, EditorLauncher,
-    EditorLaunchers, Fanout, FanoutCreateRequest, FanoutDefaults, FanoutDeliveryReceipt,
-    FanoutDeliveryState, FanoutExistingParent, FanoutExistingParentKind, FanoutFailure,
-    FanoutFailureCode, FanoutFinalizeStage, FanoutMember, FanoutMemberRequest,
-    FanoutMemberSelector, FanoutMemberStatus, FanoutNewParent, FanoutNewParentKind,
-    FanoutParentSpec, FanoutPickResult, FanoutReadRequest, FanoutReadResult, FanoutReadTarget,
-    FanoutRef, FanoutResult, FanoutSendRequest, FanoutSendResult, FanoutSendTarget,
-    FanoutSendTargetKind, FanoutStatus, FanoutSubscriptionPayload, FileChange, FileChangeKind,
-    FileChunk, FileContents, FileDiff, FileReadLimits, Gateway, GitHub, GitHubAuthMethod,
-    GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
-    KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
-    Keybindings, KeybindingsConfig, KeybindingsFiles, NewWorktreeSpec, OpenPort, OtherSettings,
-    PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, Platform,
-    PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode,
-    ProtocolEventKind, ProtocolRpcMethod, QuestionOption, RunScriptDefinition, RunScriptEntry,
-    RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
-    ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource, ScriptRunStatus,
-    Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
-    SplitVertical, StorageDefaults, StorageFile, StorageFolder, StorageReminderSettings,
-    StorageSettings, StorageTreeEntry, StorageTreeEntryKind, System1, System1Settings,
-    System1Status, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel,
-    UpdateApplyMode, UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput,
-    WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput, WhiteboardListInput,
-    WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
-    WorktreeCommit, WorktreeCommitList, WorktreeStatus, WorktreeStorage, Wsl, WslDistro,
-    WslDistroList,
+    AgentActivityOption, AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision,
+    AgentFeature, AgentFileChange, AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt,
+    AgentLaunchArgs, AgentMessage, AgentMessageKind, AgentMessageRole, AgentMode, AgentModelEntry,
+    AgentPermissionMode, AgentProgressEstimate, AgentQuestion, AgentReasoning, AgentReportKind,
+    AgentReportPayload, AgentSessionLaunchPayload, AgentSlashCommand, AgentSound, AgentSoundList,
+    AgentStatus, AgentStatusDefaults, AgentStatusSettings, AgentToolCall, AgentToolCallStatus,
+    Agents, AppInfo, AutomationInfo, AutomationPendingPayload, AutomationRootRegistration,
+    AutomationScope, AutomationStatus, AutomationTriggerKind, AutomationTrust,
+    AutomationWorktreeRoot, AutomationsChangedPayload, Bench, BoardDraftCreatePayload,
+    BranchSyncStatus, CatalogAgent, ChangeStatus, ChangedFile, Constants, ControlMethod, Daemon,
+    DefaultShells, DiffSide, DirEntry, EditorLauncher, EditorLaunchers, Fanout,
+    FanoutCreateRequest, FanoutDefaults, FanoutDeliveryReceipt, FanoutDeliveryState,
+    FanoutExistingParent, FanoutExistingParentKind, FanoutFailure, FanoutFailureCode,
+    FanoutFinalizeStage, FanoutMember, FanoutMemberRequest, FanoutMemberSelector,
+    FanoutMemberStatus, FanoutNewParent, FanoutNewParentKind, FanoutParentSpec, FanoutPickResult,
+    FanoutReadRequest, FanoutReadResult, FanoutReadTarget, FanoutRef, FanoutResult,
+    FanoutSendRequest, FanoutSendResult, FanoutSendTarget, FanoutSendTargetKind, FanoutStatus,
+    FanoutSubscriptionPayload, FileChange, FileChangeKind, FileChunk, FileContents, FileDiff,
+    FileReadLimits, Gateway, GitHub, GitHubAuthMethod, GitHubAuthStatus, GitHubRepoRef, GitHubUser,
+    KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus, KanbanSchedulingMode,
+    KeybindingChord, KeybindingChordModifiersItem, Keybindings, KeybindingsConfig,
+    KeybindingsFiles, NewWorktreeSpec, OpenPort, OtherSettings, PairingPayload, PaletteSearchMatch,
+    PaletteSearchMatchKind, PaletteSearchResponse, Platform, PlatformChord, Project, ProjectIcon,
+    ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
+    QuestionOption, RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
+    RunScriptSplit, RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads,
+    ScriptMigrationSource, ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal,
+    SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, StorageDefaults, StorageFile,
+    StorageFolder, StorageReminderSettings, StorageSettings, StorageTreeEntry,
+    StorageTreeEntryKind, System1, System1AgentProgress, System1Settings, System1Status, Tab,
+    TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel, UpdateApplyMode,
+    UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput, WhiteboardDefaults,
+    WhiteboardEditInput, WhiteboardIdInput, WhiteboardListInput, WhiteboardViewResult,
+    WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit,
+    WorktreeCommitList, WorktreeStatus, WorktreeStorage, Wsl, WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn app_name_is_present() {
-        assert!(!CONSTANTS.app.name.is_empty());
+        assert_ne!(CONSTANTS.app.name, "");
     }
 
     #[test]
@@ -95,9 +95,18 @@ mod tests {
 
     #[test]
     fn protocol_contract_names_are_present() {
-        assert!(!CONSTANTS.protocol.rpc_methods.is_empty());
-        assert!(!CONSTANTS.protocol.events.is_empty());
-        assert!(!CONSTANTS.protocol.errors.is_empty());
+        assert_ne!(
+            CONSTANTS.protocol.rpc_methods,
+            [] as [super::generated::ProtocolRpcMethod; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.events,
+            [] as [super::generated::ProtocolEventKind; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.errors,
+            [] as [super::generated::ProtocolErrorCode; 0]
+        );
     }
 
     #[test]
@@ -125,8 +134,8 @@ mod tests {
 
     #[test]
     fn updates_defaults_are_present() {
-        assert!(!CONSTANTS.updates.check_url.is_empty());
-        assert!(!CONSTANTS.updates.dev_check_url.is_empty());
+        assert_ne!(CONSTANTS.updates.check_url, "");
+        assert_ne!(CONSTANTS.updates.dev_check_url, "");
         assert!(CONSTANTS.updates.poll_interval_ms >= 1000);
     }
 }

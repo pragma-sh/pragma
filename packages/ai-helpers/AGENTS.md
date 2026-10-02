@@ -31,11 +31,12 @@ and speaks newline-delimited JSON ("NDJSON") on stdout:
 
 - **One-shot commands** print a single terminal `result` / `error` line:
   `methods`, `status`, `set-key`, `logout`, `commit-message`, `commit-plan`,
-  `pull-request`, `inline-edit`, `auto-select`, `system1-check`. Input (diff / JSON
-  context / API key) arrives on **stdin**. The two System 1 commands take their key and
-  endpoint on stdin from `system1.rs`; a `System1Error` is reported with the code
-  `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …) and an `AutoSelectError`
-  (every agent filtered out) as `auto-unavailable`.
+  `pull-request`, `inline-edit`, `auto-select`, `system1-check`, `agent-progress`. Input
+  (diff / JSON context / API key) arrives on **stdin**. The System 1 commands take their
+  key and endpoint on stdin from `system1.rs`; a `System1Error` is reported with the code
+  `system1-<kind>` (`system1-auth`, `system1-rate-limit`, …), an `AutoSelectError` (every
+  agent filtered out) as `auto-unavailable`, and an `AgentProgressError` (a malformed
+  request) as `progress-unavailable`.
 - **`resolve-conflicts`** streams `{ type: "progress", phase: "system1", files }` once,
   then `{ type: "progress", phase: "verifying", path }` per file handed to the verifier,
   then one `result` with every file's outcome. The app writes and stages the files; the
@@ -78,6 +79,8 @@ The Rust side parses the last non-empty line.
 | `auto-select.ts`      | Auto mode: one fan-out System 1 request → agent, model, reasoning effort             |
 | `conflict-markers.ts` | Parses/applies git conflict markers (`merge` + `diff3`/`zdiff3`), byte-exact endings |
 | `merge-conflicts.ts`  | AI merge-conflict resolution: per-file System 1 requests, high-tier verification     |
+| `agent-progress.ts`   | Sidebar progress: one System 1 request → progress (0..1) + activity verb             |
+| `truncate.ts`         | Head/tail character-budget truncation shared by the System 1 state builders          |
 | `prompts.ts`          | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested         |
 | `session.ts`          | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                  |
 | `run-failure.ts`      | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`              |

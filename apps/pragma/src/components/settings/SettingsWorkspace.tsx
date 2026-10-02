@@ -10,6 +10,7 @@ import {
   Keyboard,
   LogOut,
   Palette,
+  PanelLeft,
   RefreshCw,
   SlidersHorizontal,
   Smartphone,
@@ -40,6 +41,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { OtherSection } from "@/components/settings/OtherSection";
+import { SidebarSection } from "@/components/settings/SidebarSection";
 import { StorageSection } from "@/components/settings/storage/StorageSection";
 import { System1Section } from "@/components/settings/System1Section";
 import { Button } from "@/components/ui/button";
@@ -83,6 +85,7 @@ type BuiltinSection =
   | "ai"
   | "mobile"
   | "automations"
+  | "sidebar"
   | "other";
 
 type Section = BuiltinSection | `plugin:${string}`;
@@ -109,6 +112,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "ai",
   "mobile",
   "automations",
+  "sidebar",
   "other",
 ]);
 
@@ -575,6 +579,13 @@ function GlobalSettingsNavigation({
         Automations
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "sidebar"}
+        icon={<PanelLeft />}
+        onClick={() => setSection("sidebar")}
+      >
+        Sidebar
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "other"}
         icon={<RefreshCw />}
         onClick={() => setSection("other")}
@@ -646,6 +657,16 @@ function SettingsContent({
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
           <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
+  // Sidebar layout is a per-device localStorage preference, not config.json.
+  if (section === "sidebar" && scope === "global") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <SidebarSection />
         </div>
       </main>
     );

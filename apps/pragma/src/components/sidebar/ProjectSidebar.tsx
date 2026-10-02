@@ -35,6 +35,7 @@ import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { CREATE_PROJECT_EVENT, mainWorktreeLabel, projectIsGit } from "@/lib/non-git-project";
 import { startWindowDrag } from "@/lib/window-drag";
 import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
+import { useAgentProgressTracking } from "@/state/agent-progress-store";
 import { useKanban } from "@/state/kanban-context";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -51,6 +52,9 @@ export function ProjectSidebar() {
   const dialogs = useSidebarDialogs();
   const cycle = useProjectCycle();
   const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
+  // Mounted here because the sidebar is always rendered (collapsed or not), so
+  // progress keeps up even while the worktree rows are out of view.
+  useAgentProgressTracking();
   // Dragging the handle must track the pointer exactly, so the spring is
   // suppressed for the duration of the drag rather than chasing it a frame behind.
   const panelTransition = useMotionTransition(
