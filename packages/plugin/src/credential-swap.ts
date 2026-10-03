@@ -105,7 +105,7 @@ export async function readLoginEntries(
   const state = await readState(shared);
   await settleSwitches(store, shared, state);
   const slot = state.providers[provider];
-  if (!slot?.unattributed && (slot?.active ?? null) === account.home) {
+  if (holdsShared(slot, account.home)) {
     const current = await readJson(shared);
     return current ? pick(current, entries) : null;
   }
@@ -130,20 +130,29 @@ export async function writeLoginEntries(
   await fs.mkdir(parentDir(shared), { recursive: true, mode: 0o700 });
   await withLock(fs, shared, async () => {
     const state = await readState(shared);
-    let stateChanged = await settleSwitches(store, shared, state);
+    const settled = await settleSwitches(store, shared, state);
     const slot = state.providers[provider];
-    if (!slot?.unattributed && (slot?.active ?? null) === account.home) {
-      await writeJson(fs, shared, { ...(await readJson(shared)), ...updates });
-    } else if (account.home === null && slot) {
-      slot.own = { ...slot.own, ...updates };
-      stateChanged = true;
+    let ownChanged = false;
+    if (holdsShared(slot, account.home)) {
+      await mergeJson(fs, shared, updates);
     } else if (account.home !== null) {
-      const path = loginCredentialFile(store, account.home);
-      await fs.mkdir(parentDir(path), { recursive: true, mode: 0o700 });
-      await writeJson(fs, path, { ...(await readJson(path)), ...updates });
+      await mergeJson(fs, loginCredentialFile(store, account.home), updates);
+    } else if (slot) {
+      slot.own = { ...slot.own, ...updates };
+      ownChanged = true;
     }
-    if (stateChanged) await writeJson(fs, `${shared}${STATE_SUFFIX}`, state);
+    if (settled || ownChanged) await writeJson(fs, `${shared}${STATE_SUFFIX}`, state);
   });
+}
+
+/** Whether the shared file holds `home`'s entries (null: the harness's own), attributably. */
+function holdsShared(slot: ProviderSwapState | undefined, home: string | null): boolean {
+  return !slot?.unattributed && (slot?.active ?? null) === home;
+}
+
+async function mergeJson(fs: FsPromises, path: string, updates: Entries): Promise<void> {
+  await fs.mkdir(parentDir(path), { recursive: true, mode: 0o700 });
+  await writeJson(fs, path, { ...(await readJson(path)), ...updates });
 }
 
 /**
