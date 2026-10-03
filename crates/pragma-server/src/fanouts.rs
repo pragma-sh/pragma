@@ -15,6 +15,7 @@
 //!   and the ordering rules — including the destructive pick transaction. It is
 //!   generic over the host, so every rule here is tested against a fake one.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -28,10 +29,12 @@ use pragma_constants::{
     FanoutRef, FanoutResult, FanoutSendRequest, FanoutSendResult, FanoutStatus,
     FanoutSubscriptionPayload, ProtocolEventKind, CONSTANTS,
 };
+use pragma_core::exec::CommandResult;
 use pragma_core::fanout::{
     aggregate_status, attempt_branch, derive_title, failure, is_active, member_failure,
     promotion_path, resolve_selector, CatalogAgentView,
 };
+use pragma_core::prelaunch;
 use pragma_protocol::EventFrame;
 use uuid::Uuid;
 
@@ -61,6 +64,26 @@ pub struct LaunchSpec {
     pub prompt: String,
     pub fanout_id: String,
     pub member_id: String,
+}
+
+/// Pre-launch command state shared by one provisioning pass.
+///
+/// Skip is sticky across the pass: once the user cancels the run that is in
+/// flight, attempts still waiting skip their commands too and launch with
+/// "never ran" results, instead of starting the same slow commands again.
+#[derive(Debug, Default)]
+struct CommandRun {
+    run_id: Option<String>,
+    skipped: Cell<bool>,
+}
+
+impl CommandRun {
+    fn new(run_id: Option<String>) -> Self {
+        Self {
+            run_id,
+            skipped: Cell::new(false),
+        }
+    }
 }
 
 /// One live follow-up target, addressed exactly.
@@ -133,6 +156,15 @@ pub trait FanoutHost {
         commit: &str,
         title: Option<&str>,
     ) -> HostResult<WorktreeView>;
+    /// Runs a prompt's pre-launch commands one after another in a worktree,
+    /// returning every result whatever its exit code. `run_id` lets a
+    /// concurrent `exec` cancel stop them.
+    fn run_commands(
+        &self,
+        worktree: &WorktreeView,
+        commands: &[String],
+        run_id: Option<&str>,
+    ) -> HostResult<Vec<CommandResult>>;
     /// Opens one agent-owned terminal tab and delivers the prompt. Returns the
     /// tab id.
     fn launch_agent(&self, spec: &LaunchSpec) -> HostResult<String>;
@@ -341,7 +373,8 @@ impl FanoutStore {
                 |jobs| usize::try_from(jobs.get()).unwrap_or(1),
             )
             .max(1);
-        self.provision_members(host, &fanout_id, &parent, &base_commit, jobs);
+        let commands = CommandRun::new(request.command_run_id.clone());
+        self.provision_members(host, &fanout_id, &parent, &base_commit, jobs, &commands);
         let fanout = self
             .get_by_id(&fanout_id)
             .ok_or_else(|| failure(FanoutFailureCode::Internal, "fanout disappeared"))?;
@@ -530,7 +563,7 @@ impl FanoutStore {
                 .as_deref()
                 .map(str::trim)
                 .filter(|title| !title.is_empty())
-                .map_or_else(|| derive_title(&request.prompt), str::to_string),
+                .map_or_else(|| prompt_title(&request.prompt), str::to_string),
             prompt: request.prompt.clone(),
             status: FanoutStatus::Provisioning,
             winning_member_id: None,
@@ -561,6 +594,7 @@ impl FanoutStore {
         parent: &WorktreeView,
         base_commit: &str,
         jobs: usize,
+        commands: &CommandRun,
     ) {
         let members: Vec<FanoutMember> = self
             .get_by_id(fanout_id)
@@ -568,7 +602,7 @@ impl FanoutStore {
             .unwrap_or_default();
         for batch in members.chunks(jobs) {
             for member in batch {
-                self.provision_member(host, fanout_id, member, parent, base_commit);
+                self.provision_member(host, fanout_id, member, parent, base_commit, commands);
             }
         }
         self.mutate(fanout_id, |fanout| {
@@ -578,7 +612,10 @@ impl FanoutStore {
     }
 
     /// Provisions one attempt. Idempotent: a member that already has a worktree
-    /// keeps it, so a retried create never opens a second checkout.
+    /// keeps it, so a retried create never opens a second checkout. The
+    /// prompt's pre-launch commands run in the attempt's own worktree (again on
+    /// a retry, since the record keeps the prompt verbatim) and the agent gets
+    /// their output.
     fn provision_member<H: FanoutHost>(
         &self,
         host: &H,
@@ -586,6 +623,7 @@ impl FanoutStore {
         member: &FanoutMember,
         parent: &WorktreeView,
         base_commit: &str,
+        commands: &CommandRun,
     ) {
         let member_id = member.id.clone();
         self.mutate(fanout_id, |fanout| {
@@ -614,6 +652,22 @@ impl FanoutStore {
                 }
             },
         };
+        let stored = self
+            .get_by_id(fanout_id)
+            .map(|fanout| fanout.prompt)
+            .unwrap_or_default();
+        let prompt = match prelaunch_prompt(host, &worktree, &stored, commands) {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                self.mutate(fanout_id, |fanout| {
+                    if let Some(member) = find_member_mut(fanout, &member_id) {
+                        member.worktree_id = Some(worktree.id.clone());
+                    }
+                });
+                self.fail_member(fanout_id, &member_id, error.code, &error.message);
+                return;
+            }
+        };
         let spec = LaunchSpec {
             project_id: parent.project_id.clone(),
             worktree_id: worktree.id.clone(),
@@ -622,10 +676,7 @@ impl FanoutStore {
             runtime_agent_id: member.runtime_agent_id.clone(),
             model_id: member.model_id.clone(),
             reasoning_id: member.reasoning_id.clone(),
-            prompt: self
-                .get_by_id(fanout_id)
-                .map(|fanout| fanout.prompt)
-                .unwrap_or_default(),
+            prompt,
             fanout_id: fanout_id.to_string(),
             member_id: member_id.clone(),
         };
@@ -876,7 +927,17 @@ impl FanoutStore {
             .get_by_id(&fanout.id)
             .and_then(|fanout| find_member(&fanout, &request.member_id).ok().cloned())
             .ok_or_else(|| failure(FanoutFailureCode::NotFound, "member disappeared"))?;
-        self.provision_member(host, &fanout.id, &member, &parent, &fanout.base_commit);
+        // A retry has no live create request to cancel it by, so its commands
+        // run to completion.
+        let commands = CommandRun::default();
+        self.provision_member(
+            host,
+            &fanout.id,
+            &member,
+            &parent,
+            &fanout.base_commit,
+            &commands,
+        );
         self.mutate(&fanout.id, refresh_status);
         self.broadcast();
         self.get_by_id(&fanout.id)
@@ -1527,6 +1588,41 @@ fn base64_encode(bytes: &[u8]) -> String {
         });
     }
     out
+}
+
+/// A fanout's default title: the first line of what the user asked, with each
+/// `!!` command chip read as its plain code span.
+fn prompt_title(prompt: &str) -> String {
+    derive_title(&prelaunch::split_prompt_commands(prompt).prompt)
+}
+
+/// The prompt one attempt's agent receives: its pre-launch commands run in
+/// `worktree`, each chip is read as its code span, and their output follows. Unchanged when
+/// the prompt has no commands.
+fn prelaunch_prompt<H: FanoutHost>(
+    host: &H,
+    worktree: &WorktreeView,
+    stored: &str,
+    run: &CommandRun,
+) -> HostResult<String> {
+    let split = prelaunch::split_prompt_commands(stored);
+    if split.commands.is_empty() {
+        return Ok(stored.to_string());
+    }
+    let results = if run.skipped.get() {
+        split
+            .commands
+            .iter()
+            .map(|command| prelaunch::skipped_result(command))
+            .collect()
+    } else {
+        let results = host.run_commands(worktree, &split.commands, run.run_id.as_deref())?;
+        if results.iter().any(|result| result.cancelled) {
+            run.skipped.set(true);
+        }
+        results
+    };
+    Ok(prelaunch::resolve_prompt(&split, &results))
 }
 
 #[cfg(test)]

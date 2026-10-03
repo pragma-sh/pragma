@@ -24,6 +24,9 @@ Use these user-facing terms:
 | **Fanout**     | Same prompt run as isolated attempts, followed by selecting one result.  |
 | **Plugin**     | Trusted extension adding UI, commands, agents, themes, or integrations.  |
 | **Automation** | Trusted TypeScript/JavaScript task triggered by cron, event, or Run now. |
+| **Auto mode**  | System 1 model (Jev) picks agent, model, and effort for a launch prompt. |
+
+Auto mode follows the user's `automode.md` (`~/.pragma/automode.md`, overridden by `<project>/.pragma/automode.md`): YAML frontmatter `agents`/`models` `include`/`exclude` globs (`model` or `agent/model`) plus `priority` (`accuracy`, `speed`, `efficiency`, `balanced`), then free-text notes the System 1 model treats as the user's priorities. When a user asks to change how Auto picks, edit that file instead of changing their launches.
 
 Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate names. Those describe implementation, not how agent or user gets work done.
 

@@ -9,11 +9,7 @@ import {
 } from "./pragma-plugin";
 
 it("launches Cursor's unambiguous binary", () => {
-  expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual([
-    "cursor-agent",
-    "--force",
-    "--approve-mcps",
-  ]);
+  expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual(["cursor-agent", "--approve-mcps"]);
   expect(cursorAgentPlugin.agents?.[0]?.excludeFeatures).toEqual([
     "commandApproval",
     "subagents",

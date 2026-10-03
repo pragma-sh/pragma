@@ -96,7 +96,11 @@ still brokers to desktop when connected — unless the payload sets `headless: t
 which forces the server-side path even with a controller attached (used by
 `pragma-cli agent verify` so scenario sessions never open desktop tabs). Otherwise the
 server resolves agent launch metadata from the plugin catalog, spawns the PTY, and
-schedules startup/prefill input. The mirrored tab is tagged with the catalog `agentId`
+schedules startup/prefill input. `agent_options.rs` applies the payload's `modeId` /
+`permissionModeId` from the catalog's `launch.modeArgs` / `permissionModeArgs` (an omitted
+id means the agent's first, default entry; an unknown one is an error) and prefixes the
+prompt with the `slashCommand`'s catalog `invocation` — the same rules `agentLaunchArgs` /
+`applySlashCommand` in `@pragma-sh/plugin` apply on the desktop. The mirrored tab is tagged with the catalog `agentId`
 and display name so paired phones render an agent tab (icon) immediately. Bracketed (TUI)
 prefills do not trust `prefillDelayMs`
 alone: after the configured delay the launcher also waits (bounded, +15s) for the
@@ -161,6 +165,13 @@ Invariants worth keeping:
 - **The state file is owner-only and atomic.** `fanouts.json` beside the socket:
   temp file via `pragma_platform::perms::create_private_file`, flush, rename,
   restrict. Prompts can carry sensitive context and are never logged.
+- **Pre-launch `!!` commands run per attempt, on the host.** `provision_member`
+  runs the prompt's `` !!`command` `` chips (split by `pragma_core::prelaunch`)
+  in each attempt's own worktree before `launch_agent`; the agent reads each
+  chip as a plain code span, followed by the commands' output. The record keeps the prompt verbatim, so a `retry`
+  runs them again. A create's `commandRunId` names those `exec` runs: the
+  desktop's **Skip** cancels the one in flight, and `CommandRun` makes that
+  sticky so attempts still waiting skip theirs instead of starting over.
 - **A restart never replays a prompt.** Live members become `interrupted`; the
   attempt worktree may already hold work, so only an explicit `retry` relaunches
   it (into the same worktree, with the old tab id moved into history).

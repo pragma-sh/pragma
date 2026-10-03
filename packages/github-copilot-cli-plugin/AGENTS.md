@@ -121,6 +121,15 @@ https://brand.github.com/brand-identity/copilot. This package uses vendor-shippe
 only inside Pragma's explicitly named GitHub Copilot integration and must not imply GitHub
 endorsement. Do not trace, recolor, or replace it with icon-aggregator artwork.
 
+## Launch options
+
+Modes (Shift+Tab in the launcher) are `default` plus custom agents (`*.agent.md` in
+`.github/agents` and `~/.copilot/agents`), started with `--agent <name>`. Slash commands are
+`/review`, `/delegate`, `/usage`, then `copilot --acp`'s ACP command list (unverified: Copilot
+was not installed when this was written), then skills in `.github`, `.claude`, `.agents`
+(project) and `~/.copilot`, `~/.claude`, `~/.agents`.
+Permission modes: `ask` (default, no flag) and `allow-all` (`--allow-all`).
+
 ## Build, install, verify
 
 ```bash

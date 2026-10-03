@@ -97,7 +97,10 @@ mod tests {
         assert_eq!(entries[0].name, "src");
         assert_eq!(entries[0].bytes, 150);
         assert_eq!(entries[0].file_count, 2);
-        assert!(entries[0].children.is_empty());
+        assert_eq!(
+            entries[0].children,
+            [] as [pragma_constants::StorageTreeEntry; 0]
+        );
         assert_eq!(entries[1].kind, StorageTreeEntryKind::Files);
         assert_eq!(entries[1].bytes, 7);
     }

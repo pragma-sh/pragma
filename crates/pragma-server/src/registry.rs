@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::agent_options::{self, AgentLaunchOptions};
 use crate::automations::{AutomationError, AutomationsRegistry};
 use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::ports::{self, SessionOwner};
@@ -120,6 +121,17 @@ pub struct Registry {
 
 type AgentKey = (String, String, String);
 
+/// An agent's catalog launch resolved for one selection.
+struct ResolvedAgentLaunch {
+    /// The catalog `launch` config (startup input, prefill timing).
+    spec: Value,
+    /// The shell command line that starts the agent.
+    command: String,
+    agent_name: String,
+    /// The full catalog entry, for slash-command lookup.
+    agent: Value,
+}
+
 /// One server-owned agent launch. Shared by the controller-free
 /// `agentSessionLaunch` and by every fanout attempt so both build the command,
 /// tag the tab, and start the watcher identically.
@@ -135,6 +147,8 @@ pub struct AgentLaunch {
     pub reasoning_id: Option<String>,
     /// Raw model snippet that bypasses catalog model/reasoning args.
     pub model_cmd: Option<String>,
+    /// Mode, permission mode, and slash command; defaults select the agent's own.
+    pub options: AgentLaunchOptions,
     pub prompt: Option<String>,
     /// Set when this session is one attempt of a fanout.
     pub fanout: Option<FanoutMembership>,
@@ -643,6 +657,11 @@ impl Registry {
             model_id: args.model_id.clone(),
             reasoning_id: args.reasoning_id.clone(),
             model_cmd: args.model_cmd.clone(),
+            options: AgentLaunchOptions {
+                mode_id: args.mode_id.clone(),
+                permission_mode_id: args.permission_mode_id.clone(),
+                slash_command: args.slash_command.clone(),
+            },
             prompt: args.prompt.clone(),
             fanout: None,
         })?;
@@ -657,13 +676,24 @@ impl Registry {
     /// `agentSessionLaunch` and every fanout attempt go through it, so the two
     /// cannot drift in command construction, tagging, or watcher supervision.
     pub fn launch_agent_session(&self, launch: &AgentLaunch) -> Result<String, String> {
-        let (_plugin_id, spec, command, agent_name) = self.resolve_agent_launch(
+        let resolved = self.resolve_agent_launch(
             &launch.agent_id,
             launch.model_id.as_deref(),
             launch.reasoning_id.as_deref(),
             launch.model_cmd.as_deref(),
-            None,
+            &launch.options,
         )?;
+        let prompt = agent_options::launch_prompt(
+            &resolved.agent,
+            launch.options.slash_command.as_deref(),
+            launch.prompt.as_deref(),
+        )?;
+        let ResolvedAgentLaunch {
+            spec,
+            command,
+            agent_name,
+            ..
+        } = resolved;
         let tab_id = Uuid::new_v4().to_string();
         let project_root = self.mirrored_project_path(&launch.project_id).ok();
         let account_env = self.accounts.launch_env(
@@ -690,7 +720,6 @@ impl Registry {
             .get(&tab_id)
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
-        let prompt = launch.prompt.clone();
         thread::spawn(move || {
             schedule_agent_launch(&session, &spec, &command, prompt.as_deref());
         });
@@ -1009,15 +1038,16 @@ impl Registry {
     /// for the selected model/reasoning combination. A `model_cmd` snippet
     /// (for example `--model moonshot/kimi-k3`) overrides the catalog
     /// selection: the base launch command (no model/reasoning args) is used
-    /// and the snippet is appended verbatim.
+    /// and the snippet is appended verbatim. The mode and permission-mode args
+    /// from `options` follow the model/reasoning args.
     fn resolve_agent_launch(
         &self,
         agent_id: &str,
         model_id: Option<&str>,
         reasoning_id: Option<&str>,
         model_cmd: Option<&str>,
-        shell: Option<&ShellProfile>,
-    ) -> Result<(String, Value, String, String), String> {
+        options: &AgentLaunchOptions,
+    ) -> Result<ResolvedAgentLaunch, String> {
         let catalog = self
             .plugins
             .handle_rpc(&json!({ "action": "catalog" }))
@@ -1049,21 +1079,24 @@ impl Registry {
                     .ok_or_else(|| "agent launch command contains non-string".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let command = agent_command_line(&command, shell);
+        let mut command = command;
+        command.extend(agent_options::option_args(agent, options)?);
+        let command = agent_command_line(&command, None);
         let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
             Some(model_cmd) => format!("{command} {model_cmd}"),
             None => command,
         };
-        let plugin_id = agent["pluginId"]
-            .as_str()
-            .ok_or_else(|| "agent catalog entry has no plugin id".to_string())?
-            .to_string();
         let agent_name = agent["name"]
             .as_str()
             .filter(|name| !name.is_empty())
             .unwrap_or(agent_id)
             .to_string();
-        Ok((plugin_id, agent["launch"].clone(), command, agent_name))
+        Ok(ResolvedAgentLaunch {
+            spec: agent["launch"].clone(),
+            command,
+            agent_name,
+            agent: agent.clone(),
+        })
     }
 
     /// Subscribes to the workspace snapshot-then-delta stream. The snapshot is
@@ -2051,7 +2084,10 @@ mod tests {
         registry
             .set_tab_agent(tab, "pragma.codex", "Codex")
             .expect("agent metadata should persist");
-        assert!(registry.desired_watchers().is_empty());
+        assert_eq!(
+            registry.desired_watchers(),
+            [] as [crate::watchers::DesiredWatcher; 0]
+        );
 
         registry
             .spawn(

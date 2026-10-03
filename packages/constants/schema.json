@@ -31,7 +31,8 @@
     "onboarding",
     "storage",
     "projects",
-    "accounts"
+    "accounts",
+    "system1"
   ],
   "properties": {
     "app": {
@@ -114,6 +115,9 @@
     },
     "accounts": {
       "$ref": "#/definitions/AccountsDefaults"
+    },
+    "system1": {
+      "$ref": "#/definitions/System1"
     }
   },
   "definitions": {
@@ -598,6 +602,10 @@
         "idempotencyKey": {
           "type": ["string", "null"],
           "description": "Repeating a create with the same key returns the existing fanout instead of provisioning a second one."
+        },
+        "commandRunId": {
+          "type": ["string", "null"],
+          "description": "Names the `exec` runs of the prompt's pre-launch commands, so a concurrent `exec` cancel with this id skips them: the running attempt's commands stop and later attempts skip theirs."
         }
       }
     },
@@ -2060,6 +2068,10 @@
           "items": {
             "$ref": "#/definitions/AgentReasoning"
           }
+        },
+        "canonicalId": {
+          "type": "string",
+          "description": "Optional provider-qualified model id (for example `anthropic/claude-sonnet-5-5`) used to match an alias such as `sonnet` against public benchmark catalogs. Auto mode falls back to `id` when absent."
         }
       }
     },
@@ -2092,7 +2104,8 @@
         "abort",
         "interrupt",
         "usageLimits",
-        "sessionName"
+        "sessionName",
+        "slashCommands"
       ]
     },
     "CatalogAgent": {
@@ -2141,6 +2154,27 @@
             "$ref": "#/definitions/AgentModelEntry"
           }
         },
+        "slashCommands": {
+          "type": "array",
+          "description": "Slash commands the agent accepts, for a `/` picker. Applied through `AgentSessionLaunchPayload.slashCommand`.",
+          "items": {
+            "$ref": "#/definitions/AgentSlashCommand"
+          }
+        },
+        "modes": {
+          "type": "array",
+          "description": "Primary agents/modes the agent can start in (Shift+Tab in the launcher). Selected through `AgentSessionLaunchPayload.modeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentMode"
+          }
+        },
+        "permissionModes": {
+          "type": "array",
+          "description": "Permission modes the agent can start in. Selected through `AgentSessionLaunchPayload.permissionModeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentPermissionMode"
+          }
+        },
         "excludeFeatures": {
           "type": "array",
           "description": "Capabilities the agent declares unsupported; agent verification skips matching scenarios.",
@@ -2186,6 +2220,20 @@
         "prefillSubmitDelayMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "modeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.modes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
+        },
+        "permissionModeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.permissionModes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
         }
       }
     },
@@ -2437,7 +2485,13 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Shared agent-launch timing used by both the frontend's terminal-write scheduling and the Rust CLI/broker launch path.",
-      "required": ["startDelayMs", "altScreenExtraWaitMs", "altScreenSettleMs"],
+      "required": [
+        "startDelayMs",
+        "altScreenExtraWaitMs",
+        "altScreenSettleMs",
+        "prelaunchCommandPrefix",
+        "prelaunchOutputLimit"
+      ],
       "properties": {
         "startDelayMs": {
           "type": "integer",
@@ -2453,6 +2507,16 @@
           "type": "integer",
           "minimum": 0,
           "description": "Delay after a late alternate-screen entry before sending the prompt, allowing the TUI input widget to mount."
+        },
+        "prelaunchCommandPrefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prefix of an inline shell command in an agent prompt, written `!!` + a code span (``!!`bun run test` ``). The command runs headlessly in the agent's worktree before it starts; the agent reads it as a plain code span, followed by its output. Read by the prompt editor, the desktop launch paths, and the host's fanout provisioning."
+        },
+        "prelaunchOutputLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most characters of each pre-launch command stream (stdout, stderr) handed to the agent; the tail is kept."
         }
       }
     },
@@ -2796,10 +2860,25 @@
       "description": "Managed scratchpad file contract shared by the CLI, desktop host, and editor.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["directory", "extension", "frontmatterKey", "version"],
+      "required": [
+        "directory",
+        "exportsDirectory",
+        "exportHomepageUrl",
+        "extension",
+        "frontmatterKey",
+        "version"
+      ],
       "properties": {
         "directory": {
           "type": "string"
+        },
+        "exportsDirectory": {
+          "type": "string",
+          "description": "Worktree-relative directory for standalone HTML exports."
+        },
+        "exportHomepageUrl": {
+          "type": "string",
+          "description": "Pragma homepage linked from the standalone export watermark."
         },
         "extension": {
           "type": "string"
@@ -3453,6 +3532,18 @@
         },
         "reasoningId": {
           "type": ["string", "null"]
+        },
+        "modeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.modes`. Omitted selects the agent's first (default) mode."
+        },
+        "permissionModeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.permissionModes`. Omitted selects the agent's first (default) permission mode."
+        },
+        "slashCommand": {
+          "type": ["string", "null"],
+          "description": "Name from `CatalogAgent.slashCommands`. The launch prompt becomes the command's invocation followed by `prompt`."
         },
         "modelCmd": {
           "type": ["string", "null"],
@@ -5148,6 +5239,294 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "AgentSlashCommand": {
+      "title": "AgentSlashCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "One slash command an agent accepts in its prompt (`/review`, `/init`, a project command). Applied at launch by prefixing the prompt with `invocation`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Command name without the leading slash, as typed after `/` (for example `review` or `frontend:component`)."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "One-line description shown in the slash-command picker."
+        },
+        "argumentHint": {
+          "type": ["string", "null"],
+          "description": "Hint for the text expected after the command (for example `[pr-number]`)."
+        },
+        "invocation": {
+          "type": ["string", "null"],
+          "description": "Text the agent's TUI expects to invoke the command; the launch prompt becomes `<invocation> <input>`. Defaults to `/<name>`."
+        }
+      }
+    },
+    "AgentMode": {
+      "title": "AgentMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One primary agent/mode the host tool can start in (opencode's `build`/`plan`, a Claude Code `--agent`). The first entry is the tool's default.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "AgentPermissionMode": {
+      "title": "AgentPermissionMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One permission mode an agent can start in. The first entry is the default applied when a launch selects none.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "AgentLaunchArgs": {
+      "title": "AgentLaunchArgs",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "args"],
+      "description": "Resolved launch arguments for one mode or permission-mode id, appended after the model/reasoning command.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "System1": {
+      "title": "System1",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for System 1 models (TypeSafe Jev or any API that speaks its `systemone` evaluation contract). Auto mode uses one to pick an agent, model, and reasoning effort for a launch.",
+      "required": [
+        "defaultBaseUrl",
+        "defaultModel",
+        "evaluatePath",
+        "credentialFileName",
+        "autoModeFileName",
+        "requestTimeoutMs",
+        "promptCharLimit",
+        "preferencesCharLimit",
+        "hostModels",
+        "agentProgress"
+      ],
+      "properties": {
+        "defaultBaseUrl": {
+          "type": "string",
+          "description": "Base URL used when `system1.baseUrl` is not set in the global `.pragma/config.json`."
+        },
+        "defaultModel": {
+          "type": "string",
+          "description": "Model route sent with every request when `system1.model` is not set."
+        },
+        "evaluatePath": {
+          "type": "string",
+          "description": "Path of the evaluation endpoint, appended to the base URL."
+        },
+        "credentialFileName": {
+          "type": "string",
+          "description": "File under the app data directory holding the API key, written owner-only like the GitHub token."
+        },
+        "autoModeFileName": {
+          "type": "string",
+          "description": "Auto-mode preference file, resolved against the home directory (global) or the project's main worktree (project). Project wins."
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on one System 1 request; auto mode falls back rather than stalling a launch."
+        },
+        "promptCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest launch prompt sent to the System 1 model; longer prompts are truncated."
+        },
+        "preferencesCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest `automode.md` body sent to the System 1 model, per scope."
+        },
+        "hostModels": {
+          "type": "array",
+          "description": "Model route to use when `system1.model` is not set, keyed by the API host. Resellers name Jev differently than TypeSafe (OpenRouter wants `~typesafe/jev-latest`); any other host gets `defaultModel`.",
+          "items": {
+            "$ref": "#/definitions/System1HostModel"
+          }
+        },
+        "agentProgress": {
+          "$ref": "#/definitions/System1AgentProgress"
+        }
+      }
+    },
+    "System1AgentProgress": {
+      "title": "System1AgentProgress",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sidebar agent progress: after each new agent message the desktop asks the System 1 model how far along the agent is and what it is doing, from the task prompt and the agent's latest reply.",
+      "required": [
+        "activities",
+        "progressLevels",
+        "messageCharLimit",
+        "debounceMs",
+        "errorBackoffMs"
+      ],
+      "properties": {
+        "activities": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Verbs the System 1 model chooses between to describe what the agent is doing right now. Ids are stable; labels are what the sidebar shows.",
+          "items": {
+            "$ref": "#/definitions/AgentActivityOption"
+          }
+        },
+        "progressLevels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "description": "Ordered progress descriptions, lowest first. The probability-weighted level is normalised to a 0..1 progress bar.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "messageCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest agent reply sent to the System 1 model; longer replies keep their tail, where the latest work is described."
+        },
+        "debounceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Quiet period after a new agent message before evaluating, so a burst (or a snapshot replay) costs one request per agent."
+        },
+        "errorBackoffMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long progress estimation pauses after a failed request, so a bad key or rate limit is not retried on every message."
+        }
+      }
+    },
+    "AgentActivityOption": {
+      "title": "AgentActivityOption",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "description"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "Present-participle verb shown in the sidebar, e.g. `Exploring`."
+        },
+        "description": {
+          "type": "string",
+          "description": "What the System 1 model is told this activity means."
+        }
+      }
+    },
+    "AgentProgressEstimate": {
+      "title": "AgentProgressEstimate",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The System 1 model's estimate of one agent's progress on its task.",
+      "required": ["progress", "activity", "confidence"],
+      "properties": {
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Estimated fraction of the task complete."
+        },
+        "activity": {
+          "type": "string",
+          "description": "Id of the chosen `system1.agentProgress.activities` entry."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence of the activity choice."
+        }
+      }
+    },
+    "System1Settings": {
+      "title": "System1Settings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `system1` block of the global `.pragma/config.json`. Global-only. The API key is never stored here; it lives in the owner-only credential file.",
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL of a Jev-compatible API. Empty/omitted uses `system1.defaultBaseUrl`."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route to request. Empty/omitted uses `system1.defaultModel`."
+        }
+      }
+    },
+    "System1Status": {
+      "title": "System1Status",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether a System 1 model is configured, as reported to the desktop UI. The key itself never leaves the backend.",
+      "required": ["configured", "baseUrl", "model"],
+      "properties": {
+        "configured": {
+          "type": "boolean",
+          "description": "True when an API key is stored."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Effective base URL (configured or default)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Effective model route (configured or default)."
+        }
+      }
+    },
+    "System1HostModel": {
+      "title": "System1HostModel",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "model"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname, matched exactly or as a parent domain (`openrouter.ai` matches `api.openrouter.ai`)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route that host expects."
         }
       }
     }

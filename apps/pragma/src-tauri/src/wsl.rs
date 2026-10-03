@@ -88,6 +88,6 @@ mod tests {
     #[test]
     fn an_unreachable_host_is_not_claimed_to_be_windows() {
         assert!(!no_wsl().is_windows);
-        assert!(no_wsl().distros.is_empty());
+        assert_eq!(no_wsl().distros, [] as [pragma_constants::WslDistro; 0]);
     }
 }

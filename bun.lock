@@ -129,6 +129,7 @@
         "@types/react-dom": "^19.2.3",
         "@vitejs/plugin-react": "^6.0.2",
         "emojibase-data": "^17.0.0",
+        "esbuild": "^0.25.12",
         "jsdom": "^29.1.1",
         "typescript": "^6.0.3",
         "vite": "^8.0.16",
@@ -248,6 +249,8 @@
         "@earendil-works/pi-ai": "0.79.10",
         "@earendil-works/pi-coding-agent": "0.79.10",
         "@pragma-sh/sidecar-kit": "workspace:*",
+        "@pragma-sh/system1": "workspace:*",
+        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@types/node": "^24.10.1",
@@ -478,8 +481,8 @@
       "name": "@pragma-sh/plugin",
       "version": "1.1.0",
       "dependencies": {
-        "@pragma-sh/constants": "^1.0.1",
-        "@pragma-sh/sdk": "^1.0.1",
+        "@pragma-sh/constants": "^1.1.0",
+        "@pragma-sh/sdk": "^1.1.0",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -539,7 +542,7 @@
       "name": "@pragma-sh/scratchpad",
       "version": "1.1.0",
       "dependencies": {
-        "@pragma-sh/sdk": "^1.0.1",
+        "@pragma-sh/sdk": "^1.1.0",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
@@ -557,7 +560,7 @@
       "name": "@pragma-sh/scratchpad-contract",
       "version": "1.1.0",
       "dependencies": {
-        "@pragma-sh/constants": "^1.0.1",
+        "@pragma-sh/constants": "^1.1.0",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
@@ -568,7 +571,8 @@
       "name": "@pragma-sh/scratchpad-viewer",
       "version": "1.1.0",
       "dependencies": {
-        "@pragma-sh/scratchpad-contract": "^1.0.1",
+        "@pragma-sh/constants": "^1.1.0",
+        "@pragma-sh/scratchpad-contract": "^1.1.0",
       },
       "devDependencies": {
         "@mdx-js/mdx": "^3.1.1",
@@ -601,6 +605,15 @@
     "packages/sidecar-kit": {
       "name": "@pragma-sh/sidecar-kit",
       "version": "1.1.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/system1": {
+      "name": "@pragma-sh/system1",
+      "version": "0.1.0",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -1780,6 +1793,8 @@
     "@pragma-sh/sdk": ["@pragma-sh/sdk@workspace:packages/sdk"],
 
     "@pragma-sh/sidecar-kit": ["@pragma-sh/sidecar-kit@workspace:packages/sidecar-kit"],
+
+    "@pragma-sh/system1": ["@pragma-sh/system1@workspace:packages/system1"],
 
     "@pragma-sh/treemap": ["@pragma-sh/treemap@workspace:packages/treemap"],
 

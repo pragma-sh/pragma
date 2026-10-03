@@ -7,6 +7,10 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
 ## Rules
 
 - Runtime host access goes through `globalThis.pragmaScratchpad`; never import desktop internals.
+- Standalone exports set `agentFeedbackEnabled: false` on that bridge. `promptAgent`
+  must refuse delivery and built-in send/decision buttons use the shared `useAgentAction`
+  enabled state. Keep question inputs, choices, and other local interactions active;
+  never disable a whole form or fieldset merely because it is an export.
 - **Styling is one stylesheet, not inline styles.** `src/styles.ts` holds every `pragma-*`
   rule and `ensureScratchpadStyles()` injects it once per document; components only set
   class names. Inline styles cannot express hover/focus/disabled states or media queries,

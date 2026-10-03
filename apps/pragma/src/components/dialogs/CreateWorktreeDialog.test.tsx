@@ -1,8 +1,9 @@
-import type { KeyboardEvent } from "react";
-
 import type { Worktree } from "@pragma-sh/constants";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { contextResolveMock } from "@/test/prompt-editor";
+import { installMemoryLocalStorage } from "@/test/storage";
 
 const listPluginAgentsMock = vi.fn();
 const resolvePluginAgentModelsMock = vi.fn();
@@ -48,26 +49,24 @@ vi.mock("@/state/worktree-creation-context", () => ({
 vi.mock("@/plugins/agents", () => ({
   usePluginAgents: () => listPluginAgentsMock(),
   resolvePluginAgentModels: (agentId: string) => resolvePluginAgentModelsMock(agentId),
+  resolvePluginAgentOptions: async () => ({
+    modes: [
+      { id: "build", name: "Build" },
+      { id: "plan", name: "Plan" },
+    ],
+    permissionModes: [{ id: "auto", name: "Auto" }],
+    slashCommands: [{ name: "review" }],
+  }),
 }));
 
+vi.mock("@/plugins/context-providers", async () => {
+  const { testContextProviders } = await import("@/test/prompt-editor");
+  return { useContextProviders: () => testContextProviders };
+});
+
 // The TipTap editor is unrelated to this behavior; a textarea keeps it focused.
-vi.mock("@/components/github/MarkdownEditor", () => ({
-  MarkdownEditor: ({
-    onChange,
-    onKeyDown,
-    value,
-  }: {
-    onChange: (value: string) => void;
-    onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-    value: string;
-  }) => (
-    <textarea
-      aria-label="Prompt"
-      onChange={(event) => onChange(event.target.value)}
-      onKeyDown={onKeyDown}
-      value={value}
-    />
-  ),
+vi.mock("@/components/github/MarkdownEditor", async () => ({
+  MarkdownEditor: (await import("@/test/prompt-editor")).MarkdownEditorStub,
 }));
 
 const newWorktree: Worktree = {
@@ -109,6 +108,14 @@ vi.mock("@/state/workspace-context", () => ({
 }));
 
 import { CreateWorktreeDialog } from "./CreateWorktreeDialog";
+
+/** Types `text` ending in an `@query`, then picks the first match with Enter. */
+async function pickMention(text: string) {
+  const prompt = screen.getByLabelText("Prompt");
+  fireEvent.change(prompt, { target: { value: text } });
+  await screen.findByRole("region", { name: "Docs" });
+  fireEvent.keyDown(prompt, { key: "Enter" });
+}
 
 describe("CreateWorktreeDialog", () => {
   beforeEach(() => {
@@ -166,10 +173,13 @@ describe("CreateWorktreeDialog", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
     );
+    await screen.findByRole("button", { name: "Agent mode" });
 
     fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
     fireEvent.change(screen.getByLabelText("Display title"), { target: { value: "Feature" } });
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "/review Do the thing" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
 
     await waitFor(() =>
@@ -178,9 +188,16 @@ describe("CreateWorktreeDialog", () => {
         parentWorktreeId: "main",
         branch: "feature",
         title: "Feature",
-        prompt: "Do the thing",
+        // The prompt stays verbatim; mode and permission mode ride on the selection.
+        prompt: "/review Do the thing",
         agent: expect.objectContaining({ id: "claude" }),
-        modelSelection: { modelId: null, reasoningId: null },
+        modelSelection: {
+          modelId: null,
+          reasoningId: null,
+          modeId: "build",
+          permissionModeId: "auto",
+          slashCommand: null,
+        },
         syncWorktreeId: null,
       }),
     );
@@ -283,6 +300,92 @@ describe("CreateWorktreeDialog", () => {
   });
 });
 
+describe("CreateWorktreeDialog history", () => {
+  beforeAll(installMemoryLocalStorage);
+
+  beforeEach(() => {
+    listPluginAgentsMock.mockReturnValue([
+      { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
+      { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
+    ]);
+    resolvePluginAgentModelsMock.mockResolvedValue([
+      { id: "sonnet", name: "Sonnet", reasoning: [] },
+    ]);
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "main",
+      ahead: 0,
+      behind: 0,
+      hasUpstream: true,
+    });
+    createFanoutMock.mockResolvedValue({
+      fanout: { id: "f1", parentWorktreeId: "main", members: [] },
+      partial: false,
+      failures: [],
+    });
+    refreshProjectMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("always offers history, with an empty state before anything is submitted", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    expect(screen.getByText(/No submitted prompts yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByLabelText("Branch name")).toBeInTheDocument();
+  });
+
+  it("lists a submitted run and fills the form back out from it", async () => {
+    const { rerender } = render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
+    );
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Add token refresh. Then test it." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+    await waitFor(() => expect(startCreationMock).toHaveBeenCalled());
+
+    rerender(<CreateWorktreeDialog open={false} onOpenChange={vi.fn()} />);
+    rerender(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    expect(screen.getByLabelText("Branch name")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    const item = screen.getByRole("button", { name: /feature/ });
+    expect(item).toHaveTextContent("Add token refresh.");
+    expect(item).not.toHaveTextContent("Then test it.");
+    fireEvent.click(item);
+
+    expect(screen.getByLabelText("Branch name")).toHaveValue("feature");
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Add token refresh. Then test it.");
+  });
+
+  it("restores a fanout run with every attempt row", async () => {
+    const { rerender } = render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "fan" } });
+    fireEvent.change(screen.getByLabelText("Display title"), { target: { value: "Fan title" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+    await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+
+    rerender(<CreateWorktreeDialog open={false} onOpenChange={vi.fn()} />);
+    rerender(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    fireEvent.click(screen.getByRole("button", { name: /Fan title/ }));
+
+    expect(screen.getByRole("tab", { name: "Fan out" })).toHaveAttribute("data-state", "active");
+    expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(3);
+    expect(screen.getByLabelText("Branch name")).toHaveValue("fan");
+  });
+});
+
 describe("CreateWorktreeDialog fanout mode", () => {
   beforeEach(() => {
     listPluginAgentsMock.mockReturnValue([
@@ -377,6 +480,42 @@ describe("CreateWorktreeDialog fanout mode", () => {
     expect(openComparisonMock).not.toHaveBeenCalled();
   });
 
+  it("sends !! commands to the host with a run id so Skip can cancel them", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Do the thing !!`bun run test`" },
+    });
+    fireEvent.change(screen.getByLabelText("Branch name"), {
+      target: { value: "fanout/token-refresh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+    await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+    const request = createFanoutMock.mock.calls[0]![0] as {
+      prompt: string;
+      commandRunId: string | null;
+    };
+    // The host runs the commands in each attempt's worktree; the prompt stays verbatim.
+    expect(request.prompt).toBe("Do the thing !!`bun run test`");
+    expect(request.commandRunId).toEqual(expect.any(String));
+  });
+
+  it("sends no run id when the prompt has no commands", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
+    fireEvent.change(screen.getByLabelText("Branch name"), {
+      target: { value: "fanout/token-refresh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+    await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+    expect(
+      (createFanoutMock.mock.calls[0]![0] as { commandRunId: unknown }).commandRunId,
+    ).toBeNull();
+  });
+
   it("stays open until fanout worktrees and tabs are loaded", async () => {
     let finishCreate: ((value: unknown) => void) | undefined;
     let finishRefresh: (() => void) | undefined;
@@ -425,5 +564,95 @@ describe("CreateWorktreeDialog fanout mode", () => {
 
     expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(12);
     expect(screen.getByRole("button", { name: "Add agent" })).toBeEnabled();
+  });
+
+  it("offers the attempts' shared slash commands and sends the prompt verbatim", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "fanout/x" } });
+    const prompt = screen.getByLabelText("Prompt");
+    fireEvent.change(prompt, { target: { value: "/re" } });
+
+    const menu = await screen.findByRole("list", { name: "Slash commands" });
+    expect(menu).toHaveTextContent("/review");
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    expect(prompt).toHaveValue("/review ");
+    fireEvent.change(prompt, { target: { value: "/review the auth module" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+    await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+    expect((createFanoutMock.mock.calls[0]![0] as { prompt: string }).prompt).toBe(
+      "/review the auth module",
+    );
+  });
+
+  describe("@ context", () => {
+    const docsBlock = '<context mention="@auth-guide" source="Docs">\nAuth guide body\n</context>';
+
+    beforeEach(() => {
+      contextResolveMock.mockResolvedValue("Auth guide body");
+      githubFetchAndSyncMock.mockResolvedValue({
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        hasUpstream: true,
+      });
+    });
+
+    afterEach(() => {
+      publishedDraft = null;
+    });
+
+    it("attaches picked context to a single worktree's agent prompt", async () => {
+      render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+      fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
+      await pickMention("fix @au");
+      expect(screen.getByLabelText("Prompt")).toHaveValue("fix @auth-guide ");
+      fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+
+      await waitFor(() => expect(startCreationMock).toHaveBeenCalled());
+      expect(startCreationMock.mock.calls[0]![0]).toMatchObject({
+        prompt: `fix @auth-guide\n\n${docsBlock}`,
+      });
+      // The new worktree branches from its parent, so `@` searched the parent.
+      expect(contextResolveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ worktree: expect.objectContaining({ id: "main" }) }),
+      );
+    });
+
+    it("attaches picked context to every fanout attempt's prompt", async () => {
+      render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+      fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+      fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "fanout/x" } });
+      await pickMention("fix @au");
+      fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+      await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+      expect((createFanoutMock.mock.calls[0]![0] as { prompt: string }).prompt).toBe(
+        `fix @auth-guide\n\n${docsBlock}`,
+      );
+    });
+
+    it("restores a failed run's prompt without its context and keeps the context", async () => {
+      publishedDraft = {
+        projectId: "p",
+        parentWorktreeId: "main",
+        branch: "feature",
+        title: null,
+        prompt: `fix @auth-guide\n\n${docsBlock}`,
+        agent: null,
+        modelSelection: null,
+        syncWorktreeId: null,
+      };
+      render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+      expect(screen.getByLabelText("Prompt")).toHaveValue("fix @auth-guide");
+
+      fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+      await waitFor(() => expect(startCreationMock).toHaveBeenCalled());
+      expect(startCreationMock.mock.calls[0]![0]).toMatchObject({
+        prompt: `fix @auth-guide\n\n${docsBlock}`,
+      });
+      expect(contextResolveMock).not.toHaveBeenCalled();
+    });
   });
 });

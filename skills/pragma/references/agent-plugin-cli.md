@@ -88,5 +88,7 @@ Exit is non-zero when any scenario fails. Skips do not fail. Plain output is a t
 global `--json` and `--toon` serialize same report.
 
 Catalog agents may declare `excludeFeatures`. Verification skips scenarios mapped to an
-excluded capability. `command-no-permission` remains separate from command-approval tests:
+excluded capability. The catalog gate fails a mode or permission mode that has no launch
+args, and `slash-commands` fails an agent that lists no (or malformed) slash commands;
+`--scenario slash-commands` alone launches nothing. `command-no-permission` remains separate from command-approval tests:
 it runs a safe command and fails if command attention appears.

@@ -36,6 +36,9 @@ apps/pragma/
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
+│   │   ├── agent-progress-store.ts # System 1 progress/activity per agent (sidebar)
+│   │   ├── worktree-activity-store.ts # Commit/push/PR actions in flight per worktree
+│   │   ├── sidebar-preferences.ts  # Compact worktree rows (localStorage)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
@@ -362,6 +365,35 @@ from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the stor
 on-screen and when a `done` report arrives for an already-visible tab. Closing a tab
 drops all its status (`removeAgentStatusForTab`).
 
+**Detailed sidebar rows.** Agents are listed only inside their worktree's row — there is no
+separate flat agents list. Worktree rows are **detailed** by default (`WorktreeRowFrame`'s
+`details` slot: a GitHub mark + open-PR number, git action, one line per agent with an
+always-drawn progress bar floored at 10%) and fold back to the one-line layout with the
+**Compact rows** switch in Settings → Sidebar (`components/settings/SidebarSection.tsx` over
+`state/sidebar-preferences.ts`, a persisted per-device `createToggleSetStore` — deliberately
+not `config.json`). The title line never changes shape between the two. Status colors and labels live once in
+`lib/agent-status-style.ts`, shared by `AgentStatusDot` and the progress bars.
+
+**System 1 agent progress is owned by Pragma, not the plugins.** `state/agent-progress-store.ts`
+listens to every rich message (`subscribeAgentMessageEvents` — the same stream Pragma Go renders) and,
+per agent, debounces (`system1.agentProgress.debounceMs`), keeps one request in flight (a
+message landing meanwhile re-runs it once), and pauses for `errorBackoffMs` after a failure.
+It sends the first user prompt, a differing latest follow-up, the last assistant reply, and
+recent tool names through `system1_agent_progress` (Rust adds the key, the activity verbs,
+and the progress levels from `CONSTANTS.system1.agentProgress`) to the `pragma-ai
+agent-progress` sidecar. An agent whose status disappears is forgotten, so its next prompt
+is a new task. The tracker is mounted once, in `ProjectSidebar`, and only runs while a
+System 1 key is configured.
+
+**Git actions report like agents.** Wrap commit / push / PR / merge work in
+`trackWorktreeActivity(worktreeId, kind, work)` (`state/worktree-activity-store.ts`); the
+sidebar shows it while it runs and briefly after it settles. Its wording per kind and
+state is the table in that file. New call sites that commit, push, or open a PR should be wrapped
+too. Between actions, a row says **Ready for PR** while an AI-drafted PR waits to be
+opened: the PR form is persisted per worktree by `state/pull-request-draft-store.ts`, whose
+`drafted` mark is set only by an AI draft (Commit & PR or Shift+Tab), survives edits, and
+clears when the PR opens or the form is emptied. Write PR form state through that store.
+
 **Alerts (chime + system notification) are gated by a latch separate from the dot
 store.** `lib/agent-alert.ts` keeps an `alertedStatusByKey` latch keyed by
 worktree+tab+agent: a `done`/`attention` alerts at most once
@@ -586,6 +618,15 @@ Pragma SDK is not connected yet" card, even though `useRuntimeSdk` retries every
 connects seconds later. A crash card that _survives_ connection is a real failure: check the
 console for `plugin SDK bridge: gateway unavailable, retrying`.
 
+**AI** is in `PROJECT_SECTIONS` and holds both the AI providers and System 1
+(`System1Section.tsx`). Global scope shows the connected providers, the System 1 connection (`components/ai/System1ConnectionForm.tsx`, shared with the
+onboarding AI step's `System1OnboardingCard`) and the global `automode.md` editor;
+project scope shows only that project's `automode.md`. The key is written through
+`system1_set_api_key` and is never read back — the UI only sees `System1Status`, cached
+in `state/system1.ts` so every picker shows or hides **Auto** together. `system1.baseUrl`
+goes through the page's queued `persist`; onboarding (no Settings page mounted) patches
+the global file with `saveGlobalSystem1Settings`.
+
 **Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
 `other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
 `updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default
@@ -771,7 +812,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 (`cargo build -p pragma-server`, `cargo build -p pragma-gateway`, plus copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
-it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`bun run --filter pragma sidecar:server` before `cargo check` because Tauri validates
+`externalBin` paths during compilation. Use the package script rather than bare `bash`
+so Windows resolves Git Bash instead of WSL's launcher.
 Release jobs run natively on each architecture, including `windows-11-arm`, so the host
 triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
 the app shell.
@@ -1335,6 +1378,17 @@ prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/c
 live in `@pragma-sh/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
 document contains MDX regions.
 
+**Scratchpad exports** use the toolbar's **Export HTML** action in either mode. The
+live buffer is compiled with the existing `esbuild-wasm` pipeline (automatic JSX for
+imported TSX/JSX), with static media
+and literal whiteboard embeds inlined. `@pragma-sh/scratchpad-viewer` supplies the
+prebundled standalone runtime and HTML builder; its shared `frame-runtime.tsx` is also
+used by desktop previews. Exports have no host bridge, stub SDK host calls, and disable
+only built-in send/decision buttons while keeping local controls active. Every export
+carries a Created with Pragma watermark. `scratchpads::ExportHtml` writes a uniquely named file on the owning host to
+`constants.scratchpads.exportsDirectory`, under the already git-excluded scratchpad
+directory. The desktop opens the local exports folder; SSH exports remain on their host.
+
 **A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
 this for every editor surface (plain, Markdown, scratchpad). Its `load()` — initial mount
 and the error-retry button — passes through `{ kind: "loading" }`, which tears the surface
@@ -1369,7 +1423,8 @@ Vite must allow CORS from the literal `null` origin in development: sandboxing r
 the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
 graph until production bundling. Keep that exception alongside Vite's restricted localhost
 origin matcher; never replace it with unrestricted `cors: true` or weaken the iframe with
-`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` dependencies
+`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` and
+`packages/scratchpad-viewer/dist` dependencies
 are also excluded from `@vitejs/plugin-react`: React Refresh expects the app's preamble
 and crashes when its injected HMR code runs in the isolated frame; Vite's standard
 TSX/JavaScript transforms are sufficient there. The frame bootstrap still defines
@@ -1552,6 +1607,36 @@ without pulling, or pull then create. A single-worktree run hands off to
 `worktree-creation-context` and closes. A fanout stays open and busy until the host has
 provisioned its worktrees/tabs and the desktop has adopted and refreshed them, so every
 attempt row can immediately attach to its live agent session.
+
+Both it and `NewAgentSessionDialog` take agent launch options through
+`hooks/use-agent-launch-options.ts` + `components/agents/AgentLaunchOptions.tsx`: `/` at
+the start of the prompt opens the agent's slash-command picker — rendered through
+`MarkdownEditor`'s `caretPopover`, positioned under the caret from TipTap's
+`coordsAtPos` — Shift+Tab in the prompt cycles its modes, and the footer dropdown sets the
+permission mode. A mode or permission control with fewer than two choices is not shown. The hook resolves the
+lists through `resolvePluginAgentOptions` (plugins/agents.ts), whose cache also supplies
+the default mode/permission mode when `pluginAgentLaunchArgs` runs for a launch that picked
+none. The new-session dialog turns a leading known `/command` into
+`AgentModelSelection.slashCommand`; the create-worktree dialog keeps the prompt verbatim
+(a failed run restores it as a draft) and sends only the mode and permission mode.
+Escape closes an open picker before the dialog (`useEscapeToClose` runs in the capture
+phase, so `useEscapeClosesPickerFirst` takes the list of pickers and checks them first).
+
+Every agent prompt has the `@` context picker — `NewAgentSessionDialog`,
+`CreateWorktreeDialog` (single and fanout), and `KanbanDraftDialog` — through
+`hooks/use-prompt-context.ts` + `components/agents/PromptContextMenu.tsx`
+(`promptCaretPopover` picks `@` over `/`). `MarkdownEditor`'s `onCaretTextChange` feeds the
+text before the caret, `contextQuery` detects the mention, and every provider from
+`plugins/context-providers.ts` (built-ins in `lib/builtin-context-providers.ts` first, then
+plugin `contextProviders`) is searched, debounced and aborted when superseded. Picking
+inserts `@displayName` via the handle's `replaceBeforeCaret`; on submit `attachContext`
+resolves the attached mentions still in the prompt (`hasMention` on the markdown-unescaped
+text) and appends them with `formatPromptWithContext`. A prompt that is **stored and shown
+again** (a Kanban card, a failed worktree run's draft) goes back into the editor through
+`seedPrompt`, which splits the blocks off with `splitPromptContext` and keeps them attached,
+so the editor shows only the user's text and a re-save does not re-fetch. Anything that
+displays a stored prompt (e.g. `KanbanCard`) shows `splitPromptContext(prompt).prompt`.
+Dialog tests share the textarea editor stub and a fake provider from `src/test/prompt-editor.tsx`.
 
 Its **Fan out** mode is the same form with the single agent picker swapped for the
 repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display

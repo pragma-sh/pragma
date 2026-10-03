@@ -15,6 +15,7 @@ use pragma_constants::{
     FanoutMemberStatus, FanoutNewParent, FanoutNewParentKind, FanoutParentSpec, FanoutReadRequest,
     FanoutRef, FanoutSendRequest, FanoutSendTarget, FanoutSendTargetKind, FanoutStatus,
 };
+use pragma_core::exec::CommandResult;
 use pragma_core::fanout::{CatalogAgentView, CatalogModelView};
 
 use super::{
@@ -31,6 +32,10 @@ struct FakeState {
     files: HashMap<(String, String), String>,
     scratchpads: HashMap<String, Vec<ScratchpadCopy>>,
     launches: Vec<LaunchSpec>,
+    /// `(worktree id, commands, run id)` per pre-launch command run.
+    command_runs: Vec<(String, Vec<String>, Option<String>)>,
+    /// Makes every command run come back cancelled, as a user's Skip would.
+    cancel_commands: bool,
     deliveries: Vec<(DeliveryTarget, String, String)>,
     stopped: Vec<String>,
     deleted: Vec<String>,
@@ -54,6 +59,8 @@ impl Default for FakeState {
             files: HashMap::new(),
             scratchpads: HashMap::new(),
             launches: Vec::new(),
+            command_runs: Vec::new(),
+            cancel_commands: false,
             deliveries: Vec::new(),
             stopped: Vec::new(),
             deleted: Vec::new(),
@@ -208,6 +215,32 @@ impl FanoutHost for FakeHost {
         Ok(worktree)
     }
 
+    fn run_commands(
+        &self,
+        worktree: &WorktreeView,
+        commands: &[String],
+        run_id: Option<&str>,
+    ) -> HostResult<Vec<CommandResult>> {
+        let mut state = self.state();
+        state.command_runs.push((
+            worktree.id.clone(),
+            commands.to_vec(),
+            run_id.map(str::to_string),
+        ));
+        let cancelled = state.cancel_commands;
+        Ok(commands
+            .iter()
+            .map(|command| CommandResult {
+                command: command.clone(),
+                stdout: format!("ran in {}", worktree.path),
+                stderr: String::new(),
+                status: (!cancelled).then_some(0),
+                duration_ms: 10,
+                cancelled,
+            })
+            .collect())
+    }
+
     fn launch_agent(&self, spec: &LaunchSpec) -> HostResult<String> {
         let mut state = self.state();
         if state
@@ -348,6 +381,7 @@ fn request(selectors: &[&str]) -> FanoutCreateRequest {
             .collect(),
         jobs: None,
         idempotency_key: None,
+        command_run_id: None,
     }
 }
 
@@ -398,6 +432,76 @@ fn creates_one_attempt_per_selector_from_one_captured_commit() {
 }
 
 #[test]
+fn prelaunch_commands_run_in_each_attempt_worktree_before_its_agent() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    let mut create = two_members();
+    create.prompt = "Fix what !!`bun run test` reports".to_string();
+    create.command_run_id = Some("run-1".to_string());
+    let result = store.create(&host, &create).expect("creates");
+
+    // The title reads the chip as its plain code span.
+    assert_eq!(result.fanout.title, "Fix what `bun run test` reports");
+    // The record keeps the prompt verbatim, so a retry runs the commands again.
+    assert_eq!(result.fanout.prompt, "Fix what !!`bun run test` reports");
+    let runs = host.state().command_runs.clone();
+    let worktrees: Vec<String> = result
+        .fanout
+        .members
+        .iter()
+        .map(|member| member.worktree_id.clone().expect("worktree"))
+        .collect();
+    assert_eq!(runs.len(), 2);
+    for ((worktree_id, commands, run_id), expected) in runs.iter().zip(&worktrees) {
+        assert_eq!(worktree_id, expected);
+        assert_eq!(commands, &["bun run test".to_string()]);
+        assert_eq!(run_id.as_deref(), Some("run-1"));
+    }
+    let launches = host.state().launches.clone();
+    for launch in &launches {
+        assert!(launch
+            .prompt
+            .starts_with("Fix what `bun run test` reports\n\nBefore this session started"));
+        assert!(launch.prompt.contains(&format!("ran in {}", launch.cwd)));
+        assert!(!launch.prompt.contains("!!"));
+    }
+}
+
+#[test]
+fn a_skipped_command_run_skips_the_attempts_still_waiting() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    host.state().cancel_commands = true;
+    let mut create = two_members();
+    create.prompt = "Fix it after !!`sleep 600`".to_string();
+    store.create(&host, &create).expect("creates");
+
+    // Only the first attempt ran its commands; the second never started them.
+    assert_eq!(host.state().command_runs.len(), 1);
+    let launches = host.state().launches.clone();
+    assert_eq!(launches.len(), 2);
+    assert!(launches[0].prompt.contains("skipped=\"true\""));
+    assert!(launches[1]
+        .prompt
+        .contains("(skipped by the user; never ran)"));
+}
+
+#[test]
+fn a_prompt_without_commands_runs_nothing() {
+    let (store, _dir) = store();
+    let host = FakeHost::new();
+    store.create(&host, &two_members()).expect("creates");
+    assert_eq!(
+        host.state().command_runs,
+        [] as [(
+            std::string::String,
+            std::vec::Vec<std::string::String>,
+            std::option::Option<std::string::String>
+        ); 0]
+    );
+}
+
+#[test]
 fn duplicate_selectors_are_allowed_and_stay_distinct_members() {
     let (store, _dir) = store();
     let host = FakeHost::new();
@@ -420,9 +524,9 @@ fn a_bad_selector_creates_nothing_at_all() {
         .create(&host, &request(&["pragma.opencode", "pragma.nope"]))
         .expect_err("rejects");
     assert_eq!(error.code, FanoutFailureCode::UnknownAgent);
-    assert!(store.all().is_empty());
+    assert_eq!(store.all(), [] as [pragma_constants::Fanout; 0]);
     assert_eq!(host.state().worktrees.len(), 1);
-    assert!(host.state().launches.is_empty());
+    assert_eq!(host.state().launches, [] as [crate::fanouts::LaunchSpec; 0]);
 }
 
 #[test]
@@ -433,8 +537,8 @@ fn a_shared_reasoning_no_model_offers_rejects_the_whole_create() {
     request.default_reasoning_id = Some("max".to_string());
     let error = store.create(&host, &request).expect_err("rejects");
     assert_eq!(error.code, FanoutFailureCode::UnknownReasoning);
-    assert!(store.all().is_empty());
-    assert!(host.state().launches.is_empty());
+    assert_eq!(store.all(), [] as [pragma_constants::Fanout; 0]);
+    assert_eq!(host.state().launches, [] as [crate::fanouts::LaunchSpec; 0]);
 }
 
 #[test]
@@ -476,7 +580,7 @@ fn a_dirty_parent_is_refused_because_attempts_inherit_commits_not_bytes() {
     host.mark_dirty("/repo/main");
     let error = store.create(&host, &two_members()).expect_err("rejects");
     assert_eq!(error.code, FanoutFailureCode::DirtyParent);
-    assert!(store.all().is_empty());
+    assert_eq!(store.all(), [] as [pragma_constants::Fanout; 0]);
 }
 
 #[test]
@@ -636,7 +740,7 @@ fn a_corrupt_state_file_starts_empty_rather_than_refusing_to_serve() {
     )
     .expect("write corrupt");
     let store = FanoutStore::load(directory.path());
-    assert!(store.all().is_empty());
+    assert_eq!(store.all(), [] as [pragma_constants::Fanout; 0]);
 }
 
 #[test]
@@ -836,7 +940,10 @@ fn pick_commits_merges_promotes_then_deletes_every_attempt() {
         result.promoted_scratchpads,
         vec![".pragma/scratchpads/plan.mdx".to_string()]
     );
-    assert!(result.surviving_worktree_ids.is_empty());
+    assert_eq!(
+        result.surviving_worktree_ids,
+        [] as [std::string::String; 0]
+    );
     assert_eq!(
         result.deleted_worktree_ids.len(),
         2,
@@ -879,7 +986,10 @@ fn a_clean_winner_is_merged_without_inventing_a_commit() {
         )
         .expect("picks");
     assert!(result.commit.is_none());
-    assert!(host.state().commits.is_empty());
+    assert_eq!(
+        host.state().commits,
+        [] as [(std::string::String, std::string::String); 0]
+    );
     assert_eq!(result.fanout.status, FanoutStatus::Completed);
 }
 
@@ -946,9 +1056,9 @@ fn a_merge_conflict_keeps_every_attempt_and_promotes_nothing() {
 
     assert_eq!(result.stage, FanoutFinalizeStage::Merging);
     assert_eq!(result.fanout.status, FanoutStatus::NeedsResolution);
-    assert!(result.promoted_scratchpads.is_empty());
-    assert!(result.deleted_worktree_ids.is_empty());
-    assert!(host.state().stopped.is_empty());
+    assert_eq!(result.promoted_scratchpads, [] as [std::string::String; 0]);
+    assert_eq!(result.deleted_worktree_ids, [] as [std::string::String; 0]);
+    assert_eq!(host.state().stopped, [] as [std::string::String; 0]);
     assert!(host
         .read_file("/repo/main", ".pragma/scratchpads/plan.mdx")
         .is_none());
@@ -1039,7 +1149,7 @@ fn finalize_refuses_while_an_attempt_still_has_a_child_worktree() {
         )
         .expect_err("refuses");
     assert_eq!(error.code, FanoutFailureCode::DescendantWorktree);
-    assert!(host.state().deleted.is_empty());
+    assert_eq!(host.state().deleted, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -1078,7 +1188,10 @@ fn partial_cleanup_records_the_survivor_and_never_reports_completed() {
         )
         .expect("retries cleanup");
     assert_eq!(retried.fanout.status, FanoutStatus::Completed);
-    assert!(retried.surviving_worktree_ids.is_empty());
+    assert_eq!(
+        retried.surviving_worktree_ids,
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]

@@ -137,3 +137,85 @@ export type ModelKind = "fast" | "standard" | "high";
 
 /** Reference models the tier price ceilings are anchored to. */
 export type PriceAnchor = keyof typeof PICK_MODEL.priceAnchors;
+
+/**
+ * Terminal-Bench leaderboard + on-disk cache settings for
+ * {@link loadHarnessInsights}. Harness-level results — one row per agent ×
+ * model × reasoning effort — are what tell auto mode that the same model
+ * scores differently under Claude Code and Codex.
+ */
+export const HARNESS_INSIGHTS = {
+  /**
+   * The official leaderboard page. There is no documented JSON endpoint; the
+   * page embeds its rows (validated against a published schema) in the React
+   * Server Components payload, which `parseLeaderboardHtml` extracts.
+   */
+  leaderboardUrl: "https://www.tbench.ai/leaderboard/terminal-bench",
+  /** Human label for the source, shown alongside the numbers. */
+  sourceLabel: "Terminal-Bench",
+  cacheFile: ".pragma/cache/harness-insights.json",
+  /** Bump whenever {@link HarnessInsight} gains a field. */
+  cacheVersion: 1,
+  /** The leaderboard changes a few times a month; a day is plenty. */
+  cacheTtlHours: 24,
+  /** A launch must never hang on a third-party page. */
+  fetchTimeoutMs: 3_000,
+} as const;
+
+/** Knobs for the System 1 auto-select request (see `auto-select.ts`). */
+export const AUTO_SELECT = {
+  /**
+   * Most models offered to the System 1 model per agent. OpenCode can list
+   * hundreds; the API caps a choice at 255 options and a long tail of
+   * unbenchmarked models only dilutes the probabilities. Models with benchmark
+   * data are kept first.
+   */
+  maxModelsPerAgent: 40,
+  /** Harness results shown per agent, best accuracy first. */
+  maxHarnessRowsPerAgent: 6,
+  /** Below this agent-choice confidence the UI flags the pick as a guess. */
+  lowConfidence: 0.35,
+} as const;
+
+/** Knobs for AI merge-conflict resolution (see `merge-conflicts.ts`). */
+export const MERGE_CONFLICTS = {
+  /**
+   * A conflict's combined score is `confidence × (1 − riskWeight × risk)`,
+   * with `risk` normalized to `0..1`. Risk only nudges the bar: a critical
+   * conflict needs ~1.3× the confidence of a trivial one, not twice as much.
+   */
+  riskWeight: 0.25,
+  /**
+   * Below this combined score on **any** conflict, the whole file goes to the
+   * built-in AI for verification. Deliberately permissive: with four real
+   * options 0.25 is chance, and System 1 escalates on its own by answering
+   * `combine` when no pick is correct. So this bar only has to catch a
+   * genuine coin-flip, not every less-than-certain answer.
+   */
+  minCombinedScore: 0.35,
+  /**
+   * A `combine` answer (System 1 says the sides need a hand merge) escalates
+   * only at or above this normalized risk — 0.25 is the "Low" level. On a
+   * trivial conflict (wording, formatting, comments) a hand merge is not worth
+   * an LLM call, so System 1's best real option is taken instead.
+   */
+  combineMinRisk: 0.25,
+  /**
+   * Per-file System 1 request timeout. Longer than auto mode's, because a
+   * conflicted file is a much larger state than a launch prompt.
+   */
+  system1TimeoutMs: 30_000,
+  /** Lines of unconflicted code shown around each conflict, per side. */
+  contextLines: 12,
+  /**
+   * Most characters of one conflict side sent to System 1. A side cut here is
+   * a conflict System 1 did not fully see, so its file is always verified.
+   */
+  maxSideChars: 6_000,
+  /** Commit messages per branch per file, newest first. */
+  maxCommitsPerSide: 20,
+  /** Pull request description characters included as intent. */
+  maxDescriptionChars: 4_000,
+  /** Conflicted-file characters included in the verification prompt. */
+  maxVerifyFileChars: 60_000,
+} as const;

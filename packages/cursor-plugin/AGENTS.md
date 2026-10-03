@@ -43,12 +43,19 @@ not a permission gate Cursor exposes only via keystrokes — it is skipped when
 The Pragma launcher starts Cursor's unambiguous binary name:
 
 ```json
-"start": ["cursor-agent", "--force", "--approve-mcps"]
+"start": ["cursor-agent", "--approve-mcps"]
 ```
 
+plus the selected permission mode, whose first entry (the default) adds:
+
 - **`--force`** (`--yolo`) — Run Everything: auto-approve commands unless explicitly
-  denied (matches intro option **`u`** / `approvalMode: "unrestricted"`).
+  denied (matches intro option **`u`** / `approvalMode: "unrestricted"`). The `default`
+  permission mode drops it.
 - **`--approve-mcps`** — skips the MCP approval prompt at session start.
+
+Modes (Shift+Tab in the launcher) are `agent` (no flag), `plan`, and `ask` (`--mode <id>`).
+Slash commands are the prompt-taking built-ins (`/plan`, `/ask`, `/debug`, `/goal`) plus
+`.cursor/commands` and `.cursor/skills` in the project and home directory.
 
 Do not shorten this to `agent`: unrelated tools install that generic binary name. Model
 discovery and launch must both target `cursor-agent`, or Pragma can catalog Cursor models

@@ -10,7 +10,6 @@
 //! keychain items are scoped to the app's code signature, so unsigned/dev builds
 //! re-prompt for access on every rebuild.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -19,7 +18,6 @@ use pragma_constants::{
     CONSTANTS,
 };
 use pragma_core::git::{GitRequest, GithubRepoInfo};
-use pragma_platform::perms;
 use serde::de::DeserializeOwned;
 use tauri::State;
 
@@ -28,6 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
+use crate::secret_file::SecretFile;
 
 /// Settings key holding the "user skipped GitHub setup" flag (persisted in the
 /// `settings` table — it isn't a secret).
@@ -47,64 +46,41 @@ const DEVICE_FLOW_TIMEOUT: Duration = Duration::from_secs(900);
 // Token file storage
 // ---------------------------------------------------------------------------
 
-/// Owns the on-disk location of the GitHub token. Managed as Tauri state so every
-/// command resolves the same path, derived once from the app data dir. The token
-/// is a plaintext file with owner-only (`0600`) permissions — the same approach
-/// the `gh` CLI takes with `~/.config/gh/hosts.yml`. The OS keychain is
-/// intentionally avoided because its items are bound to the app's code signature,
-/// which changes on every unsigned/dev rebuild and triggers a fresh access prompt.
+/// Owns the on-disk GitHub token. Managed as Tauri state so every command
+/// resolves the same file, derived once from the app data dir. Storage itself is
+/// the shared owner-only [`SecretFile`] (see `secret_file.rs` for why this is a
+/// file and not the OS keychain).
 #[derive(Clone)]
 pub struct TokenStore {
-    path: PathBuf,
+    file: SecretFile,
 }
 
 impl TokenStore {
     /// Builds the store rooted at the app data dir.
     pub fn new(app_data_dir: &Path) -> Self {
         Self {
-            path: app_data_dir.join(TOKEN_FILE_NAME),
+            file: SecretFile::new(app_data_dir, TOKEN_FILE_NAME),
         }
     }
 
     /// Reads the stored token, or `None` when the file is missing or empty.
     fn read(&self) -> Option<String> {
-        let token = fs::read_to_string(&self.path).ok()?;
-        let token = token.trim();
-        if token.is_empty() {
-            None
-        } else {
-            Some(token.to_string())
-        }
+        self.file.read()
     }
 
-    /// Writes the token to disk with owner-only (`0600`) permissions.
+    /// Writes the token to disk with owner-only permissions.
     fn write(&self, token: &str) -> AppResult<()> {
-        write_private(&self.path, token)
+        self.file
+            .write(token)
             .map_err(|error| AppError::GitHub(format!("failed to store token: {error}")))
     }
 
     /// Removes the stored token; a missing file is treated as success.
     fn clear(&self) -> AppResult<()> {
-        match fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(AppError::GitHub(format!("failed to clear token: {error}"))),
-        }
+        self.file
+            .clear()
+            .map_err(|error| AppError::GitHub(format!("failed to clear token: {error}")))
     }
-}
-
-/// Writes `contents` to `path` so only the owning account can read it.
-///
-/// This holds a GitHub access token, so the restriction is not optional on any
-/// platform: `0600` on Unix, an owner-only access-control list on Windows. The
-/// restriction is re-applied to a pre-existing file in case it was previously
-/// created more permissively.
-fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let mut file = perms::create_private_file(path)?;
-    file.write_all(contents.as_bytes())?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +618,27 @@ pub async fn github_merge_in_progress(
     })
     .await
     .map_err(|error| AppError::GitHub(format!("merge status task failed: {error}")))?
+}
+
+/// Lists the paths Git still marks as conflicted in this worktree.
+#[tauri::command]
+pub async fn github_unmerged_paths(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<Vec<String>> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        host_git(
+            &pty,
+            &GitRequest::GithubUnmergedPaths {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("unmerged paths task failed: {error}")))?
 }
 
 /// Pushes the worktree's branch to `origin`, setting upstream, before opening a

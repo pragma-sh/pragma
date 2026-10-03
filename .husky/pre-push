@@ -4,7 +4,7 @@
 # before compiling the workspace.
 bun run typecheck
 cargo fmt --all -- --check
-bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
+bun run --filter pragma sidecar:server
 cargo check --workspace --all-targets
 
 # Fallow code intelligence: block on dead-code/duplication/complexity issues

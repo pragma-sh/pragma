@@ -2,6 +2,8 @@ import {
   defineAccounts,
   defineAgent,
   definePlugin,
+  modeProvider,
+  slashCommandProvider,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
@@ -40,6 +42,28 @@ const baseWatcher = createTuiWatcher({
   // markers, so inject watcher messages as ordinary text.
   interjectMode: "plain",
 });
+
+/** Copilot CLI built-ins worth starting a session with; skills are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "review", description: "Review the current changes" },
+  { name: "delegate", description: "Delegate a task to the Copilot coding agent" },
+  { name: "usage", description: "Show session usage" },
+];
+/** Fallback when the ACP list is unavailable: the skill roots Copilot CLI reads. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: ".github/skills", layout: "skills" as const },
+  { dir: ".claude/skills", layout: "skills" as const },
+  { dir: ".agents/skills", layout: "skills" as const },
+  { dir: "~/.copilot/skills", layout: "skills" as const },
+  { dir: "~/.claude/skills", layout: "skills" as const },
+  { dir: "~/.agents/skills", layout: "skills" as const },
+];
+/** Custom agents (`*.agent.md`) are selected with `--agent <name>`. */
+const AGENT_SOURCES = [
+  { dir: ".github/agents", layout: "files" as const, suffix: ".agent.md", recursive: false },
+  { dir: "~/.copilot/agents", layout: "files" as const, suffix: ".agent.md", recursive: false },
+];
+const DEFAULT_MODE = "default";
 
 /** Pragma plugin for GitHub Copilot CLI. */
 export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
@@ -104,6 +128,10 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: MODELS,
+      modes: modeProvider([{ id: DEFAULT_MODE, name: "Default" }], AGENT_SOURCES),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["copilot", "--acp"] },
+      }),
       permissionModes: [
         { id: "ask", name: "Ask" },
         { id: "allow-all", name: "Allow all" },
@@ -119,6 +147,7 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
         ],
         permissionMode: (permissionModeId: string) =>
           permissionModeId === "allow-all" ? ["--allow-all"] : [],
+        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
       },
     }),
   ],

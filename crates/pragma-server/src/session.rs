@@ -1724,7 +1724,7 @@ mod tests {
 
         let (outputs, titles) = split(feed(&input));
 
-        assert!(outputs.is_empty());
+        assert_eq!(outputs, [] as [std::vec::Vec<u8>; 0]);
         assert_eq!(titles, vec![String::from_utf8(title).expect("ASCII title")]);
     }
 
@@ -1739,7 +1739,7 @@ mod tests {
         let output: Vec<u8> = outputs.into_iter().flatten().collect();
 
         assert_eq!(output, input);
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
         assert!(parser.pending.len() <= OSC_PENDING_MAX_BYTES);
         assert!(parser.body.len() <= OSC_TITLE_MAX_BYTES);
     }
@@ -1753,7 +1753,7 @@ mod tests {
         let (outputs, titles) = split(chunks);
 
         assert_eq!(outputs.into_iter().flatten().collect::<Vec<_>>(), input);
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1773,7 +1773,7 @@ mod tests {
         let (outputs, titles) = split(chunks);
 
         assert_eq!(outputs.into_iter().flatten().collect::<Vec<_>>(), input);
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1784,7 +1784,7 @@ mod tests {
         let (outputs, titles) = split(chunks);
         let output_bytes: Vec<u8> = outputs.into_iter().flatten().collect();
         assert_eq!(output_bytes, b"\x1b]1;icon\x07".to_vec());
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1794,7 +1794,7 @@ mod tests {
         let chunks = feed(input);
         let (outputs, titles) = split(chunks);
         assert_eq!(outputs, vec![input.to_vec()]);
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1831,7 +1831,7 @@ mod tests {
         let _ = parser.push(b"\x1b]0;first\x07");
         let _ = parser.push(b"\x1b]0;second\x07");
         let (_, titles) = split(parser.finish());
-        assert!(titles.is_empty());
+        assert_eq!(titles, [] as [std::string::String; 0]);
         // To get the second title we need to feed the OSC body to the parser
         // and look at its chunks before finish — verify the latest-wins
         // behavior by replaying both into a single push and checking.

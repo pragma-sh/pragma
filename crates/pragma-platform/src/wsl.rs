@@ -192,7 +192,10 @@ mod tests {
 
     #[test]
     fn a_machine_with_no_distributions_parses_to_nothing() {
-        assert!(parse_distros("  NAME  STATE  VERSION\n").is_empty());
+        assert_eq!(
+            parse_distros("  NAME  STATE  VERSION\n"),
+            [] as [pragma_constants::WslDistro; 0]
+        );
     }
 
     /// A row missing its version column must be dropped: defaulting the version
@@ -201,7 +204,10 @@ mod tests {
     #[test]
     fn an_incomplete_row_is_dropped() {
         let output = "  NAME    STATE     VERSION\n* Ubuntu  Running\n";
-        assert!(parse_distros(output).is_empty());
+        assert_eq!(
+            parse_distros(output),
+            [] as [pragma_constants::WslDistro; 0]
+        );
     }
 
     /// A version of `0` is not something WSL prints, but the schema forbids it
@@ -219,6 +225,9 @@ mod tests {
     #[test]
     fn the_empty_list_still_reports_the_host_platform() {
         assert_eq!(super::empty_list().is_windows, cfg!(windows));
-        assert!(super::empty_list().distros.is_empty());
+        assert_eq!(
+            super::empty_list().distros,
+            [] as [pragma_constants::WslDistro; 0]
+        );
     }
 }

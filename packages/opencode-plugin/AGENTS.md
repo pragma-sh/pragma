@@ -217,6 +217,14 @@ the single source of truth. The `pragma-plugins` catalog sidecar imports its bui
 to assemble agent catalog and watcher metadata. Its icon asset stays in this package
 under `assets/`, not in Pragma core.
 
+Modes (Shift+Tab in the launcher) come from `opencode agent list`: every `primary`/`all`
+agent except the internal `compaction`, `summary`, and `title`, with `build` and `plan`
+first (and the fallback when the command fails); `--agent <name>` starts one. Slash commands
+come from `opencode acp` (the ACP `available_commands_update`, which includes skills and
+custom commands), with `/init`, `/review`, and `.opencode` / `~/.config/opencode` command and
+skill folders as the fallback.
+OpenCode has no permission-mode flag, so `permissionModes` stays empty.
+
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.
 

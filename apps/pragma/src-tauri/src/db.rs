@@ -1518,10 +1518,10 @@ mod tests {
             1
         );
         db.delete_tab(&tab.id).expect("tab should delete");
-        assert!(db
-            .list_tabs(&project.id)
-            .expect("tabs should list")
-            .is_empty());
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list"),
+            [] as [pragma_constants::Tab; 0]
+        );
     }
 
     #[test]
@@ -2062,10 +2062,10 @@ mod tests {
         assert_eq!(remaining.len(), 1);
         assert!(remaining[0].is_main);
         assert!(!remaining.iter().any(|w| w.id == child.id));
-        assert!(db
-            .list_tabs(&project.id)
-            .expect("tabs should list")
-            .is_empty());
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list"),
+            [] as [pragma_constants::Tab; 0]
+        );
         let _ = tab;
     }
 
@@ -2141,10 +2141,11 @@ mod tests {
 
         db.delete_kanban_card(&card.id)
             .expect("delete should succeed");
-        assert!(db
-            .list_kanban_cards(&project.id)
-            .expect("cards should list")
-            .is_empty());
+        assert_eq!(
+            db.list_kanban_cards(&project.id)
+                .expect("cards should list"),
+            [] as [pragma_constants::KanbanPromptCard; 0]
+        );
     }
 
     #[test]
@@ -2160,10 +2161,11 @@ mod tests {
         db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None, None)
             .expect("card should insert");
         db.delete_project(&project.id).expect("project delete");
-        assert!(db
-            .list_kanban_cards(&project.id)
-            .expect("cards should list")
-            .is_empty());
+        assert_eq!(
+            db.list_kanban_cards(&project.id)
+                .expect("cards should list"),
+            [] as [pragma_constants::KanbanPromptCard; 0]
+        );
     }
 
     #[test]

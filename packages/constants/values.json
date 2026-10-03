@@ -141,6 +141,8 @@
   },
   "scratchpads": {
     "directory": ".pragma/scratchpads",
+    "exportsDirectory": ".pragma/scratchpads/exports",
+    "exportHomepageUrl": "https://pragma-app.sh",
     "extension": "mdx",
     "frontmatterKey": "pragmaScratchpad",
     "version": 1
@@ -228,7 +230,9 @@
   "agents": {
     "startDelayMs": 500,
     "altScreenExtraWaitMs": 15000,
-    "altScreenSettleMs": 500
+    "altScreenSettleMs": 500,
+    "prelaunchCommandPrefix": "!!",
+    "prelaunchOutputLimit": 20000
   },
   "github": {
     "oauthClientId": "Ov23li1WfY05SeQNp5tk",
@@ -391,5 +395,90 @@
     "maxRetryMs": 900000,
     "loginOutputMaxBytes": 16384,
     "loginTimeoutMs": 600000
+  },
+  "system1": {
+    "defaultBaseUrl": "https://api.typesafe.ai",
+    "defaultModel": "jev-latest",
+    "evaluatePath": "/v1/systemone",
+    "credentialFileName": "system1-key",
+    "autoModeFileName": ".pragma/automode.md",
+    "requestTimeoutMs": 5000,
+    "promptCharLimit": 6000,
+    "preferencesCharLimit": 4000,
+    "hostModels": [
+      {
+        "host": "openrouter.ai",
+        "model": "~typesafe/jev-latest"
+      }
+    ],
+    "agentProgress": {
+      "activities": [
+        {
+          "id": "planning",
+          "label": "Planning",
+          "description": "Deciding on an approach or writing a plan; little code has been read or changed yet."
+        },
+        {
+          "id": "exploring",
+          "label": "Exploring",
+          "description": "Reading code, searching the repository, or gathering context."
+        },
+        {
+          "id": "coding",
+          "label": "Coding",
+          "description": "Writing or editing source files to implement the change."
+        },
+        {
+          "id": "testing",
+          "label": "Testing",
+          "description": "Writing tests or running the test suite."
+        },
+        {
+          "id": "debugging",
+          "label": "Debugging",
+          "description": "Investigating a failure, error, or unexpected behaviour."
+        },
+        {
+          "id": "verifying",
+          "label": "Verifying",
+          "description": "Running builds, linters, or type checks, or double-checking finished work."
+        },
+        {
+          "id": "reviewing",
+          "label": "Reviewing",
+          "description": "Reviewing a diff, a pull request, or its own changes."
+        },
+        {
+          "id": "documenting",
+          "label": "Documenting",
+          "description": "Updating documentation, comments, or guides."
+        },
+        {
+          "id": "waiting",
+          "label": "Waiting",
+          "description": "Asking the user a question or waiting for their input or approval."
+        },
+        {
+          "id": "wrapping-up",
+          "label": "Wrapping up",
+          "description": "Summarising the result, committing, or otherwise finishing the task."
+        }
+      ],
+      "progressLevels": [
+        "not started",
+        "just started",
+        "early",
+        "about a quarter",
+        "about a third",
+        "about half",
+        "past half",
+        "about three quarters",
+        "nearly done",
+        "complete"
+      ],
+      "messageCharLimit": 4000,
+      "debounceMs": 750,
+      "errorBackoffMs": 60000
+    }
   }
 }

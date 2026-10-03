@@ -167,7 +167,11 @@ exit cleanup and rely on next `SessionStart` stale clear.
 
 Model provider runs supported `codex debug models` command, keeps `visibility: "list"`, and
 maps `supported_reasoning_levels[].effort`. Launch uses `--model`; reasoning uses
-`--config model_reasoning_effort="..."`; permission modes use `--ask-for-approval`.
+`--config model_reasoning_effort="..."`; permission modes use `--ask-for-approval`, except
+the first, `default`, which passes nothing so Codex's config decides. Slash commands are
+`/init`, `/review`, `/status`, `/diff`, custom prompts in `~/.codex/prompts` as
+`/prompts:<name>`, and every skill Codex resolved — read from the "Available skills" section
+of `codex debug prompt-input` — invoked as `$<name>` (Codex has no `/` form for skills).
 
 Usage provider launches short-lived `codex app-server --stdio`, performs required
 `initialize` / `initialized` handshake, then calls stable `account/rateLimits/read`. Transport

@@ -181,14 +181,29 @@ const agent = defineAgent({
   icon: icons.Bot,
   launch: { command: ["example", "--interactive"] },
   models: [{ id: "default", name: "Default" }],
-  permissionModes: [],
+  // First entry = default applied to every launch that picks none.
+  permissionModes: [
+    { id: "default", name: "Ask" },
+    { id: "yolo", name: "Auto-approve" },
+  ],
+  modes: [
+    { id: "build", name: "Build" },
+    { id: "plan", name: "Plan" },
+  ],
+  slashCommands: [{ name: "init", description: "Write AGENTS.md" }],
   args: {
     model: (id) => ["--model", id],
     reasoning: (id) => ["--effort", id],
-    permissionMode: () => [],
+    permissionMode: (id) => (id === "yolo" ? ["--yolo"] : []),
+    mode: (id) => ["--agent", id],
   },
 });
 ```
+
+`modes`, `permissionModes`, and `slashCommands` follow the `models` pattern (static list or
+async provider). The launcher cycles modes with Shift+Tab, offers permission modes in a
+dropdown, and opens a slash-command picker on `/`. `agentLaunchArgs(agent, selection)` and
+`applySlashCommand(invocation, input)` are the helpers hosts use to apply a selection.
 
 Models may be static or async `(ctx) => Promise<AgentModelEntry[]>`. Keep host-tool parsing
 inside plugin. `excludeFeatures` tells `pragma-cli agent verify` which optional scenarios tool

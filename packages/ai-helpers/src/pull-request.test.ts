@@ -12,18 +12,11 @@ const mocks = vi.hoisted(() => ({
   runPromptToText: vi.fn(async () =>
     JSON.stringify({ title: "Add PR generation", body: "## Summary\n\nAdds generation." }),
   ),
-  selectModelCandidates: vi.fn(() => [{ id: "standard-model" }]),
-}));
-
-vi.mock("./pick-model.ts", () => ({
-  selectModelCandidates: mocks.selectModelCandidates,
-}));
-
-vi.mock("./model-insights.ts", () => ({
-  loadModelInsights: vi.fn(async () => new Map()),
+  selectModelCandidates: vi.fn((_kind: string) => [{ id: "standard-model" }]),
 }));
 
 vi.mock("./session.ts", () => ({
+  loadModelCandidates: async (kind: string) => mocks.selectModelCandidates(kind),
   createPragmaSession: mocks.createPragmaSession,
   runPromptToText: mocks.runPromptToText,
 }));

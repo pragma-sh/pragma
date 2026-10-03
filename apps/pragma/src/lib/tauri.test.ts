@@ -26,6 +26,7 @@ import {
   deleteFile,
   deleteWorktree,
   editWhiteboard,
+  exportScratchpadHtml,
   fileDiff,
   githubAbortMerge,
   githubMergeBaseBranch,
@@ -70,6 +71,17 @@ import {
 } from "./tauri";
 
 describe("stream IPC wrappers", () => {
+  it("passes standalone exports through the typed host adapter", async () => {
+    invokeMock.mockResolvedValue(".pragma/scratchpads/exports/plan.html");
+    expect(await exportScratchpadHtml("wt-1", "Plan", "<!doctype html>")).toBe(
+      ".pragma/scratchpads/exports/plan.html",
+    );
+    expect(invokeMock).toHaveBeenCalledWith("export_scratchpad_html", {
+      worktreeId: "wt-1",
+      title: "Plan",
+      html: "<!doctype html>",
+    });
+  });
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);

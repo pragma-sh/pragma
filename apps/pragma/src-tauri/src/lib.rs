@@ -24,6 +24,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod merge_conflicts;
 mod onboarding;
 mod plugin_distribution;
 mod plugins;
@@ -34,8 +35,10 @@ mod pty;
 mod scratchpads;
 mod script_migration;
 mod scripts;
+mod secret_file;
 mod ssh_host;
 mod storage;
+mod system1;
 mod updates;
 mod whiteboards;
 mod window_chrome;
@@ -1223,6 +1226,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
+    app.manage(system1::System1KeyStore::new(&data_dir));
     let resource_dir = app.path().resource_dir().ok();
     let pty = PtyClient::new(app_data_dir, channel, resource_dir);
     // The local client stays managed for host-agnostic consumers (agent event
@@ -1421,6 +1425,8 @@ pub fn run() {
             worktrees::hide_worktree,
             worktrees::delete_worktree,
             scripts::load_project_scripts,
+            scripts::run_worktree_commands,
+            scripts::cancel_worktree_commands,
             script_migration::detect_script_migration,
             script_migration::apply_script_migration,
             script_migration::dismiss_script_migration,
@@ -1429,6 +1435,7 @@ pub fn run() {
             control::start_agent,
             control::exec_in_worktree,
             scratchpads::scratchpad_prompt_agent,
+            scratchpads::export_scratchpad_html,
             scratchpads::list_scratchpads,
             scratchpads::open_scratchpad_tab,
             whiteboards::create_whiteboard,
@@ -1505,6 +1512,7 @@ pub fn run() {
             github::github_merge_base_branch,
             github::github_abort_merge,
             github::github_merge_in_progress,
+            github::github_unmerged_paths,
             github::github_push_branch,
             github::github_pr_file_diff,
             github::github_delete_remote_branch,
@@ -1515,6 +1523,8 @@ pub fn run() {
             ai::ai_setup_dismissed,
             ai::set_ai_setup_dismissed,
             ai::ai_generate_commit_message,
+            merge_conflicts::ai_resolve_merge_conflicts,
+            merge_conflicts::ai_commit_merge_resolution,
             git::worktree_changes_since,
             git::base_file_diff,
             scratchpads::list_scratchpad_files,
@@ -1532,6 +1542,14 @@ pub fn run() {
             ai::ai_login,
             ai::ai_login_respond,
             ai::ai_login_cancel,
+            system1::system1_status,
+            system1::system1_set_api_key,
+            system1::system1_clear_api_key,
+            system1::system1_check,
+            system1::system1_auto_select,
+            system1::system1_agent_progress,
+            system1::read_automode,
+            system1::write_automode,
             automations::register_automation_roots,
             automations::list_automations,
             automations::approve_automation,

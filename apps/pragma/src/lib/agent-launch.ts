@@ -1,7 +1,7 @@
 import { constants } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
-import { modelLaunchArgs } from "@/lib/agent-model-selection";
+import { launchPrompt, modelLaunchArgs } from "@/lib/agent-model-selection";
 import {
   accountsLaunchEnv,
   type AgentConfig,
@@ -111,7 +111,8 @@ export function startAgentInTab(
   selection?: AgentModelSelection,
 ): void {
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
   // The tab's shell is spawned when its terminal mounts; hand the mount the
   // env of the accounts this harness is bound to.
@@ -267,7 +268,8 @@ export async function startBackgroundAgentSession(
   const cols = Math.min(BACKGROUND_TERMINAL_COLS, MAX_TERMINAL_COLS);
   const rows = Math.min(BACKGROUND_TERMINAL_ROWS, MAX_TERMINAL_ROWS);
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
 
   const write = (data: string) => {
     void ptyWrite(tabId, data).catch((error: unknown) => {

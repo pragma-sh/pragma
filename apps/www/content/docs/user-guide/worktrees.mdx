@@ -20,6 +20,21 @@ The sidebar lists the selected project's worktrees:
   worktree.
 - Hovering a non-main row reveals three actions: **Pin**, **New child**, and
   **Delete worktree**.
+- Rows are **detailed** by default: under the title line a worktree shows its open pull
+  request (a GitHub mark with the PR number), any git action in progress (**Committing**,
+  **Writing commit message**, **Committing & drafting PR**, **Drafting PR**, **Pushing**,
+  **Opening PR**, **Merging**, then briefly whether it succeeded), **Ready for PR** once a
+  pull request has been drafted but not yet opened, and one line per agent —
+  click anywhere on the card to select the worktree, or on an agent line to open its tab.
+- Each agent line shows its status — **Running**, **Needs input**, or **Finished** — and a
+  progress bar in the same yellow / red / green as the status dots. The bar always shows
+  at least 10%. With a [System 1 model](/docs/user-guide/auto-mode) configured, a running
+  agent's status becomes what it is doing — **Planning**, **Exploring**, **Coding**,
+  **Testing**, **Debugging**, **Verifying**, **Reviewing**, **Documenting**, **Waiting**, or
+  **Wrapping up** — and the bar follows an estimate Pragma refreshes every time the agent
+  writes a new message.
+- **Settings → Sidebar → Compact rows** folds every row back to its title line; nesting,
+  the title, and the status dot are the same in both layouts.
 
 **Right-click a row** for the full menu: Rename · Pin / Unpin · Copy worktree path · Copy
 branch name · **Open in editor** (VS Code, Cursor, Windsurf, Zed, Sublime Text, IntelliJ
@@ -40,6 +55,20 @@ branch from that worktree instead of main). The dialog:
 Submit with **Create worktree** or **<Keys mac="⌘↵" other="Ctrl+↵" />** — the shortcut works from
 any field.
 
+While the prompt is just a slash and a name, a picker under the cursor lists the agent's
+slash commands —
+its built-ins plus your project and user commands and skills. **↑**/**↓** and **Enter** or **Tab** pick one; **Esc** closes it. **Shift+Tab** in
+the prompt cycles the agent's modes (opencode's Build and Plan, a Claude Code agent), and the
+dropdown next to it sets the permission mode. Either control is hidden when the agent offers
+only one choice. Both start at the agent's default, and Pragma
+remembers the last permission mode per agent.
+
+In **Fan out** the picker lists only the slash commands every attempt's agent has, and the
+prompt goes to each attempt as written, so a leading `/command` runs in all of them. Modes
+and permission modes are not offered there; each attempt starts in its agent's default.
+Type `@` in either mode to attach files, issues, or pull requests — see
+[Prompt context](/docs/user-guide/prompt-context).
+
 <Callout title="The prompt drives the agent">
   The prompt is passed to the agent exactly as written. Write it like you would type it into the
   agent's own TUI — it is the same conversation, just launched for you.
@@ -56,6 +85,14 @@ worktree will land, and clicking that row brings the progress screen back. If yo
 still watching when it finishes, the new worktree takes over with its terminal or agent
 session; if you left, the session starts in the background and stays out of your way
 until you open the tab.
+
+### Reusing a previous prompt
+
+The clock-shaped **History** button next to the **Standard | Fan out** switch swaps the form for the project's submitted runs, newest
+first: each shows its display title (or branch) with the prompt's first sentence under it.
+Click one to fill the dialog back out as it was sent — branch, title, prompt, and the agent
+and model, or every attempt row for a fanout. Nothing starts until you submit again. Only
+runs with a prompt are kept, and the history lives in this desktop app's local storage.
 
 ### Syncing main first
 

@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn teardown_never_reaches_outside_the_instance_it_launched() {
         assert!(descendants_of(&dev_tree(), 10).iter().all(|pid| *pid != 60));
-        assert!(descendants_of(&dev_tree(), 40).is_empty());
+        assert_eq!(descendants_of(&dev_tree(), 40), [] as [u32; 0]);
     }
 
     #[test]

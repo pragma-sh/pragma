@@ -35,3 +35,17 @@ export function joinPath(...segments: string[]): string {
     .filter((segment) => segment.length > 0)
     .join("/");
 }
+
+/** Resolves relative dot segments, rejecting traversal above the worktree root. */
+export function normalizeWorktreePath(path: string): string {
+  const output: string[] = [];
+  for (const segment of path.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (!output.pop()) throw new Error(`Path escapes worktree: ${path}`);
+    } else {
+      output.push(segment);
+    }
+  }
+  return output.join("/");
+}

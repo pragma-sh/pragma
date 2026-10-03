@@ -147,20 +147,36 @@ Contribute launcher with `defineAgent`:
 - `models`: static entries or async `(ctx) => Promise<entries>` provider.
 - `args.model`, `args.reasoning`, optional `args.modelReasoning`, and
   `args.permissionMode`: return argv fragments.
+- `permissionModes`, `modes` (primary agents the launcher cycles with Shift+Tab), and
+  `slashCommands` (the launcher's `/` picker): static lists or async `(ctx) => …`
+  providers, applied by `args.permissionMode`, `args.mode`, and optional
+  `args.slashCommand(name)` (the text that invokes it; defaults to `/<name>`). The first
+  permission mode and mode are the defaults every launch applies, so a flag the agent
+  always needs unattended (`--permission-mode auto`, `-y`) goes in the first permission
+  mode, never in `launch.command`. Use `slashCommandProvider(builtins, sources)` and
+  `modeProvider(builtins, sources)` from `@pragma-sh/plugin/catalog` to add commands,
+  skills, and agent profiles discovered in the tool's markdown directories.
 - `startupInput`: timed pre-TUI gates.
 - `prefillDelayMs`, `prefillMode`, `prefillSubmit`, `prefillSubmitDelayMs`: agent-owned
   prompt delivery behavior.
 - `excludeFeatures`: declare unsupported optional capabilities (`questions`,
   `commandApproval`, `commands`, `subagents`, `abort`, `interrupt`, `usageLimits`,
-  `sessionName`) so `agent verify` skips scenarios the host cannot implement.
+  `sessionName`, `slashCommands`) so `agent verify` skips scenarios the host cannot
+  implement.
 
 Model discovery rules:
 
 - Never emit a provider-level Auto model in static `models` or provider output. When a
   selected model has `reasoning` entries, Pragma shows an Auto reasoning choice for
   model-only launch, which appends `args.model` and no reasoning arguments.
-- Provider entries are `{ id, name, reasoning?: [{ id, name }] }`. Omit `reasoning` when
-  the host has none or cannot expose levels reliably for that model.
+- Provider entries are `{ id, name, reasoning?: [{ id, name }], canonicalId? }`. Omit
+  `reasoning` when the host has none or cannot expose levels reliably for that model.
+  List `reasoning` **lowest effort first**: auto mode maps task difficulty onto it by
+  position.
+- When a model id is a moving alias (`sonnet`, `opus`), set `canonicalId` to the
+  provider-qualified model it currently resolves to (`anthropic/claude-sonnet-5-5`).
+  Auto mode matches it against public benchmark catalogs; it is never passed to the host.
+  Ids that already name a concrete model (`openai/gpt-6-astra`) need none.
 - Emit fast variants as separate model entries. Never collapse them into a fast toggle.
 - Discovery is lazy: Pragma calls the provider when the selector submenu is focused,
   shows cached results immediately, then updates with the refreshed result.

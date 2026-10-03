@@ -136,11 +136,12 @@ Observed payloads (26.8.3):
 
 `junie` with:
 
-| Selection       | Flag                                         |
-| --------------- | -------------------------------------------- |
-| model           | `--model <id>`                               |
-| reasoning       | `--effort low\|medium\|high`                 |
-| permission mode | `--brave` for `brave`, nothing for `default` |
+| Selection       | Flag                                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------------------- |
+| model           | `--model <id>`                                                                                       |
+| reasoning       | `--effort low\|medium\|high`                                                                         |
+| permission mode | `--brave` for `brave`, `--plan` for `plan`, nothing for `default`                                    |
+| slash commands  | ACP `available_commands_update` (skills included); fallback built-ins + `.junie` commands and skills |
 
 Junie's approval behaviour is the `brave_mode` setting (`off` / `auto` / `on`, default
 `auto`), and `--brave` is its only command-line lever — it forces `on`. There is no flag

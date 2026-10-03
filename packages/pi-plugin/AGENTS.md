@@ -41,6 +41,13 @@ on a graceful quit. The exact launched-session watcher also reports `cleared`
 when its session exits, covering crashes and kills that skip `session_shutdown`; reporting
 failures are swallowed so cleanup cannot disrupt watcher shutdown.
 
+## Launch options
+
+`createPiPragmaPlugin` gives every Pi-compatible launcher `/compact` and `/session` plus
+prompt templates (`/<name>`) and skills (`/skill:<name>`) discovered in Pi's directories
+(`PI_SLASH_COMMAND_SOURCES`); a fork with other config roots passes
+`agent.slashCommandSources`. Pi has no modes or permission modes.
+
 ## Build and install
 
 ```sh

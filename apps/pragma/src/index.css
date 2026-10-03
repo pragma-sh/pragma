@@ -393,6 +393,27 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /* Agent-prompt shell command (`!!` in an agent prompt): a small inline,
+     monospaced chip with a `$` prompt. The pending chip is the widget shown
+     right after `!!`, before the command has any text. */
+  .tiptap .shell-command {
+    padding: 0.0625rem 0.375rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  .tiptap .shell-command::before {
+    content: "$ ";
+    color: var(--muted-foreground);
+  }
+  .tiptap .shell-command-pending::before {
+    content: "$";
+  }
   .tiptap table .selectedCell {
     background-color: var(--selection);
   }

@@ -3,6 +3,8 @@ import {
   defineAgent,
   definePlugin,
   type AccountIdentity,
+  commandAndSkillDirs,
+  slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
@@ -23,6 +25,15 @@ const baseWatcher = createTuiWatcher({
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits";
+
+/** Cursor Agent built-ins that take a prompt; project/user commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "plan", description: "Create a plan", argumentHint: "[prompt]" },
+  { name: "ask", description: "Ask a read-only question", argumentHint: "[prompt]" },
+  { name: "debug", description: "Debug mode", argumentHint: "[prompt]" },
+  { name: "goal", description: "Start a durable goal that continues while idle" },
+];
+const SLASH_COMMAND_SOURCES = commandAndSkillDirs([".cursor", "~/.cursor"]);
 
 /**
  * Pragma plugin for Cursor Agent, bundled to `dist/pragma-plugin.mjs` and
@@ -86,7 +97,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       name: "Cursor Agent",
       icon: () => null,
       iconPath: "assets/cursor.svg",
-      launch: { command: ["cursor-agent", "--force", "--approve-mcps"] },
+      launch: { command: ["cursor-agent", "--approve-mcps"] },
       excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -98,11 +109,24 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
         parseCursorModels(
           await execFirst(ctx, "cursor-agent models 2>/dev/null || agent models 2>/dev/null"),
         ),
-      permissionModes: [],
+      // First entry is the default: `--force` runs commands unattended, which
+      // is what the excluded `commandApproval` feature above relies on.
+      permissionModes: [
+        { id: "force", name: "Run everything" },
+        { id: "default", name: "Ask for approval" },
+      ],
+      modes: [
+        { id: "agent", name: "Agent" },
+        { id: "plan", name: "Plan", description: "Read-only planning" },
+        { id: "ask", name: "Ask", description: "Q&A, read-only" },
+      ],
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES),
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: () => [],
-        permissionMode: () => [],
+        permissionMode: (permissionModeId: string) =>
+          permissionModeId === "force" ? ["--force"] : [],
+        mode: (modeId: string) => (modeId === "agent" ? [] : ["--mode", modeId]),
       },
     }),
   ],

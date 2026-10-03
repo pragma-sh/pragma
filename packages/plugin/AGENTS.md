@@ -13,6 +13,7 @@ packages/plugin/
 ├── src/plugin.ts        # definePlugin + API-version stamp
 ├── src/agent.ts         # defineAgent and agent types
 ├── src/watcher.ts       # defineWatcher and watcher context types
+├── src/context.ts       # defineContextProvider + `@` picker query/match/prompt-format helpers
 ├── src/contributions.ts # UI slot, Settings page, web view, and command contribution helpers
 ├── src/accounts.ts      # defineAccounts, ACCOUNT_PROVIDERS, legacy-usage adapter (resolveAccountProviders)
 ├── src/account-identity.ts # Canonical identity per well-known provider + credential-store readers
@@ -45,6 +46,32 @@ packages/plugin/
   entirely.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
   `react/jsx-runtime` to `@pragma-sh/plugin` subpaths.
+- **Agent launch options follow the models pattern.** `modes`, `permissionModes`, and
+  `slashCommands` are each a static list or an async `(ctx) => …` provider, applied through
+  `args.mode` / `args.permissionMode` / `args.slashCommand`. The **first** mode and
+  permission mode is the default every launch applies when none is selected, so a flag a
+  launcher always needs belongs in that first entry, never baked into `launch.command`
+  (or an "ask" selection can never remove it). `agentLaunchArgs` and `applySlashCommand`
+  are the one implementation the desktop uses; the headless server mirrors them in
+  `crates/pragma-server/src/agent_options.rs` from the catalog's resolved args — keep both
+  in step. `slashCommandProvider(builtins, sources, { acp, load })` merges, first name
+  winning: the built-ins, the tool's **ACP** list (`acp: { command }` starts its Agent
+  Client Protocol server, opens a session, and reads `available_commands_update` — the
+  tool's own list, skills included; `acp-discovery.ts`), a custom `load`, then markdown
+  command/skill directories (`commandAndSkillDirs`). Prefer ACP or a tool-provided listing
+  over guessed directories. A command whose TUI syntax differs sets its own `invocation`
+  (Codex skills are `$name`). `modeProvider` scans agent profiles. Every step runs through
+  `sdk.exec` as a POSIX shell script and degrades to nothing on failure.
+- **`@` prompt context is one format everywhere.** `defineContextProvider` declares a
+  source (`search` → items with `displayName`/`searchText`, `resolve` → text); the desktop
+  merges plugin providers after its built-ins (`apps/pragma/src/lib/builtin-context-providers.ts`:
+  GitHub issues, pull requests, then files). A provider shows a message instead of results by
+  throwing `ContextProviderNotice` (checked by name via `isContextProviderNotice`, since each
+  plugin bundle has its own copy). `contextQuery`, `matchContextItems`,
+  `formatPromptWithContext`, and `splitPromptContext` (its inverse) are the single implementation of mention detection, ranking, and
+  the `<context>` block format — never re-implement them in a client. They are pure, so they
+  are also exported from `./catalog`, the bridge-free entry the desktop imports values from
+  (the main entry throws without `__PRAGMA__`, which breaks jsdom tests).
 - Add exported API with JSDoc and tests. Breaking API changes require a major version bump;
   additive changes require a minor bump.
 

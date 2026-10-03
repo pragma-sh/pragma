@@ -1,6 +1,7 @@
 import type { AgentReportPayload } from "@pragma-sh/constants";
 import type { ZodType, ZodTypeAny } from "zod";
 import type { AgentDefinition } from "./agent";
+import type { ContextProviderDefinition } from "./context";
 import type {
   CommandDefinition,
   PluginIcon,
@@ -62,6 +63,8 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   agents?: AgentDefinition<InferConfig<TConfigSchema>>[];
   watchers?: WatcherDefinition<InferConfig<TConfigSchema>>[];
   commands?: CommandDefinition<InferConfig<TConfigSchema>>[];
+  /** Sources of `@` context for the desktop's agent prompt fields. */
+  contextProviders?: ContextProviderDefinition<InferConfig<TConfigSchema>>[];
   settings?: PluginSettingsContributions;
   keybindings?: PluginKeybindingsContributions;
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
