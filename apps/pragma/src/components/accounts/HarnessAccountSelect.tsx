@@ -59,7 +59,6 @@ export function HarnessAccountSelect({
   const others = choices.filter((choice) => choice.status !== "ready");
   const current = harness.current?.accountKey ?? "";
   const override = harness.current?.scope === "project";
-  const ownLogin = harness.current?.scope === "global" ? actions.followOwnLogin : undefined;
   const currentAccount = provider.accounts.find((account) => account.key === current);
   const pick = (key: string) => {
     const account = options.find((option) => option.account.key === key)?.account;
@@ -67,24 +66,13 @@ export function HarnessAccountSelect({
   };
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          aria-label={`Choose the account ${harness.name} uses`}
-          className={cn(
-            "inline-flex min-w-0 shrink-0 items-center justify-between gap-1.5 rounded-md border text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none data-[state=open]:bg-accent",
-            size === "md"
-              ? "h-8 w-64 bg-background px-2.5 text-sm"
-              : "h-6 max-w-52 border-transparent px-1.5 text-[11px]",
-            muted && "text-muted-foreground",
-            muted && size === "md" && "border-dashed",
-          )}
-          disabled={provider.legacy}
-          type="button"
-        >
-          <span className="truncate">{currentAccount?.label ?? "Choose account"}</span>
-          {provider.legacy ? null : <ChevronDown className="size-3.5 shrink-0 opacity-60" />}
-        </button>
-      </DropdownMenuTrigger>
+      <AccountSelectTrigger
+        harness={harness}
+        label={currentAccount?.label ?? "Choose account"}
+        legacy={provider.legacy}
+        muted={muted}
+        size={size}
+      />
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel>
           {harness.name} uses{override ? " · this project only" : ""}
@@ -94,42 +82,118 @@ export function HarnessAccountSelect({
             </span>
           ) : null}
         </DropdownMenuLabel>
-        {options.length > 0 ? (
-          <DropdownMenuRadioGroup onValueChange={pick} value={current}>
-            {options.map(({ account, borrowed }) => (
-              <DropdownMenuRadioItem key={account.key} value={account.key}>
-                <AccountOptionLabel
-                  account={account}
-                  detail={borrowed ? borrowedSignInLabel(harness) : null}
-                />
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        ) : (
-          <p className="px-1.5 py-1 text-xs text-muted-foreground">Not signed in to an account</p>
-        )}
+        <ReadyAccounts current={current} harness={harness} onPick={pick} options={options} />
         <OtherAccounts choices={others} harness={harness} signIn={actions.signIn} />
-        {canSignInAnother(harness) || override || ownLogin ? <DropdownMenuSeparator /> : null}
-        {canSignInAnother(harness) ? (
-          <DropdownMenuItem onSelect={() => actions.signIn(harness)}>
-            <LogIn />
-            Sign in to another account…
-          </DropdownMenuItem>
-        ) : null}
-        {override ? (
-          <DropdownMenuItem onSelect={() => actions.resetOverride(harness)}>
-            <Undo2 />
-            Follow all projects
-          </DropdownMenuItem>
-        ) : null}
-        {ownLogin ? (
-          <DropdownMenuItem onSelect={() => ownLogin(harness)}>
-            <Undo2 />
-            Use {harness.name}'s own login
-          </DropdownMenuItem>
-        ) : null}
+        <HarnessMenuActions actions={actions} harness={harness} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function AccountSelectTrigger({
+  harness,
+  label,
+  legacy,
+  muted,
+  size,
+}: {
+  harness: HarnessView;
+  label: string;
+  legacy: boolean | undefined;
+  muted: boolean;
+  size: "sm" | "md";
+}) {
+  return (
+    <DropdownMenuTrigger asChild>
+      <button
+        aria-label={`Choose the account ${harness.name} uses`}
+        className={cn(
+          "inline-flex min-w-0 shrink-0 items-center justify-between gap-1.5 rounded-md border text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none data-[state=open]:bg-accent",
+          size === "md"
+            ? "h-8 w-64 bg-background px-2.5 text-sm"
+            : "h-6 max-w-52 border-transparent px-1.5 text-[11px]",
+          muted && "text-muted-foreground",
+          muted && size === "md" && "border-dashed",
+        )}
+        disabled={legacy}
+        type="button"
+      >
+        <span className="truncate">{label}</span>
+        {legacy ? null : <ChevronDown className="size-3.5 shrink-0 opacity-60" />}
+      </button>
+    </DropdownMenuTrigger>
+  );
+}
+
+/** The accounts the harness can switch to right away, as radio items. */
+function ReadyAccounts({
+  current,
+  harness,
+  onPick,
+  options,
+}: {
+  current: string;
+  harness: HarnessView;
+  onPick: (key: string) => void;
+  options: HarnessAccountChoice[];
+}) {
+  if (options.length === 0) {
+    return <p className="px-1.5 py-1 text-xs text-muted-foreground">Not signed in to an account</p>;
+  }
+  return (
+    <DropdownMenuRadioGroup onValueChange={onPick} value={current}>
+      {options.map((choice) => (
+        <DropdownMenuRadioItem key={choice.account.key} value={choice.account.key}>
+          <AccountOptionLabel
+            account={choice.account}
+            detail={
+              choice.status === "ready" && choice.borrowed ? borrowedSignInLabel(harness) : null
+            }
+          />
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  );
+}
+
+/** Sign in to another account, and the ways back to an inherited choice. */
+function HarnessMenuActions({
+  actions,
+  harness,
+}: {
+  actions: HarnessAccountActions;
+  harness: HarnessView;
+}) {
+  const scope = harness.current?.scope;
+  const ownLogin = scope === "global" ? actions.followOwnLogin : undefined;
+  const items = [
+    canSignInAnother(harness) && {
+      icon: LogIn,
+      label: "Sign in to another account…",
+      onSelect: () => actions.signIn(harness),
+    },
+    scope === "project" && {
+      icon: Undo2,
+      label: "Follow all projects",
+      onSelect: () => actions.resetOverride(harness),
+    },
+    ownLogin && {
+      icon: Undo2,
+      label: `Use ${harness.name}'s own login`,
+      onSelect: () => ownLogin(harness),
+    },
+  ].filter((item) => !!item);
+  if (items.length === 0) return null;
+  return (
+    <>
+      <DropdownMenuSeparator />
+      {items.map(({ icon: Icon, label, onSelect }) => (
+        <DropdownMenuItem key={label} onSelect={onSelect}>
+          <Icon />
+          {label}
+        </DropdownMenuItem>
+      ))}
+    </>
   );
 }
 
