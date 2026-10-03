@@ -204,7 +204,7 @@ impl AccountsHost {
                 Ok(json!({ "ok": true }))
             }
             AccountsRequest::RemoveLogin { login_id } => {
-                self.remove_login(&login_id)?;
+                self.remove_login(registry, &login_id)?;
                 Ok(json!({ "ok": true }))
             }
             AccountsRequest::LaunchEnv {
@@ -513,6 +513,9 @@ impl AccountsHost {
             &env,
         ) {
             self.discard_home(home.as_deref());
+            if provider.swaps {
+                self.restore_swap(registry, agent_id, &provider);
+            }
             return Err(error.to_string());
         }
         // `; exit` works in POSIX shells and PowerShell alike, so the session
@@ -527,6 +530,9 @@ impl AccountsHost {
         if let Err(error) = registry.write(&session_id, &line) {
             let _ = registry.kill(&session_id);
             self.discard_home(home.as_deref());
+            if provider.swaps {
+                self.restore_swap(registry, agent_id, &provider);
+            }
             return Err(format!("failed to start the login command: {error}"));
         }
         type_login_input(
@@ -665,33 +671,29 @@ impl AccountsHost {
             let _ = registry.kill(&pending.session_id);
             self.discard_home(pending.home.as_deref());
             if pending.provider.swaps {
-                self.restore_swap(registry, &pending);
+                self.restore_swap(registry, &pending.agent_id, &pending.provider);
             }
         }
         Ok(())
     }
 
     /// Swaps the harness's globally bound account back into its shared
-    /// credential file after an abandoned sign-in, which left it signed out of
-    /// the provider. A project override is restored by that project's next launch.
-    fn restore_swap(&self, registry: &Registry, pending: &PendingLogin) {
+    /// credential file after an abandoned sign-in or a removed login, either of
+    /// which can leave a login that no longer exists there. A project override
+    /// is restored by that project's next launch.
+    fn restore_swap(&self, registry: &Registry, agent_id: &str, provider: &AccountProviderInfo) {
         let Some(store) = self.store.as_ref() else {
             return;
         };
         let Ok(state) = store.snapshot() else {
             return;
         };
-        let home = core_accounts::resolve_login(
-            &state,
-            &pending.agent_id,
-            &pending.provider.provider,
-            None,
-        )
-        .and_then(|login| login.home.clone());
-        if let Err(error) = activate_op(registry, &pending.provider, home.as_deref(), &[], None) {
+        let home = core_accounts::resolve_login(&state, agent_id, &provider.provider, None)
+            .and_then(|login| login.home.clone());
+        if let Err(error) = activate_op(registry, provider, home.as_deref(), &[], None) {
             eprintln!(
-                "accounts: restoring {}'s {} sign-in failed: {error}",
-                pending.agent_id, pending.provider.title
+                "accounts: restoring {agent_id}'s {} sign-in failed: {error}",
+                provider.title
             );
         }
     }
@@ -729,6 +731,10 @@ impl AccountsHost {
     /// share a token kind (see `AccountProviderInfo::shared_token_kind`). The
     /// copy and its source join one token group, which every sync keeps on
     /// the newest token.
+    ///
+    /// Fails when the harness has no login for the account and cannot take a
+    /// shared one: launch resolution would otherwise fall back to its default
+    /// login, running it as an account the caller did not choose.
     fn adopt_shared_login(
         &self,
         registry: &Registry,
@@ -737,16 +743,6 @@ impl AccountsHost {
         key: &str,
         project_root: Option<&str>,
     ) -> Result<(), String> {
-        let providers = providers_for(registry, project_root)?;
-        let Some((target, kind)) = providers.iter().find_map(|info| {
-            let kind = info.shared_token_kind.as_deref()?;
-            (info.shared_token_writable
-                && info.provider == provider
-                && info.agent_ids.iter().any(|id| id == agent_id))
-            .then_some((info, kind))
-        }) else {
-            return Ok(());
-        };
         let store = self.store()?;
         let state = store.snapshot().map_err(|error| error.to_string())?;
         let in_account = |login: &&AccountLogin| {
@@ -760,6 +756,18 @@ impl AccountsHost {
         {
             return Ok(());
         }
+        let providers = providers_for(registry, project_root)?;
+        let Some((target, kind)) = providers.iter().find_map(|info| {
+            let kind = info.shared_token_kind.as_deref()?;
+            (info.shared_token_writable
+                && info.provider == provider
+                && info.agent_ids.iter().any(|id| id == agent_id))
+            .then_some((info, kind))
+        }) else {
+            return Err(format!(
+                "{agent_id} has no sign-in to this account and cannot use another harness's. Sign in with {agent_id} instead."
+            ));
+        };
         let sources: Vec<(&AccountLogin, &AccountProviderInfo)> = state
             .logins
             .iter()
@@ -927,7 +935,7 @@ impl AccountsHost {
         }
     }
 
-    fn remove_login(&self, login_id: &str) -> Result<(), String> {
+    fn remove_login(&self, registry: &Registry, login_id: &str) -> Result<(), String> {
         let store = self.store()?;
         let removed = store
             .update(|state| {
@@ -945,6 +953,16 @@ impl AccountsHost {
             })
             .map_err(|error| error.to_string())?;
         self.discard_home(removed.home.as_deref());
+        // A swap provider may still have the removed login in the harness's
+        // shared credential file. Swapping the bound login back in drops it:
+        // with its home gone, its entries have nowhere to be saved.
+        if let Some(provider) = providers_for(registry, None)
+            .ok()
+            .and_then(|providers| provider_for_login(&providers, &removed).cloned())
+            .filter(|provider| provider.swaps)
+        {
+            self.restore_swap(registry, &removed.agent_id, &provider);
+        }
         Ok(())
     }
 
@@ -1410,7 +1428,10 @@ mod tests {
 
     #[test]
     fn extract_urls_ignores_plain_words() {
-        assert!(extract_urls("httpbin and http:// only").is_empty());
+        assert_eq!(
+            extract_urls("httpbin and http:// only"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

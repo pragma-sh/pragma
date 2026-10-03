@@ -154,10 +154,14 @@ credentialStoreAccount({
 - **At launch** Pragma calls the provider's `swap.activate`: the entries currently in the
   shared file are saved back to the login they belong to — so a token the harness refreshed
   is kept — and the bound login's entries are written in. Other providers' entries are never
-  touched. A `<file>.pragma.json` beside the shared file records which login is in it.
+  touched. A `<file>.pragma.json` beside the shared file records which login is in it. A switch
+  is recorded there before the shared file is written, so one cut short is settled by what the
+  file holds; entries that match neither login are saved to neither.
 - **Signing in** happens in place: Pragma swaps in the new, still empty login first, then runs
-  `login.command`, which writes the new sign-in to the shared file. Cancelling swaps the
-  previous account straight back.
+  `login.command`, which writes the new sign-in to the shared file. Cancelling, or a sign-in
+  that fails to start, swaps the previous account straight back.
+- **Removing a login** swaps the bound account back in, so the removed sign-in leaves the shared
+  file with it.
 - **Running sessions switch too**, because they read the same file. The menu says so instead of
   counting sessions left on the old account.
 - A token is only ever in one place at a time; Pragma copies entries but never refreshes one.
@@ -189,7 +193,8 @@ signing in again. A `SharedToken` is either an OAuth sign-in
   use `apiKeyTokenKind(provider)` (`key:<provider>`), so any harness holding that provider's key
   matches.
 - **`write` is optional.** Without it the harness lends its sign-in but never takes one (Kimi
-  Code, whose config has no per-account slots).
+  Code, whose config has no per-account slots), so binding it to an account it has not signed in
+  to is refused rather than silently launching with its own login.
 - **Never share a restricted sign-in.** Claude Free/Pro/Max and Gemini CLI/Antigravity OAuth stay
   with their own harness; `apiKeyOnly` providers only ever share keys.
 

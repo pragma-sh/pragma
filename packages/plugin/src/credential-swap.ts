@@ -12,6 +12,9 @@
  *
  * Which login occupies the shared file, and the harness's own sign-in while it
  * is displaced, are recorded in a `<file>.pragma.json` beside the shared file.
+ * A switch is recorded there before the shared file is written, so one cut
+ * short between the two writes is settled by what the file actually holds,
+ * never by guessing — see `settleSwitches`.
  * Tokens are copied, never refreshed: one sign-in only ever lives in one place
  * at a time, so a rotating refresh token is never used from two copies.
  */
@@ -45,6 +48,23 @@ interface ProviderSwapState {
   active: string | null;
   /** The harness's own entries, kept while a Pragma login occupies the shared file. */
   own?: Entries;
+  /** A switch recorded but not yet confirmed: the shared file may still hold `outgoing`. */
+  switching?: PendingSwitch;
+  /**
+   * An interrupted switch left entries in the shared file that match neither
+   * login's saved copy, so they are never saved to a login; the next switch
+   * replaces them with a saved copy.
+   */
+  unattributed?: boolean;
+}
+
+interface PendingSwitch {
+  /** The login being put in: a Pragma login home, or null for the harness's own. */
+  target: string | null;
+  /** The provider's entries in the shared file before the switch. */
+  outgoing: Entries;
+  /** The shared-file keys the provider owns. */
+  entries: string[];
 }
 
 interface FsPromises {
@@ -82,13 +102,14 @@ export async function readLoginEntries(
   account: Pick<AccountContext["account"], "home" | "env">,
 ): Promise<Entries | null> {
   const shared = await sharedCredentialFile(store, account.env);
-  const active = (await readState(shared)).providers[provider];
-  const activeHome = active?.active ?? null;
-  if (activeHome === account.home) {
+  const state = await readState(shared);
+  await settleSwitches(store, shared, state);
+  const slot = state.providers[provider];
+  if (!slot?.unattributed && (slot?.active ?? null) === account.home) {
     const current = await readJson(shared);
     return current ? pick(current, entries) : null;
   }
-  if (account.home === null) return active?.own ?? {};
+  if (account.home === null) return slot?.own ?? {};
   const own = await readJson(loginCredentialFile(store, account.home));
   return own ? pick(own, entries) : null;
 }
@@ -109,17 +130,19 @@ export async function writeLoginEntries(
   await fs.mkdir(parentDir(shared), { recursive: true, mode: 0o700 });
   await withLock(fs, shared, async () => {
     const state = await readState(shared);
+    let stateChanged = await settleSwitches(store, shared, state);
     const slot = state.providers[provider];
-    if ((slot?.active ?? null) === account.home) {
+    if (!slot?.unattributed && (slot?.active ?? null) === account.home) {
       await writeJson(fs, shared, { ...(await readJson(shared)), ...updates });
     } else if (account.home === null && slot) {
       slot.own = { ...slot.own, ...updates };
-      await writeJson(fs, `${shared}${STATE_SUFFIX}`, state);
+      stateChanged = true;
     } else if (account.home !== null) {
       const path = loginCredentialFile(store, account.home);
       await fs.mkdir(parentDir(path), { recursive: true, mode: 0o700 });
       await writeJson(fs, path, { ...(await readJson(path)), ...updates });
     }
+    if (stateChanged) await writeJson(fs, `${shared}${STATE_SUFFIX}`, state);
   });
 }
 
@@ -153,48 +176,119 @@ interface Swap {
 }
 
 async function swapLocked(swap: Swap): Promise<void> {
-  const { fs, shared, provider, entries, target } = swap;
+  const { fs, store, shared, provider, entries, target } = swap;
+  const stateFile = `${shared}${STATE_SUFFIX}`;
   const state = await readState(shared);
+  const settled = await settleSwitches(store, shared, state);
   const slot = state.providers[provider] ?? { active: null };
-  if (slot.active === target) return;
+  if (slot.active === target && !slot.unattributed) {
+    if (settled) await writeJson(fs, stateFile, state);
+    return;
+  }
 
   const current = (await readJson(shared)) ?? {};
-  const incoming = await incomingEntries(swap, slot);
-  // Save the outgoing entries first: a crash between writes must lose nothing.
-  const own = await saveOutgoing(swap, state, slot, pick(current, entries));
+  const outgoing = pick(current, entries);
+  const incoming = await savedEntries(store, slot, target, entries);
+  // Save the outgoing entries and record the switch before making it: a
+  // crash between writes must lose nothing, and must leave enough behind to
+  // tell which login the shared file holds.
+  const own = await saveOutgoing(swap, slot, outgoing);
+  state.providers[provider] = {
+    active: slot.active,
+    ...(own ? { own } : {}),
+    switching: { target, outgoing, entries: [...entries] },
+  };
+  await writeJson(fs, stateFile, state);
 
   await writeJson(fs, shared, { ...omit(current, entries), ...incoming });
-  if (target === null) {
-    delete state.providers[provider];
-  } else {
-    state.providers[provider] = { active: target, ...(own ? { own } : {}) };
-  }
-  await writeJson(fs, `${shared}${STATE_SUFFIX}`, state);
+  completeSwitch(state, provider, target, false);
+  await writeJson(fs, stateFile, state);
 }
 
-/** The target login's entries. An empty login (one about to sign in) leaves the provider signed out. */
-async function incomingEntries(swap: Swap, slot: ProviderSwapState): Promise<Entries> {
-  if (swap.target === null) return slot.own ?? {};
-  const stored = await readJson(loginCredentialFile(swap.store, swap.target));
-  return pick(stored ?? {}, swap.entries);
+/**
+ * A login's saved entries: its home's copy, or the harness's own kept aside.
+ * An empty login (one about to sign in) has none, leaving the provider signed out.
+ */
+async function savedEntries(
+  store: CredentialStore,
+  slot: ProviderSwapState,
+  target: string | null,
+  entries: readonly string[],
+): Promise<Entries> {
+  if (target === null) return slot.own ?? {};
+  const stored = await readJson(loginCredentialFile(store, target));
+  return pick(stored ?? {}, entries);
+}
+
+/**
+ * Settles switches a stopped sidecar recorded but never confirmed, in
+ * `state` only; returns whether anything changed. The shared file holding the
+ * target's saved entries means the switch happened, and holding the outgoing
+ * ones means it did not. Anything else (the harness rewrote the file since) is
+ * kept from both logins, because attributing it to the wrong one would save
+ * one account's sign-in as another's.
+ */
+async function settleSwitches(
+  store: CredentialStore,
+  shared: string,
+  state: SwapState,
+): Promise<boolean> {
+  let changed = false;
+  let current: Entries | undefined;
+  for (const [provider, slot] of Object.entries(state.providers)) {
+    const pending = slot.switching;
+    if (!pending) continue;
+    changed = true;
+    // oxlint-disable-next-line no-await-in-loop -- read once, only when a switch is pending.
+    current ??= (await readJson(shared)) ?? {};
+    const inShared = pick(current, pending.entries);
+    // oxlint-disable-next-line no-await-in-loop -- at most one pending switch per provider.
+    const incoming = await savedEntries(store, slot, pending.target, pending.entries);
+    if (sameEntries(inShared, incoming)) {
+      completeSwitch(state, provider, pending.target, false);
+    } else if (sameEntries(inShared, pending.outgoing)) {
+      delete slot.switching;
+    } else {
+      completeSwitch(state, provider, pending.target, true);
+    }
+  }
+  return changed;
+}
+
+/** Records `target` as the login in the shared file. */
+function completeSwitch(
+  state: SwapState,
+  provider: string,
+  target: string | null,
+  unattributed: boolean,
+): void {
+  const own = state.providers[provider]?.own;
+  if (target === null && !unattributed) {
+    delete state.providers[provider];
+    return;
+  }
+  state.providers[provider] = {
+    active: target,
+    ...(own ? { own } : {}),
+    ...(unattributed ? { unattributed } : {}),
+  };
 }
 
 /**
  * Saves the entries leaving the shared file to the login they belong to, and
- * returns the harness's own entries as they now stand.
+ * returns the harness's own entries as they now stand (the caller records
+ * them). Unattributed entries belong to no login and are not saved.
  */
 async function saveOutgoing(
   swap: Swap,
-  state: SwapState,
   slot: ProviderSwapState,
   outgoing: Entries,
 ): Promise<Entries | undefined> {
+  if (slot.unattributed) return slot.own;
   if (slot.active !== null) {
     await saveBack(swap.fs, loginCredentialFile(swap.store, slot.active), outgoing, swap.entries);
     return slot.own;
   }
-  state.providers[swap.provider] = { active: null, own: outgoing };
-  await writeJson(swap.fs, `${swap.shared}${STATE_SUFFIX}`, state);
   return outgoing;
 }
 
@@ -276,6 +370,19 @@ async function readJson(path: string): Promise<Entries | null> {
 async function writeJson(fs: FsPromises, path: string, value: unknown): Promise<void> {
   await fs.writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: PRIVATE_FILE_MODE });
   await fs.chmod(path, PRIVATE_FILE_MODE);
+}
+
+function sameEntries(a: Entries, b: Entries): boolean {
+  return stableJson(a) === stableJson(b);
+}
+
+/** JSON with object keys sorted, so equal entries compare equal whatever order a writer used. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = recordValue(value);
+  if (!record) return JSON.stringify(value) ?? "null";
+  const keys = Object.keys(record).toSorted();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
 
 function pick(source: Entries, keys: readonly string[]): Entries {

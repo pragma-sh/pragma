@@ -39,6 +39,8 @@ export function useAccountLogin(store: ProjectAccounts, openUrls: boolean): Acco
   const [login, setLogin] = useState<AccountLogin | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loginId = useRef<string | null>(null);
+  /** Bumped by every begin, cancel, and reset, so a begin that resolves late can tell it was superseded. */
+  const attempt = useRef(0);
   const opened = useRef(false);
 
   const finish = useCallback(async () => {
@@ -88,15 +90,23 @@ export function useAccountLogin(store: ProjectAccounts, openUrls: boolean): Acco
       setSession(null);
       setLogin(null);
       opened.current = false;
+      const current = ++attempt.current;
       try {
         const started = await store.api.beginLogin({
           pluginId: harness.source.pluginId,
           providerId: harness.source.providerId,
           agentId: harness.agentId,
         });
+        // Cancelled (e.g. the dialog closed) while the host was starting it:
+        // stop the sign-in there too, which also restores a swapped account.
+        if (current !== attempt.current) {
+          await store.api.cancelLogin(started.loginId).catch(() => undefined);
+          return;
+        }
         loginId.current = started.loginId;
         setPhase("waiting");
       } catch (cause) {
+        if (current !== attempt.current) return;
         setError(errorMessage(cause));
         setPhase("error");
       }
@@ -114,6 +124,7 @@ export function useAccountLogin(store: ProjectAccounts, openUrls: boolean): Acco
   );
 
   const cancel = useCallback(async () => {
+    attempt.current += 1;
     const id = loginId.current;
     loginId.current = null;
     setPhase("idle");
@@ -121,6 +132,7 @@ export function useAccountLogin(store: ProjectAccounts, openUrls: boolean): Acco
   }, [store]);
 
   const reset = useCallback(() => {
+    attempt.current += 1;
     loginId.current = null;
     setPhase("idle");
     setSession(null);

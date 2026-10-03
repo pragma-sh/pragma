@@ -145,6 +145,80 @@ describe("activateCredentialSwap", () => {
     await expect(stat(a)).rejects.toThrow();
   });
 
+  describe("after a switch stopped between its writes", () => {
+    const own = { "openai-codex": { type: "oauth", refresh: "own" } };
+
+    /** The record a swap from the harness's own sign-in to `target` writes before the shared file. */
+    async function recordSwitch(target: string): Promise<void> {
+      await writeJson(`${shared}.pragma.json`, {
+        providers: {
+          openai: {
+            active: null,
+            own,
+            switching: { target, outgoing: own, entries: ENTRIES },
+          },
+        },
+      });
+    }
+
+    it("keeps the outgoing login when the shared file was never written", async () => {
+      const a = await home("a", { "openai-codex": { type: "oauth", refresh: "a" } });
+      const b = await home("b", { "openai-codex": { type: "oauth", refresh: "b" } });
+      await recordSwitch(a);
+      expect(await readLoginEntries(STORE, "openai", ENTRIES, { home: null, env })).toEqual(own);
+      await activate(b);
+      // A's copy was never in the shared file, so it is never overwritten with the own sign-in.
+      expect((await readJson(join(a, "auth.json")))["openai-codex"]).toEqual({
+        type: "oauth",
+        refresh: "a",
+      });
+      await activate(null);
+      expect((await readJson(shared))["openai-codex"]).toEqual(own["openai-codex"]);
+    });
+
+    it("takes the switch as made when the shared file holds the target", async () => {
+      const a = await home("a", { "openai-codex": { type: "oauth", refresh: "a" } });
+      await recordSwitch(a);
+      await writeJson(shared, {
+        "openai-codex": { type: "oauth", refresh: "a" },
+        openrouter: { type: "api", key: "or-key" },
+      });
+      expect(await readLoginEntries(STORE, "openai", ENTRIES, { home: a, env })).toEqual({
+        "openai-codex": { type: "oauth", refresh: "a" },
+      });
+      // Activating A again settles the switch without rewriting the file.
+      await activate(a);
+      expect((await readJson(`${shared}.pragma.json`)).providers).toEqual({
+        openai: { active: a, own },
+      });
+      // The harness then rotates A's token, and the next switch saves it to A.
+      const current = await readJson(shared);
+      await writeJson(shared, { ...current, "openai-codex": { type: "oauth", refresh: "a2" } });
+      await activate(null);
+      expect((await readJson(join(a, "auth.json")))["openai-codex"]).toEqual({
+        type: "oauth",
+        refresh: "a2",
+      });
+      expect((await readJson(shared))["openai-codex"]).toEqual(own["openai-codex"]);
+    });
+
+    it("saves entries it cannot attribute to no login", async () => {
+      const a = await home("a", { "openai-codex": { type: "oauth", refresh: "a" } });
+      await recordSwitch(a);
+      await writeJson(shared, { "openai-codex": { type: "oauth", refresh: "unknown" } });
+      await activate(a);
+      // The saved copies stay as they were, and A's copy replaces the unknown entries.
+      expect((await readJson(join(a, "auth.json")))["openai-codex"]).toEqual({
+        type: "oauth",
+        refresh: "a",
+      });
+      expect((await readJson(shared))["openai-codex"]).toEqual({ type: "oauth", refresh: "a" });
+      await activate(null);
+      expect((await readJson(shared))["openai-codex"]).toEqual(own["openai-codex"]);
+      expect(await readJson(`${shared}.pragma.json`)).toEqual({ providers: {} });
+    });
+  });
+
   it("clears a lock a crashed writer left behind", async () => {
     const lock = `${shared}.lock`;
     await mkdir(lock);
