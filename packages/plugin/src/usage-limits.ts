@@ -73,7 +73,11 @@ export async function runProviderCommand<TConfig>(
   return { kind: "ok", stdout: result.stdout };
 }
 
-/** A plugin-owned usage source rendered by Pragma's shared usage-limits UI. */
+/**
+ * A plugin-owned usage source rendered by Pragma's shared usage-limits UI.
+ * @deprecated Declare an account provider with `defineAccounts` and put these
+ * fields under its `usageLimits`.
+ */
 export interface UsageLimitProviderDefinition<TConfig = unknown> {
   id: string;
   title: string;
@@ -89,7 +93,11 @@ export interface UsageLimitProviderDefinition<TConfig = unknown> {
   load: (ctx: PluginContext<TConfig>) => Promise<UsageLimitsResult>;
 }
 
-/** Declares a provider for Pragma's shared usage-limits UI. */
+/**
+ * Declares a provider for Pragma's shared usage-limits UI.
+ * @deprecated Use `defineAccounts`. The host adapts legacy providers into a
+ * single-login account provider with no sign-in or switching.
+ */
 export function defineUsageLimitProvider<TConfig = unknown>(
   input: UsageLimitProviderDefinition<TConfig>,
 ): UsageLimitProviderDefinition<TConfig> {
