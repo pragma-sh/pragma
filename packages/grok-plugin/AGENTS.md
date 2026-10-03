@@ -230,3 +230,7 @@ grok's usage ceiling quickly, and a rate-limited turn is recorded as
 `cleared`, so scenarios fail for reasons that have nothing to do with the plugin. Check
 `~/.grok/sessions/<encoded-cwd>/<id>/updates.jsonl` for that record before debugging a
 failure.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `xai`. Each account is a `GROK_HOME`; login is `grok login --oauth`. No `identify` yet, so every Pragma-created login is its own account.

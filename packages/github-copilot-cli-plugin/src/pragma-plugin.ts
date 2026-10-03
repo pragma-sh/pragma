@@ -1,13 +1,15 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
+import { identifyCopilotAccount } from "./identity";
 import { loadGitHubCopilotUsageLimits } from "./usage-limits";
 
+export { identifyCopilotAccount, parseCopilotConfig } from "./identity";
 export { loadGitHubCopilotUsageLimits, parseGitHubCopilotUsageLimits } from "./usage-limits";
 
 const REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map((id) => ({
@@ -43,17 +45,28 @@ const baseWatcher = createTuiWatcher({
 export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
   name: "GitHub Copilot CLI",
   description: "Launch GitHub Copilot CLI from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "github-copilot",
-      title: "GitHub Copilot",
+  accounts: defineAccounts([
+    {
+      provider: "github-copilot",
+      agent: "github-copilot",
       dashboardUrl: "https://github.com/settings/copilot",
       iconPath: "assets/copilot.png",
-      primaryLimitId: "ai-credits",
-      refreshIntervalMs: 60_000,
-      load: loadGitHubCopilotUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["copilot", "login"],
+        instructions: "Enter the code shown here on the GitHub page that opens.",
+      },
+      // `COPILOT_HOME` replaces all of `~/.copilot`: config, sessions, and the
+      // plain-text token fallback when no system credential store exists.
+      env: (home) => ({ COPILOT_HOME: home }),
+      credentialPath: (home) => `System credential store, else ${home ?? "~/.copilot"}`,
+      identify: identifyCopilotAccount,
+      usageLimits: {
+        primaryLimitId: "ai-credits",
+        refreshIntervalMs: 60_000,
+        load: loadGitHubCopilotUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "github-copilot",

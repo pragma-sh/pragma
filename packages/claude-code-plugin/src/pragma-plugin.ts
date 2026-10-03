@@ -1,7 +1,8 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  type AccountIdentity,
   type PluginContext,
   type PluginDefinition,
   type UsageLimit,
@@ -36,19 +37,31 @@ const reasoningStandard = reasoningFull.slice(0, 3);
 export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
   name: "Claude Code",
   description: "Launch Claude Code from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "claude-code",
-      title: "Claude Code",
+  accounts: defineAccounts([
+    {
+      provider: "anthropic",
+      agent: "claude-code",
       dashboardUrl: "https://claude.ai/new#settings/usage",
       iconPath: "assets/claude-code.svg",
-      primaryLimitId: "five-hour",
-      // Each refresh spawns a headless `claude -p` session that queries Anthropic's
-      // strictly rate-limited OAuth usage endpoint; polling faster causes 429s.
-      refreshIntervalMs: 300_000,
-      load: loadClaudeUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["claude", "auth", "login"],
+        instructions: "Finish signing in to Claude in the browser tab that opens.",
+      },
+      // Claude Code keeps every credential and setting under its config dir, so
+      // pointing it at a Pragma-owned one gives each account its own login.
+      env: (home) => ({ CLAUDE_CONFIG_DIR: home }),
+      credentialPath: claudeCredentialPath,
+      identify: identifyClaudeAccount,
+      usageLimits: {
+        primaryLimitId: "five-hour",
+        // Each refresh spawns a headless `claude -p` session that queries
+        // Anthropic's strictly rate-limited OAuth usage endpoint; polling
+        // faster causes 429s.
+        refreshIntervalMs: 300_000,
+        load: loadClaudeUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     createTuiWatcher({
       agent: "claude-code",
@@ -88,6 +101,48 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
 });
 
 export default claudeCodeAgentPlugin;
+
+/** Where Claude Code keeps a login's token: the macOS Keychain, else the config dir. */
+export function claudeCredentialPath(home: string | null): string {
+  if (globalThis.process?.platform === "darwin") return "macOS Keychain (Claude Code-credentials)";
+  return `${home ?? "~/.claude"}/.credentials.json`;
+}
+
+/** Reports the signed-in Claude account from `claude auth status --json`. */
+export async function identifyClaudeAccount(ctx: PluginContext): Promise<AccountIdentity | null> {
+  const cwd = ctx.project?.path ?? "/tmp";
+  const [result] = await ctx.sdk.exec.run({ cwd, commands: ["claude auth status --json"] });
+  if (!result || result.status !== 0) {
+    return null;
+  }
+  return parseClaudeAuthStatus(result.stdout);
+}
+
+/** Parses `claude auth status --json`; a signed-out config dir yields null. */
+export function parseClaudeAuthStatus(stdout: string): AccountIdentity | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!isRecord(value) || value.loggedIn !== true) {
+    return null;
+  }
+  const email = typeof value.email === "string" ? value.email : undefined;
+  const orgId = typeof value.orgId === "string" ? value.orgId : undefined;
+  const id = orgId && email ? `${orgId}:${email}` : (orgId ?? email);
+  if (!id) {
+    return null;
+  }
+  const plan = typeof value.subscriptionType === "string" ? value.subscriptionType : undefined;
+  return {
+    id,
+    ...(email ? { email } : {}),
+    ...(typeof value.orgName === "string" ? { name: value.orgName } : {}),
+    ...(plan ? { plan: plan.charAt(0).toUpperCase() + plan.slice(1) } : {}),
+  };
+}
 
 /** Loads plan usage through Claude Code's structured `/usage` control request. */
 export async function loadClaudeUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {

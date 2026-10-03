@@ -1,29 +1,87 @@
 import { runProviderCommand } from "@pragma-sh/plugin/catalog";
-import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
+import type {
+  AccountIdentity,
+  PluginContext,
+  UsageLimit,
+  UsageLimitsResult,
+} from "@pragma-sh/plugin/catalog";
 
 const RATE_LIMITS_REQUEST_ID = 2;
+const ACCOUNT_REQUEST_ID = 3;
 /** Metered bucket codex reports for the account's main quota. */
 const CODEX_BUCKET_ID = "codex";
 // Keep stdin open long enough for slower app-server processes to flush their response.
 const APP_SERVER_DRAIN_SECONDS = 3;
-const APP_SERVER_MESSAGES = [
-  {
-    method: "initialize",
-    id: 1,
-    params: {
-      clientInfo: { name: "pragma", title: "Pragma", version: "0.0.0" },
+
+/** Pipes one request to `codex app-server` after the initialize handshake. */
+function appServerCommand(request: { method: string; id: number; params: unknown }): string {
+  const messages = [
+    {
+      method: "initialize",
+      id: 1,
+      params: {
+        clientInfo: { name: "pragma", title: "Pragma", version: "0.0.0" },
+      },
     },
-  },
-  { method: "initialized", params: {} },
-  { method: "account/rateLimits/read", id: RATE_LIMITS_REQUEST_ID, params: {} },
-];
-const APP_SERVER_INPUT = APP_SERVER_MESSAGES.map((message) =>
-  shellQuote(JSON.stringify(message)),
-).join(" ");
-const USAGE_COMMAND =
-  `command -v codex >/dev/null 2>&1 || exit 20; ` +
-  `{ printf '%s\\n' ${APP_SERVER_INPUT}; sleep ${APP_SERVER_DRAIN_SECONDS}; } | ` +
-  "codex app-server --stdio";
+    { method: "initialized", params: {} },
+    request,
+  ];
+  const input = messages.map((message) => shellQuote(JSON.stringify(message))).join(" ");
+  return (
+    `command -v codex >/dev/null 2>&1 || exit 20; ` +
+    `{ printf '%s\\n' ${input}; sleep ${APP_SERVER_DRAIN_SECONDS}; } | ` +
+    "codex app-server --stdio"
+  );
+}
+
+const USAGE_COMMAND = appServerCommand({
+  method: "account/rateLimits/read",
+  id: RATE_LIMITS_REQUEST_ID,
+  params: {},
+});
+const ACCOUNT_COMMAND = appServerCommand({
+  method: "account/read",
+  id: ACCOUNT_REQUEST_ID,
+  params: {},
+});
+
+/** Reports the signed-in ChatGPT account through app-server `account/read`. */
+export async function identifyCodexAccount(ctx: PluginContext): Promise<AccountIdentity | null> {
+  const outcome = await runProviderCommand(ctx, ACCOUNT_COMMAND);
+  return outcome.kind === "ok" ? parseCodexAccount(outcome.stdout) : null;
+}
+
+/**
+ * Finds the `account/read` reply in app-server output. Only a ChatGPT login
+ * has an identity (and usage limits); an API key or no login yields null.
+ */
+export function parseCodexAccount(stdout: string): AccountIdentity | null {
+  const reply = findAppServerReply(stdout, ACCOUNT_REQUEST_ID);
+  const account = reply && isRecord(reply.result) ? reply.result.account : null;
+  if (!isRecord(account) || account.type !== "chatgpt") return null;
+  const email = stringValue(account.email);
+  if (!email) return null;
+  const plan = stringValue(account.planType);
+  return {
+    id: email,
+    email,
+    ...(plan ? { plan: plan.charAt(0).toUpperCase() + plan.slice(1) } : {}),
+  };
+}
+
+/** The app-server NDJSON message answering request `id`, skipping any other line. */
+function findAppServerReply(stdout: string, id: number): Record<string, unknown> | undefined {
+  for (const line of stdout.split("\n")) {
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (isRecord(message) && message.id === id) return message;
+  }
+  return undefined;
+}
 
 /** Loads Codex plan limits through its supported app-server account API. */
 export async function loadCodexUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
@@ -43,30 +101,22 @@ export async function loadCodexUsageLimits(ctx: PluginContext): Promise<UsageLim
 
 /** Scans app-server NDJSON output for the rate-limit response and normalizes it. */
 export function extractCodexUsageLimits(stdout: string, observedAt: number): UsageLimitsResult {
-  for (const line of stdout.split("\n")) {
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!isRecord(message) || message.id !== RATE_LIMITS_REQUEST_ID) {
-      continue;
-    }
-    if ("result" in message) {
-      return parseCodexUsageLimits(message.result, observedAt);
-    }
-    const detail = isRecord(message.error) ? stringValue(message.error.message) : null;
-    if (detail && /auth|login|api key/i.test(detail)) {
-      return {
-        status: "unavailable",
-        reason: "authentication-required",
-        message: "Sign in to Codex with ChatGPT to load usage limits.",
-      };
-    }
-    throw new Error(detail ?? "Codex usage request failed");
+  const message = findAppServerReply(stdout, RATE_LIMITS_REQUEST_ID);
+  if (!message) {
+    throw new Error("Codex app-server did not return usage data");
   }
-  throw new Error("Codex app-server did not return usage data");
+  if ("result" in message) {
+    return parseCodexUsageLimits(message.result, observedAt);
+  }
+  const detail = isRecord(message.error) ? stringValue(message.error.message) : null;
+  if (detail && /auth|login|api key/i.test(detail)) {
+    return {
+      status: "unavailable",
+      reason: "authentication-required",
+      message: "Sign in to Codex with ChatGPT to load usage limits.",
+    };
+  }
+  throw new Error(detail ?? "Codex usage request failed");
 }
 
 /** Normalizes app-server `account/rateLimits/read` output. */

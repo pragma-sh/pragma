@@ -162,3 +162,34 @@ yet, so the base command is the effective launch; when the selector gets wired, 
 the baked-in `-y`). `--model <alias>` selects the model. Outside a Pragma terminal
 `PRAGMA_SERVER_SOCKET`/`PRAGMA_DAEMON_SOCKET` are unset and every hook is a silent no-op
 (exit 0), so the plugin is harmless in plain terminals.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `moonshot`, without usage limits. Each account is a `KIMI_CODE_HOME` (Kimi's whole data root); login is `kimi login` (device-code flow).
+
+## Account providers
+
+`moonshot` is Kimi's own sign-in: multi-account through `KIMI_CODE_HOME`, login `kimi login`.
+
+`src/accounts.ts` adds one provider per well-known API-key provider (`KIMI_API_KEY_PROVIDERS`,
+from `modelsDevAccountProviders` in `@pragma-sh/plugin`, minus `moonshot`). `kimi provider
+catalog add <id> --api-key …` imports a provider under its models.dev id, so a provider in
+`config.toml` named `openrouter`, `zai-coding-plan`, … is matched by that id; a custom-named
+provider is not recognized. Only providers that sell keys for use in any client are listed; Anthropic and Google are API keys, never the Claude or Gemini subscription sign-ins those providers restrict to their own apps. Each lends its key to OpenCode, Pi and Prime Agent (`sharedToken`, kind `key:<provider>`, read-only): Kimi never takes one, because its config is written through `kimi provider catalog add`, which would put the key on a command line, and it has no per-account slot to hold a copy.
+
+- **Read through the CLI, not the file.** `identify` runs `kimi provider list --json` (the same
+  command the model loader uses), which applies `KIMI_CODE_HOME` and Kimi's own config rules.
+  Parsing `config.toml` ourselves would duplicate those rules and add a TOML parser to a
+  bundle the webview also loads.
+- **One listing per reload, not one per row.** Every provider identifies at once, so the
+  parsed keys are memoized per login env for 5s; without it a reload runs Kimi ~20 times.
+- **The key never leaves `accounts.ts`.** Only `apiKeyIdentity`'s digest is returned; never
+  log the listing.
+- **`available` asks Kimi's catalog.** `kimi provider catalog list --json` (models.dev,
+  fetched over the network, ~1.4s) lists what `catalog add` can import; a provider none of
+  whose ids appear is not listed. One listing is cached for 10 minutes and capped at 10s;
+  a failed or unreadable listing keeps every provider and is not cached.
+- No `env` and no `login`: only `moonshot` may move `KIMI_CODE_HOME` (two providers setting
+  it fight at launch), and Kimi has no interactive key prompt — the paste field cannot drive
+  `catalog add`. Known limit, as with OpenCode Go: switching `moonshot` to a Pragma-added
+  account moves the whole Kimi home, so the keys then come from that directory's config.

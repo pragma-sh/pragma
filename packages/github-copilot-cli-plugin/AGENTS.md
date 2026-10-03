@@ -145,3 +145,7 @@ pragma-cli agent verify --agent pragma.github-copilot --abort-input '\x1b' --inc
 
 Verifier skips explicitly unsupported question and abort/interrupt scenarios. Command approval,
 subagents, session naming, usage limits, stream integrity, and crash cleanup remain required.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `github-copilot`. Each account is a `COPILOT_HOME`; login is `copilot login` (device flow). Copilot prefers the system credential store and falls back to a plain-text token under `COPILOT_HOME`; whether two logins coexist in the Keychain still needs a real two-account test. `identify` reads `$COPILOT_HOME/config.json` (`last_logged_in_user`, then `logged_in_users`) and returns the lowercased github.com login — the id OpenCode and Pi Copilot sign-ins also produce, so they merge. The format was confirmed from a third-party reader (VTCode's Copilot auth), not a local install; enterprise hosts return null.

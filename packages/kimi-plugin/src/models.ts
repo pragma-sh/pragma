@@ -4,8 +4,10 @@ import type { AgentModelEntry, PluginContext } from "@pragma-sh/plugin/catalog";
 // GUI-launched Pragma hosts do not put on the subprocess PATH (see
 // `process_env` in pragma-core). The `||` fallback keeps the loader working on
 // such a host while still preferring a `kimi` the user installed on PATH.
-const KIMI_BIN_DIR = "$HOME/.kimi-code/bin";
-const KIMI_MODELS_COMMAND = `kimi provider list --json || "${KIMI_BIN_DIR}/kimi" provider list --json`;
+/** Where the official Kimi Code installer puts the CLI. */
+export const KIMI_BIN_DIR = "$HOME/.kimi-code/bin";
+/** Kimi Code's configured providers and model aliases, as JSON. */
+export const KIMI_MODELS_COMMAND = `kimi provider list --json || "${KIMI_BIN_DIR}/kimi" provider list --json`;
 const KIMI_DEFAULT_MODEL_COMMAND = `kimi provider list || "${KIMI_BIN_DIR}/kimi" provider list`;
 
 interface KimiConfigModel {
@@ -87,7 +89,8 @@ export function parseKimiDefaultModel(output: string): string | undefined {
   return match?.[1]?.trim() || undefined;
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
+/** `value` as a plain object, or undefined. */
+export function recordValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;

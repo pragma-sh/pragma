@@ -33,6 +33,10 @@ do not present context-window consumption as account allowance.
 Full live verification is optional while Prime retains Pi's extension API. Focused tests
 must still cover identity matching and model parsing.
 
+## Account providers
+
+Uses `piAccountProviders` from `@pragma-sh/pi-plugin/pragma-plugin-factory` with Prime's own store: `PRIME_AGENT_CODING_AGENT_DIR`, default `~/.prime/agent/auth.json` (same entry keys as Pi). The env name is derived from the package's config name upstream (`packages/coding-agent/src/config.ts`). See the Pi guide for why the agent dir never moves. OpenAI switches by swapping `auth.json` like Pi's; its login is `prime-agent --no-session` with `input: ["/login", "ChatGPT"]` and `inputDelayMs: 6000`. Prime 0.7's `/login` takes no provider and lists signed-in providers first, which an in-place sign-in has just signed out of, so the line filters the picker rather than trusting the order; Prime starts a daemon and kernel before its prompt accepts input. Prime cannot sign in against a scratch `PRIME_AGENT_CODING_AGENT_DIR` (its per-user daemon socket is shared and dies with `DaemonSocketClosedError`), which is why sign-in is in place. Prime wraps the sign-in URL at its panel width without an OSC 8 link, so on an SSH host the dialog's link is truncated; Prime opens the browser itself locally.
+
 ## Branding
 
 `assets/prime-butterfly.svg` comes from Prime Intellect's official Prime Agent repository:

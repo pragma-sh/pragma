@@ -196,3 +196,7 @@ there, not in Rust/Tauri IPC.
    worktrees may inherit trust from the main checkout (see Cursor CLI changelog). Use
    `--force` only if you intentionally want headless-style trust + run-everything
    behavior in interactive sessions.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `cursor` with **no `env`**: on macOS Cursor keeps its token under the fixed Keychain entry `cursor-access-token`, so a second `CURSOR_CONFIG_DIR` would overwrite the first login instead of sitting beside it. Signing in again (`cursor-agent login`) replaces the one login. `identify` parses `cursor-agent status`.

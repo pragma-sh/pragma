@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { PI_ACCOUNT_ENTRIES } from "@pragma-sh/pi-plugin/pragma-plugin-factory";
+
 import { primeAgentPlugin } from "./pragma-plugin";
 
 describe("Prime Agent plugin", () => {
@@ -14,6 +16,17 @@ describe("Prime Agent plugin", () => {
       launch: { command: ["prime-agent", "--no-session"] },
     });
     expect(primeAgentPlugin.watchers?.[0]?.agent).toBe("prime-agent");
+  });
+
+  it("identifies Pi's sign-ins from Prime Agent's own directory", () => {
+    const accounts = primeAgentPlugin.accounts ?? [];
+    expect(accounts.map((provider) => provider.provider)).toEqual(
+      PI_ACCOUNT_ENTRIES.map((entry) => entry.provider),
+    );
+    expect(accounts.every((provider) => provider.agent === "prime-agent")).toBe(true);
+    expect(accounts[0]?.credentialPath?.(null)).toBe(
+      "$PRIME_AGENT_CODING_AGENT_DIR or ~/.prime/agent/auth.json",
+    );
   });
 
   it("discovers V4 Flash through Prime's model command", async () => {

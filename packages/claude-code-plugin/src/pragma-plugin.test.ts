@@ -1,6 +1,11 @@
 import { expect, it, vi } from "vitest";
 
-import { claudeCodeAgentPlugin, loadClaudeUsageLimits, parseClaudeUsage } from "./pragma-plugin";
+import {
+  claudeCodeAgentPlugin,
+  loadClaudeUsageLimits,
+  parseClaudeAuthStatus,
+  parseClaudeUsage,
+} from "./pragma-plugin";
 
 it("declares command approvals unsupported but questions supported", () => {
   const agent = claudeCodeAgentPlugin.agents?.[0];
@@ -10,10 +15,33 @@ it("declares command approvals unsupported but questions supported", () => {
   expect(agent?.excludeFeatures).not.toContain("questions");
 });
 
-it("links to Claude's usage dashboard", () => {
-  expect(claudeCodeAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
-    "https://claude.ai/new#settings/usage",
-  );
+it("declares an Anthropic account provider with its own config dir per login", () => {
+  const provider = claudeCodeAgentPlugin.accounts?.[0];
+  expect(provider).toMatchObject({
+    provider: "anthropic",
+    agent: "claude-code",
+    dashboardUrl: "https://claude.ai/new#settings/usage",
+    login: { command: ["claude", "auth", "login"] },
+    usageLimits: { primaryLimitId: "five-hour" },
+  });
+  expect(provider?.env?.("/h/1")).toEqual({ CLAUDE_CONFIG_DIR: "/h/1" });
+  expect(claudeCodeAgentPlugin.usageLimits).toBeUndefined();
+});
+
+it("identifies a login from claude auth status", () => {
+  expect(
+    parseClaudeAuthStatus(
+      JSON.stringify({
+        loggedIn: true,
+        email: "a@b.c",
+        orgId: "org-1",
+        orgName: "Acme",
+        subscriptionType: "max",
+      }),
+    ),
+  ).toEqual({ id: "org-1:a@b.c", email: "a@b.c", name: "Acme", plan: "Max" });
+  expect(parseClaudeAuthStatus(JSON.stringify({ loggedIn: false }))).toBeNull();
+  expect(parseClaudeAuthStatus("not json")).toBeNull();
 });
 
 it("normalizes Claude plan usage windows", () => {

@@ -271,3 +271,9 @@ The shared approval scenarios (`command-allow`/`command-deny`/`decision-timeout`
 `PermissionRequest`, so an `ls`-based prompt fails with "agent settled without command
 attention" even though the blocking approval hook works. A write outside the workspace
 escalates and fires the hook.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `openai` (agent `codex`). Each account is a `CODEX_HOME`; login is `codex login`; `identify` sends app-server `account/read` and uses the ChatGPT email (an API-key login has no identity and no plan limits).
+
+`sharedToken` (`src/shared-token.ts`, kind `chatgpt`) reads and writes `$CODEX_HOME/auth.json` `tokens` so OpenCode, Pi, and Prime Agent can use a Codex sign-in (same OAuth client, `app_EMoamEEZ73f0CkXaXp7hrann`) and the reverse. Codex needs an `id_token` the others drop: a token written here keeps the existing one, and Codex refuses a sign-in it has never had. `last_refresh` is set to the access token's `iat`, so Codex's ~8-day refresh schedule is unchanged.

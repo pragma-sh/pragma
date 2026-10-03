@@ -368,3 +368,7 @@ caches.
    hooks file detected". The manifest `hooks` field is only for _additional_ hook files.
 2. Installed at user scope, the plugin runs in **every Claude session**, including
    outside Pragma — hence the `PRAGMA_DAEMON_SOCKET` guard on every hook.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `anthropic` (agent `claude-code`). Each Pragma-created account is a `CLAUDE_CONFIG_DIR` under `~/.pragma/accounts/anthropic/`; login is `claude auth login`; `identify` parses `claude auth status --json` (`orgId:email`, so two users of one Team org stay separate). On macOS the token lives in the Keychain, which Claude Code keys by config dir, so `credentialPath` reports the Keychain rather than a file.

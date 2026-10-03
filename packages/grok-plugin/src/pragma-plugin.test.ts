@@ -88,11 +88,12 @@ describe("grokAgentPlugin", () => {
     expect(agent?.args.reasoning("high")).toEqual(["--reasoning-effort", "high"]);
   });
 
-  it("registers the usage provider against the launcher's icon", () => {
-    const provider = grokAgentPlugin.usageLimits?.[0];
-    expect(provider?.id).toBe("grok");
-    expect(provider?.primaryLimitId).toBe("credits");
+  it("registers the xAI account provider against the launcher's icon", () => {
+    const provider = grokAgentPlugin.accounts?.[0];
+    expect(provider?.provider).toBe("xai");
+    expect(provider?.usageLimits?.primaryLimitId).toBe("credits");
     expect(provider?.iconPath).toBe(agent?.iconPath);
+    expect(provider?.env?.("/h/1")).toEqual({ GROK_HOME: "/h/1" });
   });
 
   it("uses the local agent id for the watcher, so reports and events line up", () => {
