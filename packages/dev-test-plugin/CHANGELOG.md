@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.0.2...dev-test-plugin-v1.1.0) (2026-10-03)
+
+
+### Features
+
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **dev-test-plugin:** add a sample prompt context provider ([cb56dee](https://github.com/pragma-sh/pragma/commit/cb56dee580341983069e5225f6c7e2b2ffbb8c17))
+
+
+### Bug Fixes
+
+* **ci:** unblock pre-push checks ([c5fee4a](https://github.com/pragma-sh/pragma/commit/c5fee4ad5857b5710833dd0fba089ab2789c36b4))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.2.0
+    * @pragma-sh/plugin bumped to 1.2.0
+    * @pragma-sh/sdk bumped to 1.2.0
+
 ## [1.0.2](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.0.1...dev-test-plugin-v1.0.2) (2026-09-26)
 
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.1.0...plugin-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **plugin:** add account provider API, callbacks, and SDK client ([1855ad3](https://github.com/pragma-sh/pragma/commit/1855ad342ea0e65720498ce06053784e75289a23))
+* **plugin:** add agent launch options and prompt context providers ([a9cb8b7](https://github.com/pragma-sh/pragma/commit/a9cb8b7b045aa1d6ae736de5afd27609795ce6a6))
+* **plugin:** add canonicalId for benchmark model matching ([5b5fb44](https://github.com/pragma-sh/pragma/commit/5b5fb44c7a829796b99826d6df849e88859f8245))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+
+
+### Bug Fixes
+
+* **accounts:** keep swapped credentials consistent across failures ([5c441ab](https://github.com/pragma-sh/pragma/commit/5c441ab6d473bdde127f092ef0f8f8cde2195831))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.1.0 to ^1.2.0
+    * @pragma-sh/sdk bumped from ^1.1.0 to ^1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.0.1...plugin-v1.1.0) (2026-09-26)
 
 

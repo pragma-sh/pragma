@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.1.0...pragma-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **plugin:** add canonicalId for benchmark model matching ([5b5fb44](https://github.com/pragma-sh/pragma/commit/5b5fb44c7a829796b99826d6df849e88859f8245))
+* **pragma:** add agent launch options, context, and pre-launch commands ([45a9ce7](https://github.com/pragma-sh/pragma/commit/45a9ce72c26abfef5f33445cdaa0c9136f7a6215))
+* **pragma:** add AI merge-conflict resolution to the PR view ([6bfae45](https://github.com/pragma-sh/pragma/commit/6bfae4546a7b7d575126046d7433fe3a7e396d09))
+* **pragma:** add AI merge-conflict resolution to the PR view ([60d30b2](https://github.com/pragma-sh/pragma/commit/60d30b2d7468718ffa330d6ce7bb79819ddd6429))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+* **pragma:** add Auto mode to agent pickers ([3bf0305](https://github.com/pragma-sh/pragma/commit/3bf0305d1f76c648dd6eec6016e84a20abcb96ed))
+* **pragma:** add compact sidebar rows setting ([edbdca9](https://github.com/pragma-sh/pragma/commit/edbdca92548c3137df2f2408bb39d7eed7306e3e))
+* **pragma:** add detailed sidebar worktree rows ([a484729](https://github.com/pragma-sh/pragma/commit/a4847295063f13e201867841ee17f65e851ea44c))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+* **pragma:** add Export HTML action for scratchpads ([ac56355](https://github.com/pragma-sh/pragma/commit/ac56355be10e743d93f6e2946cb8cdef627a3d71))
+* **pragma:** add System 1 connection settings ([f90aa48](https://github.com/pragma-sh/pragma/commit/f90aa4879b2a982dac8dea677025cf79eb8aae81))
+* **pragma:** export scratchpads as standalone offline HTML ([ab4c167](https://github.com/pragma-sh/pragma/commit/ab4c1671c90a8e19af42223505092be7e4af9ea1))
+* **pragma:** replace the usage popover with account providers UI ([93215f1](https://github.com/pragma-sh/pragma/commit/93215f106dc4f934bb44af42fa7fc7307e4ce357))
+* **pragma:** show System 1 agent progress in the sidebar ([2568f4c](https://github.com/pragma-sh/pragma/commit/2568f4c8b457a4a3302245c98f9df44c123053db))
+* **pragma:** track git actions and PR drafts in the sidebar ([b9cb87e](https://github.com/pragma-sh/pragma/commit/b9cb87e1a5fb11da390ad5c26bf30cbd4cbf24c6))
+
+
+### Bug Fixes
+
+* **accounts:** keep swapped credentials consistent across failures ([5c441ab](https://github.com/pragma-sh/pragma/commit/5c441ab6d473bdde127f092ef0f8f8cde2195831))
+* **ci:** unblock pre-push checks ([c5fee4a](https://github.com/pragma-sh/pragma/commit/c5fee4ad5857b5710833dd0fba089ab2789c36b4))
+* harden System 1 settings and auto mode filters ([76d4f7c](https://github.com/pragma-sh/pragma/commit/76d4f7c4dc9ee9ae445a0c2e21055eae6142db31))
+* **pragma:** clear scratchpad export push checks ([aa17d96](https://github.com/pragma-sh/pragma/commit/aa17d9635643cdf562c5f10f94259704d0a76852))
+* **pragma:** harden AI merge-conflict resolution ([89a27f0](https://github.com/pragma-sh/pragma/commit/89a27f0bf4775d57243ce8f80ba65dc0b7fa0bb9))
+* **pragma:** scope agent progress to its run and hide ready-for-PR only for live PRs ([595217e](https://github.com/pragma-sh/pragma/commit/595217ebc3a13ee1a42d2c17540a77508b8ac665))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.2.0
+    * @pragma-sh/plugin bumped to 1.2.0
+    * @pragma-sh/scratchpad bumped to 1.2.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.2.0
+    * @pragma-sh/sdk bumped to 1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.0.1...pragma-v1.1.0) (2026-09-26)
 
 

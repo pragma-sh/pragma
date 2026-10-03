@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/constants-v1.1.0...constants-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* add host-owned account providers with per-launch env ([b019a1f](https://github.com/pragma-sh/pragma/commit/b019a1f8224a99dd1a7149ccbc7017654b779dc7))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **ai-helpers:** estimate agent progress with System 1 ([46386c7](https://github.com/pragma-sh/pragma/commit/46386c7c264cfe5ee4333eddf3893482d739b937))
+* **constants:** add agent launch options and prelaunch command contracts ([eed9d5c](https://github.com/pragma-sh/pragma/commit/eed9d5c6e997849122b3edf2b3fd61476a5fce12))
+* **constants:** add destinations for standalone scratchpad exports ([a0187c6](https://github.com/pragma-sh/pragma/commit/a0187c6857050a26e1eb6a8d52b98b532752b1ae))
+* **constants:** add System 1 defaults and status schema ([abe1680](https://github.com/pragma-sh/pragma/commit/abe1680eb0ac116ecc5396b32476ce1f64021bfa))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+* **pragma:** export scratchpads as standalone offline HTML ([ab4c167](https://github.com/pragma-sh/pragma/commit/ab4c1671c90a8e19af42223505092be7e4af9ea1))
+
+
+### Bug Fixes
+
+* satisfy clippy 1.99 assert_is_empty in tests ([e9d0fb4](https://github.com/pragma-sh/pragma/commit/e9d0fb43a1362cedbc09a68d3af3824607eb79b0))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/constants-v1.0.1...constants-v1.1.0) (2026-09-26)
 
 

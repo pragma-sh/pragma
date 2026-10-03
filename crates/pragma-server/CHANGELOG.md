@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.1.0...pragma-server-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* add host-owned account providers with per-launch env ([b019a1f](https://github.com/pragma-sh/pragma/commit/b019a1f8224a99dd1a7149ccbc7017654b779dc7))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **pragma-server:** apply launch options and run pre-launch commands ([c311c51](https://github.com/pragma-sh/pragma/commit/c311c51dca0b498866e66d2ff242d1093c92217a))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+
+
+### Bug Fixes
+
+* **accounts:** keep swapped credentials consistent across failures ([5c441ab](https://github.com/pragma-sh/pragma/commit/5c441ab6d473bdde127f092ef0f8f8cde2195831))
+* satisfy clippy 1.99 assert_is_empty in tests ([e9d0fb4](https://github.com/pragma-sh/pragma/commit/e9d0fb43a1362cedbc09a68d3af3824607eb79b0))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.0.1...pragma-server-v1.1.0) (2026-09-26)
 
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.1.0...scratchpad-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* **pragma:** export scratchpads as standalone offline HTML ([ab4c167](https://github.com/pragma-sh/pragma/commit/ab4c1671c90a8e19af42223505092be7e4af9ea1))
+* **scratchpad:** disable agent feedback in standalone exports ([d36ab4d](https://github.com/pragma-sh/pragma/commit/d36ab4d8917299007af81d9dd6fee0a85577c682))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sdk bumped from ^1.1.0 to ^1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.0.1...scratchpad-v1.1.0) (2026-09-26)
 
 
