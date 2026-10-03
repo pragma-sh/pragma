@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { AccountProvidersMenu } from "@/components/accounts/AccountProvidersMenu";
 import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
   ContextMenu,
@@ -51,7 +52,6 @@ import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { TabRenameInput } from "@/components/tabs/TabRenameInput";
 import { type TabRenameApi, useTabRename } from "@/components/tabs/use-tab-rename";
-import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
 import { useWslDistros } from "@/hooks/use-wsl-distros";
@@ -325,7 +325,20 @@ function ProjectScriptButtons({ workspace }: { workspace: Workspace }) {
   });
 }
 
-/** The left side of the toolbar: agents menu, usage limits, go-back. */
+/** The toolbar's Account providers menu for the selected project's host. */
+function ToolbarAccountProviders({ workspace }: { workspace: Workspace }) {
+  const kanban = useKanban();
+  const worktreeId = workspace.selectedWorktreeId;
+  return (
+    <AccountProvidersMenu
+      isRemote={worktreeId ? workspace.remoteWorktrees[worktreeId] === true : false}
+      onOpenSettings={() => kanban.openSettings("accounts")}
+      projectId={workspace.selectedProjectId}
+    />
+  );
+}
+
+/** The left side of the toolbar: agents menu, account providers, go-back. */
 function TerminalToolbar({
   workspace,
   topperItems,
@@ -338,7 +351,7 @@ function TerminalToolbar({
     // rather than squeezing its controls into each other.
     <div className="flex shrink-0 items-center gap-1">
       <AgentsMenu />
-      <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
+      <ToolbarAccountProviders workspace={workspace} />
       <PluginTopperItems items={topperItems} />
       {workspace.agentBackAvailable ? (
         <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>

@@ -8,7 +8,6 @@ import type {
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
-  UsageLimitProviderDefinition,
 } from "@pragma-sh/plugin";
 import {
   PluginBoundary,
@@ -54,13 +53,6 @@ export function usePluginSidebarCards(
   activeProjectId: string | null,
 ): VisiblePluginContribution<SidebarCardDefinition>[] {
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarCards);
-}
-
-/** Returns active providers for the shared usage-limits display. */
-export function usePluginUsageLimitProviders(
-  activeProjectId: string | null,
-): VisiblePluginContribution<UsageLimitProviderDefinition>[] {
-  return useVisibleContributions(activeProjectId, (definition) => definition.usageLimits);
 }
 
 function useVisibleContributions<TContribution extends object>(
@@ -126,10 +118,7 @@ function shouldShow<TConfig>(
 }
 
 /** Builds callback context for a loaded plugin record. */
-export function pluginContextForRecord(
-  record: PluginRecord,
-  runtime: PluginRuntime,
-): PluginContext {
+function pluginContextForRecord(record: PluginRecord, runtime: PluginRuntime): PluginContext {
   if (!runtime.sdk) {
     throw new Error("Plugin SDK is not connected yet");
   }

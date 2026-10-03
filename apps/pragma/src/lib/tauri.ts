@@ -43,6 +43,7 @@ import type {
   WhiteboardViewResult,
   WslDistroList,
 } from "@pragma-sh/constants";
+import { AccountsApi, type AccountLaunchEnv, type AccountsRequest } from "@pragma-sh/sdk";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -347,6 +348,7 @@ export function ptySpawn(
   rows: number,
   onEvent: PtyEventHandler,
   shell?: ShellProfile | null,
+  env?: LaunchEnv,
 ): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
   const generation = ++nextPtyStreamGeneration;
@@ -359,6 +361,7 @@ export function ptySpawn(
     cols,
     rows,
     shell,
+    env: env?.length ? env : null,
     streamGeneration: generation,
     onEvent: channel,
   }).then(() => ({ channel, generation }));
@@ -372,9 +375,21 @@ export function ptySpawnDetached(
   cols: number,
   rows: number,
   shell?: ShellProfile | null,
+  env?: LaunchEnv,
 ): Promise<void> {
-  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows, shell });
+  return invoke("pty_spawn_detached", {
+    sessionId,
+    worktreeId,
+    cwd,
+    cols,
+    rows,
+    shell,
+    env: env?.length ? env : null,
+  });
 }
+
+/** Extra `[name, value]` environment for a spawned shell (an agent's bound accounts). */
+export type LaunchEnv = Array<[string, string]>;
 
 /**
  * Attaches to an existing daemon PTY session and replays daemon scrollback.
@@ -2121,6 +2136,30 @@ export function pluginStorageSet(pluginId: string, key: string, value: string): 
 /** Deletes one plugin-owned durable storage value. */
 export function pluginStorageDelete(pluginId: string, key: string): Promise<void> {
   return invoke("plugin_storage_delete", { pluginId, key });
+}
+
+// -------------------------------- accounts --------------------------------
+
+/**
+ * Sends one `accounts` RPC to the host that owns the project (this machine when
+ * `projectId` is null). The host fills `projectRoot` from the project.
+ */
+function accountsRpc<T>(projectId: string | null, request: AccountsRequest): Promise<T> {
+  return invoke<T>("accounts_rpc", { projectId, payload: request });
+}
+
+/** The typed accounts API for one project's host. */
+export function accountsApi(projectId: string | null): AccountsApi {
+  return new AccountsApi((request) => accountsRpc(projectId, request));
+}
+
+/** Env a launch of `agentId` into a worktree needs for its bound accounts. */
+export function accountsLaunchEnv(
+  worktreeId: string,
+  agentId: string,
+  tabId: string,
+): Promise<AccountLaunchEnv> {
+  return invoke<AccountLaunchEnv>("accounts_launch_env", { worktreeId, agentId, tabId });
 }
 
 // -------------------------------- fanouts ---------------------------------
