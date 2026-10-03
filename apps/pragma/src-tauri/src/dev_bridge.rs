@@ -14,7 +14,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 /// Bridge protocol version exposed via `GET /version`. Bumped whenever the
 /// HTTP surface changes shape so CLI clients can feature-detect.
-pub const BRIDGE_VERSION: &str = "0.7.0";
+pub const BRIDGE_VERSION: &str = "0.8.0";
 
 #[derive(Deserialize)]
 struct EvalRequest {
@@ -27,6 +27,19 @@ struct EvalRequest {
 #[derive(Deserialize)]
 struct LogRequest {
     token: String,
+}
+
+#[derive(Deserialize)]
+struct MenuRequest {
+    token: String,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MenuItemInfo {
+    id: &'static str,
+    accelerator: &'static str,
 }
 
 #[derive(Serialize)]
@@ -421,7 +434,7 @@ pub fn __dev_bridge_result(
     state.notify.notify_all();
 }
 
-const EVAL_TIMEOUT_MESSAGE: &str = "Eval timeout: no result callback received. Re-copy examples/tauri-bridge/src/dev_bridge.rs from tauri-agent-tools 0.7.0+ and verify Tauri IPC is available.";
+const EVAL_TIMEOUT_MESSAGE: &str = "Eval timeout: no result callback received. The page may be reloading or blocked; retry, and verify Tauri IPC is available.";
 
 fn build_eval_callback_js(js: &str, request_id: &str) -> String {
     format!(
@@ -470,6 +483,25 @@ fn build_eval_callback_js(js: &str, request_id: &str) -> String {
         js = serde_json::to_string(js).unwrap(),
         id = serde_json::to_string(request_id).unwrap(),
     )
+}
+
+/// Captures the largest visible window owned by this process as PNG bytes.
+fn capture_own_window() -> Result<Vec<u8>, String> {
+    let pid = std::process::id();
+    let windows = xcap::Window::all().map_err(|e| format!("listing windows failed: {e}"))?;
+    let window = windows
+        .into_iter()
+        .filter(|w| w.pid().ok() == Some(pid) && !w.is_minimized().unwrap_or(true))
+        .max_by_key(|w| u64::from(w.width().unwrap_or(0)) * u64::from(w.height().unwrap_or(0)))
+        .ok_or("this app has no visible window to capture")?;
+    let image = window.capture_image().map_err(|e| {
+        format!("window capture failed (grant the dev app Screen Recording permission): {e}")
+    })?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, xcap::image::ImageFormat::Png)
+        .map_err(|e| format!("PNG encoding failed: {e}"))?;
+    Ok(png.into_inner())
 }
 
 /// Start the development bridge HTTP server.
@@ -568,6 +600,8 @@ pub fn start_bridge(
                         "/capabilities".to_string(),
                         "/devtools".to_string(),
                         "/health".to_string(),
+                        "/screenshot".to_string(),
+                        "/menu".to_string(),
                     ],
                 };
                 let json = serde_json::to_string(&resp).unwrap();
@@ -585,6 +619,8 @@ pub fn start_bridge(
                     | "/capabilities"
                     | "/devtools"
                     | "/health"
+                    | "/screenshot"
+                    | "/menu"
             );
             if !is_post || !known_post {
                 let _ = request.respond(Response::from_string("Not found").with_status_code(404));
@@ -620,6 +656,71 @@ pub fn start_bridge(
                 let json = serde_json::to_string(&resp).unwrap();
                 let header = Header::from_bytes("Content-Type", "application/json").unwrap();
                 let _ = request.respond(Response::from_string(json).with_header(header));
+                continue;
+            }
+
+            // Handle /menu — list the native menu's accelerators, or fire one
+            // item by id. macOS gives menu chords (Cmd+T, Cmd+W, …) to the menu
+            // bar before the webview sees them, so a synthetic keydown can never
+            // reach them; this is how a driver presses them for real.
+            if url == "/menu" {
+                let req: MenuRequest = match serde_json::from_str(&body) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let _ = request
+                            .respond(Response::from_string("Invalid JSON").with_status_code(400));
+                        continue;
+                    }
+                };
+                if req.token != expected_token {
+                    let _ = request
+                        .respond(Response::from_string("Unauthorized").with_status_code(401));
+                    continue;
+                }
+                let json = match req.id {
+                    Some(id) => serde_json::json!({
+                        "triggered": crate::dev_trigger_menu(&app_handle, &id)
+                    }),
+                    None => serde_json::json!({
+                        "items": crate::dev_menu_accelerators()
+                            .into_iter()
+                            .map(|(id, accelerator)| MenuItemInfo { id, accelerator })
+                            .collect::<Vec<_>>()
+                    }),
+                };
+                let header = Header::from_bytes("Content-Type", "application/json").unwrap();
+                let _ =
+                    request.respond(Response::from_string(json.to_string()).with_header(header));
+                continue;
+            }
+
+            // Handle /screenshot — a PNG of this app's own largest window.
+            // Captured in-process so it runs under the app's Screen Recording
+            // grant, not the grant of whatever terminal is asking.
+            if url == "/screenshot" {
+                let req: AuthedRequest = match serde_json::from_str(&body) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let _ = request
+                            .respond(Response::from_string("Invalid JSON").with_status_code(400));
+                        continue;
+                    }
+                };
+                if req.token != expected_token {
+                    let _ = request
+                        .respond(Response::from_string("Unauthorized").with_status_code(401));
+                    continue;
+                }
+                match capture_own_window() {
+                    Ok(png) => {
+                        let header = Header::from_bytes("Content-Type", "image/png").unwrap();
+                        let _ = request.respond(Response::from_data(png).with_header(header));
+                    }
+                    Err(message) => {
+                        let _ =
+                            request.respond(Response::from_string(message).with_status_code(500));
+                    }
+                }
                 continue;
             }
 
@@ -901,8 +1002,7 @@ mod tests {
     #[test]
     fn eval_timeout_message_is_actionable() {
         assert!(EVAL_TIMEOUT_MESSAGE.contains("no result callback received"));
-        assert!(EVAL_TIMEOUT_MESSAGE.contains("Re-copy"));
-        assert!(EVAL_TIMEOUT_MESSAGE.contains("dev_bridge.rs"));
+        assert!(EVAL_TIMEOUT_MESSAGE.contains("retry"));
     }
 }
 

@@ -1,9 +1,9 @@
 // Injected into a running Pragma dev build by `pragma-bench run`, through the
-// Tauri dev bridge (`tauri-agent-tools eval --file`).
+// Tauri dev bridge's `/eval` endpoint (see `driver.rs`).
 //
 // Why the whole scenario lives in the page: a keystroke's latency is measured in
 // milliseconds, and every bridge round-trip costs tens of them. Driving one
-// keystroke per CLI call would measure the CLI. So the benchmark ships the loop
+// keystroke per bridge call would measure the bridge. So the benchmark ships the loop
 // into the webview, where send and paint timestamps come from the same
 // `performance.now()` clock, and polls it from the outside for progress.
 //
