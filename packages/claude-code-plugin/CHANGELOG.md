@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.0.3...claude-code-plugin-v1.1.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **plugin:** add account providers to agent plugins ([f146701](https://github.com/pragma-sh/pragma/commit/f146701d578769eb1f814bbdbe850eb1bb05b852))
+* **plugin:** add canonicalId for benchmark model matching ([5b5fb44](https://github.com/pragma-sh/pragma/commit/5b5fb44c7a829796b99826d6df849e88859f8245))
+* **plugins:** declare launch options in the agent plugins ([26ac10e](https://github.com/pragma-sh/pragma/commit/26ac10e402c22b4abe75b862e439f967548bb9a2))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.2.0
+    * @pragma-sh/watcher-kit bumped to 1.2.0
+
 ## [1.0.3](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.0.2...claude-code-plugin-v1.0.3) (2026-09-26)
 
 

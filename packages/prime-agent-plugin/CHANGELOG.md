@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.0.2...prime-agent-plugin-v1.1.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* **plugin:** add account providers to agent plugins ([f146701](https://github.com/pragma-sh/pragma/commit/f146701d578769eb1f814bbdbe850eb1bb05b852))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/pi-plugin bumped to 1.1.0
+
 ## [1.0.2](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.0.1...prime-agent-plugin-v1.0.2) (2026-09-26)
 
 

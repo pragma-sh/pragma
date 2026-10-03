@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.1.0...pragma-go-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* **ci:** ship Pragma Go releases as OTA updates by fingerprint; deploy:www publishes www merges ([972ca88](https://github.com/pragma-sh/pragma/commit/972ca8822ba21dfebdf61ed5c2f27a46baffeb5b))
+
+
+### Bug Fixes
+
+* **pragma-go:** call turbo through bun x in the EAS post-install hook ([430dcf7](https://github.com/pragma-sh/pragma/commit/430dcf7c244e184c1055114f839f0292dad6c079))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.0.0...pragma-go-v1.1.0) (2026-09-26)
 
 

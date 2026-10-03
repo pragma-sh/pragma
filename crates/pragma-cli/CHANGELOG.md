@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.1.0...pragma-cli-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* add host-owned account providers with per-launch env ([b019a1f](https://github.com/pragma-sh/pragma/commit/b019a1f8224a99dd1a7149ccbc7017654b779dc7))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **pragma-cli:** add agent launch flags and slash-command verify ([6f02ac8](https://github.com/pragma-sh/pragma/commit/6f02ac848b60e28e072d8aa446f52d3b6a6797dd))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.0.1...pragma-cli-v1.1.0) (2026-09-26)
 
 

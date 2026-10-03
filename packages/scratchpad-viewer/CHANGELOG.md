@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.1.0...scratchpad-viewer-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* **pragma:** export scratchpads as standalone offline HTML ([ab4c167](https://github.com/pragma-sh/pragma/commit/ab4c1671c90a8e19af42223505092be7e4af9ea1))
+* **scratchpad-viewer:** prebundle standalone scratchpad export runtime ([0eb77d9](https://github.com/pragma-sh/pragma/commit/0eb77d9e7920e964cac9edcf9963e0843fe5f409))
+
+
+### Bug Fixes
+
+* **ci:** generate scratchpad runtimes before audit ([8f97788](https://github.com/pragma-sh/pragma/commit/8f977889cf02078cc6bcf97059f29092f4e28cbc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.1.0 to ^1.2.0
+    * @pragma-sh/scratchpad-contract bumped from ^1.1.0 to ^1.2.0
+  * devDependencies
+    * @pragma-sh/scratchpad bumped to 1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.0.1...scratchpad-viewer-v1.1.0) (2026-09-26)
 
 

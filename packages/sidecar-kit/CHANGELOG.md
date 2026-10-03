@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.1.0...sidecar-kit-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+
+
+### Bug Fixes
+
+* **sidecar-kit:** cache-bust rebuilt plugin and automation imports ([a34e225](https://github.com/pragma-sh/pragma/commit/a34e225d32e1b259abe78c2af51aa3ddd51c5ea6))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.0.1...sidecar-kit-v1.1.0) (2026-09-26)
 
 

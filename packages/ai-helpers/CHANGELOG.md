@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.1.0...ai-helpers-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* **ai-helpers:** add auto-select, automode, and benchmark insights ([63d3cde](https://github.com/pragma-sh/pragma/commit/63d3cdee9f96c95d059043954c251e1ff59809b3))
+* **ai-helpers:** estimate agent progress with System 1 ([46386c7](https://github.com/pragma-sh/pragma/commit/46386c7c264cfe5ee4333eddf3893482d739b937))
+* **pragma:** add AI merge-conflict resolution to the PR view ([6bfae45](https://github.com/pragma-sh/pragma/commit/6bfae4546a7b7d575126046d7433fe3a7e396d09))
+* **pragma:** add AI merge-conflict resolution to the PR view ([60d30b2](https://github.com/pragma-sh/pragma/commit/60d30b2d7468718ffa330d6ce7bb79819ddd6429))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+
+
+### Bug Fixes
+
+* harden System 1 settings and auto mode filters ([76d4f7c](https://github.com/pragma-sh/pragma/commit/76d4f7c4dc9ee9ae445a0c2e21055eae6142db31))
+* **pragma:** harden AI merge-conflict resolution ([89a27f0](https://github.com/pragma-sh/pragma/commit/89a27f0bf4775d57243ce8f80ba65dc0b7fa0bb9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sidecar-kit bumped to 1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.0.1...ai-helpers-v1.1.0) (2026-09-26)
 
 
