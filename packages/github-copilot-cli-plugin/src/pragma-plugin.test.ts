@@ -11,7 +11,7 @@ const byteLength = (value: string) => new TextEncoder().encode(value).byteLength
 
 it("defines GitHub Copilot launcher and usage UI", () => {
   const agent = githubCopilotCliPlugin.agents?.[0];
-  const usage = githubCopilotCliPlugin.usageLimits?.[0];
+  const usage = githubCopilotCliPlugin.accounts?.[0];
   expect(agent?.id).toBe("github-copilot");
   expect(agent?.launch.command).toEqual(["copilot", "--no-auto-update"]);
   expect(agent?.excludeFeatures).toEqual(["abort", "interrupt"]);
@@ -24,10 +24,13 @@ it("defines GitHub Copilot launcher and usage UI", () => {
   ]);
   expect(agent?.args.permissionMode("allow-all")).toEqual(["--allow-all"]);
   expect(usage).toMatchObject({
-    id: "github-copilot",
-    primaryLimitId: "ai-credits",
+    provider: "github-copilot",
+    agent: "github-copilot",
+    login: { command: ["copilot", "login"] },
+    usageLimits: { primaryLimitId: "ai-credits" },
     iconPath: "assets/copilot.png",
   });
+  expect(usage?.env?.("/h/1")).toEqual({ COPILOT_HOME: "/h/1" });
 });
 
 it("normalizes GitHub Copilot AI-credit usage", () => {
@@ -146,4 +149,20 @@ it("maps Copilot runtime authentication errors", () => {
       1,
     ),
   ).toMatchObject({ status: "unavailable", reason: "authentication-required" });
+});
+
+it("identifies the signed-in github.com user from Copilot's config", async () => {
+  const { parseCopilotConfig } = await import("./identity");
+  expect(
+    parseCopilotConfig({
+      last_logged_in_user: { host: "https://github.com", login: "OctoCat" },
+      logged_in_users: [{ host: "https://github.com", login: "OctoCat" }],
+    }),
+  ).toEqual({ id: "octocat", name: "OctoCat" });
+  expect(
+    parseCopilotConfig({ logged_in_users: [{ host: "https://ghe.example.com", login: "x" }] }),
+  ).toBeNull();
+  expect(parseCopilotConfig({})).toBeNull();
+  expect(parseCopilotConfig(null)).toBeNull();
+  expect(githubCopilotCliPlugin.accounts?.[0]?.identify).toBeTypeOf("function");
 });

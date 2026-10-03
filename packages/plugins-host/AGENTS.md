@@ -10,11 +10,14 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId) and correlated
-  `usageLimits` (`requestId` + optional `pluginId`). There is no separate `reload`
+- **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId), correlated
+  `usageLimits` (`requestId` + optional `pluginId`; each account provider's default login, for
+  `agent verify`), and correlated `accounts` (`requestId` + `op`: `providers`, `launch`, `identify`,
+  `usage`). `accounts` ops run **beside** the serial command queue: they shell out to harness
+  CLIs that take seconds, and one slow usage load must not stall a launch's env lookup. There is no separate `reload`
   command — host re-sends full `load` with fresh gateway credentials.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
-  correlated `usageLimits`, `error`, `log`.
+  correlated `usageLimits` and `accountsResult`, `error`, `log`.
 
 **Re-importing rebuilt bundles.** Each `load` re-imports every bundle through
 `freshImportSpecifier(mainPath, mtime)` (`@pragma-sh/sidecar-kit`). Do not go back to a
@@ -55,7 +58,8 @@ packages/plugins-host/
 │   ├── cli.ts        # Sidecar entry: stdin loop, resolves + assembles catalog, emits events
 │   ├── catalog.ts    # assembleCatalog, resolveModels, hashIcon, mimeForIcon, ICON_MAX_BYTES
 │   ├── manifest.ts   # resolveManifests: global + project .pragma/config.json plugins
-│   ├── usage-limits.ts # Loads plugin usage-limit providers with plugin-specific context
+│   ├── accounts.ts     # Account ops: provider metadata, login env, identify, usage (env applied to sdk.exec)
+│   ├── usage-limits.ts # Default-login usage per account provider (the `usageLimits` command)
 │   ├── lifecycle.ts # Executes onInstall/onPragmaLoad with durable dedupe markers
 │   ├── index.ts      # Re-exports for tests/consumers
 │   ├── catalog.test.ts
@@ -69,7 +73,7 @@ Official agent definitions live in each integration package's `src/pragma-plugin
 Pragma does not bundle or activate them. Onboarding installs only integrations selected by
 the user, globally registers their package paths, then desktop and catalog sidecar discover
 those configured bundles. When plugin ids collide, project overrides global; only the winner
-contributes agents, watchers, and usage providers. Do not statically import agent packages or
+contributes agents, watchers, and account providers. Do not statically import agent packages or
 duplicate their metadata here.
 
 ## Catalog wire types

@@ -1,6 +1,6 @@
-// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma-sh/constants";
 
+import { AccountsClient } from "./accounts-client";
 import { AgentsClient } from "./agents-client";
 import { AssetsClient } from "./assets-client";
 import { EventsClient } from "./events-client";
@@ -21,6 +21,8 @@ import { WorkspaceClient } from "./workspace-client";
 
 /** Fetch-based client for the local Pragma HTTP gateway. */
 export class PragmaClient {
+  /** Host-owned account providers: logins, bindings, usage, and launch env. */
+  readonly accounts: AccountsClient;
   readonly fs: FsClient;
   readonly git: GitClient;
   readonly exec: ExecClient;
@@ -53,6 +55,7 @@ export class PragmaClient {
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
+    this.accounts = new AccountsClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
     this.whiteboards = new WhiteboardsClient(this.transport);
   }

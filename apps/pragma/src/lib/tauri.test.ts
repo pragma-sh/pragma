@@ -117,7 +117,16 @@ describe("stream IPC wrappers", () => {
       cwd: "/repo",
       cols: 80,
       rows: 24,
+      env: null,
     });
+  });
+
+  it("passes an agent launch's account env to the spawn", () => {
+    void ptySpawnDetached("session", "worktree", "/repo", 80, 24, null, [["CODEX_HOME", "/h"]]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "pty_spawn_detached",
+      expect.objectContaining({ env: [["CODEX_HOME", "/h"]] }),
+    );
   });
 
   it("tracks and stops exact filesystem subscriptions", async () => {

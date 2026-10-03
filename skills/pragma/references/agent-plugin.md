@@ -3,7 +3,7 @@
 An **agent plugin** integrates a host coding-agent tool — OpenCode, Claude Code, Cursor,
 Codex, or a new TUI agent — so it reports live status into Pragma and appears in the
 agent launcher. Use this reference for lifecycle reporters, launchable agents, PTY
-watchers, and account usage-limit providers.
+watchers, and account providers (`defineAccounts`).
 
 For sidebar tabs, cards, web views, commands, keybindings, settings, or CSS, use
 `plugin-api.md` instead. Derive the reporting contract from this file only; `plugin-api.md`
@@ -15,7 +15,7 @@ Companion references:
 - `sdk.md`: typed `@pragma-sh/sdk` client and reporting helpers.
 - `cli.md`: general `pragma-cli` surface.
 - `agent-plugin-cli.md`: exact agent CLI commands and flags.
-- `agent-plugin-patterns.md`: abort, sub-agent, watcher, and usage-limit patterns.
+- `agent-plugin-patterns.md`: abort, sub-agent, watcher, and account/usage-limit patterns.
 
 ## Choose Route First
 
@@ -28,8 +28,9 @@ Companion references:
 4. Otherwise, contribute a `createTuiWatcher` through Pragma plugin. Parse
    `ctx.output`, derive state from rendered TUI, and use `sendKeys` for replies.
    Set `handleDecisions: true`. Document parsing fragility and exact tested version.
-5. If host has account usage for its default provider, also add a
-   `defineUsageLimitProvider`.
+5. Declare the host's sign-in with `defineAccounts`: a well-known `provider` key, the
+   `agent`, its `login` command, the config-dir `env` if the host has one, `identify`, and
+   `usageLimits` when it exposes plan usage.
 
 Do not add host-specific installers or parsing to Pragma core. Plugin packages install
 through host tool's own mechanism. Ask owner before changing core, server, CLI, SDK, or
@@ -206,10 +207,44 @@ plugins install the published package normally.
   only as a question timeout.
 - Use watcher for interjections when host has no mid-turn input hook.
 
-Add `defineUsageLimitProvider` when applicable. Return either `ready` with finite,
-well-formed `limits`, or `unavailable` with a supported reason and useful message. Throw
-for unexpected transport/parser failures so verification detects regressions. See real
-Claude Code and Cursor implementations in `agent-plugin-patterns.md`.
+Declare an account provider with `defineAccounts` (never the deprecated
+`defineUsageLimitProvider`):
+
+- `provider`: a well-known key from `ACCOUNT_PROVIDERS` (`anthropic`, `openai`, `cursor`,
+  `github-copilot`, `xai`, `jetbrains`, `opencode-go`, `moonshot`, plus API-key providers such
+  as `openrouter`, `google`, `deepseek`, `groq`, `zai`) so rows merge with other plugins that
+  sign in to the same provider.
+- Only declare a provider whose credential may be used outside its own first-party harness.
+  Claude Free/Pro/Max OAuth (Claude Code and claude.ai only) and Gemini CLI / Antigravity
+  OAuth are not: in any other harness declare Anthropic and Google with `apiKeyOnly: true`.
+- `login.command`: the host CLI's own browser sign-in (`claude auth login`, `codex login`).
+  Add `instructions` when the user must paste a code or pick an option.
+- `env(home)`: only when the host has a config-dir override **that also isolates its
+  token**. A host that keeps its token under one fixed Keychain entry (Cursor) must omit
+  `env`, or a second account silently overwrites the first.
+- `identify`: a stable account id from the host's own status command. Return `null` when
+  signed out. The id must match what every other harness reports for that provider, so use
+  the `@pragma-sh/plugin` helpers (`chatGptIdentity`, `anthropicOAuthIdentity`,
+  `gitHubIdentity`, `apiKeyIdentity`) rather than inventing one. Only when the host has no
+  status command may you read its credential file, and then only through
+  `identifyFromCredentialStore`: identity only, never refresh or rewrite a token.
+- **One harness, several providers**: declare one provider per sign-in (OpenCode: OpenCode
+  Go, OpenAI, Copilot and every API-key provider; Pi: the same). `credentialStoreAccount`
+  builds one such provider from a store entry; `modelsDevAccountProviders` lists the
+  well-known API-key providers by models.dev id (OpenCode, Kimi Code).
+- The `defineAccounts` list is the harness's supported providers. Add `available(ctx)` when
+  the installed CLI can report what it offers (Kimi: `kimi provider catalog list --json`),
+  cache the answer, and fail open; omit it when the CLI has no supported way to say. If they share one
+  credential file, at most one of them may declare `env` — two providers setting the same
+  variable fight at launch and the first wins. The rest follow the harness's own sign-in
+  and omit `iconPath`, so the merged row keeps the dedicated harness's logo.
+- `usageLimits.load`: return either `ready` with finite, well-formed `limits`, or
+  `unavailable` with a supported reason and useful message. Throw for unexpected
+  transport/parser failures so verification detects regressions.
+
+Callbacks get an `AccountContext`; its `ctx.sdk.exec.run` already carries the login's env,
+so run the host CLI normally. See real Claude Code and Cursor implementations in
+`agent-plugin-patterns.md`.
 
 ## Find Official Branding Icon
 
@@ -230,7 +265,7 @@ Use first-party branding, not an invented mark or generic terminal icon:
    embedded raster data, metadata containing personal paths, and unnecessary editor
    payload. Preserve `viewBox` and visual geometry. Never run untrusted SVG as HTML.
 6. Store asset in plugin's `assets/` directory with descriptive kebab-case name. Point
-   `defineAgent.iconPath` and usage provider `iconPath` at same canonical file when they
+   `defineAgent.iconPath` and account provider `iconPath` at same canonical file when they
    represent same product.
 7. Build plugin and fetch catalog icon through `/v1/assets/{hash}` (or run `agent verify`
    catalog gate) to confirm MIME, hash, size cap, and rendering. Check both light and dark
@@ -358,7 +393,7 @@ approval and finish with `gh pr create`.
 - Official icon provenance/license documented; asset sanitized and contrast-checked.
 - Sub-agent work cannot produce premature done.
 - Question/decision request ids round-trip.
-- Usage-limit provider included when host exposes account limits.
+- Account provider declared; `usageLimits` included when host exposes account limits.
 - Every script uses TypeScript, except necessary POSIX `sh` hooks or wrappers.
 - Unsupported optional capabilities are listed in `excludeFeatures`; skipped verifier
   scenarios carry that explicit reason.

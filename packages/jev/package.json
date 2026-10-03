@@ -1,0 +1,25 @@
+{
+  "name": "@pragma-sh/jev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drives a running Pragma dev app like a person would — DOM snapshots, real pointer and keyboard events, window screenshots — with a Jev-powered agent loop on top.",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "jev": "./src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "bun src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma-sh/constants": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

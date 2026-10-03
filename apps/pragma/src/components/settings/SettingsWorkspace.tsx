@@ -17,6 +17,7 @@ import {
   Sparkles,
   SquareTerminal,
   Trash2,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +36,7 @@ import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { PragmaGoSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
+import { AccountsSection } from "@/components/settings/AccountsSection";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
@@ -80,6 +82,7 @@ type BuiltinSection =
   | "theme"
   | "terminal"
   | "agentStatus"
+  | "accounts"
   | "storage"
   | "github"
   | "ai"
@@ -97,6 +100,7 @@ const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "accounts",
   "storage",
   "ai",
 ]);
@@ -107,6 +111,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "accounts",
   "storage",
   "github",
   "ai",
@@ -471,6 +476,7 @@ export function SettingsWorkspace() {
           setSection={setSection}
           settingsPages={settingsPages}
           worktreeId={worktreeId}
+          isRemote={worktreeId ? workspace.remoteWorktrees[worktreeId] === true : false}
         />
       </div>
     </section>
@@ -526,6 +532,13 @@ function SettingsNavigation({
         onClick={() => setSection("agentStatus")}
       >
         Agent Status
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "accounts"}
+        icon={<UserRound />}
+        onClick={() => setSection("accounts")}
+      >
+        Account Providers
       </SettingsNavItem>
       <SettingsNavItem
         active={section === "storage"}
@@ -598,6 +611,7 @@ function GlobalSettingsNavigation({
 
 // fallow-ignore-next-line complexity -- selects one mutually exclusive settings panel from state.
 function SettingsContent({
+  isRemote,
   error,
   loaded,
   loading,
@@ -625,6 +639,7 @@ function SettingsContent({
   setSection: (section: Section) => void;
   settingsPages: ReturnType<typeof usePluginSettingsPages>;
   worktreeId: string | null;
+  isRemote: boolean;
 }) {
   const settingsPage = settingsPages.find((page) => pluginSection(page.key) === section);
   if (settingsPage) {
@@ -657,6 +672,17 @@ function SettingsContent({
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
           <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
+  // Accounts live on the project's host, not in `config.json`, so the page
+  // renders past the config load state.
+  if (section === "accounts") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <AccountsSection isRemote={isRemote} projectId={projectId} scope={scope} />
         </div>
       </main>
     );

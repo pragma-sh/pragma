@@ -15,6 +15,7 @@ import { PLUGIN_API_VERSION } from "./generated/version";
 import type { PluginContext } from "./types";
 import type { PluginDeepLinkEvent } from "./types";
 import type { WatcherDefinition } from "./watcher";
+import type { AccountProviderDefinition } from "./accounts";
 import type { UsageLimitProviderDefinition } from "./usage-limits";
 import type { ThemeDefinition } from "./theme";
 
@@ -67,6 +68,9 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   settings?: PluginSettingsContributions;
   keybindings?: PluginKeybindingsContributions;
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
+  /** Account providers this plugin's harnesses can sign in to (see `defineAccounts`). */
+  accounts?: AccountProviderDefinition<InferConfig<TConfigSchema>>[];
+  /** @deprecated Declare `accounts` with `defineAccounts`; the host adapts these into single-login account providers. */
   usageLimits?: UsageLimitProviderDefinition<InferConfig<TConfigSchema>>[];
   themes?: ThemeDefinition[];
   css?: string;

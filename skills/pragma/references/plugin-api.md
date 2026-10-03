@@ -1,7 +1,7 @@
 # Pragma Plugin API Reference
 
 `@pragma-sh/plugin` is public TypeScript API for trusted extensions rendered and run by Pragma.
-Use plugin for persistent UI, command-palette actions, launchable agents, usage limits, themes,
+Use plugin for persistent UI, command-palette actions, launchable agents, account providers, themes,
 or event-driven integration. Use `@pragma-sh/automations` instead for UI-free scheduled tasks.
 
 Installed TypeScript declarations remain authority for exact fields.
@@ -68,11 +68,12 @@ export default definePlugin({
 | `defineCommand`            | Command-palette action with optional default keybinding.   |
 | `defineAgent`              | Coding agent available in Pragma launcher.                 |
 | `defineWatcher`            | Session watcher for plugin-contributed agent.              |
-| `defineUsageLimitProvider` | Provider shown in shared usage-limits UI.                  |
+| `defineAccounts`           | Account providers: login, env, identity, usage limits.     |
+| `defineUsageLimitProvider` | Deprecated; adapted into a single-login account provider.  |
 | `defineTheme`              | Selectable light/dark palette in Theme settings.           |
 
 Register definitions on matching `definePlugin` fields: `ui`, `commands`, `agents`,
-`watchers`, `usageLimits`, and `themes`.
+`watchers`, `accounts` (`usageLimits` is deprecated), and `themes`.
 
 `defineTheme` colors are Pragma theme-token names without the `--` prefix, and both
 `light` and `dark` maps must be supplied:

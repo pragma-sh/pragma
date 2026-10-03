@@ -331,7 +331,8 @@ function withoutNulls<T extends object>(item: T): WithoutNulls<T> {
   ) as WithoutNulls<T>;
 }
 
-function qualifiedAgentId(pluginId: string, agentId: string): string {
+/** Catalog agent id for a plugin-local agent id (shared with the desktop's `pluginAgentId`). */
+export function qualifiedAgentId(pluginId: string, agentId: string): string {
   if (agentId.includes(".")) return agentId;
   return pluginId === `pragma.${agentId}` ? pluginId : `${pluginId}.${agentId}`;
 }

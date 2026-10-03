@@ -407,6 +407,21 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/jev": {
+      "name": "@pragma-sh/jev",
+      "version": "0.1.0",
+      "bin": {
+        "jev": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@pragma-sh/constants": "^1.1.0",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/junie-plugin": {
       "name": "@pragma-sh/junie-plugin",
       "version": "1.0.3",
@@ -1750,6 +1765,8 @@
     "@pragma-sh/github-helpers": ["@pragma-sh/github-helpers@workspace:packages/github-helpers"],
 
     "@pragma-sh/grok-plugin": ["@pragma-sh/grok-plugin@workspace:packages/grok-plugin"],
+
+    "@pragma-sh/jev": ["@pragma-sh/jev@workspace:packages/jev"],
 
     "@pragma-sh/junie-plugin": ["@pragma-sh/junie-plugin@workspace:packages/junie-plugin"],
 

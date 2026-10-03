@@ -1,7 +1,16 @@
 {
   "title": "Plugin development",
-  "description": "Extend the desktop app with @pragma-sh/plugin — tabs, commands, agents, prompt context, usage limits, and themes.",
+  "description": "Extend the desktop app with @pragma-sh/plugin — tabs, commands, agents, prompt context, account providers, and themes.",
   "icon": "Puzzle",
   "root": true,
-  "pages": ["index", "getting-started", "ui", "agents", "context", "usage-limits", "runtime"]
+  "pages": [
+    "index",
+    "getting-started",
+    "ui",
+    "agents",
+    "context",
+    "accounts",
+    "usage-limits",
+    "runtime"
+  ]
 }

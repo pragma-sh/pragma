@@ -33,6 +33,9 @@
     // (scenarios.rs) and injected into the webview at runtime — never
     // statically imported by any JS/TS entry point.
     "packages/bench/src/runner.js",
+    // `packages/jev/src/page-agent.js` is read as text by `page.ts` and
+    // injected into the dev webview through the bridge — never imported.
+    "packages/jev/src/page-agent.js",
     // The scratchpad viewer's in-page runtime is an esbuild entry point
     // (`packages/scratchpad-viewer/scripts/build.ts`) bundled into a string and
     // inlined into the generated document — never imported by a module graph.

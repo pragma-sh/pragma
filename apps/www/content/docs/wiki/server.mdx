@@ -74,12 +74,12 @@ completed` — and a retry resumes at the first incomplete stage. A merge confli
 
 ## Sidecar supervision
 
-| Sidecar      | Mechanism                                                                                                                                                                                                       |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| automations  | Scans global + project automation dirs every 5 s; cron tick 20 s; trust state in `automations-state.json`; NDJSON pump to the sidecar.                                                                          |
-| plugins host | Lazily respawned `pragma-plugins`; RPC domain `plugins` (`catalog`, `registerRoots`, `readAsset`, `usageLimits`, `reload`); roots persisted in `plugin-roots.json`.                                             |
-| watchers     | `WatcherSupervisor` spawns one `pragma-watch` per live agent session (5 s reconcile; fresh gateway credentials after a gateway restart; exponential backoff 5 s→5 m on crash loops). Nothing else may spawn it. |
-| tunnel       | Child process from `~/.pragma/config.json` `tunnel.command`; stdout scanned against `urlPattern`; status `idle/starting/active/error`; restarted at server startup.                                             |
+| Sidecar      | Mechanism                                                                                                                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| automations  | Scans global + project automation dirs every 5 s; cron tick 20 s; trust state in `automations-state.json`; NDJSON pump to the sidecar.                                                                                                                                                                                   |
+| plugins host | Lazily respawned `pragma-plugins`; RPC domain `plugins` (`catalog`, `registerRoots`, `readAsset`, `usageLimits`, `reload`); roots persisted in `plugin-roots.json`. Also runs account-provider callbacks for the `accounts` domain (logins, bindings, and hidden sign-in terminals; state in `~/.pragma/accounts.json`). |
+| watchers     | `WatcherSupervisor` spawns one `pragma-watch` per live agent session (5 s reconcile; fresh gateway credentials after a gateway restart; exponential backoff 5 s→5 m on crash loops). Nothing else may spawn it.                                                                                                          |
+| tunnel       | Child process from `~/.pragma/config.json` `tunnel.command`; stdout scanned against `urlPattern`; status `idle/starting/active/error`; restarted at server startup.                                                                                                                                                      |
 
 ## Other server duties
 

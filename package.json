@@ -13,7 +13,7 @@
     "dev": "bun run --filter pragma tauri:dev",
     "dev:pragma": "bun run --filter pragma tauri:dev",
     "dev:www": "bun run --filter www dev",
-    "dev:command": "bun scripts/dev-command.ts",
+    "jev": "bun packages/jev/src/cli.ts",
     "dev:go": "bun run --filter pragma-go start",
     "dev:go:ios": "bun run --filter pragma-go ios",
     "dev:go:android": "bun run --filter pragma-go android",

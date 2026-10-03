@@ -4,6 +4,7 @@ import {
   cursorAgentPlugin,
   loadCursorUsageLimits,
   parseCursorModels,
+  parseCursorStatus,
   parseCursorUsageSummary,
 } from "./pragma-plugin";
 
@@ -129,10 +130,23 @@ it("passes a model straight to --model without a synthetic effort suffix", () =>
   expect(agent?.args.modelReasoning).toBeUndefined();
 });
 
-it("links to Cursor's usage dashboard", () => {
-  expect(cursorAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
-    "https://cursor.com/dashboard/spending",
-  );
+it("declares a single-login Cursor account provider", () => {
+  const provider = cursorAgentPlugin.accounts?.[0];
+  expect(provider).toMatchObject({
+    provider: "cursor",
+    agent: "cursor",
+    dashboardUrl: "https://cursor.com/dashboard/spending",
+    login: { command: ["cursor-agent", "login"] },
+  });
+  expect(provider?.env).toBeUndefined();
+});
+
+it("identifies a login from cursor-agent status", () => {
+  expect(parseCursorStatus("\u001b[32m✓\u001b[0m Logged in as a@b.c\n")).toEqual({
+    id: "a@b.c",
+    email: "a@b.c",
+  });
+  expect(parseCursorStatus("Not logged in")).toBeNull();
 });
 
 it("submits interjections in a separate PTY write", async () => {

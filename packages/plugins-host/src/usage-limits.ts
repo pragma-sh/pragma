@@ -1,6 +1,7 @@
-import type { PluginContext, UsageLimitsResult } from "@pragma-sh/plugin";
+import { resolveAccountProviders, type UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 import type { PragmaClient } from "@pragma-sh/sdk";
 
+import { accountLaunch, loadAccountUsage, withAccountEnv } from "./accounts";
 import type { ResolvedPlugin } from "./catalog";
 
 /** One loaded usage-limit provider and its current result. */
@@ -11,7 +12,11 @@ export interface ResolvedUsageLimits {
   result: UsageLimitsResult;
 }
 
-/** Loads usage-limit providers from matching resolved plugins. */
+/**
+ * Loads each account provider's usage for its harness's own default login.
+ * Backs the `usageLimits` sidecar command `pragma-cli agent verify` probes;
+ * per-account usage goes through the `accounts` command instead.
+ */
 export async function loadUsageLimits(
   plugins: ResolvedPlugin[],
   sdk: PragmaClient,
@@ -20,55 +25,27 @@ export async function loadUsageLimits(
 ): Promise<ResolvedUsageLimits[]> {
   const loads = plugins
     .filter((plugin) => !pluginId || plugin.pluginId === pluginId)
-    .flatMap((plugin) => {
-      const ctx = contextFor(plugin, sdk, root);
-      return (plugin.definition.usageLimits ?? []).map((provider) => ({
-        pluginId: plugin.pluginId,
-        providerId: provider.id,
-        title: provider.title,
-        load: provider.load(ctx),
-      }));
-    });
-  const results = await Promise.allSettled(loads.map((load) => load.load));
-  return results.flatMap((result, index) => {
-    const load = loads[index];
-    if (!load) {
-      return [];
-    }
-    return [
-      {
-        pluginId: load.pluginId,
-        providerId: load.providerId,
-        title: load.title,
-        result:
-          result.status === "fulfilled"
-            ? result.value
-            : unavailableResult(load.title, result.reason),
-      },
-    ];
-  });
-}
-
-function unavailableResult(title: string, reason: unknown): UsageLimitsResult {
-  const detail = reason instanceof Error ? reason.message : String(reason);
-  return {
-    status: "unavailable",
-    reason: "error",
-    message: detail || `${title} usage limits could not be loaded.`,
-  };
-}
-
-function contextFor(
-  plugin: ResolvedPlugin,
-  sdk: PragmaClient,
-  root: string | undefined,
-): PluginContext {
-  return {
-    pluginId: plugin.pluginId,
-    pluginDir: plugin.dir,
-    config: plugin.config,
-    project: root ? { id: root, name: root, path: root } : null,
-    sdk,
-    notify: () => {},
-  };
+    .flatMap((plugin) =>
+      resolveAccountProviders(plugin.definition)
+        .filter((provider) => provider.usageLimits)
+        .map(async (provider) => {
+          const env = accountLaunch(provider, null).env;
+          const result = await loadAccountUsage(provider, {
+            pluginId: plugin.pluginId,
+            pluginDir: plugin.dir,
+            config: plugin.config,
+            project: root ? { id: root, name: root, path: root } : null,
+            sdk: withAccountEnv(sdk, env),
+            notify: () => {},
+            account: { loginId: "default", home: null, env },
+          });
+          return {
+            pluginId: plugin.pluginId,
+            providerId: provider.id,
+            title: provider.title,
+            result,
+          };
+        }),
+    );
+  return Promise.all(loads);
 }

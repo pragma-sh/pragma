@@ -47,9 +47,17 @@ before the gateway exists drops gateway-dependent agents (their model providers 
 so the host tracks whether the last load had credentials and re-loads on the next
 `catalog` read once they appear.
 
-Desktop usage-limit refresh failures use `logUsageLimitsError`: background polling keeps
-last-good data instead of raising user-facing errors, while bounded failure details remain
-available in server logs.
+`accounts.rs` serves the `accounts` RPC domain (host-owned account providers). The
+durable record and binding rules are `pragma_core::accounts`; plugin callbacks (login
+command, env, `identify`, usage) go to the sidecar as correlated `accounts` requests. A
+sign-in runs the plugin's login command in a **hidden PTY session**
+(`account-login-<id>`, no worktree) with the new login's env, typed as `<cmd>; exit` so the
+session ends with the command; `loginStatus` returns the ANSI-stripped tail plus every
+printed http(s) URL (OSC 8 targets included). `launch_env` is the one resolver every launch
+path uses: `launch_agent_session` (CLI, fanouts, headless mobile) passes it to
+`spawn_with_env`, and the desktop asks for it through `launchEnv` before its own spawn. It
+never fails a launch — any error falls back to the harness's default login. Usage is
+loaded once per **account** (not per harness), because Anthropic's usage endpoint 429s.
 
 Each server process also generates a boot id passed with the server state directory to
 `pragma-plugins`. The sidecar persists plugin lifecycle markers there: `onInstall` once per

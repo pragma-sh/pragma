@@ -150,20 +150,17 @@ pub fn install(driver: &Driver) -> BenchResult<()> {
         "hookGlobal": CONSTANTS.bench.hook_global,
     });
     let source = RUNNER_JS.replace(CONFIG_PLACEHOLDER, &config.to_string());
-    let path = std::env::temp_dir().join(format!("pragma-bench-runner-{}.js", std::process::id()));
-    std::fs::write(&path, source)?;
     // Retried because installing happens at the two moments the window is least
     // responsive — just after boot, and just after a restart during recovery —
-    // and the CLI gives up on a slow window before the window has actually failed.
-    let mut result = driver.eval_file(&path);
+    // and the bridge gives up on a slow window before the window has actually failed.
+    let mut result = driver.eval(&source);
     for _ in 1..INSTALL_ATTEMPTS {
         if result.is_ok() {
             break;
         }
         thread::sleep(POLL_INTERVAL);
-        result = driver.eval_file(&path);
+        result = driver.eval(&source);
     }
-    let _ = std::fs::remove_file(&path);
     result?;
     Ok(())
 }

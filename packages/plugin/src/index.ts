@@ -118,6 +118,63 @@ export type {
 } from "./plugin";
 export { definePlugin } from "./plugin";
 export type {
+  AccountContext,
+  AccountDeclarations,
+  AccountHandle,
+  AccountIdentity,
+  AccountLogin,
+  AccountProviderDefinition,
+  AccountSharedToken,
+  AccountSwap,
+  AccountUsageLimits,
+  ModelsDevAccountProvider,
+  ResolvedAccountProvider,
+  SharedToken,
+  WellKnownAccountProvider,
+  WellKnownAccountProviderInfo,
+} from "./accounts";
+export {
+  ACCOUNT_PROVIDERS,
+  accountProviderFromUsageLimits,
+  accountProviderTitle,
+  apiKeyTokenKind,
+  defineAccounts,
+  modelsDevAccountProviders,
+  resolveAccountProviders,
+  wellKnownProvider,
+} from "./accounts";
+export {
+  anthropicOAuthIdentity,
+  apiKeyIdentity,
+  chatGptIdentity,
+  entryToken,
+  credentialDir,
+  credentialFileSharedToken,
+  credentialStoreAccount,
+  credentialStorePath,
+  gitHubIdentity,
+  identifyFromCredentialStore,
+  jwtClaims,
+  parseAnthropicProfile,
+  readCredentialFile,
+  storedCredentialIdentity,
+  tokenEntry,
+  writeCredentialFile,
+} from "./account-identity";
+export type {
+  CredentialStore,
+  CredentialStoreAccountOptions,
+  StoredSharedTokenOptions,
+  StoredCredentialOptions,
+} from "./account-identity";
+export {
+  activateCredentialSwap,
+  loginCredentialFile,
+  readLoginEntries,
+  sharedCredentialFile,
+  writeLoginEntries,
+} from "./credential-swap";
+export type {
   UsageLimit,
   UsageLimitProviderDefinition,
   UsageLimitsReady,

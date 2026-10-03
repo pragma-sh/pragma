@@ -256,3 +256,7 @@ Two more flags matter here:
 - Each session is a JVM. `--jobs 3` is comfortable; the abort scenarios time out on a
   loaded machine well before the plugin is at fault, so re-check a failure with
   `--jobs 1` before believing it.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `jetbrains` with no `login` and no `env`: Junie signs in from its own welcome screen and has no config-dir override, so it has exactly one (default) account.

@@ -1,8 +1,9 @@
 import {
-  commandAndSkillDirs,
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  type AccountIdentity,
+  commandAndSkillDirs,
   slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
@@ -43,17 +44,31 @@ const SLASH_COMMAND_SOURCES = commandAndSkillDirs([".cursor", "~/.cursor"]);
 export const cursorAgentPlugin: PluginDefinition = definePlugin({
   name: "Cursor Agent",
   description: "Launch Cursor Agent from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "cursor",
-      title: "Cursor",
+  accounts: defineAccounts([
+    {
+      provider: "cursor",
+      agent: "cursor",
       dashboardUrl: "https://cursor.com/dashboard/spending",
       iconPath: "assets/cursor.svg",
-      primaryLimitId: "api",
-      refreshIntervalMs: 5 * 60_000,
-      load: loadCursorUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["cursor-agent", "login"],
+        instructions: "Finish signing in to Cursor in the browser tab that opens.",
+      },
+      // No `env`: on macOS Cursor keeps its token under one fixed Keychain
+      // entry, so a second config dir would overwrite the first login rather
+      // than sit beside it. Signing in again replaces the one login.
+      credentialPath: () =>
+        globalThis.process?.platform === "darwin"
+          ? "macOS Keychain (cursor-access-token)"
+          : "~/.cursor/auth.json",
+      identify: identifyCursorAccount,
+      usageLimits: {
+        primaryLimitId: "api",
+        refreshIntervalMs: 5 * 60_000,
+        load: loadCursorUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "cursor",
@@ -237,6 +252,18 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const cwd = ctx.project?.path ?? "/tmp";
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
   return result?.stdout ?? "";
+}
+
+/** Reports the signed-in Cursor account from `cursor-agent status`. */
+export async function identifyCursorAccount(ctx: PluginContext): Promise<AccountIdentity | null> {
+  return parseCursorStatus(await execFirst(ctx, "cursor-agent status 2>/dev/null"));
+}
+
+/** Parses `cursor-agent status` ("Logged in as <email>"); signed out yields null. */
+export function parseCursorStatus(output: string): AccountIdentity | null {
+  const text = output.replace(CURSOR_CONTROL_SEQUENCE, "");
+  const email = /Logged in as\s+(\S+@\S+)/i.exec(text)?.[1]?.replace(/[.,]$/, "");
+  return email ? { id: email, email } : null;
 }
 
 /** Loads Cursor account usage using credentials created by `cursor-agent login`. */

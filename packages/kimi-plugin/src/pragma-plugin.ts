@@ -1,4 +1,5 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
   modeProvider,
@@ -7,6 +8,7 @@ import {
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
+import { kimiApiKeyProviders } from "./accounts";
 import { loadKimiModels } from "./models";
 
 /** Lets Kimi's paste-aware composer commit interjected text before Enter. */
@@ -61,6 +63,22 @@ const baseWatcher = createTuiWatcher({
 export const kimiAgentPlugin: PluginDefinition = definePlugin({
   name: "Kimi Code",
   description: "Launch Kimi Code from Pragma.",
+  accounts: defineAccounts([
+    {
+      provider: "moonshot",
+      agent: "kimi",
+      iconPath: "assets/kimi.png",
+      login: {
+        command: ["kimi", "login"],
+        instructions: "Open the link, sign in to Kimi, and enter the code shown here.",
+      },
+      // `KIMI_CODE_HOME` is Kimi Code's whole data root: config, sessions,
+      // and OAuth tokens.
+      env: (home) => ({ KIMI_CODE_HOME: home }),
+      credentialPath: (home) => home ?? "~/.kimi-code",
+    },
+    ...kimiApiKeyProviders(),
+  ]),
   watchers: [
     {
       agent: "kimi",

@@ -26,6 +26,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  type LaunchEnv,
   type PtyMessage,
   type PtyStream,
 } from "@/lib/tauri";
@@ -416,6 +417,8 @@ export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>();
   private webglLru = new Map<string, ManagedTerminal>();
   private pendingInput = new Map<string, PendingInputQueue>();
+  /** Per-tab env resolvers consumed by the tab's first spawn. */
+  private spawnEnv = new Map<string, (tab: Tab) => Promise<LaunchEnv>>();
   private nextHostGeneration = 0;
   // Title listeners are keyed by tab id and kept **independent of the terminal's
   // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
@@ -1426,6 +1429,21 @@ export class TerminalManager {
     };
   }
 
+  /**
+   * Registers extra environment for this tab's shell, resolved when the shell
+   * is actually spawned (an agent launch's bound accounts). A tab whose shell
+   * already exists ignores it.
+   */
+  setSpawnEnv(tabId: string, resolve: (tab: Tab) => Promise<LaunchEnv>): void {
+    this.spawnEnv.set(tabId, resolve);
+  }
+
+  private takeSpawnEnv(tab: Tab): Promise<LaunchEnv> {
+    const resolve = this.spawnEnv.get(tab.id);
+    this.spawnEnv.delete(tab.id);
+    return resolve ? resolve(tab) : Promise.resolve([]);
+  }
+
   private connect(tab: Tab, cwd: string, managed: ManagedTerminal): void {
     const tabId = tab.id;
     const connectionGeneration = ++managed.connectionGeneration;
@@ -1459,8 +1477,11 @@ export class TerminalManager {
         // The tab's own shell profile, so a session respawned after a server
         // restart returns to the shell it was opened with rather than the
         // current default.
-        return ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null).catch(
-          (spawnError) => {
+        return this.takeSpawnEnv(tab)
+          .then((env) =>
+            ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null, env),
+          )
+          .catch((spawnError) => {
             if (!isCurrentConnection()) {
               return null;
             }
@@ -1469,8 +1490,7 @@ export class TerminalManager {
             return ptyAttach(tabId, cols, rows, null, onEvent).catch(() =>
               Promise.reject(spawnError),
             );
-          },
-        );
+          });
       })
       .then((stream) => {
         if (!stream) {

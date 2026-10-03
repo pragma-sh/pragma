@@ -10,17 +10,21 @@ const ptySpawnMock = vi.fn();
 const ptySpawnDetachedMock = vi.fn();
 const writeWhenReadyMock = vi.fn();
 const whenConnectedMock = vi.fn();
+const setSpawnEnvMock = vi.fn();
+const accountsLaunchEnvMock = vi.fn(async () => ({ env: [] as Array<[string, string]> }));
 
 vi.mock("@/lib/tauri", () => ({
   ptyWrite: (...args: unknown[]) => ptyWriteMock(...args),
   ptySpawn: (...args: unknown[]) => ptySpawnMock(...args),
   ptySpawnDetached: (...args: unknown[]) => ptySpawnDetachedMock(...args),
+  accountsLaunchEnv: (...args: unknown[]) => accountsLaunchEnvMock(...(args as [])),
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
   terminalManager: {
     writeWhenReady: (...args: unknown[]) => writeWhenReadyMock(...args),
     whenConnected: (...args: unknown[]) => whenConnectedMock(...args),
+    setSpawnEnv: (...args: unknown[]) => setSpawnEnvMock(...args),
   },
   MAX_TERMINAL_COLS: 240,
   MAX_TERMINAL_ROWS: 90,
@@ -68,6 +72,16 @@ describe("startAgentInTab", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("hands the mounting terminal the harness's account env", async () => {
+    startAgentInTab("tab-1", agent(["claude"]));
+    const resolve = setSpawnEnvMock.mock.calls.at(-1)?.[1] as
+      | ((tab: { worktreeId: string }) => Promise<unknown>)
+      | undefined;
+    expect(setSpawnEnvMock.mock.calls.at(-1)?.[0]).toBe("tab-1");
+    await resolve?.({ worktreeId: "wt-9" });
+    expect(accountsLaunchEnvMock).toHaveBeenCalledWith("wt-9", "test", "tab-1");
   });
 
   it("sends the start command after the launch delay", async () => {
@@ -208,6 +222,8 @@ describe("startBackgroundAgentSession", () => {
       "/cwd",
       expect.any(Number),
       expect.any(Number),
+      null,
+      [],
     );
     // No prefill to watch for, so the unmounted tab's output never streams into the webview.
     expect(ptySpawnMock).not.toHaveBeenCalled();
@@ -215,6 +231,29 @@ describe("startBackgroundAgentSession", () => {
     expect(ptyWriteMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
     expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "opencode\r");
+  });
+
+  it("spawns with the env of the accounts the harness is bound to", async () => {
+    accountsLaunchEnvMock.mockResolvedValueOnce({ env: [["CLAUDE_CONFIG_DIR", "/h/1"]] });
+    await startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["claude"]));
+    expect(accountsLaunchEnvMock).toHaveBeenCalledWith("wt-1", "test", "tab-1");
+    expect(ptySpawnDetachedMock).toHaveBeenCalledWith(
+      "tab-1",
+      "wt-1",
+      "/cwd",
+      expect.any(Number),
+      expect.any(Number),
+      null,
+      [["CLAUDE_CONFIG_DIR", "/h/1"]],
+    );
+  });
+
+  it("launches with the default login when the account env is unavailable", async () => {
+    accountsLaunchEnvMock.mockRejectedValueOnce(new Error("host down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["claude"]));
+    expect(ptySpawnDetachedMock.mock.calls[0]?.[6]).toEqual([]);
+    warn.mockRestore();
   });
 
   it("waits for split alternate-screen output before pasting a bracketed prefill", async () => {

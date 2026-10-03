@@ -5,14 +5,16 @@
 //! Mirrors the `automations` sidecar supervisor: a lazily (re)spawned child with
 //! a stdout reader thread. The sidecar resolves plugin agent contributions in
 //! TypeScript (it can `import()` plugin bundles) and reports a `catalog` event;
-//! the last catalog is cached so a sidecar crash never blanks the catalog — a
-//! respawn re-runs `load` and the cache holds until a fresh publish arrives.
+//! the last catalog is cached so a sidecar crash never blanks the catalog — the
+//! next request re-sends `load` to the respawned child, and the cache holds until
+//! its fresh publish arrives.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -40,12 +42,14 @@ const ASSET_MAX_BYTES: u64 = 256 * 1024;
 // `NotStarted`, causing every catalog caller to enqueue another full reload.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
-const USAGE_LIMITS_LOG_FIELD_MAX_CHARS: usize = 2_000;
+/// Account callbacks shell out to harness CLIs (`claude -p`, `codex app-server`)
+/// that can take tens of seconds on a cold start; usage shares the same bound.
+const ACCOUNTS_REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 #[cfg(not(test))]
 const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
 
-type UsageLimitsSender = SyncSender<Result<Value, String>>;
-type PendingUsageLimits = Arc<Mutex<HashMap<String, UsageLimitsSender>>>;
+type PendingSender = SyncSender<Result<Value, String>>;
+type PendingRequests = Arc<Mutex<HashMap<String, PendingSender>>>;
 
 #[derive(Debug, Error)]
 pub enum PluginsError {
@@ -133,6 +137,13 @@ enum SidecarEvent {
         #[serde(default)]
         error: Option<String>,
     },
+    AccountsResult {
+        request_id: String,
+        #[serde(default)]
+        value: Option<Value>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 }
 
 /// Owns the supervised sidecar plus the cached catalog + asset map.
@@ -143,9 +154,12 @@ pub struct PluginsRegistry {
     assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
     watchers: Arc<Mutex<Vec<WatcherSpec>>>,
     publish_revision: Arc<(Mutex<u64>, Condvar)>,
-    pending_usage_limits: PendingUsageLimits,
+    pending: PendingRequests,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
+    /// The sidecar generation `load_state` describes; a respawned child has
+    /// loaded nothing, whatever the previous one had.
+    loaded_generation: AtomicU64,
     reload_lock: Mutex<()>,
     server_boot_id: String,
 }
@@ -157,7 +171,7 @@ impl PluginsRegistry {
         let assets = Arc::new(Mutex::new(HashMap::new()));
         let watchers = Arc::new(Mutex::new(Vec::new()));
         let publish_revision = Arc::new((Mutex::new(0), Condvar::new()));
-        let pending_usage_limits = Arc::new(Mutex::new(HashMap::new()));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
         let roots = load_persisted_roots(&server_dir);
         let registry = Arc::new(Self {
             server_dir,
@@ -166,9 +180,10 @@ impl PluginsRegistry {
             assets: Arc::clone(&assets),
             watchers: Arc::clone(&watchers),
             publish_revision: Arc::clone(&publish_revision),
-            pending_usage_limits: Arc::clone(&pending_usage_limits),
+            pending: Arc::clone(&pending),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
+            loaded_generation: AtomicU64::new(0),
             reload_lock: Mutex::new(()),
             server_boot_id: uuid::Uuid::new_v4().to_string(),
         });
@@ -211,15 +226,17 @@ impl PluginsRegistry {
                         providers,
                         error,
                     } => {
-                        let sender = pending_usage_limits
-                            .lock()
-                            .ok()
-                            .and_then(|mut pending| pending.remove(&request_id));
-                        if let Some(sender) = sender {
-                            let result = error
-                                .map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
-                            let _ = sender.send(result);
-                        }
+                        let result =
+                            error.map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
+                        complete_pending(&pending, &request_id, result);
+                    }
+                    SidecarEvent::AccountsResult {
+                        request_id,
+                        value,
+                        error,
+                    } => {
+                        let result = error.map_or_else(|| Ok(value.unwrap_or(Value::Null)), Err);
+                        complete_pending(&pending, &request_id, result);
                     }
                     SidecarEvent::Ready => {}
                 }
@@ -266,7 +283,6 @@ impl PluginsRegistry {
             }
             "readAsset" => self.read_asset(payload),
             "usageLimits" => self.usage_limits(payload),
-            "logUsageLimitsError" => Self::log_usage_limits_error(payload),
             "reload" => {
                 self.reload()?;
                 Ok(json!({ "ok": true }))
@@ -369,6 +385,8 @@ impl PluginsRegistry {
         let (revision, changed) = &*self.publish_revision;
         let previous = *revision.lock().map_err(|_| PluginsError::LockPoisoned)?;
         let state = self.send_load(&roots)?;
+        self.loaded_generation
+            .store(self.sidecar.generation(), Ordering::SeqCst);
         let (revision, timeout) = changed
             .wait_timeout_while(
                 revision.lock().map_err(|_| PluginsError::LockPoisoned)?,
@@ -396,15 +414,24 @@ impl PluginsRegistry {
             .reload_lock
             .lock()
             .map_err(|_| PluginsError::LockPoisoned)?;
-        let state = *self
-            .load_state
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?;
-        match state {
+        // Respawn a crashed child now, so its generation is current below.
+        self.sidecar.ensure_running()?;
+        match self.current_load_state()? {
             LoadState::StartedWithGateway => Ok(()),
             LoadState::StartedWithoutGateway if self.gateway_credentials().is_none() => Ok(()),
             LoadState::NotStarted | LoadState::StartedWithoutGateway => self.reload_locked(),
         }
+    }
+
+    /// `load_state`, or `NotStarted` when the sidecar has respawned since.
+    fn current_load_state(&self) -> Result<LoadState, PluginsError> {
+        if self.loaded_generation.load(Ordering::SeqCst) != self.sidecar.generation() {
+            return Ok(LoadState::NotStarted);
+        }
+        Ok(*self
+            .load_state
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?)
     }
 
     fn send_load(&self, roots: &[String]) -> Result<LoadState, PluginsError> {
@@ -481,45 +508,56 @@ impl PluginsRegistry {
     }
 
     fn usage_limits(&self, payload: &Value) -> Result<Value, PluginsError> {
-        self.ensure_catalog_fresh()?;
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        self.pending_usage_limits
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?
-            .insert(request_id.clone(), sender);
-        let mut command = json!({
-            "type": "usageLimits",
-            "requestId": request_id,
-        });
+        let mut command = json!({ "type": "usageLimits" });
         if let Some(plugin_id) = payload.get("pluginId").and_then(Value::as_str) {
             command["pluginId"] = Value::String(plugin_id.to_string());
         }
-        if let Err(error) = self.sidecar.send(&command) {
-            if let Ok(mut pending) = self.pending_usage_limits.lock() {
-                pending.remove(&request_id);
-            }
-            return Err(error);
-        }
-        let result = receiver
-            .recv_timeout(USAGE_LIMITS_TIMEOUT)
-            .map_err(|error| {
-                if let Ok(mut pending) = self.pending_usage_limits.lock() {
-                    pending.remove(&request_id);
-                }
-                PluginsError::Operation(format!("wait for usage limits: {error}"))
-            })?;
-        result
+        self.request(command, USAGE_LIMITS_TIMEOUT)
             .map(|providers| json!({ "providers": providers }))
-            .map_err(PluginsError::Operation)
     }
 
-    fn log_usage_limits_error(payload: &Value) -> Result<Value, PluginsError> {
-        let plugin_id = required_log_field(payload, "pluginId")?;
-        let provider_id = required_log_field(payload, "providerId")?;
-        let message = required_log_field(payload, "message")?;
-        eprintln!("usage limits update failed for {plugin_id}/{provider_id}: {message}");
-        Ok(json!({ "ok": true }))
+    /// Runs one account op (`providers`, `launch`, `identify`, `usage`) in the
+    /// sidecar, which owns the plugin callbacks. `op` carries the op's fields.
+    pub fn accounts_request(&self, mut op: Value) -> Result<Value, PluginsError> {
+        op["type"] = Value::String("accounts".to_string());
+        self.request(op, ACCOUNTS_REQUEST_TIMEOUT)
+    }
+
+    /// Sends one correlated command and waits for the sidecar's matching reply.
+    fn request(&self, mut command: Value, timeout: Duration) -> Result<Value, PluginsError> {
+        self.ensure_catalog_fresh()?;
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.pending
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?
+            .insert(request_id.clone(), sender);
+        command["requestId"] = Value::String(request_id.clone());
+        let forget = || {
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.remove(&request_id);
+            }
+        };
+        if let Err(error) = self.sidecar.send(&command) {
+            forget();
+            return Err(error);
+        }
+        let result = receiver.recv_timeout(timeout).map_err(|error| {
+            forget();
+            PluginsError::Operation(format!("wait for plugins sidecar: {error}"))
+        })?;
+        result.map_err(PluginsError::Operation)
+    }
+}
+
+/// Hands a sidecar reply to the request waiting on it, if it is still waiting.
+fn complete_pending(pending: &PendingRequests, request_id: &str, result: Result<Value, String>) {
+    let sender = pending
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.remove(request_id));
+    if let Some(sender) = sender {
+        let _ = sender.send(result);
     }
 }
 
@@ -544,25 +582,6 @@ fn resolve_watcher(
         .filter(|watcher| watcher.watcher_agent == agent_id);
     let watcher = matches.next()?.clone();
     matches.next().is_none().then_some(watcher)
-}
-
-fn required_log_field(payload: &Value, field: &str) -> Result<String, PluginsError> {
-    let value = payload
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| PluginsError::InvalidRequest(format!("missing {field}")))?;
-    Ok(value
-        .chars()
-        .take(USAGE_LIMITS_LOG_FIELD_MAX_CHARS)
-        .map(|character| {
-            if character == '\n' || character == '\r' {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect())
 }
 
 /// Reads the persisted plugin roots, or an empty list before the first
@@ -599,6 +618,8 @@ struct PluginsSidecar {
     tx: Sender<SidecarEvent>,
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<ChildStdin>>,
+    /// Bumped on every spawn, so callers can tell a respawned child apart.
+    generation: AtomicU64,
 }
 
 impl PluginsSidecar {
@@ -607,7 +628,12 @@ impl PluginsSidecar {
             tx,
             child: Mutex::new(None),
             stdin: Mutex::new(None),
+            generation: AtomicU64::new(0),
         }
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
     }
 
     fn send(&self, command: &Value) -> Result<(), PluginsError> {
@@ -715,6 +741,7 @@ impl PluginsSidecar {
         }
         *self.stdin.lock().map_err(|_| PluginsError::LockPoisoned)? = Some(stdin);
         *self.child.lock().map_err(|_| PluginsError::LockPoisoned)? = Some(child);
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -748,11 +775,13 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use serde_json::json;
 
     use super::{
-        is_lowercase_hex_sha256, resolve_watcher, AssetEntry, PluginsError, PluginsRegistry,
-        SidecarEvent, WatcherSpec, PLUGIN_ROOTS_FILE,
+        is_lowercase_hex_sha256, resolve_watcher, AssetEntry, PluginsRegistry, SidecarEvent,
+        WatcherSpec, PLUGIN_ROOTS_FILE,
     };
 
     fn watcher(plugin_id: &str, agent_id: &str, watcher_agent: &str) -> WatcherSpec {
@@ -857,28 +886,6 @@ mod tests {
     }
 
     #[test]
-    fn usage_limits_error_log_requires_identifying_fields() {
-        let result = PluginsRegistry::log_usage_limits_error(&json!({
-            "pluginId": "pragma.cursor",
-            "providerId": "cursor",
-        }));
-
-        assert!(matches!(result, Err(PluginsError::InvalidRequest(_))));
-    }
-
-    #[test]
-    fn usage_limits_error_log_accepts_complete_event() {
-        let result = PluginsRegistry::log_usage_limits_error(&json!({
-            "pluginId": "pragma.cursor",
-            "providerId": "cursor",
-            "message": "not logged in\nretry later",
-        }))
-        .expect("complete log event");
-
-        assert_eq!(result, json!({ "ok": true }));
-    }
-
-    #[test]
     fn gateway_credentials_require_a_real_port_and_token() {
         let dir =
             std::env::temp_dir().join(format!("pragma-plugins-creds-test-{}", std::process::id()));
@@ -926,6 +933,27 @@ mod tests {
             *registry.load_state.lock().expect("load state"),
             super::LoadState::NotStarted,
             "idempotent registration must not reload the plugin sidecar"
+        );
+    }
+
+    #[test]
+    fn respawned_sidecar_needs_a_fresh_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = PluginsRegistry::new(dir.path().to_path_buf());
+        *registry.load_state.lock().expect("load state") = super::LoadState::StartedWithGateway;
+        registry.loaded_generation.store(1, Ordering::SeqCst);
+        registry.sidecar.generation.store(1, Ordering::SeqCst);
+        assert_eq!(
+            registry.current_load_state().expect("state"),
+            super::LoadState::StartedWithGateway
+        );
+
+        registry.sidecar.generation.store(2, Ordering::SeqCst);
+
+        assert_eq!(
+            registry.current_load_state().expect("state"),
+            super::LoadState::NotStarted,
+            "a respawned child has loaded no plugins"
         );
     }
 

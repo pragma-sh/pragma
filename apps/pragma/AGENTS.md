@@ -768,6 +768,20 @@ best-effort. Fanout snapshots are host-wide, so tab adoption filters each fanout
 `projectId`; it also enforces that a tab's project matches its worktree and repairs legacy
 cross-project rows from older builds.
 
+## Account providers
+
+The toolbar's `components/accounts/AccountProvidersMenu.tsx` replaced the usage-limits
+popover. All state is host-owned and read through `accounts_rpc` (routed to the project's
+host) into `state/accounts-store.ts`, one shared store per project that polls usage once per
+account while subscribed. `lib/accounts.ts` turns the host's list into provider → account
+views; binding resolution stays on the host (`effective`, `loginKeys`) — never re-derive it
+here. Every agent launch passes the bound accounts' env to its PTY spawn: `startAgentInTab`
+through `terminalManager.setSpawnEnv`, background launches directly; `resolveAgentLaunchEnv`
+never blocks a launch for more than 5 s. Settings → Account Providers
+(`components/settings/AccountsSection.tsx`) renders the menu's own
+`components/accounts/ProviderSection.tsx` with `wide` + `manage` — keep the two one UI, never
+a second Settings-only layout. The page pins the chips' write scope via `rowActions(…, scope)`.
+
 ## Remote agent session launch
 
 `control.rs` handles the brokered `agentSessionLaunch` control method: it resolves or
@@ -1788,7 +1802,7 @@ keypress events needed for shifted input.
 ## Agent board
 
 A **project-scoped agent board** lives behind the agent-board button in the top tab
-toolbar (`TerminalTabs`, between the usage-limits popover and the editor launcher; it
+toolbar (`TerminalTabs`, between the Account providers menu and the editor launcher; it
 replaced the new-session button). `state/kanban-context.tsx` (`useKanban`) is mounted in
 `App.tsx` **inside** `WorkspaceProvider` and is **always alive**, so it works in both
 shell modes. It owns a `mode: "normal" | "kanban" | "settings"` switch: `WorkspaceShell` renders

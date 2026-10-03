@@ -1,7 +1,7 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
   slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
@@ -64,17 +64,26 @@ const SLASH_COMMAND_SOURCES = [
 export const grokAgentPlugin: PluginDefinition = definePlugin({
   name: "Grok",
   description: "Launch Grok Build from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "grok",
-      title: "Grok",
+  accounts: defineAccounts([
+    {
+      provider: "xai",
+      agent: "grok",
       dashboardUrl: "https://grok.com/?_s=usage",
       iconPath: "assets/grok.svg",
-      primaryLimitId: PRIMARY_LIMIT_ID,
-      refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
-      load: loadGrokUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["grok", "login", "--oauth"],
+        instructions: "Finish signing in to Grok in the browser tab that opens.",
+      },
+      // `GROK_HOME` moves `~/.grok` (config and cached credentials) wholesale.
+      env: (home) => ({ GROK_HOME: home }),
+      credentialPath: (home) => `${home ?? "~/.grok"}/auth.json`,
+      usageLimits: {
+        primaryLimitId: PRIMARY_LIMIT_ID,
+        refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
+        load: loadGrokUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "grok",

@@ -13,6 +13,7 @@ import {
 } from "./catalog";
 import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
+import { handleAccountsOp, type AccountsOp } from "./accounts";
 import { loadUsageLimits } from "./usage-limits";
 
 interface LoadCommand {
@@ -30,7 +31,9 @@ interface UsageLimitsCommand {
   pluginId?: string;
 }
 
-type Command = LoadCommand | UsageLimitsCommand;
+type AccountsCommand = { type: "accounts"; requestId: string } & AccountsOp;
+
+type Command = LoadCommand | UsageLimitsCommand | AccountsCommand;
 
 interface LoadedState {
   plugins: ResolvedPlugin[];
@@ -144,6 +147,15 @@ async function load(
   };
 }
 
+/** Resolves to `{ value }` or `{ error }` so a failed op still answers its request. */
+async function settle(work: Promise<unknown>): Promise<{ value?: unknown; error?: string }> {
+  try {
+    return { value: (await work) ?? null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 class StdinLines {
   private loaded: LoadedState | undefined;
   /** Last successfully assembled catalog, the fallback for flaky providers. */
@@ -156,17 +168,32 @@ class StdinLines {
   constructor() {
     readStdinLines(
       (line) => {
-        this.queue = this.queue.then(() => this.dispatch(line));
+        let command: Command;
+        try {
+          command = JSON.parse(line) as Command;
+        } catch (error) {
+          emitError(error);
+          return;
+        }
+        // Account ops shell out to harness CLIs that take seconds; running them
+        // beside the queue keeps one slow usage load from stalling a launch.
+        if (command.type === "accounts") {
+          void this.handleAccounts(command);
+          return;
+        }
+        this.queue = this.queue.then(() => this.dispatch(command));
       },
       () => process.exit(0),
     );
   }
 
-  private async dispatch(line: string, followUp = false): Promise<void> {
+  private async dispatch(
+    command: LoadCommand | UsageLimitsCommand,
+    followUp = false,
+  ): Promise<void> {
     try {
-      const command = JSON.parse(line) as Command;
       if (command.type === "load") {
-        await this.handleLoad(command, line, followUp);
+        await this.handleLoad(command, followUp);
         return;
       }
       await this.handleUsageLimits(command);
@@ -176,7 +203,7 @@ class StdinLines {
   }
 
   /** Assembles and publishes the catalog; a follow-up reuses the load's generation. */
-  private async handleLoad(command: LoadCommand, line: string, followUp: boolean): Promise<void> {
+  private async handleLoad(command: LoadCommand, followUp: boolean): Promise<void> {
     const generation = followUp ? this.loadGeneration : ++this.loadGeneration;
     const loaded = await load(command, this.lastCatalog);
     this.loaded = loaded.state;
@@ -188,17 +215,21 @@ class StdinLines {
       watchers: loaded.watchers,
     });
     this.scheduleLifecycles(command, loaded.state);
-    if (!followUp) this.scheduleFollowUp(line, generation, loaded.catalog.pending);
+    if (!followUp) this.scheduleFollowUp(command, generation, loaded.catalog.pending);
   }
 
   /**
    * Options that overran their budget finish in the background; reload once
    * they have (a single follow-up), unless a newer load superseded this one.
    */
-  private scheduleFollowUp(line: string, generation: number, pending?: Promise<void>): void {
+  private scheduleFollowUp(
+    command: LoadCommand,
+    generation: number,
+    pending?: Promise<void>,
+  ): void {
     void pending?.then(() => {
       if (generation !== this.loadGeneration) return undefined;
-      this.queue = this.queue.then(() => this.dispatch(line, true));
+      this.queue = this.queue.then(() => this.dispatch(command, true));
       return undefined;
     });
   }
@@ -230,6 +261,19 @@ class StdinLines {
       }
       return undefined;
     });
+  }
+
+  private async handleAccounts(command: AccountsCommand): Promise<void> {
+    emit({
+      type: "accountsResult",
+      requestId: command.requestId,
+      ...(await this.runAccounts(command)),
+    });
+  }
+
+  private runAccounts(command: AccountsCommand): Promise<{ value?: unknown; error?: string }> {
+    if (!this.loaded) return Promise.resolve({ error: "plugin catalog has not loaded" });
+    return settle(handleAccountsOp(this.loaded.plugins, this.loaded.sdk, command));
   }
 
   private async handleUsageLimits(command: UsageLimitsCommand): Promise<void> {

@@ -15,8 +15,6 @@ pub enum BenchError {
         status: String,
         stderr: String,
     },
-    #[error("tauri-agent-tools is not installed (`npm install -g tauri-agent-tools`)")]
-    ToolMissing,
     #[error("the page rejected the injected script: {0}")]
     Eval(String),
     #[error("the dev app's bridge is gone and no replacement was found")]

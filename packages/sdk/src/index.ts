@@ -1,3 +1,11 @@
+export {
+  AccountsApi,
+  AccountsClient,
+  type AccountLaunchEnv,
+  type AccountLoginStart,
+  type AccountsRequest,
+  type AccountsSend,
+} from "./accounts-client";
 export { PragmaClient } from "./client";
 export { AssetsClient, type FetchedAsset } from "./assets-client";
 export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
@@ -9,6 +17,16 @@ export {
   type FanoutSubscriptionEvent,
 } from "./fanouts-client";
 export type {
+  AccountBindingScope,
+  AccountEffectiveBinding,
+  AccountIdentity,
+  AccountLogin,
+  AccountLoginSession,
+  AccountProviderInfo,
+  AccountSessionUse,
+  AccountUsageEntry,
+  AccountsListResult,
+  AccountsState,
   BoardDraftCreatePayload,
   Fanout,
   FanoutCreateRequest,

@@ -40,6 +40,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
         "whiteboards" => ProtocolRpcMethod::Whiteboards,
         "fanouts" => ProtocolRpcMethod::Fanouts,
+        "accounts" => ProtocolRpcMethod::Accounts,
         _ => return None,
     })
 }
@@ -67,6 +68,10 @@ mod tests {
         assert!(matches!(
             parse_method("whiteboards"),
             Some(ProtocolRpcMethod::Whiteboards)
+        ));
+        assert!(matches!(
+            parse_method("accounts"),
+            Some(ProtocolRpcMethod::Accounts)
         ));
         assert!(parse_method("missing").is_none());
     }

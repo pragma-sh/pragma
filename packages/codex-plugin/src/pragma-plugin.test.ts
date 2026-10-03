@@ -4,13 +4,37 @@ import { codexAgentPlugin, parseCodexModels } from "./pragma-plugin";
 import {
   extractCodexUsageLimits,
   loadCodexUsageLimits,
+  parseCodexAccount,
   parseCodexUsageLimits,
 } from "./usage-limits";
 
 it("uses Codex as the integration display name", () => {
   expect(codexAgentPlugin.name).toBe("Codex");
   expect(codexAgentPlugin.agents?.[0]?.name).toBe("Codex");
-  expect(codexAgentPlugin.usageLimits?.[0]?.title).toBe("Codex");
+  expect(codexAgentPlugin.accounts?.[0]).toMatchObject({
+    provider: "openai",
+    agent: "codex",
+    login: { command: ["codex", "login"] },
+  });
+  expect(codexAgentPlugin.accounts?.[0]?.env?.("/h/1")).toEqual({ CODEX_HOME: "/h/1" });
+});
+
+/** App-server output holding an `account/read` reply for `account`. */
+function reply(account: unknown): string {
+  return [
+    '{"id":1,"result":{}}',
+    JSON.stringify({ id: 3, result: { account, requiresOpenaiAuth: true } }),
+  ].join("\n");
+}
+
+it("identifies a ChatGPT login from app-server account/read", () => {
+  expect(parseCodexAccount(reply({ type: "chatgpt", email: "a@b.c", planType: "plus" }))).toEqual({
+    id: "a@b.c",
+    email: "a@b.c",
+    plan: "Plus",
+  });
+  expect(parseCodexAccount(reply({ type: "apiKey" }))).toBeNull();
+  expect(parseCodexAccount(reply(null))).toBeNull();
 });
 
 it("parses visible Codex models and reasoning levels", () => {

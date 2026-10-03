@@ -15,6 +15,7 @@ Thanks for wanting to help. Please read this page before you write code — it w
 - [Where things go](#where-things-go)
 - [Style guidelines](#style-guidelines)
 - [Testing](#testing)
+- [Verifying in the running app (jev)](#verifying-in-the-running-app-jev)
 - [Quality gates](#quality-gates)
 - [Release secrets](#release-secrets)
 - [Working with coding agents](#working-with-coding-agents)
@@ -77,7 +78,7 @@ Useful variations:
 bun run --filter pragma tauri:build       # full desktop bundle for your platform
 bun run --filter pragma sidecar:server    # restage the server sidecar only
 PRAGMA_SKIP_WEB=1 bun run dev             # skip the Expo web export
-bun run dev:command -- <dev-id> "<cmd>"   # open a command in a new tab of a running dev build
+bun run jev -- run "<goal>"               # Jev drives the running dev app toward a goal (see .agents/skills/jev)
 bun run benchmark                         # terminal lag benchmark (drives its own dev window)
 ```
 
@@ -265,6 +266,52 @@ A test must pass on macOS, Linux, **and** Windows. Recurring traps: `git init` i
 
 Never add a `pretest` hook that builds the package — `test` already depends on `build` in `turbo.json`, and the two bundlers race for the same `dist/`.
 
+## Verifying in the running app (jev)
+
+Tests prove the logic; they do not prove the app works. For anything a user sees, check the change in the real dev window too. `bun run jev` (`packages/jev`) drives a running `bun run dev` instance the way a person would: it clicks at real coordinates, types into fields and the terminal, presses shortcuts, and screenshots the window. A Jev-powered agent can take a plain-English goal and work through it for you.
+
+**Setup**
+
+1. Start the app with `bun run dev` and leave its window open. jev never launches the app and never runs headless. `bun run jev -- instances` lists running dev builds; jev picks the one built from your checkout, or the one you pass with `--pid <n>`.
+2. For goal-driven runs, give jev an [OpenRouter](https://openrouter.ai) key: export `JEV_API_KEY` (or `OPENROUTER_API_KEY`), or put `JEV_API_KEY=sk-or-…` in `~/.pragma/jev.env`. The direct commands below need no key.
+3. macOS or Linux only: the dev bridge jev talks to writes its token to `/tmp`.
+
+**Give it a goal**
+
+```bash
+bun run jev -- run "Open Settings → Keybindings and report the shortcut for a new terminal tab"
+bun run jev -- run "Create a worktree named the given name and report the sidebar entry" --input name=feature-x
+```
+
+jev prints each step as it goes, then a report, the path of a final screenshot, and its run folder (a step-by-step log of what it saw and did). Exit codes: `0` done, `1` failed, `2` it asked a question, `3` it ran out of steps (default 25, `--steps N`). Answer a question or continue a run with:
+
+```bash
+bun run jev -- run --resume <run-id> --answer "<text>"
+```
+
+Write goals as checks ("… and report X") so jev verifies rather than just clicks, and open the final screenshot yourself before trusting the report.
+
+**Drive it step by step**
+
+```bash
+bun run jev -- snapshot                      # every clickable/typeable element with an [index], plus terminal text
+bun run jev -- click 12                      # by index, or a CSS selector; --right, --double, --at x,y
+bun run jev -- type "hello" --into 7 --enter
+bun run jev -- key "Meta+t"                  # app shortcuts work, including native-menu ones (⌘T, ⌘W, ⌘P)
+bun run jev -- terminal run "git status"     # click into the terminal, type, Enter, print the screen
+bun run jev -- terminal read --full          # terminal text including scrollback
+bun run jev -- screenshot -o shot.png        # PNG of the app window
+bun run jev -- look "Is anything clipped?"   # screenshot + screen text, analysed by Jev
+bun run jev -- eval "document.title"         # raw JavaScript in the webview
+```
+
+Two things worth knowing:
+
+- **The terminal is a canvas.** Terminal panes are drawn on a WebGL `<canvas>`, so their text is not in the DOM. jev reads it from a dev-only hook instead. Click the terminal (or use `terminal run`) and typing goes to the shell, just as when you click into it yourself.
+- **It acts on your real dev data.** jev clicks and types for real. Use a throwaway project, and close the tabs it opens.
+
+`jev` replaces the old `tauri-agent-tools` CLI and the `bun run dev:command` script; the internals are documented in [`packages/jev/AGENTS.md`](packages/jev/AGENTS.md).
+
 ## Quality gates
 
 Run before you push:
@@ -430,9 +477,9 @@ Pragma is built with coding agents, and the repo is set up for them:
 
 - `AGENTS.md` **is the contract.** The root file holds repo-wide rules; every app, crate, and package has its own with the specifics. `CLAUDE.md` is a symlink to the root one, so both audiences stay in sync. Point your agent at the `AGENTS.md` closest to the code it is touching.
 - **The guide is living — fix it in the same change.** If your change makes an `AGENTS.md`stale (you added a package, moved a file, changed a command, adopted a pattern), update it in the same commit. That is expected, not optional. When you learn a gotcha the hard way, write it down there so nobody rediscovers it.
-- **Mirror workflow changes into the skills.** User-facing skills live in `skills/` and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes); internal contributor skills live directly in `.agents/skills/`. Relevant ones: `pragma-architecture` (where code goes), `shared-constants`, `tauri-command`, `code-quality`, `pragma-go`, and `pragma`.
+- **Mirror workflow changes into the skills.** User-facing skills live in `skills/` and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes); internal contributor skills live directly in `.agents/skills/`. Relevant ones: `pragma-architecture` (where code goes), `shared-constants`, `tauri-command`, `code-quality`, `jev` (verifying in the running app), `pragma-go`, and `pragma`.
 - **Run agents in worktrees.** That is what Pragma is for — one agent per worktree, no collisions. Note that a Pragma worktree can be a partial checkout; if `cargo` or Vitest fails on a missing root `Cargo.toml` or `tsconfig.base.json`, that is why.
-- **Manually test changes.** Always make sure you test your changes. You do not have to read every line of code just make sure the changes work.
+- **Manually test changes.** Always make sure you test your changes. You do not have to read every line of code just make sure the changes work. Agents can do this themselves with [`bun run jev`](#verifying-in-the-running-app-jev): give it a goal, then check the screenshot it leaves behind.
 - **Do not let an agent widen the scope.** The [contribution policy ](#contribution-policy)applies to agent-written code exactly as it does to hand-written code — an agent that helpfully refactors four extra packages has just made your pull request unmergeable.
 - **Do not commit generated files or agent scratch output** (`src/generated/**`, scratchpads, transcripts).
 

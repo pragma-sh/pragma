@@ -59,7 +59,7 @@ than no guide.
   contributor skills live directly in `.agents/skills/`, so that directory contains both
   internal and user-facing skills. If you
   change a workflow here, update the relevant skill (`pragma-architecture`,
-  `shared-constants`, `tauri-command`, `code-quality`, `pragma`) too, and
+  `shared-constants`, `tauri-command`, `code-quality`, `jev`, `pragma`) too, and
   add a new skill when you add a substantial new workflow.
 - **Ship the website with the feature.** A user-visible change is not done until
   `apps/www` matches it: add or update the `/docs` page (and its `meta.json` entry), the
@@ -117,6 +117,7 @@ than no guide.
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
+│   ├── jev/                     # `bun run jev` drives the running dev app (DOM, input, screenshots, Jev agent) → see packages/jev/AGENTS.md
 │   ├── brand/                   # `@pragma-sh/brand` the Pragma mark as vector geometry + palettes → see packages/brand/AGENTS.md
 │   ├── treemap/                 # `@pragma-sh/treemap` GrandPerspective-style treemap layout + palette → see packages/treemap/AGENTS.md
 │   ├── sdk/                     # `@pragma-sh/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
@@ -262,6 +263,11 @@ than no guide.
   promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
   (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
   callers of the same `fanouts` RPC — never a second implementation.
+- Anything that drives or inspects the running dev app for verification (DOM snapshots,
+  clicks, typing into a terminal, window screenshots, the Jev agent loop) → `packages/jev`
+  (`bun run jev`), over the debug-only dev bridge in `src-tauri/src/dev_bridge.rs`. It is
+  not part of `pragma-cli`, and it replaced both `tauri-agent-tools` and the old
+  `dev:command` pass-through.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
@@ -292,7 +298,9 @@ bun install                # Install all workspace deps
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run dev:pragma         # Same as `bun run dev`, named explicitly
 bun run dev:www            # Run the marketing + docs site (Next.js, http://localhost:3000)
-bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
+bun run jev -- run "<goal>"  # Jev drives the running dev app toward a goal and reports (skill: jev)
+bun run jev -- terminal run "<command>" # Click into the dev app's terminal, type, Enter, print the screen
+bun run jev -- screenshot    # PNG of the dev app window (then read it)
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
 bun run video:studio       # Preview the launch film in Remotion Studio
@@ -784,3 +792,42 @@ Defaults live in `@pragma-sh/constants` under `platform` and `terminalDefaults`.
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when
     creation fails rather than passing for the wrong reason.
+
+## Verifying in the running dev app (jev)
+
+Unit tests do not prove that a UI or terminal change works. **Before calling a user-visible
+change done, drive it in the real dev window with `bun run jev`** (`packages/jev`, skill
+`jev`). jev is a contributor tool, not part of `pragma-cli`. It replaced both
+`tauri-agent-tools` and the old `bun run dev:command` pass-through, so do not reintroduce
+either.
+
+- **It needs a running, visible `bun run dev`.** jev never launches the app and never runs
+  headless. It picks the dev instance built from the current checkout, or the one given with
+  `--pid` (list them with `bun run jev -- instances`). A Rust change restarts the dev app
+  through Tauri's watcher, so wait for the new pid before driving it.
+- **Goal first.** `bun run jev -- run "<goal> and report <what to check>"` hands the task to
+  Jev (`typesafe/jev-router` on OpenRouter). Each step it reads the screen, takes one action,
+  and observes the result, until it reports `done` (exit 0) with the evidence it saw, `fail`
+  (1), asks a question (2: answer with `--resume <id> --answer "…"`), or runs out of steps
+  (3). Supply text it may type with `--input name=value`. It never invents values.
+- **Check its evidence.** Every run saves `final.png` and per-step `step-NN.txt` in its run
+  folder. Read the screenshot yourself (`bun run jev -- screenshot` captures one on demand,
+  and `jev look "<question>"` has Jev analyse it). When the report and the screenshot
+  disagree, trust the screenshot.
+- **The terminal is a canvas.** xterm draws on WebGL, so the DOM holds no terminal text.
+  jev reads it through the dev-only `constants.bench.hookGlobal` hook, which is shared with
+  `packages/bench`, so don't remove or rename it. Clicking the terminal's index focuses it,
+  and typing then goes to the shell. `bun run jev -- terminal run "<cmd>"` does
+  click → type → Enter → read in one call.
+- **Input is real DOM events, never app internals.** Pointer and mouse sequences go to
+  hit-tested coordinates, and text goes in through `insertText`. Native-menu chords (⌘T, ⌘W,
+  ⌘P, ⌘⇧P, ⌘,) never reach the webview on macOS, so jev fires those menu items through the
+  bridge's `/menu` endpoint, which is fed by `MENU_ACCELERATORS` in `lib.rs`. A new
+  native-menu shortcut belongs in that table.
+- **The transport is the debug-only dev bridge** (`src-tauri/src/dev_bridge.rs`: `/eval`,
+  `/screenshot`, `/menu`, `/logs`, …). It starts only under `debug_assertions` and writes its
+  token to `/tmp`, so jev runs on macOS and Linux. `/screenshot` captures inside the app, so
+  the dev app's Screen Recording permission applies, not the terminal's. Bump
+  `BRIDGE_VERSION` when the bridge's HTTP surface changes.
+- **It acts on real state.** Don't delete projects or worktrees, push, or close tabs you
+  didn't open unless the task asks for it, and close the tabs you open.

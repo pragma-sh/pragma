@@ -114,6 +114,9 @@ pub struct Registry {
     /// commit, and the finalize stage. Host-owned so a fanout survives the
     /// desktop being closed or the server restarting.
     fanouts: Arc<crate::fanouts::FanoutStore>,
+    /// Host-owned account providers: logins, bindings, hidden sign-in
+    /// terminals, and the env every launch path resolves through.
+    accounts: crate::accounts::AccountsHost,
 }
 
 type AgentKey = (String, String, String);
@@ -207,7 +210,7 @@ fn now_timestamp() -> String {
 /// The command is *typed into* a live interactive shell, so it must be quoted
 /// the way that shell parses it — POSIX quoting typed into PowerShell mangles
 /// every Windows path with a space in it.
-fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
+pub(crate) fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
     let launch = shell.map_or_else(
         || pragma_platform::shell::resolve_launch(None),
         |profile| pragma_platform::shell::resolve_profile_launch(profile, None),
@@ -341,8 +344,28 @@ impl Registry {
                 store.reconcile_after_restart();
                 store
             },
+            accounts: crate::accounts::AccountsHost::new(),
             server_dir,
         }
+    }
+
+    /// Routes an `accounts` RPC to the host account providers.
+    pub fn handle_accounts_rpc(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.accounts.handle(self, payload)
+    }
+
+    /// Keeps every shared sign-in on its newest token (see
+    /// `AccountsHost::sync_all_token_groups`).
+    pub fn sync_account_tokens(&self) {
+        self.accounts.sync_all_token_groups(self);
+    }
+
+    /// The plugin catalog host, for account callbacks that run in its sidecar.
+    pub fn plugins(&self) -> &Arc<PluginsRegistry> {
+        &self.plugins
     }
 
     pub fn handle_tunnel_rpc(
@@ -672,6 +695,13 @@ impl Registry {
             ..
         } = resolved;
         let tab_id = Uuid::new_v4().to_string();
+        let project_root = self.mirrored_project_path(&launch.project_id).ok();
+        let account_env = self.accounts.launch_env(
+            self,
+            &launch.agent_id,
+            project_root.as_deref(),
+            Some(&tab_id),
+        );
         // A server-owned launch has no shell picker behind it, so the project's
         // own configured shell decides.
         let _events = self
@@ -680,6 +710,7 @@ impl Registry {
                 &launch.worktree_id,
                 &launch.cwd,
                 launch.fanout.as_ref(),
+                &account_env,
             )
             .map_err(|error| error.to_string())?;
         let session = self
@@ -778,6 +809,13 @@ impl Registry {
         Ok((raw, text))
     }
 
+    /// A session's raw scrollback and whether its shell has exited, or `None`
+    /// once the session is gone.
+    pub fn session_scrollback(&self, session_id: &str) -> Option<(Vec<u8>, bool)> {
+        let session = self.sessions.lock().ok()?.get(session_id).cloned()?;
+        Some((session.scrollback_bytes(), session.has_exited()))
+    }
+
     /// True when a watcher is attached to this session.
     pub fn has_watcher(&self, tab_id: &str) -> bool {
         self.watchers.is_watching(tab_id)
@@ -798,8 +836,9 @@ impl Registry {
         worktree_id: &str,
         cwd: &str,
         fanout: Option<&FanoutMembership>,
+        account_env: &[(String, String)],
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
-        let env = fanout.map_or_else(Vec::new, |fanout| {
+        let mut env = fanout.map_or_else(Vec::new, |fanout| {
             vec![
                 (
                     pragma_constants::CONSTANTS.fanout.env_fanout_id.clone(),
@@ -811,6 +850,7 @@ impl Registry {
                 ),
             ]
         });
+        env.extend_from_slice(account_env);
         self.spawn_with_env(
             tab_id.to_string(),
             worktree_id.to_string(),
@@ -1105,6 +1145,8 @@ impl Registry {
         }
     }
 
+    /// Spawns a session with no extra environment.
+    #[cfg(test)]
     pub fn spawn(
         &self,
         session_id: String,
@@ -1715,7 +1757,7 @@ impl Registry {
         }
     }
 
-    fn session(&self, session_id: &str) -> Result<Arc<Session>, RegistryError> {
+    pub(crate) fn session(&self, session_id: &str) -> Result<Arc<Session>, RegistryError> {
         self.sessions
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?

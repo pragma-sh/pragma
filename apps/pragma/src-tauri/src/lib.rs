@@ -1,6 +1,7 @@
 // Tauri command extraction requires owned IPC arguments and `State<T>` values.
 #![allow(clippy::needless_pass_by_value)]
 
+mod accounts;
 mod agent_cli;
 mod agent_events;
 mod agent_notifications;
@@ -111,6 +112,22 @@ fn menu_accelerator(id: &str) -> Option<&'static str> {
         .iter()
         .find(|(item_id, _)| *item_id == id)
         .map(|(_, accelerator)| *accelerator)
+}
+
+/// Workspace menu accelerators active on this platform, for the dev bridge:
+/// jev routes a chord that macOS would hand to the menu bar (and so never to
+/// the webview) to the same menu item a real keystroke would fire.
+pub(crate) fn dev_menu_accelerators() -> Vec<(&'static str, &'static str)> {
+    MENU_ACCELERATORS
+        .iter()
+        .filter_map(|(id, _)| menu_accelerator(id).map(|accelerator| (*id, accelerator)))
+        .collect()
+}
+
+/// Fires a workspace menu item exactly as choosing it would, for the dev bridge.
+pub(crate) fn dev_trigger_menu(app: &tauri::AppHandle, id: &str) -> bool {
+    let known = id == MENU_START_TOUR || MENU_ACCELERATORS.iter().any(|(item, _)| *item == id);
+    known && app.emit(MENU_EVENT, id).is_ok()
 }
 
 /// The workspace menu items whose accelerators Settings can suspend while
@@ -635,6 +652,7 @@ async fn pty_spawn(
     cols: u16,
     rows: u16,
     shell: Option<ShellProfile>,
+    env: Option<Vec<(String, String)>>,
     stream_generation: u64,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
@@ -656,7 +674,10 @@ async fn pty_spawn(
             cwd,
             cols,
             rows,
-            shell,
+            pragma_client::SpawnOptions {
+                shell,
+                env: env.unwrap_or_default(),
+            },
             stream_generation,
             on_event,
         )
@@ -676,6 +697,7 @@ async fn pty_spawn_detached(
     cols: u16,
     rows: u16,
     shell: Option<ShellProfile>,
+    env: Option<Vec<(String, String)>>,
 ) -> AppResult<()> {
     let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
     let is_local_host = host_id == LOCAL_HOST;
@@ -687,7 +709,17 @@ async fn pty_spawn_detached(
                 log::warn!("failed to ensure pragma-gateway before detached PTY spawn: {error}");
             }
         }
-        client.spawn_detached(session_id, worktree_id, cwd, cols, rows, shell)
+        client.spawn_detached(
+            session_id,
+            worktree_id,
+            cwd,
+            cols,
+            rows,
+            pragma_client::SpawnOptions {
+                shell,
+                env: env.unwrap_or_default(),
+            },
+        )
     })
     .await
 }
@@ -1237,7 +1269,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     if cfg!(debug_assertions) {
         if let Err(error) = dev_bridge::start_bridge(app.handle()).map(|_| ()) {
-            log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
+            log::warn!("failed to start the jev dev bridge: {error}");
         }
     }
     Ok(())
@@ -1497,6 +1529,8 @@ pub fn run() {
             git::base_file_diff,
             scratchpads::list_scratchpad_files,
             fanouts::fanout_rpc,
+            accounts::accounts_rpc,
+            accounts::accounts_launch_env,
             fanouts::list_fanouts,
             fanouts::restore_fanout_tab,
             fanouts::pick_fanout_member,

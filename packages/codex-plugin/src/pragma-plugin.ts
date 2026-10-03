@@ -1,7 +1,7 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
   slashCommandProvider,
   type AgentModelEntry,
   type AgentSlashCommand,
@@ -10,9 +10,16 @@ import {
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
-import { loadCodexUsageLimits } from "./usage-limits";
+import { codexSharedToken } from "./shared-token";
+import { identifyCodexAccount, loadCodexUsageLimits } from "./usage-limits";
 
-export { loadCodexUsageLimits, parseCodexUsageLimits } from "./usage-limits";
+export { codexAuth, codexSharedToken, parseCodexAuth } from "./shared-token";
+export {
+  identifyCodexAccount,
+  loadCodexUsageLimits,
+  parseCodexAccount,
+  parseCodexUsageLimits,
+} from "./usage-limits";
 
 const INTERJECT_SUBMIT_DELAY_MS = 200;
 const baseWatcher = createTuiWatcher({
@@ -38,17 +45,30 @@ const SLASH_COMMAND_SOURCES = [
 export const codexAgentPlugin: PluginDefinition = definePlugin({
   name: "Codex",
   description: "Launch Codex CLI from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "codex",
-      title: "Codex",
+  accounts: defineAccounts([
+    {
+      provider: "openai",
+      agent: "codex",
       dashboardUrl: "https://chatgpt.com/codex/settings/usage",
       iconPath: "assets/codex.png",
-      primaryLimitId: "codex-primary",
-      refreshIntervalMs: 60_000,
-      load: loadCodexUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["codex", "login"],
+        instructions: "Sign in with ChatGPT in the browser tab that opens.",
+      },
+      // `CODEX_HOME` holds Codex's auth, config, and sessions, so each account
+      // gets its own directory.
+      env: (home) => ({ CODEX_HOME: home }),
+      credentialPath: (home) => `${home ?? "~/.codex"}/auth.json`,
+      identify: identifyCodexAccount,
+      // Its ChatGPT sign-in can be handed to OpenCode, Pi, and Prime Agent.
+      sharedToken: codexSharedToken,
+      usageLimits: {
+        primaryLimitId: "codex-primary",
+        refreshIntervalMs: 60_000,
+        load: loadCodexUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "codex",

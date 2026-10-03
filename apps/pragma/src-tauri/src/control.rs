@@ -166,6 +166,7 @@ fn register_once(app: &AppHandle, pty: &PtyClient, source_host_id: &str) -> AppR
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     };
     write_json_frame(&mut stream, &request)?;
     stream.set_read_timeout(None)?;
@@ -206,6 +207,7 @@ fn register_once(app: &AppHandle, pty: &PtyClient, source_host_id: &str) -> AppR
                     subscription: None,
                     control: None,
                     control_result: Some(result),
+                    env: None,
                 };
                 write_json_frame(&mut stream, &response)?;
             }

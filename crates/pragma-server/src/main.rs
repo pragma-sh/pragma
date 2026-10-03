@@ -1,3 +1,4 @@
+mod accounts;
 mod agent_options;
 mod automations;
 mod fanout_host;
@@ -168,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let core = Arc::new(Core::new(&paths.dir)?);
     start_watcher_reconciler(&registry);
+    start_account_token_sync(&registry);
     start_dropped_files_sweeper();
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
@@ -207,6 +209,20 @@ fn start_watcher_reconciler(registry: &Arc<Registry>) {
     thread::spawn(move || loop {
         registry.reconcile_watchers();
         thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
+}
+
+/// How often shared sign-ins are brought onto their newest token between
+/// launches. A harness refreshes an OAuth token about once every 8–10 days;
+/// syncing every few minutes passes the rotated refresh token on long before
+/// another copy needs it.
+const ACCOUNT_TOKEN_SYNC_INTERVAL: Duration = Duration::from_mins(5);
+
+fn start_account_token_sync(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    thread::spawn(move || loop {
+        thread::sleep(ACCOUNT_TOKEN_SYNC_INTERVAL);
+        registry.sync_account_tokens();
     });
 }
 
@@ -406,20 +422,7 @@ fn handle_request(
     core: &Core,
 ) -> Result<Outcome, HandledRequestError> {
     match request.kind {
-        RequestKind::Spawn => {
-            let session_id = required(request.session_id, "sessionId")?;
-            let worktree_id = required(request.worktree_id, "worktreeId")?;
-            let cwd = required(request.cwd, "cwd")?;
-            let cols = request.cols.unwrap_or(80);
-            let rows = request.rows.unwrap_or(24);
-            let (scrollback, rx) = registry
-                .spawn(session_id, worktree_id, cwd, cols, rows, request.shell)
-                .map_err(|err| HandledRequestError::Request(err.to_string()))?;
-            Ok(Outcome {
-                event_stream: Some(EventStream { scrollback, rx }),
-                control_rx: None,
-            })
-        }
+        RequestKind::Spawn => spawn_request(request, registry),
         RequestKind::Attach => {
             let session_id = required(request.session_id, "sessionId")?;
             // Only resize when the attacher declares a viewport; a size-less
@@ -759,6 +762,9 @@ fn handle_rpc_request(
     if matches!(rpc.method, ProtocolRpcMethod::Fanouts) {
         return Ok(handle_fanout_rpc(request_id, rpc.payload, registry));
     }
+    if matches!(rpc.method, ProtocolRpcMethod::Accounts) {
+        return Ok(handle_accounts_rpc(request_id, rpc.payload, registry));
+    }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {
             request_id,
@@ -777,6 +783,61 @@ fn handle_rpc_request(
             }),
         },
     })
+}
+
+/// Spawns one PTY session, exporting any extra env the caller sent (an agent
+/// launch's bound accounts).
+fn spawn_request(
+    request: RequestFrame,
+    registry: &Registry,
+) -> Result<Outcome, HandledRequestError> {
+    let session_id = required(request.session_id, "sessionId")?;
+    let worktree_id = required(request.worktree_id, "worktreeId")?;
+    let cwd = required(request.cwd, "cwd")?;
+    let cols = request.cols.unwrap_or(80);
+    let rows = request.rows.unwrap_or(24);
+    let env = request.env.unwrap_or_default();
+    let (scrollback, rx) = registry
+        .spawn_with_env(
+            session_id,
+            worktree_id,
+            cwd,
+            cols,
+            rows,
+            request.shell,
+            &env,
+        )
+        .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+    Ok(Outcome {
+        event_stream: Some(EventStream { scrollback, rx }),
+        control_rx: None,
+    })
+}
+
+/// Answers one `accounts` RPC from the host account providers.
+fn handle_accounts_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> RpcResponseFrame {
+    match registry.handle_accounts_rpc(payload) {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    }
 }
 
 fn handle_control_request(
