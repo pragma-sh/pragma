@@ -1,0 +1,182 @@
+---
+title: Account providers
+description: See every account your agents sign in to, how much of each plan is left, and switch which account each agent uses.
+---
+
+The **Account providers** menu (the row of small bars in the toolbar, next to the agents
+menu) lists every account your agent harnesses are signed in to, grouped by provider —
+Anthropic, OpenAI, Cursor, GitHub Copilot, xAI, and so on. Each bar in the button is one
+provider, filled to its busiest account in this project.
+
+## What it shows
+
+One row per **account**, showing its name, email and plan, and its **primary limit** as
+"N% used" with a bar. Click a row to see every limit with its **resets in** countdown.
+
+Under a provider's accounts sits one **harness row** per harness — Claude Code, OpenCode,
+Codex, … — each with a picker naming the account it launches with in the current project.
+A harness still on its own login, not on any listed account, reads **Choose account**. A harness that cannot use any of the provider's listed accounts gets no row — OpenCode under Anthropic, for example, which only takes an Anthropic API key, never a Claude subscription. It appears once you add such a key with **Add account**. A picker
+lists **every** account of its provider: the ones that harness can use right away (its own, or
+one it can borrow from another harness), then ones it would first have to sign in to, then ones
+it cannot use at all, greyed out with the reason — for example, a Claude subscription in
+OpenCode, which only takes an Anthropic API key. A provider that
+only OpenCode, Pi, Prime Agent or Kimi Code can use (OpenRouter, DeepSeek, …) appears once one of them
+is signed in to it. The picker is
+the menu's only way to switch: click it to pick a different account for that
+harness, sign it in to another account, or drop a project override.
+
+Accounts are merged across harnesses: if Codex and OpenCode are both signed in to the same
+ChatGPT account, it shows up once, and both harness rows name it. Usage is loaded once per account.
+
+The bar turns warning-coloured from 50% and destructive from 75%. When a provider has
+several accounts in use, its toolbar bar shows the **highest** — the one that will stop you
+first.
+
+## Switching accounts
+
+A switch applies to **all projects**, except projects that chose their own account for that
+harness. A project override shows a dot next to the harness name; choose **Follow all projects** in its picker
+to return to the global choice. Settings → **Account Providers** gives each provider a card:
+its **Accounts** list shows every limit and which harnesses are signed in to each account
+(click an account's name to rename it), and its **Harnesses** list picks an account for each
+harness globally, or for the selected project only.
+In the global scope, **Use _harness_'s own login** clears the global choice.
+
+Switching changes the account **new sessions** start with. Sessions that are already
+running keep the account they launched with, and the menu tells you how many are still on
+the old one. The exception is a harness that shares one sign-in file (see below): its running sessions
+switch with it.
+
+## Adding an account
+
+Click **+** in the menu (or **Add account** in Settings), choose the provider and the
+harness to sign in with, and click **Open browser**. Pragma runs the harness's own login
+command in a hidden terminal on the machine that runs the harness:
+
+- Links the login prints show up as **Open sign-in page** buttons. On a remote (SSH) host
+  Pragma opens the first one for you, since that host's browser is not yours.
+- If the sign-in page gives you a code, paste it into the field and click **Send**.
+- **Show terminal output** reveals everything the login printed.
+
+When the login finishes, name the account and choose which harnesses use it.
+
+Each account gets its own credential directory under `~/.pragma/accounts/`, readable only by
+you. Pragma stores the path to the token, never the token itself.
+
+## Harnesses
+
+| Harness        | Provider                  | Multiple accounts                            |
+| -------------- | ------------------------- | -------------------------------------------- |
+| Claude Code    | Anthropic                 | Yes (`CLAUDE_CONFIG_DIR`)                    |
+| Codex          | OpenAI                    | Yes (`CODEX_HOME`)                           |
+| GitHub Copilot | GitHub Copilot            | Yes (`COPILOT_HOME`)                         |
+| Grok           | xAI                       | Yes (`GROK_HOME`)                            |
+| OpenCode       | OpenCode Go               | Yes (`XDG_DATA_HOME`)                        |
+| OpenCode       | OpenAI                    | Yes (swaps its `auth.json`)                  |
+| OpenCode       | GitHub Copilot            | Yes (swaps its `auth.json`)                  |
+| OpenCode       | API-key providers (below) | Its own sign-in (`opencode auth login`)      |
+| Pi             | OpenAI                    | Yes (swaps its `auth.json`)                  |
+| Pi             | Anthropic                 | API key only, in Pi                          |
+| Pi             | GitHub Copilot            | Its own sign-in (`/login` in Pi)             |
+| Pi             | OpenCode Go               | Its own sign-in (API key in Pi)              |
+| Pi             | API-key providers (below) | Its own sign-in (API key in Pi)              |
+| Prime Agent    | Same as Pi                | Same as Pi; OpenAI switches by swapping too  |
+| Kimi Code      | Moonshot                  | Yes (`KIMI_CODE_HOME`), no usage             |
+| Kimi Code      | API-key providers (below) | Its own config (`kimi provider catalog add`) |
+| Cursor         | Cursor                    | One login (macOS Keychain entry)             |
+| Junie          | JetBrains                 | One login, signed in from Junie              |
+
+A harness's existing sign-in (for example `~/.claude`) shows up automatically as its
+default account. An OpenCode account keeps its own session history, because OpenCode stores
+sessions beside its credentials.
+
+### One sign-in, several harnesses
+
+OpenCode, Pi and Prime Agent can sign in to providers that have a harness of their own —
+ChatGPT, GitHub Copilot, OpenCode Go. Pragma recognizes the account behind each
+sign-in, so if Codex and Pi are both signed in to the same ChatGPT account, it appears once,
+under both harnesses, and its usage comes from Codex. A provider that only a multi-provider
+harness uses shows the account but no usage.
+
+These harnesses keep every provider's sign-in in one `auth.json`, next to their sessions and
+extensions, so Pragma cannot give one provider a directory of its own. For **ChatGPT** (OpenCode,
+Pi, Prime Agent) and **GitHub Copilot** (OpenCode) it switches accounts by **swapping** that
+provider's entry in the shared file when the harness starts instead:
+
+- **Add another account** from the harness's picker: Pragma sets your current sign-in aside, runs
+  the harness's login (`opencode auth login`, or `/login` typed into Pi or Prime Agent for you),
+  and saves whatever you sign in to as a new account. Cancel and your previous sign-in comes
+  straight back.
+- **Switching** works like any other harness. The next launch writes the chosen account in and
+  saves the one it replaces, including any token the harness refreshed in the meantime. Every
+  other provider in the file is left alone.
+- **Running sessions switch too**, because they read the same file. The harness's picker says so.
+- **One sign-in is enough.** An account signed in through one harness appears in the other
+  harnesses' dropdowns as _Uses its existing sign-in_ (or _API key_), and picking it copies it
+  over — no browser. See [Sharing a sign-in](#sharing-a-sign-in-between-harnesses) below.
+- OpenCode Go still uses a separate data directory per account. When it is on an account you
+  added in Pragma, the swap applies to that directory's `auth.json`.
+
+### Sharing a sign-in between harnesses
+
+Pragma lends a sign-in from one harness to another wherever the provider allows it and the two
+harnesses sign in the same way:
+
+| What                           | Shared between                                                              |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| ChatGPT sign-in                | Codex, OpenCode, Pi, Prime Agent                                            |
+| GitHub Copilot sign-in         | Pi and Prime Agent (OpenCode and Copilot CLI each use their own GitHub app) |
+| Any API key (below)            | OpenCode, Pi, Prime Agent; Kimi Code lends its keys but cannot take one     |
+| Claude or Gemini subscriptions | Never — their terms keep them to Claude Code and Google's own tools         |
+| Grok, Kimi Code, Cursor, Junie | Nothing to share: no other harness signs in to them the same way            |
+
+API keys never change, so a copied key is simply a copy. A ChatGPT or Copilot sign-in replaces
+its refresh token each time a harness refreshes it (for ChatGPT, about every 8–10 days), so
+Pragma keeps the copies of one sign-in on the newest token: when any of them launches, when the
+menu opens, and every five minutes. If two harnesses on the same account both refresh before
+Pragma catches up, the later one fails; relaunching it picks up the current token. Codex can
+only take a ChatGPT sign-in for an account it has signed in to itself, because it also needs an
+ID token the other harnesses don't keep. Sign-ins you made separately are never linked, so
+they keep their own refresh tokens.
+
+### API-key providers
+
+OpenCode, Pi, Prime Agent and Kimi Code also show any of these they hold an API key for: Anthropic, Google
+Gemini API, xAI, OpenCode Zen, OpenRouter, DeepSeek, Groq, Mistral, Cerebras, Fireworks AI,
+Together AI, Hugging Face, NVIDIA, Vercel AI Gateway, Z.ai, MiniMax, Kimi Code, Moonshot AI
+Platform and Xiaomi MiMo. A key is identified by a digest, never stored, so the same key in
+two harnesses is one account. These rows show no usage.
+
+Sign OpenCode in from **Add account** (it runs `opencode auth login` for that provider; paste
+the key into the field). Pi and Prime Agent read keys from their own `auth.json`. Kimi Code
+reads the providers you imported with `kimi provider catalog add <id> --api-key …`; one you
+gave a custom name is not recognized.
+
+### Subscriptions Pragma will not use outside their own app
+
+Some providers only allow their subscription sign-in in their own tools. Pragma follows those
+terms, so in any other harness these providers are **API key only**:
+
+- **Anthropic** — Claude Free, Pro and Max sign-ins may only be used in Claude Code and
+  claude.ai. A Claude sign-in made in Pi or OpenCode is treated as signed out; use an
+  Anthropic API key there, or Claude Code for your subscription.
+- **Google** — Gemini CLI and Antigravity sign-ins are restricted to Google's own tools. Use a
+  Gemini API key from Google AI Studio.
+
+ChatGPT and GitHub Copilot sign-ins are permitted in OpenCode and Pi, and merge with the
+Codex and Copilot CLI accounts they belong to.
+
+## Remote hosts
+
+Accounts belong to the machine that runs the harness. A project on an SSH host or in WSL
+shows that host's accounts, and signing in there stores the credentials on that host.
+
+## Refreshing
+
+Each provider declares its own refresh interval (at minimum 15 seconds), with exponential
+backoff up to 15 minutes on failures. Opening the menu always refreshes. Providers report
+their own unavailable states — "not configured", "authentication required", or a plain
+error — instead of fake numbers.
+
+Building an account provider for your own agent is part of the
+[plugin API](/docs/plugins/accounts) — `defineAccounts`.

@@ -1,0 +1,266 @@
+---
+title: Account providers
+description: defineAccounts — declare the accounts your agent signs in to, with login, per-account usage limits, and switching.
+---
+
+The toolbar's [Account providers menu](/docs/user-guide/account-providers) is fed by
+plugins. An agent plugin declares one **account provider** for every provider its harness
+can sign in to. Pragma — not the plugin — remembers the accounts, which harness uses which
+one, and per-project overrides.
+
+```ts
+import { defineAccounts, definePlugin, runProviderCommand } from "@pragma-sh/plugin/catalog";
+
+export default definePlugin({
+  name: "My Agent",
+  agents: [myAgent],
+  accounts: defineAccounts([
+    {
+      provider: "anthropic", // a well-known key merges rows across plugins
+      agent: "my-agent", // which of this plugin's agents uses it (default: all)
+      dashboardUrl: "https://my-agent.dev/usage",
+      iconPath: "./assets/agent.svg",
+      login: {
+        command: ["my-agent", "login"], // expected to open the browser
+        instructions: "Paste the code shown after signing in.", // optional
+        // optional: lines typed into the login terminal, each followed by Enter,
+        // for a harness that signs in from inside its TUI
+        // input: ["/login openai"], inputDelayMs: 2500,
+      },
+      // Point the harness at a Pragma-owned credential directory. Declaring
+      // `env` is what enables more than one account per harness.
+      env: (home) => ({ MY_AGENT_HOME: home }),
+      credentialPath: (home) => `${home ?? "~/.my-agent"}/auth.json`,
+      identify: async (ctx) => {
+        const outcome = await runProviderCommand(ctx, "my-agent whoami --json");
+        if (outcome.kind !== "ok") return null; // signed out
+        const { id, email, plan } = JSON.parse(outcome.stdout);
+        return { id, email, plan };
+      },
+      usageLimits: {
+        primaryLimitId: "messages",
+        refreshIntervalMs: 30_000, // minimum 15s; backoff on failure up to 15min
+        load: async (ctx) => {
+          /* same result shape as before — see below */
+        },
+      },
+    },
+  ]),
+});
+```
+
+## How accounts work
+
+- **Logins and accounts.** Each harness has its own **login** per provider: its existing
+  default sign-in (`home: null`), plus one per account added through Pragma, each in its own
+  owner-only directory under `~/.pragma/accounts/`. Logins of one provider whose `identify`
+  returns the same `id` are one **account**, so the menu shows it once however many harnesses
+  use it — and loads its usage once.
+- **Callbacks run under the login's env.** `identify` and `usageLimits.load` get an
+  `AccountContext` (`ctx.account` = `{ loginId, home, env }`) whose `ctx.sdk.exec.run`
+  already carries `env(home)`. A loader written for one account works for every account.
+- **Launches too.** When the user starts the harness, Pragma adds the bound account's env to
+  the new terminal — from the desktop, the agent board, `pragma-cli`, a fanout, or Pragma Go.
+- **Login.** `login.command` runs in a hidden terminal on the host with the new login's env.
+  Printed URLs become buttons, a paste field types into the terminal, and when the command
+  exits Pragma calls `identify` to save the login. Without `env` or `swap`, signing in again
+  replaces the harness's one login.
+- **Where it lives.** Accounts are host-owned: an SSH or WSL project uses that host's
+  accounts. Only the credential **path** is stored, never the token.
+
+## Well-known providers
+
+Use a key from `ACCOUNT_PROVIDERS` so your plugin merges with others on the same provider:
+`anthropic`, `openai`, `cursor`, `github-copilot`, `xai`, `jetbrains`, `opencode-go`,
+`moonshot`, and the API-key providers `opencode-zen`, `moonshot-platform`, `google`,
+`openrouter`, `deepseek`, `groq`, `mistral`, `cerebras`, `fireworks`, `together`,
+`huggingface`, `nvidia`, `vercel-ai-gateway`, `zai`, `minimax`, `xiaomi`. A well-known key
+also supplies a default `dashboardUrl`, and for API-key providers its models.dev ids —
+`modelsDevAccountProviders(except)` lists them for a harness that names providers the
+models.dev way, as OpenCode and Kimi Code do. Any other string works too; it just won't merge.
+
+<Callout title="Respect the provider's terms">
+  Only declare a sign-in the provider allows outside its own harness. Claude Free/Pro/Max OAuth may
+  only be used in Claude Code and claude.ai, and Gemini CLI or Antigravity OAuth only in Google's
+  tools — declare Anthropic and Google with `apiKeyOnly: true` everywhere else, so an OAuth entry is
+  reported as signed out.
+</Callout>
+
+Merging also needs the **same identity id**. If your harness signs in to a well-known
+provider itself, identify it with the matching helper instead of inventing an id:
+
+```ts
+import { identifyFromCredentialStore } from "@pragma-sh/plugin/catalog";
+
+// A harness that keeps every provider in ~/.my-agent/auth.json, keyed by provider.
+const store = { dirEnv: "MY_AGENT_DIR", defaultDir: "~/.my-agent", file: "auth.json" };
+
+defineAccounts([
+  // No `env`: the providers share one file, so this follows the harness's own sign-in
+  // (see "Switching in a shared credential file" below to switch it instead).
+  { provider: "openai", identify: identifyFromCredentialStore(store, "openai", "openai") },
+  // Claude subscription OAuth is for Claude Code only: identify Anthropic API keys alone.
+  {
+    provider: "anthropic",
+    identify: identifyFromCredentialStore(store, "anthropic", "anthropic", { apiKeyOnly: true }),
+  },
+]);
+```
+
+| Helper                        | Input                                                   | Id                                           |
+| ----------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `chatGptIdentity`             | ChatGPT OAuth access token (decoded offline)            | Account email, as Codex reports it           |
+| `anthropicOAuthIdentity`      | Claude OAuth access token                               | `<org uuid>:<email>`, as Claude Code reports |
+| `gitHubIdentity`              | GitHub OAuth token                                      | Lowercased GitHub login                      |
+| `apiKeyIdentity`              | Any API key                                             | SHA-256 digest of the key, never the key     |
+| `identifyFromCredentialStore` | A `{ type: "oauth" \| "api", … }` entry in a JSON store | Whichever of the above fits                  |
+
+`identifyFromCredentialStore(store, entries, provider, { apiKeyOnly })` takes one entry key or
+several (first that identifies wins). For a provider that simply follows the harness's sign-in,
+`credentialStoreAccount` builds the whole declaration:
+
+```ts
+import { credentialStoreAccount } from "@pragma-sh/plugin/catalog";
+
+credentialStoreAccount({
+  provider: "openrouter",
+  agent: "my-agent",
+  store,
+  entries: ["openrouter"],
+  apiKeyOnly: true,
+  login: { command: ["my-agent", "auth", "login", "--provider", "openrouter"] }, // optional
+});
+```
+
+## Switching in a shared credential file
+
+`env` relocates a harness's whole data directory, so it only fits a harness that keeps one
+provider per directory (Codex, Claude Code). A multi-provider harness — OpenCode, Pi, Prime
+Agent — keeps every provider in one `auth.json` beside its sessions and extensions, so no single
+provider can own a directory. Declare `switchable: true` instead, and Pragma **swaps** that
+provider's entries in and out of the shared file:
+
+```ts
+credentialStoreAccount({
+  provider: "openai",
+  agent: "my-agent",
+  store,
+  entries: ["openai"],
+  switchable: true,
+  login: { command: ["my-agent", "auth", "login", "--provider", "openai"] }, // required
+});
+```
+
+- **At launch** Pragma calls the provider's `swap.activate`: the entries currently in the
+  shared file are saved back to the login they belong to — so a token the harness refreshed
+  is kept — and the bound login's entries are written in. Other providers' entries are never
+  touched. A `<file>.pragma.json` beside the shared file records which login is in it.
+- **Signing in** happens in place: Pragma swaps in the new, still empty login first, then runs
+  `login.command`, which writes the new sign-in to the shared file. Cancelling swaps the
+  previous account straight back.
+- **Running sessions switch too**, because they read the same file. The menu says so instead of
+  counting sessions left on the old account.
+- A token is only ever in one place at a time; Pragma copies entries but never refreshes one.
+
+`swap` is a field of `AccountProviderDefinition` (`{ activate(ctx) }`) if you need it without
+`credentialStoreAccount`; it is ignored when `env` is set.
+
+## Sharing one sign-in between harnesses
+
+Declare `sharedToken` so an account signed in through one harness can be used by others without
+signing in again. A `SharedToken` is either an OAuth sign-in
+(`{ type: "oauth", access, refresh, expires, accountId?, idToken? }`) or an API key
+(`{ type: "api", key }`):
+
+```ts
+{
+  provider: "openai",
+  env: (home) => ({ MY_AGENT_HOME: home }), // or `swap` — a copy needs a login of its own
+  sharedToken: {
+    kind: "chatgpt", // providers of the same kind exchange tokens
+    read: async (ctx) => /* this login's SharedToken, or null when signed out */ null,
+    write: async (ctx, token) => { /* store it as this login's sign-in */ }, // optional
+  },
+}
+```
+
+- **Kinds.** Name an OAuth kind after the OAuth **client**: `chatgpt`, or
+  `github-copilot:<client id>` — tokens issued to one client are not handed to another. API keys
+  use `apiKeyTokenKind(provider)` (`key:<provider>`), so any harness holding that provider's key
+  matches.
+- **`write` is optional.** Without it the harness lends its sign-in but never takes one (Kimi
+  Code, whose config has no per-account slots).
+- **Never share a restricted sign-in.** Claude Free/Pro/Max and Gemini CLI/Antigravity OAuth stay
+  with their own harness; `apiKeyOnly` providers only ever share keys.
+
+`credentialStoreAccount` shares by default: every provider lends its API key (from any of its
+`entries`) and becomes `switchable`, so it can take one. Pass
+`sharedToken: { kind, entry, type: "oauth" }` to lend an OAuth sign-in instead, or `false` to
+share nothing; set the store's `apiKeyType` (`api` for OpenCode, `api_key` for Pi) so a copied
+key is written the way the harness expects. For a provider whose logins are whole data
+directories (`env`), `credentialFileSharedToken(store, { kind, entry, type })` does the same.
+
+Picking an account for a harness that never signed in to it makes Pragma create that harness a
+login from the newest copy and link the two in a **token group**. OAuth copies are kept on the
+newest token (by `expires`) at each launch, each menu refresh, and every five minutes, because
+providers rotate refresh tokens; keys are copied once. Separate sign-ins are never linked.
+
+## Which providers a harness supports
+
+Your `defineAccounts` list _is_ the harness's supported providers: each entry says how the
+harness signs in to that provider. There is no separate list to keep in sync.
+
+When the installed harness can report what it offers, add `available` so a provider it no
+longer supports drops out of the menu, Add account, and launch:
+
+```ts
+{
+  provider: "openrouter",
+  agent: "my-agent",
+  // Ask the harness itself, e.g. its provider catalog. Cache the answer:
+  // Pragma asks every provider each time it lists accounts.
+  available: async (ctx) => (await myAgentCatalog(ctx)).has("openrouter"),
+}
+```
+
+Leave `available` out when the harness has no supported way to say — the declaration
+stands. A throw also keeps the provider listed, so being offline hides nothing. Kimi Code
+uses `kimi provider catalog list --json`; OpenCode, Pi and Prime Agent have no such command
+and rely on their declarations.
+
+A provider with no account signed in is hidden from the toolbar menu unless its harness can
+hold several accounts; Add account still lists it.
+
+None of them refresh a token. Several providers rotate refresh tokens, so only the harness
+that owns one should use it.
+
+## Usage shapes
+
+```ts
+interface UsageLimit {
+  id: string;
+  title: string;
+  used: number;
+  limit: number | null; // null = unlimited → "Unlimited"
+  resetsInMs?: number; // drives the "resets in" countdown
+}
+
+type UsageLimitsResult =
+  | { status: "ready"; observedAt: number; summary?: UsageLimit; limits: UsageLimit[] }
+  | {
+      status: "unavailable";
+      reason: "not-configured" | "authentication-required" | "unsupported" | "error";
+      message: string;
+    };
+```
+
+`runProviderCommand` executes a command and classifies the result:
+`{ kind: "missing" }` when the binary is absent (exit status `CLI_MISSING_STATUS` = 20),
+`{ kind: "failed"; stderr }`, or `{ kind: "ok"; stdout }`. Report unavailable states
+honestly — the menu renders them instead of fake numbers.
+
+<Callout title="Replaces defineUsageLimitProvider">
+  `usageLimits: [defineUsageLimitProvider(...)]` still works but is deprecated. Pragma adapts each
+  one into a single-login account provider with a **legacy** badge: usage limits and the dashboard
+  link, no sign-in and no switching. See [Usage limits](/docs/plugins/usage-limits).
+</Callout>
