@@ -112,6 +112,7 @@ fn attach_request(session_id: &str) -> RequestFrame {
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     }
 }
 
@@ -319,6 +320,7 @@ fn subscribe_agents_request() -> RequestFrame {
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     }
 }
 
@@ -367,6 +369,7 @@ pub fn agent_report(
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     };
     let Server { mut stream } = server::connect()?;
     write_json_frame(&mut stream, &frame)?;
@@ -415,6 +418,7 @@ pub fn agent_message(
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     };
     let Server { mut stream } = server::connect()?;
     write_json_frame(&mut stream, &frame)?;
@@ -572,6 +576,7 @@ fn publish_agent_frame(kind: RequestKind, payload: &serde_json::Value) -> Result
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     };
     let Server { mut stream } = server::connect()?;
     write_json_frame(&mut stream, &frame)?;

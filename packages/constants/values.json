@@ -171,7 +171,8 @@
       "scratchpads",
       "whiteboards",
       "wsl",
-      "fanouts"
+      "fanouts",
+      "accounts"
     ],
     "events": [
       "agentStatus",
@@ -381,5 +382,14 @@
   "projects": {
     "nonGitWarning": true,
     "nonGitRootLabel": "root"
+  },
+  "accounts": {
+    "stateFile": "accounts.json",
+    "homeDir": "accounts",
+    "defaultLoginPrefix": "default",
+    "minRefreshMs": 15000,
+    "maxRetryMs": 900000,
+    "loginOutputMaxBytes": 16384,
+    "loginTimeoutMs": 600000
   }
 }

@@ -27,7 +27,10 @@ mod generated {
 pub type ExcalidrawScene = serde_json::Value;
 
 pub use generated::{
-    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
+    AccountBindingScope, AccountBindingState, AccountBindings, AccountEffectiveBinding,
+    AccountIdentity, AccountLogin, AccountLoginSession, AccountProviderInfo, AccountSessionUse,
+    AccountUsageEntry, AccountsDefaults, AccountsListResult, AccountsState, AgentAnswer,
+    AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
     AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
     AgentMessageRole, AgentModelEntry, AgentQuestion, AgentReasoning, AgentReportKind,
     AgentReportPayload, AgentSessionLaunchPayload, AgentSound, AgentSoundList, AgentStatus,

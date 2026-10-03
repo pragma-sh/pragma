@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod accounts;
 pub mod cancel;
 pub mod exec;
 pub mod fanout;
@@ -104,6 +105,9 @@ impl Core {
             // Owned by `pragma-server`'s `FanoutRegistry`, which holds the
             // durable record and the PTY/watcher lifetimes fanout needs.
             | ProtocolRpcMethod::Fanouts
+            // Owned by `pragma-server`, which runs plugin account callbacks in the
+            // plugins sidecar and hosts the hidden login terminals.
+            | ProtocolRpcMethod::Accounts
             // Answered by `pragma-server`, which owns the host's process
             // spawning; the core router never sees it.
             | ProtocolRpcMethod::Wsl => Err(CoreError::UnsupportedMethod(

@@ -15,7 +15,9 @@ Tauri or client presentation code.
 
 - **Done (host RPC):** `filesystem` (`fs.rs`), `git` (`git.rs`), headless
   lifecycle command execution (`exec.rs`), and managed scratchpad listing
-  (`scratchpads.rs`), plus durable whiteboard CRUD/search/rendering (`whiteboards.rs`),
+  (`scratchpads.rs`), plus durable whiteboard CRUD/search/rendering (`whiteboards.rs`), the host account store and
+  binding rules (`accounts.rs`: `~/.pragma/accounts.json`, owner-only credential dirs under
+  `~/.pragma/accounts/<provider>/<login>`, project override > global > default login),
   are implemented behind `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
   absolute project/worktree roots (and, for git, DB-derived parent branches)
   from the client DB, then forward via `PragmaClient::rpc`. The host

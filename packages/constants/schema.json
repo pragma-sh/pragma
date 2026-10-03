@@ -30,7 +30,8 @@
     "updates",
     "onboarding",
     "storage",
-    "projects"
+    "projects",
+    "accounts"
   ],
   "properties": {
     "app": {
@@ -110,6 +111,9 @@
     },
     "projects": {
       "$ref": "#/definitions/ProjectDefaults"
+    },
+    "accounts": {
+      "$ref": "#/definitions/AccountsDefaults"
     }
   },
   "definitions": {
@@ -136,7 +140,8 @@
         "scratchpads",
         "whiteboards",
         "wsl",
-        "fanouts"
+        "fanouts",
+        "accounts"
       ]
     },
     "ProtocolEventKind": {
@@ -4714,6 +4719,435 @@
             "$ref": "#/definitions/StorageTreeEntry"
           },
           "description": "Always empty today: the treemap stops at top-level folders. Kept so a deeper tree can be added without a wire change."
+        }
+      }
+    },
+    "AccountsDefaults": {
+      "title": "AccountsDefaults",
+      "description": "Host-owned account-provider storage and polling limits. Accounts, their credential directories, and harness bindings live on the host that runs the harness.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stateFile",
+        "homeDir",
+        "defaultLoginPrefix",
+        "minRefreshMs",
+        "maxRetryMs",
+        "loginOutputMaxBytes",
+        "loginTimeoutMs"
+      ],
+      "properties": {
+        "stateFile": {
+          "type": "string",
+          "description": "File under the host's `~/.pragma` holding logins, labels, and bindings."
+        },
+        "homeDir": {
+          "type": "string",
+          "description": "Directory under the host's `~/.pragma` holding one owner-only credential directory per Pragma-created login."
+        },
+        "defaultLoginPrefix": {
+          "type": "string",
+          "description": "Login-id prefix for a harness's own existing login (no Pragma-owned credential directory)."
+        },
+        "minRefreshMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Smallest usage refresh interval the host honours, whatever a plugin requests."
+        },
+        "maxRetryMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Upper bound on exponential usage-refresh backoff after failures."
+        },
+        "loginOutputMaxBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "Tail of a login command's terminal output returned to clients."
+        },
+        "loginTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "A login session still running after this long is killed and discarded."
+        }
+      }
+    },
+    "AccountIdentity": {
+      "title": "AccountIdentity",
+      "description": "Who a login is signed in as, reported by the plugin's `identify`. Logins of one provider with the same `id` are one account.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountLogin": {
+      "title": "AccountLogin",
+      "description": "One harness x provider credential slot on this host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pluginId",
+        "providerId",
+        "provider",
+        "agentId",
+        "home",
+        "credentialPath",
+        "identity",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Resolved account-provider id inside the plugin."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Well-known provider key rows merge on, e.g. `anthropic`."
+        },
+        "agentId": {
+          "type": "string",
+          "description": "Catalog agent (harness) id this login belongs to."
+        },
+        "home": {
+          "type": ["string", "null"],
+          "description": "Pragma-owned credential directory, or null for the harness's own default login."
+        },
+        "credentialPath": {
+          "type": ["string", "null"],
+          "description": "Where the token lives, as reported by the plugin. Never the token itself."
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/AccountIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "tokenGroup": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Logins that share one sign-in (copied from each other instead of signed in separately) have the same group. Pragma keeps every login in a group on the newest token, so a refresh by one harness reaches the others."
+        }
+      }
+    },
+    "AccountBindings": {
+      "title": "AccountBindings",
+      "description": "Harness (agent id) -> provider key -> account key.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountBindingState": {
+      "title": "AccountBindingState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "projects"],
+      "properties": {
+        "global": {
+          "$ref": "#/definitions/AccountBindings"
+        },
+        "projects": {
+          "type": "object",
+          "description": "Per-project overrides keyed by the project root on this host.",
+          "additionalProperties": {
+            "$ref": "#/definitions/AccountBindings"
+          }
+        }
+      }
+    },
+    "AccountsState": {
+      "title": "AccountsState",
+      "description": "Persisted host account state (`accounts.stateFile`).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "logins", "labels", "bindings"],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "logins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountLogin"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "description": "User labels keyed by account key.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "bindings": {
+          "$ref": "#/definitions/AccountBindingState"
+        }
+      }
+    },
+    "AccountBindingScope": {
+      "title": "AccountBindingScope",
+      "type": "string",
+      "enum": ["global", "project"]
+    },
+    "AccountProviderInfo": {
+      "title": "AccountProviderInfo",
+      "description": "One plugin-declared account provider, as resolved by the plugins sidecar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pluginId",
+        "providerId",
+        "provider",
+        "title",
+        "agentIds",
+        "dashboardUrl",
+        "iconPath",
+        "pluginDir",
+        "hasLogin",
+        "loginInstructions",
+        "multiAccount",
+        "identifies",
+        "legacy",
+        "primaryLimitId",
+        "refreshIntervalMs"
+      ],
+      "properties": {
+        "pluginId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Catalog agent ids (harnesses) that use this provider."
+        },
+        "dashboardUrl": {
+          "type": ["string", "null"]
+        },
+        "iconPath": {
+          "type": ["string", "null"]
+        },
+        "pluginDir": {
+          "type": ["string", "null"]
+        },
+        "hasLogin": {
+          "type": "boolean"
+        },
+        "loginInstructions": {
+          "type": ["string", "null"]
+        },
+        "multiAccount": {
+          "type": "boolean",
+          "description": "True when the plugin can point its harness at a Pragma-owned credential directory."
+        },
+        "sharedTokenKind": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Kind of sign-in this provider can lend (e.g. `chatgpt`, `key:openrouter`). Harnesses with the same kind can use one another's sign-in for an account, so a harness can switch to an account it never signed in to."
+        },
+        "sharedTokenWritable": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when the provider can also take a sign-in lent by another harness (it has per-account slots to store one)."
+        },
+        "swaps": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when accounts switch by swapping entries in the harness's one shared credential file at launch (a multi-provider harness), instead of through `env`. Running sessions of such a harness follow the switch."
+        },
+        "identifies": {
+          "type": "boolean",
+          "description": "True when the plugin reports who a login is signed in as (`identify`). A default login it cannot identify is signed out, not an account."
+        },
+        "legacy": {
+          "type": "boolean",
+          "description": "Adapted from a deprecated `defineUsageLimitProvider`."
+        },
+        "primaryLimitId": {
+          "type": ["string", "null"]
+        },
+        "refreshIntervalMs": {
+          "type": ["integer", "null"]
+        }
+      }
+    },
+    "AccountSessionUse": {
+      "title": "AccountSessionUse",
+      "description": "Which account a live agent session was launched with.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tabId", "agentId", "provider", "accountKey"],
+      "properties": {
+        "tabId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "accountKey": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountsListResult": {
+      "title": "AccountsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providers", "state", "loginKeys", "effective", "sessions"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountProviderInfo"
+          }
+        },
+        "state": {
+          "$ref": "#/definitions/AccountsState"
+        },
+        "loginKeys": {
+          "type": "object",
+          "description": "Account key of every login (login id -> key), as the host groups them.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "effective": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountEffectiveBinding"
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountSessionUse"
+          }
+        }
+      }
+    },
+    "AccountUsageEntry": {
+      "title": "AccountUsageEntry",
+      "description": "Usage limits for one account, loaded once through one of its logins.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountKey", "loginId", "result"],
+      "properties": {
+        "accountKey": {
+          "type": "string"
+        },
+        "loginId": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "description": "A plugin `UsageLimitsResult`, validated by the client."
+        }
+      }
+    },
+    "AccountLoginSession": {
+      "title": "AccountLoginSession",
+      "description": "A running hidden login terminal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loginId", "instructions", "urls", "output", "exited"],
+      "properties": {
+        "loginId": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": ["string", "null"]
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "http(s) URLs the login command printed, oldest first."
+        },
+        "output": {
+          "type": "string",
+          "description": "ANSI-stripped tail of the login terminal."
+        },
+        "exited": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AccountEffectiveBinding": {
+      "title": "AccountEffectiveBinding",
+      "description": "The login a harness launches with for one provider in the requested project, resolved by the host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "provider", "accountKey", "loginId", "scope"],
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "accountKey": {
+          "type": ["string", "null"],
+          "description": "Account the harness uses; null when it has no login for this provider yet."
+        },
+        "loginId": {
+          "type": ["string", "null"]
+        },
+        "scope": {
+          "description": "Where the binding came from; null when the harness falls back to its own default login.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/AccountBindingScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

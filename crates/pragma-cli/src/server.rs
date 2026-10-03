@@ -98,6 +98,7 @@ pub fn rpc(method: ProtocolRpcMethod, payload: Value) -> Result<Value, CliError>
             subscription: None,
             control: None,
             control_result: None,
+            env: None,
         },
     )?;
     let _ = stream.set_read_timeout(None);

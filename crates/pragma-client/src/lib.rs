@@ -257,9 +257,9 @@ impl PragmaClient {
         cwd: String,
         cols: u16,
         rows: u16,
-        shell: Option<ShellProfile>,
+        options: impl Into<SpawnOptions>,
     ) -> ClientResult<LocalStream> {
-        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, shell);
+        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, options.into());
         self.open_event_stream(&request)
     }
 
@@ -926,10 +926,27 @@ pub fn cargo_executable() -> PathBuf {
     PathBuf::from("cargo")
 }
 
+/// How a spawned session's shell starts.
+#[derive(Debug, Clone, Default)]
+pub struct SpawnOptions {
+    /// Shell world the session launches in; `None` leaves the choice to the
+    /// server (project config, then the shipped default).
+    pub shell: Option<ShellProfile>,
+    /// Extra environment for the shell, e.g. the env of the accounts an agent
+    /// launch is bound to.
+    pub env: Vec<(String, String)>,
+}
+
+impl From<Option<ShellProfile>> for SpawnOptions {
+    fn from(shell: Option<ShellProfile>) -> Self {
+        Self {
+            shell,
+            env: Vec::new(),
+        }
+    }
+}
+
 /// Builds a `Spawn` request frame.
-///
-/// `shell` names the shell world the session launches in; `None` leaves the
-/// choice to the server (project config, then the shipped default).
 #[must_use]
 pub fn request_spawn(
     session_id: String,
@@ -937,10 +954,11 @@ pub fn request_spawn(
     cwd: String,
     cols: u16,
     rows: u16,
-    shell: Option<ShellProfile>,
+    options: SpawnOptions,
 ) -> RequestFrame {
     RequestFrame {
-        shell,
+        shell: options.shell,
+        env: (!options.env.is_empty()).then_some(options.env),
         ..request_frame(
             RequestKind::Spawn,
             Some(session_id),
@@ -1179,6 +1197,7 @@ pub fn request_control(method: pragma_protocol::ControlMethod, payload: Value) -
         subscription: None,
         control: Some(ControlRequest { method, payload }),
         control_result: None,
+        env: None,
     }
 }
 
@@ -1206,6 +1225,7 @@ pub fn request_subscribe(
         }),
         control: None,
         control_result: None,
+        env: None,
     }
 }
 
@@ -1226,6 +1246,7 @@ pub fn request_rpc(method: ProtocolRpcMethod, payload: Value) -> RequestFrame {
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     }
 }
 
@@ -1252,6 +1273,7 @@ fn request_frame(
         subscription: None,
         control: None,
         control_result: None,
+        env: None,
     }
 }
 

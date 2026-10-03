@@ -154,6 +154,7 @@ fn project_id_for(worktree_id: &str) -> Result<String, CliError> {
         }),
         control: None,
         control_result: None,
+        env: None,
     };
     write_json_frame(&mut stream, &request)?;
     loop {
@@ -215,6 +216,7 @@ fn watch(fanout_id: &str, out: &Output) -> Result<(), CliError> {
         }),
         control: None,
         control_result: None,
+        env: None,
     };
     write_json_frame(&mut stream, &request)?;
     // A subscription is mostly idle; leaving the connect-time read timeout on

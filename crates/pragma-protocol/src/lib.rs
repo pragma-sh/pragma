@@ -117,6 +117,11 @@ pub struct RequestFrame {
     /// (app → server). Present only for [`RequestKind::ControlResult`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_result: Option<ControlResult>,
+    /// Extra environment for the session's shell. Present only for
+    /// [`RequestKind::Spawn`]; an agent launch carries the env of the accounts
+    /// its harness is bound to, so the setting reaches every shell unquoted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -575,6 +580,7 @@ mod tests {
             subscription: None,
             control: None,
             control_result: None,
+            env: None,
         };
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write frame");
@@ -791,6 +797,7 @@ mod tests {
                 payload: serde_json::json!({ "projectId": "p1" }),
             }),
             control_result: None,
+            env: None,
         };
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write control");

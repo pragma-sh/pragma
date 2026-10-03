@@ -36,6 +36,7 @@ pub fn request(
         subscription: None,
         control: Some(ControlRequest { method, payload }),
         control_result: None,
+        env: None,
     };
     write_json_frame(&mut stream, &request)?;
     loop {
