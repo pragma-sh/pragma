@@ -10,12 +10,20 @@ import { cn } from "@/lib/utils";
 
 /**
  * The prompt footer: the current mode (Shift+Tab cycles it) and the permission
- * mode dropdown. Renders nothing for an agent that declares neither.
+ * mode dropdown. Renders nothing for an agent that declares neither, or while
+ * `auto` is set: Auto picks the agent on submit, so there is no agent yet whose
+ * modes could be chosen.
  */
-export function AgentLaunchOptionsBar({ launch }: { launch: AgentLaunchOptionsState }) {
+export function AgentLaunchOptionsBar({
+  launch,
+  auto = false,
+}: {
+  launch: AgentLaunchOptionsState;
+  auto?: boolean;
+}) {
   // A control with a single choice has nothing to choose, so it is not shown.
   const { modes, permissionModes } = launch.options;
-  if (modes.length < 2 && permissionModes.length < 2) {
+  if (auto || (modes.length < 2 && permissionModes.length < 2)) {
     return null;
   }
   const mode =

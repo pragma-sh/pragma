@@ -813,7 +813,7 @@ export function NewAgentSessionDialog({
             {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
             <div className="flex items-center gap-2">
               <div className="mr-auto min-w-0">
-                <AgentLaunchOptionsBar launch={form.launch} />
+                <AgentLaunchOptionsBar launch={form.launch} auto={auto.active} />
               </div>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel

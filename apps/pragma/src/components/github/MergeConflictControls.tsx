@@ -31,6 +31,15 @@ import { useAi } from "@/state/ai-context";
 import { useSystem1Status } from "@/state/system1";
 import { useWorkspace } from "@/state/workspace-context";
 
+/**
+ * Tells the PR view that GitHub's state changed. `conflictsPushed` marks a push
+ * that resolved the merge conflict: GitHub still reports the PR as conflicting
+ * until it recomputes, so the view shows it mergeable meanwhile and polls.
+ */
+export type PullRequestChanged = (change?: { conflictsPushed: true }) => void;
+
+const CONFLICTS_PUSHED = { conflictsPushed: true } as const;
+
 /** Where the worktree's merge stands; `null` until the first read resolves. */
 interface MergeStatus {
   inProgress: boolean;
@@ -110,7 +119,7 @@ function useAiConflictResolution({
   worktreeId: string;
   status: MergeStatus | null;
   refresh: () => Promise<void>;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
 }) {
   const [phase, setPhase] = useState<AiPhase | null>(null);
   /** A merge commit exists locally that has not reached the remote yet. */
@@ -127,7 +136,7 @@ function useAiConflictResolution({
         );
         if (!conflicts) {
           toast.success(`Merged latest ${pr.baseRef} and pushed ${pr.headRef}`);
-          onChanged();
+          onChanged(CONFLICTS_PUSHED);
           return;
         }
       }
@@ -163,7 +172,7 @@ function useAiConflictResolution({
       toast.success(
         message ? `Committed and pushed: ${message.split("\n")[0]}` : `Pushed ${pr.headRef}`,
       );
-      onChanged();
+      onChanged(CONFLICTS_PUSHED);
     } catch (cause) {
       const reason = errorMessage(cause);
       toast.error(message ? `Committed, but the push failed: ${reason}` : reason);
@@ -188,7 +197,7 @@ function useManualMergeActions({
   repo: GitHubRepoRef;
   worktreeId: string;
   refresh: () => Promise<void>;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
 }) {
   const [merging, setMerging] = useState(false);
 
@@ -205,7 +214,7 @@ function useManualMergeActions({
         toast.warning(`Merged ${pr.baseRef}. Resolve conflicting files in this worktree.`);
       } else {
         toast.success(`Merged latest ${pr.baseRef} and pushed ${pr.headRef}`);
-        onChanged();
+        onChanged(CONFLICTS_PUSHED);
       }
     } catch (cause) {
       toast.error(errorMessage(cause));
@@ -385,7 +394,7 @@ export function MergeConflictControls({
   repo,
   worktreeId,
 }: {
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
   worktreeId: string;
