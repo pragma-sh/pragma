@@ -92,6 +92,38 @@ export const ROWS: readonly ComparisonRow[] = [
     superset: "no",
   },
   {
+    feature: "Auto agent & model picks",
+    detail: "A System 1 model picks the agent, model, and reasoning effort for each launch",
+    pragma: "yes",
+    emdash: "no",
+    orca: "no",
+    superset: "no",
+  },
+  {
+    feature: "Live agent progress",
+    detail: "What each agent is doing right now, with an estimate of how far it has got",
+    pragma: "yes",
+    emdash: "status only",
+    orca: "status only",
+    superset: "status only",
+  },
+  {
+    feature: "AI merge-conflict resolution",
+    detail: "Resolves each conflict in the PR view, double-checks uncertain files, then commits",
+    pragma: "yes",
+    emdash: "no",
+    orca: "hands it to an agent",
+    superset: "no",
+  },
+  {
+    feature: "Agent accounts & usage limits",
+    detail: "Every agent's accounts and plan usage, switchable globally or per project",
+    pragma: "yes",
+    emdash: "no",
+    orca: "partial",
+    superset: "partial",
+  },
+  {
     feature: "Mobile & web client",
     detail: "Platforms it ships, and how you reach it off your LAN",
     pragma: "iOS, Android, Web — own tunnel",
@@ -166,7 +198,7 @@ export const COMPETITORS: readonly Competitor[] = [
     summary: [
       "Emdash is an Electron desktop app for running CLI coding agents — Claude Code, Codex, Cursor, OpenCode, and others — in parallel, each in its own git worktree and branch. It works with local projects and remote machines over SSH/SFTP, and can import tasks from a handful of project-management tools. It's Apache-2.0 licensed and keeps its state in a local SQLite database, with optional telemetry.",
       "Reviewing several agents at once means switching between their separate terminal sessions. Pragma adds a public plugin API, interactive scratchpads, an agent board, and a fan-out compare view on top of the same worktree model.",
-      "Pragma is currently ahead on a few fronts: a public plugin API opens up third-party sidebar tabs and web views, agents write to interactive MDX scratchpads instead of just terminal output, a kanban-style board tracks work from prompt to pull request, a fan-out view lets you compare several attempts side by side, built-in AI handles inline edits and PR drafting, and there's a shipped mobile and web client.",
+      "Pragma is currently ahead on a few fronts: a public plugin API opens up third-party sidebar tabs and web views, agents write to interactive MDX scratchpads instead of just terminal output, a kanban-style board tracks work from prompt to pull request, a fan-out view lets you compare several attempts side by side, built-in AI handles inline edits and PR drafting, a System 1 model picks the agent and model for each launch and resolves merge conflicts, and there's a shipped mobile and web client.",
     ],
     migration: [
       {
@@ -200,7 +232,7 @@ export const COMPETITORS: readonly Competitor[] = [
     summary: [
       'Orca is an Electron app supporting several coding agents (Claude Code, Codex, Cursor, OpenCode, and others), with a terminal, a browser pane whose "Design Mode" turns a clicked UI element into prompt context, SSH worktrees, and a CLI. It ships a mobile companion app (iOS App Store, Android APK, both beta) for monitoring agents from your phone, paired to a desktop or a self-hosted "Remote Orca Server" — reaching that desktop off your LAN means signing in to Orca\'s own hosted "Orca Relay," or running your own Tailscale/VPN.',
       "Orca tracks agent status per worktree rather than moving cards through a board, and its scheduled automations run on a cron rather than reacting to host events. Pragma adds a public plugin API, interactive scratchpads, an agent board, and a tunnel command you run yourself instead of a hosted relay.",
-      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a kanban-style agent board, automations that react to host events rather than only a cron, and reaching a desktop off your LAN through a tunnel command you control instead of signing in to a required Orca Relay.",
+      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a kanban-style agent board, automations that react to host events rather than only a cron, and reaching a desktop off your LAN through a tunnel command you control instead of signing in to a required Orca Relay. Both apps switch agent accounts and show usage, but only Pragma lets a project pick its own account.",
     ],
     migration: [
       {
@@ -234,7 +266,7 @@ export const COMPETITORS: readonly Competitor[] = [
       "Superset is an Electron app for running coding agents in parallel, each in its own git worktree. It has a board (columns for Idle, Working, Needs attention, Needs review, tied to agent and PR state), a diff viewer, an in-app browser, scheduled automations, and a CLI.",
       'Remote access runs through its own hosted "Superset Relay" — reaching a workspace on another machine needs an account on Superset\'s service, not a command you run yourself. Its own pricing page lists a mobile app as "Coming soon" on every plan; there\'s no shipped phone client today.',
       "It's also the only one of the three that isn't open source: Elastic License 2.0 is source-available, not OSI open source — you can read and modify it, but you may not offer it to others as a hosted service, and its license-key gating may not be circumvented. Like Emdash and Orca, it has no public plugin API or interactive scratchpads, and its fan-out is parallel workspaces without a unified compare view.",
-      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a unified fan-out view for comparing attempts rather than separate parallel workspaces, built-in AI for inline edits and PR drafting, a shipped mobile and web client, SSH remote projects, and an AGPL-3.0 license that's fully open source rather than source-available.",
+      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a unified fan-out view for comparing attempts rather than separate parallel workspaces, built-in AI for inline edits and PR drafting, Auto agent and model picks, AI merge-conflict resolution, per-project agent accounts, a shipped mobile and web client, SSH remote projects, and an AGPL-3.0 license that's fully open source rather than source-available.",
     ],
     migration: [
       {
@@ -269,4 +301,4 @@ export function compareDetailRoute(slug: string): string {
 /** Shown under every comparison table — what was checked, and what changed recently. */
 export const FOOTNOTE = `Checked against the ${COMPETITORS.map((c) => c.repo).join(
   ", ",
-)} repositories (README, LICENSE, and linked docs) as of 2026-08-29, with the mobile row re-verified on 2026-09-05 after both projects shipped changes: Orca added a hosted "Orca Relay" tunnel option, and Superset's own pricing page now lists its mobile app as "Coming soon" rather than shipped. This space moves fast — if something here is out of date, open an issue on ${repoUrl} and we will correct it.`;
+)} repositories (README, LICENSE, and linked docs) as of 2026-08-29, with the mobile row re-verified on 2026-09-05 after both projects shipped changes: Orca added a hosted "Orca Relay" tunnel option, and Superset's own pricing page now lists its mobile app as "Coming soon" rather than shipped. The Auto, agent progress, merge-conflict, and accounts rows were checked on 2026-10-03: Orca and Superset both track usage and switch accounts globally (Superset for Claude Code and Codex), with no per-project choice, and Orca resolves conflicts by launching an agent on them. This space moves fast — if something here is out of date, open an issue on ${repoUrl} and we will correct it.`;
