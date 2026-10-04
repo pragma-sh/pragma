@@ -551,7 +551,9 @@ package-manager installs select `.deb` or `.rpm`; AppImage sessions receive no a
 restart offer until in-place replacement is supported. **No release ships an AppImage** —
 the Linux jobs pass `--bundles deb,rpm`, because `tauri.conf.json` also targets AppImage
 and its linuxdeploy step needs FUSE, which the ubuntu-24.04 runners restrict
-(`failed to run linuxdeploy`). Adding one back means fixing that first. The website update API scans recent
+(`failed to run linuxdeploy`). RWX's tag-triggered `build-linux` passes the same flag:
+its image has no `xdg-mime`, so a bare `tauri build` dies at the AppImage step after the
+`.deb` and `.rpm` already built. Adding one back means fixing both first. The website update API scans recent
 releases through the newest restart manifest, because another monorepo component may be
 GitHub's latest release and a client may have skipped a required native release.
 

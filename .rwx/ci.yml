@@ -216,7 +216,9 @@ tasks:
       GIT_TAG: ${{ init.tag }}
     run: |
       if [ -n "$GIT_TAG" ]; then
-        bun run --filter pragma tauri build
+        # Match release.yml: no release ships an AppImage, and its linuxdeploy
+        # step needs xdg-mime, which this image does not have.
+        bun run --filter pragma tauri build --bundles deb,rpm
       else
         bun run --filter pragma tauri build --no-bundle
       fi
