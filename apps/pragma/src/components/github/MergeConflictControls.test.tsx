@@ -81,7 +81,9 @@ describe("MergeConflictControls", () => {
     mergeState(false, []);
     system1.current = { configured: false };
     renderControls();
-    expect(await screen.findByRole("button", { name: "Sync with Base Branch" })).toBeEnabled();
+    // Buttons render disabled until the first merge-status read resolves.
+    const button = await screen.findByRole("button", { name: "Sync with Base Branch" });
+    await waitFor(() => expect(button).toBeEnabled());
     expect(screen.queryByRole("button", { name: /Resolve Merge Conflicts/ })).toBeNull();
   });
 
@@ -135,7 +137,9 @@ describe("MergeConflictControls", () => {
   it("stays available after syncing leaves conflicts", async () => {
     mergeState(true, ["src/a.ts"]);
     renderControls();
-    expect(await screen.findByRole("button", { name: "Resolve Merge Conflicts" })).toBeEnabled();
+    // Buttons render disabled until the first merge-status read resolves.
+    const button = await screen.findByRole("button", { name: "Resolve Merge Conflicts" });
+    await waitFor(() => expect(button).toBeEnabled());
     expect(screen.getByRole("button", { name: "Abort Merge" })).toBeInTheDocument();
   });
 

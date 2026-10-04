@@ -491,10 +491,13 @@ footer in a commit message** — the 1.0.0 cut did, and it resurfaced a release 
 Please gives it every commit back to the _oldest_ release it is looking for (`www` and
 `pragma-go` rarely release), and a footer found there pins the whole linked group: the
 release PR after 1.0.1 proposed downgrading everything to 1.0.0. The top-level
-`last-release-sha` (the 1.0.1 release commit) is the floor that keeps those footers out of
-the window; move it forward only after checking `git log <old>..<new> -- apps/www
-apps/pragma-go` has no unreleased `feat`/`fix`, since commits below it are invisible to
-every component. Verify a config change without merging anything:
+`last-release-sha` is the floor that keeps those footers out of the window — and it is
+also the **only** thing that tells `pragma-desktop` where its last release was. Left
+behind, the next desktop release re-reads every `feat` since the floor: after 1.2.0, a
+fix-only main proposed 1.3.0 with the 1.1/1.2 features in its changelog. **Move it to the
+release commit (the `pragma-v*` tag's commit) after every desktop release**, after checking
+`git log <old>..<new> -- apps/www apps/pragma-go` has no unreleased `feat`/`fix`, since
+commits below it are invisible to every component. Verify a config change without merging anything:
 `npx release-please release-pr --token=$(gh auth token) --repo-url=pragma-sh/pragma
 --target-branch=<your pushed branch> --dry-run --trace` — it reads the config from the
 _branch_, never your working tree, so the branch has to be pushed first. Release Please rejects `..` in `extra-files`; shared version fields in
