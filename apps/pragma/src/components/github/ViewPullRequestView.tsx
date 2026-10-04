@@ -8,7 +8,10 @@ import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
-import { MergeConflictControls } from "@/components/github/MergeConflictControls";
+import {
+  MergeConflictControls,
+  type PullRequestChanged,
+} from "@/components/github/MergeConflictControls";
 import { ChangeGroup } from "@/components/right-sidebar/ChangeGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -295,7 +298,7 @@ function MergeOrStatus({
   worktreeId,
 }: {
   checks: ChecksStatus | null;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   onMergingChange?: (merging: boolean) => void;
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
@@ -337,7 +340,7 @@ export function ViewPullRequestView({
   repo: GitHubRepoRef;
   pr: PullRequestSummary;
   worktreeId: string;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   /** True while a merge mutation is in flight (shows the "merging" badge). */
   merging?: boolean;
 }) {
@@ -674,7 +677,7 @@ function MergeCard({
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
   worktreeId: string;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   onMergingChange?: (merging: boolean) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
