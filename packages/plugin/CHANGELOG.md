@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.1](https://github.com/pragma-sh/pragma/compare/plugin-v1.2.0...plugin-v1.2.1) (2026-10-04)
+
+
+### Miscellaneous Chores
+
+* **plugin:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.2.0 to ^1.2.1
+    * @pragma-sh/sdk bumped from ^1.2.0 to ^1.2.1
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.1.0...plugin-v1.2.0) (2026-10-03)
 
 
