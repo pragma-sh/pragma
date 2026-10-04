@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.1.0...pragma-client-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* add host-owned account providers with per-launch env ([b019a1f](https://github.com/pragma-sh/pragma/commit/b019a1f8224a99dd1a7149ccbc7017654b779dc7))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+
+
+### Bug Fixes
+
+* satisfy clippy 1.99 assert_is_empty in tests ([e9d0fb4](https://github.com/pragma-sh/pragma/commit/e9d0fb43a1362cedbc09a68d3af3824607eb79b0))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.0.1...pragma-client-v1.1.0) (2026-09-26)
 
 

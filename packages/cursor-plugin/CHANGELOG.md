@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.0.2...cursor-plugin-v1.1.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **plugin:** add account providers to agent plugins ([f146701](https://github.com/pragma-sh/pragma/commit/f146701d578769eb1f814bbdbe850eb1bb05b852))
+* **plugins:** declare launch options in the agent plugins ([26ac10e](https://github.com/pragma-sh/pragma/commit/26ac10e402c22b4abe75b862e439f967548bb9a2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.2.0
+    * @pragma-sh/watcher-kit bumped to 1.2.0
+
 ## [1.0.2](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.0.1...cursor-plugin-v1.0.2) (2026-09-26)
 
 

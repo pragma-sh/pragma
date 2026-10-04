@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/www-v1.1.0...www-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **ci:** ship Pragma Go releases as OTA updates by fingerprint; deploy:www publishes www merges ([972ca88](https://github.com/pragma-sh/pragma/commit/972ca8822ba21dfebdf61ed5c2f27a46baffeb5b))
+* **pragma:** add AI merge-conflict resolution to the PR view ([6bfae45](https://github.com/pragma-sh/pragma/commit/6bfae4546a7b7d575126046d7433fe3a7e396d09))
+* **pragma:** add AI merge-conflict resolution to the PR view ([60d30b2](https://github.com/pragma-sh/pragma/commit/60d30b2d7468718ffa330d6ce7bb79819ddd6429))
+* **pragma:** add Auto mode — System 1 models pick the agent, model, and effort ([a299628](https://github.com/pragma-sh/pragma/commit/a299628b45904d5a656b7e3a40900db1c6bf4fde))
+* **pragma:** add detailed sidebar worktree rows ([a484729](https://github.com/pragma-sh/pragma/commit/a4847295063f13e201867841ee17f65e851ea44c))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+* **pragma:** export scratchpads as standalone offline HTML ([ab4c167](https://github.com/pragma-sh/pragma/commit/ab4c1671c90a8e19af42223505092be7e4af9ea1))
+* **pragma:** show System 1 agent progress in the sidebar ([2568f4c](https://github.com/pragma-sh/pragma/commit/2568f4c8b457a4a3302245c98f9df44c123053db))
+* **www:** deploy merges labelled deploy:www to production ([62a56be](https://github.com/pragma-sh/pragma/commit/62a56be80c1b7fb73522366650fb7a369ada6dae))
+
+
+### Bug Fixes
+
+* **accounts:** keep swapped credentials consistent across failures ([5c441ab](https://github.com/pragma-sh/pragma/commit/5c441ab6d473bdde127f092ef0f8f8cde2195831))
+* **pragma:** harden AI merge-conflict resolution ([89a27f0](https://github.com/pragma-sh/pragma/commit/89a27f0bf4775d57243ce8f80ba65dc0b7fa0bb9))
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/www-v1.0.0...www-v1.1.0) (2026-09-26)
 
 

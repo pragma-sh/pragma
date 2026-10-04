@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/pragma-sh/pragma/compare/bench-v1.0.2...bench-v1.1.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* **jev:** drive the running dev app with an in-repo tool ([c59d41b](https://github.com/pragma-sh/pragma/commit/c59d41b7f214a193f6132766ec2eb5834ba3600d))
+* **pragma:** add detailed sidebar worktree rows with agent progress, PRs, and git activity ([b35bac5](https://github.com/pragma-sh/pragma/commit/b35bac5bff2ce2145544fa4553615f26faf0095c))
+
+
+### Bug Fixes
+
+* satisfy clippy 1.99 assert_is_empty in tests ([e9d0fb4](https://github.com/pragma-sh/pragma/commit/e9d0fb43a1362cedbc09a68d3af3824607eb79b0))
+
 ## [1.0.2](https://github.com/pragma-sh/pragma/compare/bench-v1.0.1...bench-v1.0.2) (2026-09-26)
 
 ## [1.0.1](https://github.com/pragma-sh/pragma/compare/bench-v1.0.0...bench-v1.0.1) (2026-09-23)

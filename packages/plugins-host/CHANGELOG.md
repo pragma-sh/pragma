@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/plugins-host-v1.1.0...plugins-host-v1.2.0) (2026-10-03)
+
+
+### Features
+
+* account providers for agent plugins ([0cc8bc6](https://github.com/pragma-sh/pragma/commit/0cc8bc687b7d9640897ab6c63bf34a60fc2172d1))
+* agent launch options, prompt context, and pre-launch commands ([3d78519](https://github.com/pragma-sh/pragma/commit/3d785196198bed56a25e6261423a136ae0859030))
+* **plugin:** add account provider API, callbacks, and SDK client ([1855ad3](https://github.com/pragma-sh/pragma/commit/1855ad342ea0e65720498ce06053784e75289a23))
+* **plugins-host:** resolve agent launch options into the catalog ([b181a2d](https://github.com/pragma-sh/pragma/commit/b181a2d31d7ffce8829c51d49d8221bdc2f204b5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.2.0
+    * @pragma-sh/plugin bumped to 1.2.0
+    * @pragma-sh/sdk bumped to 1.2.0
+    * @pragma-sh/sidecar-kit bumped to 1.2.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/plugins-host-v1.0.1...plugins-host-v1.1.0) (2026-09-26)
 
 
