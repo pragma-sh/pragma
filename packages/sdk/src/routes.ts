@@ -25,4 +25,5 @@ export const routes = {
   pushTokens: "/v1/push/tokens",
   pushTest: "/v1/push/test",
   pushPresence: "/v1/push/presence",
+  portForward: "/v1/ports/forward",
 } as const;

@@ -6,7 +6,11 @@ use pragma_constants::Tab;
 
 /// Tab metadata operations served by the host that owns the terminal session.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(
+    tag = "action",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum TabsRequest {
     /// Records an agent launched in a terminal tab and its default display title.
     SetAgent {
@@ -54,4 +58,58 @@ pub struct TabAgentMetadata {
     pub tab_id: String,
     pub agent_id: String,
     pub title: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Every client that sends these requests — the SDK, the phone, the
+    // gateway — speaks camelCase on the wire. A snake_case field name here is
+    // not a cosmetic mismatch: the request fails to deserialize, and a caller
+    // waiting for its RPC reply never gets one.
+    #[test]
+    fn reads_camel_case_fields() {
+        let request: TabsRequest =
+            serde_json::from_str(r#"{"action":"listManaged","worktreeIds":["w1"]}"#)
+                .expect("a client sends camelCase");
+
+        match request {
+            TabsRequest::ListManaged { worktree_ids } => assert_eq!(worktree_ids, ["w1"]),
+            other => panic!("expected listManaged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_a_camel_case_open_terminal() {
+        let request: TabsRequest =
+            serde_json::from_str(r#"{"action":"openTerminal","worktreeId":"w1","requestId":"r1"}"#)
+                .expect("a client sends camelCase");
+
+        match request {
+            TabsRequest::OpenTerminal {
+                worktree_id,
+                request_id,
+                title,
+            } => {
+                assert_eq!(worktree_id, "w1");
+                assert_eq!(request_id, "r1");
+                assert_eq!(title, None);
+            }
+            other => panic!("expected openTerminal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn writes_camel_case_fields() {
+        let json = serde_json::to_value(TabsRequest::Close {
+            tab_id: "t1".to_string(),
+        })
+        .expect("the request serializes");
+
+        assert_eq!(
+            json,
+            serde_json::json!({ "action": "close", "tabId": "t1" })
+        );
+    }
 }

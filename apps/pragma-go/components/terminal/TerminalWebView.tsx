@@ -1,13 +1,15 @@
 import {
   buildTerminalViewerHtml,
+  terminalBackgroundColor,
   terminalCommandScript,
   terminalThemeCss,
   type TerminalViewerCommand,
 } from "@pragma/terminal-viewer";
-import { forwardRef, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
+import { createTerminalCommandQueue } from "@/lib/terminal-command-queue";
 import { useHostThemeOverrides } from "@/lib/theme-context";
 import { terminalMessageHandler, type TerminalViewProps } from "./terminal-bridge";
 
@@ -37,21 +39,50 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
       () => buildTerminalViewerHtml({ mode: scheme, themeCss }),
       [scheme, themeCss],
     );
+    // The color the document is about to paint, resolved the same way it
+    // resolves it. A web view shows the platform's own white surface until its
+    // first paint, so the container underneath has to already be this color —
+    // otherwise every push into a terminal flashes white.
+    const background = useMemo(
+      () => terminalBackgroundColor(scheme, overrides),
+      [overrides, scheme],
+    );
+    // ...and the view itself stays transparent until the document says it has
+    // painted, so that surface is never what the user sees. Transparent rather
+    // than unmounted: xterm has to be laid out to measure a grid at all.
+    const [painted, setPainted] = useState(false);
+    useEffect(() => setPainted(false), [html]);
 
-    useImperativeHandle(ref, () => ({
-      send: (command: TerminalViewerCommand) => {
-        webView.current?.injectJavaScript(terminalCommandScript(command));
+    // `injectJavaScript` before the document loads is discarded, and a session's
+    // replay usually beats the load. Commands wait for the renderer's own ready
+    // signal instead of being thrown at a page that is not there yet.
+    const queue = useMemo(
+      () =>
+        createTerminalCommandQueue((command: TerminalViewerCommand) => {
+          webView.current?.injectJavaScript(terminalCommandScript(command));
+        }),
+      [],
+    );
+    // A new palette rebuilds the document, so the gate closes until the
+    // reloaded page reports itself ready again.
+    useEffect(() => queue.reset(), [html, queue]);
+
+    useImperativeHandle(ref, () => ({ send: queue.send }), [queue]);
+
+    const handleMessage = terminalMessageHandler({
+      ...props,
+      onReady: () => {
+        setPainted(true);
+        queue.ready();
+        props.onReady();
       },
-    }));
-
-    const handleMessage = terminalMessageHandler(props);
+    });
 
     return (
-      <View className="flex-1 bg-background">
+      <View className="flex-1" style={{ backgroundColor: background }}>
         <WebView
           allowFileAccess={false}
           androidLayerType="hardware"
-          className="flex-1 bg-background"
           hideKeyboardAccessoryView
           keyboardDisplayRequiresUserAction={false}
           onMessage={(event: WebViewMessageEvent) => handleMessage(event.nativeEvent.data)}
@@ -64,6 +95,7 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
           scalesPageToFit={false}
           setSupportMultipleWindows={false}
           source={{ html }}
+          style={{ backgroundColor: background, flex: 1, opacity: painted ? 1 : 0 }}
         />
       </View>
     );

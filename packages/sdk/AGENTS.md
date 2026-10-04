@@ -7,7 +7,7 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `ports`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 `client.createBoardDraft({ prompt, worktreeId, agentId, modelId?, reasoningId? })`
 creates a draft card through the running desktop controller.
@@ -112,6 +112,10 @@ Four namespaces exist because the _host_ owns the thing, not the client:
   from the last byte this renderer accepted instead of replaying everything.
 - `client.usageLimits` — the host's single validated cache of plugin usage
   providers. Asking often is cheap; the host decides when a provider runs.
+- `client.ports` — `list(worktreeIds)` returns only listeners descended from those
+  worktrees' live terminal shells; `forward({ projectId, port })` revalidates the exact
+  listener, exposes an injected design proxy with the configured tunnel command, and
+  returns its public browser URL.
 
 ## AI and GitHub
 
@@ -124,7 +128,10 @@ Four namespaces exist because the _host_ owns the thing, not the client:
 - **Publishing is separate from committing**, because a commit is local and a
   publish is not. `github.publish` pushes and creates, idempotent per
   `requestId`; `github.pullRequest` finds an existing one, including one opened
-  outside Pragma, and reports merged separately from closed.
+  outside Pragma, and reports merged separately from closed. `github.branches`
+  lists what a pull request can merge into, with the repository default and the
+  worktree's own head branch, so a client can offer a base without its own
+  GitHub API code.
 
 There is deliberately **no method that returns the GitHub token**: this
 namespace is reachable from a paired phone. `ai.ask` is read-only by

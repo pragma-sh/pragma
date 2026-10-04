@@ -55,6 +55,9 @@
 - `GET /v1/push/tokens` - list phones registered for push.
 - `POST /v1/push/test` - send a test notification to every registered phone.
 - `POST /v1/push/presence` - desktop focus heartbeat; suppresses pushes while focused.
+- `POST /v1/ports/forward` - revalidate one terminal-owned listener, start a loopback
+  design-injection proxy, expose it with the configured tunnel command, and return its
+  public browser URL.
 - `GET /v1/theme?root=...` - the user's merged `.pragma/theme.json` color overrides.
 - `GET /v1/scratchpads?root=...` - every managed scratchpad in that worktree, MDX
   source and attached agent included. `root` is required and must be absolute;
@@ -157,3 +160,24 @@ request becomes an empty 500 the SDK cannot explain to the user. The brokered
   protocol method/event names, and protocol-version compatibility.
 - Do not add TCP, auth, or gateway concerns directly to `pragma-server`.
 - Keep the router hand-rolled and small; `tiny_http` is the only HTTP server layer.
+
+## Forwarded ports
+
+Port forwards are explicit, public browser sessions. `port_forward.rs` first asks the
+host for current `ports` inventory and requires the exact worktree/tab/PID/port tuple;
+proxied requests revalidate it before connecting to `127.0.0.1`, at most once per
+`PORT_VERIFY_TTL` (5s) and single-flight. A check scans the whole process and socket
+table, so re-checking every request of a page load queued them behind the server.
+Only page navigations (`Accept` includes `text/html`) are fetched with
+`accept-encoding: identity`, because the design runtime is injected into that HTML;
+every other request carries the browser's own `accept-encoding` and its
+`content-encoding` passes through untouched. Never copy the client's `accept-encoding`
+and then add another — reqwest's `header` appends, the upstream picks gzip, and the page
+arrives as compressed bytes. A compressed HTML response is passed through uninjected
+rather than edited. The proxy never
+receives or forwards the gateway bearer token. A random capability reaches only the
+browser URL fragment, is stripped before application scripts run, and protects injected
+catalog/apply calls without entering HTTP logs or proxied HTML. Agent launch is always
+headless through the existing control path. HTML receives the draggable design brush before page scripts;
+ordinary assets and redirects remain on the generated tunnel origin. WebSocket/HMR
+upgrades are not proxied by the current `tiny_http` transport.

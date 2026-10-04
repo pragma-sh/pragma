@@ -147,7 +147,13 @@ impl AiHost {
         match run_oneshot(SIDECAR_NAME, SIDECAR_DEV_ENTRY, &["status"], &[], None) {
             Ok(value) => json!({
                 "available": value.get("available").and_then(Value::as_bool).unwrap_or(false),
-                "signedIn": value.get("signedIn").and_then(Value::as_bool).unwrap_or(false),
+                // The sidecar reports the provider ids it holds credentials
+                // for, not a flag: read it as a list, or every client is told
+                // it is signed out while the host happily runs models.
+                "signedIn": value
+                    .get("signedIn")
+                    .and_then(Value::as_array)
+                    .is_some_and(|providers| !providers.is_empty()),
             }),
             Err(error) => json!({ "available": false, "signedIn": false, "error": error }),
         }

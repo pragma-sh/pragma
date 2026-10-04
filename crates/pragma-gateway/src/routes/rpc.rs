@@ -36,11 +36,11 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "exec" => ProtocolRpcMethod::Exec,
         "automations" => ProtocolRpcMethod::Automations,
         "plugins" => ProtocolRpcMethod::Plugins,
-        "tunnel" => ProtocolRpcMethod::Tunnel,
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
         "fanouts" => ProtocolRpcMethod::Fanouts,
         "sessions" => ProtocolRpcMethod::Sessions,
         "scripts" => ProtocolRpcMethod::Scripts,
+        "ports" => ProtocolRpcMethod::Ports,
         _ => return None,
     })
 }
@@ -69,6 +69,11 @@ mod tests {
             parse_method("fanouts"),
             Some(ProtocolRpcMethod::Fanouts)
         ));
+        assert!(matches!(
+            parse_method("ports"),
+            Some(ProtocolRpcMethod::Ports)
+        ));
+        assert!(parse_method("tunnel").is_none(), "desktop-only control");
         assert!(parse_method("missing").is_none());
     }
 }

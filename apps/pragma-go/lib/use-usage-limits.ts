@@ -6,6 +6,12 @@ import { AppState } from "react-native";
 
 import { useConnection } from "./connection-context";
 
+/**
+ * Poll cadence while the screen is visible, matching the desktop popover's.
+ * The host clamps real provider calls to this same floor.
+ */
+const POLL_MS = constants.usageLimits.minRefreshIntervalMs;
+
 /** The paired host's usage providers, and how the last read went. */
 export interface UsageLimits {
   providers: UsageLimitsProvider[];
@@ -20,10 +26,11 @@ export interface UsageLimits {
 /**
  * Reads the host's usage-limit cache.
  *
- * Polling is the host's job, not the phone's: it owns the refresh cadence and
- * coalesces this request with the desktop's. So this asks on mount, when the
- * screen regains focus, when the app returns to the foreground, and when the
- * user pulls to refresh — and never on a timer while backgrounded.
+ * Polling is the host's job, not the phone's: it owns the per-provider cadence,
+ * the backoff, and the cache, so asking more often than its floor costs a
+ * provider nothing. This therefore polls on the same cadence the desktop
+ * popover uses, but only while the screen is focused *and* the app is in the
+ * foreground — a backgrounded phone never runs the timer.
  *
  * A failed read leaves the previous providers in place. An unreachable host is
  * not the same as a provider reporting no usage, and the difference has to
@@ -58,19 +65,34 @@ export function useUsageLimits(root?: string): UsageLimits {
     if (!client) {
       setProviders([]);
       setLoading(false);
-      return undefined;
+      return;
     }
+    // The first read is the focus effect's: it re-runs whenever `refresh`
+    // changes, so firing here too would only duplicate the request.
     setLoading(true);
-    void refresh();
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
-    });
-    return () => subscription.remove();
-  }, [client, refresh]);
+  }, [client]);
 
   useFocusEffect(
     useCallback(() => {
-      void refresh();
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const stop = (): void => {
+        if (timer !== undefined) clearInterval(timer);
+        timer = undefined;
+      };
+      const start = (): void => {
+        stop();
+        void refresh();
+        timer = setInterval(() => void refresh(), POLL_MS);
+      };
+      if (AppState.currentState === "active") start();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") start();
+        else stop();
+      });
+      return () => {
+        stop();
+        subscription.remove();
+      };
     }, [refresh]),
   );
 

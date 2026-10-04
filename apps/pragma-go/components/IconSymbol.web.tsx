@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ArrowUp,
   Check,
   ChevronLeft,
@@ -11,6 +12,7 @@ import {
   FileText,
   Folder,
   GitBranch,
+  GitPullRequest,
   Inbox,
   MessagesSquare,
   Plus,
@@ -35,7 +37,9 @@ import { Text } from "./ui/text";
 // symbol degrades instead of disappearing.
 
 const LUCIDE_BY_SF_SYMBOL: Record<string, LucideIcon> = {
+  "arrow.left": ArrowLeft,
   "arrow.triangle.branch": GitBranch,
+  "arrow.triangle.pull": GitPullRequest,
   "arrow.up": ArrowUp,
   "bubble.left.and.text.bubble.right": MessagesSquare,
   "checkmark.circle.fill": CircleCheck,

@@ -1,6 +1,14 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { type ReactNode, useCallback, useState } from "react";
-import { Alert, Linking, Pressable, ScrollView, View, type ColorValue } from "react-native";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  View,
+  type ColorValue,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentIcon } from "@/components/AgentIcon";
@@ -10,10 +18,10 @@ import { LaunchSheet } from "@/components/LaunchSheet";
 import { CommitAndPrSheet } from "@/components/CommitAndPrSheet";
 import { IconSymbol } from "@/components/IconSymbol";
 import { NavGroup, NavRow } from "@/components/NavRow";
+import { RenameTabSheet } from "@/components/RenameTabSheet";
 import { ScriptsMenuButton } from "@/components/ScriptsMenuButton";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { WorktreeNavRow } from "@/components/WorktreeNavRow";
 import { useConnection } from "@/lib/connection-context";
@@ -27,8 +35,11 @@ import {
   useWorktree,
 } from "@/lib/data/data-context";
 import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
+import { confirmPortForward } from "@/lib/confirm-port-forward";
 import { attachmentLabel } from "@/lib/scratchpad-agent";
 import type { AgentTab, TerminalTab } from "@/lib/types";
+import { useOpenPorts } from "@/lib/use-open-ports";
+import type { OpenPort } from "@pragma/sdk";
 import { catalogAgentById, useCatalog } from "@/lib/use-catalog";
 import { useCommitAndPr, type CommitAndPr } from "@/lib/use-commit-and-pr";
 import { useScratchpads } from "@/lib/use-scratchpads";
@@ -44,6 +55,7 @@ export default function WorktreeScreen() {
   const children = useChildWorktrees(worktreeId);
   const agentTabs = useAgentTabs(worktreeId);
   const terminalTabs = useTerminalTabs(worktreeId);
+  const ports = useOpenPorts(worktreeId);
   const commitAndPr = useCommitAndPr(worktreeId, worktree?.path);
   const [commitOpen, setCommitOpen] = useState(false);
   const { status } = useConnection();
@@ -63,27 +75,59 @@ export default function WorktreeScreen() {
     hapticImpact();
     setCommitOpen(true);
   }, []);
+  // The run is the host's, and the sheet is closed while it goes: the header
+  // action is the progress. It comes back on its own once there is something to
+  // act on — the pull request draft, or a failure worth reading.
+  const working = commitAndPr.phase === "running";
+  // Two things block the flow before it starts: a host with no GitHub token
+  // cannot push or open a pull request, and a clean worktree has nothing to
+  // commit. Both are the desktop's conditions. Unknown blocks neither.
+  const blocked = commitAndPr.githubReady === false || commitAndPr.hasChanges === false;
+  const settled = commitAndPr.phase === "review" || commitAndPr.phase === "failed";
+  useEffect(() => {
+    if (settled) setCommitOpen(true);
+  }, [settled]);
   const renderHeaderActions = useCallback(
     ({ tintColor }: { tintColor?: ColorValue }) => (
       <View className="flex-row items-center gap-4">
         <Pressable
-          accessibilityLabel="Commit and open a pull request"
+          accessibilityLabel={commitActionLabel({
+            githubReady: commitAndPr.githubReady,
+            hasChanges: commitAndPr.hasChanges,
+            working,
+          })}
           accessibilityRole="button"
+          accessibilityState={{ busy: working, disabled: working || blocked }}
+          disabled={working || blocked}
           hitSlop={8}
           onPress={openCommitSheet}
+          style={blocked ? { opacity: 0.4 } : undefined}
         >
-          <IconSymbol
-            color={tintColor ?? foreground}
-            fallback="⌥"
-            name="arrow.triangle.branch"
-            size={22}
-          />
+          {working ? (
+            <ActivityIndicator color={tintColor ?? foreground} size="small" />
+          ) : (
+            <IconSymbol
+              color={tintColor ?? foreground}
+              fallback="⑂"
+              name="arrow.triangle.pull"
+              size={22}
+            />
+          )}
         </Pressable>
         <ScriptsMenuButton color={tintColor ?? foreground} worktreeId={worktreeId} />
         <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
       </View>
     ),
-    [foreground, openCommitSheet, openLaunchSheet, worktreeId],
+    [
+      blocked,
+      commitAndPr.githubReady,
+      commitAndPr.hasChanges,
+      foreground,
+      openCommitSheet,
+      openLaunchSheet,
+      working,
+      worktreeId,
+    ],
   );
 
   // Terminals are always offered, so "empty" is only about what already exists.
@@ -97,14 +141,37 @@ export default function WorktreeScreen() {
         commitAndPr={commitAndPr}
         empty={empty}
         insetBottom={insets.bottom}
+        ports={ports}
+        projectId={worktree?.projectId ?? ""}
         terminalTabs={terminalTabs}
         worktreeId={worktreeId}
         worktreeNodes={children}
       />
       <WorktreeLaunchSheet onOpenChange={setLaunchOpen} open={launchOpen} worktree={worktree} />
-      <CommitAndPrSheet flow={commitAndPr} onOpenChange={setCommitOpen} open={commitOpen} />
+      <CommitAndPrSheet
+        flow={commitAndPr}
+        onOpenChange={setCommitOpen}
+        open={commitOpen}
+        worktreeName={worktree ? worktreeLabel(worktree) : "this worktree"}
+      />
     </>
   );
+}
+
+/** What the header action says it is, including why it cannot be used. */
+function commitActionLabel({
+  githubReady,
+  hasChanges,
+  working,
+}: {
+  githubReady: boolean | null;
+  hasChanges: boolean | null;
+  working: boolean;
+}): string {
+  if (working) return "Committing…";
+  if (githubReady === false) return "Sign in to GitHub to commit and open a pull request";
+  if (hasChanges === false) return "Nothing to commit";
+  return "Commit and open a pull request";
 }
 
 function WorktreeHeader({
@@ -131,6 +198,8 @@ function WorktreeContents({
   commitAndPr,
   empty,
   insetBottom,
+  ports,
+  projectId,
   terminalTabs,
   worktreeId,
   worktreeNodes,
@@ -139,6 +208,8 @@ function WorktreeContents({
   commitAndPr: CommitAndPr;
   empty: boolean;
   insetBottom: number;
+  ports: OpenPort[];
+  projectId: string;
   terminalTabs: TerminalTab[];
   worktreeId: string;
   worktreeNodes: WorktreeNode[];
@@ -152,6 +223,7 @@ function WorktreeContents({
       <LinkedPullRequest flow={commitAndPr} />
       <WorktreesGroup nodes={worktreeNodes} />
       <TerminalsGroup tabs={terminalTabs} worktreeId={worktreeId} />
+      <PortsGroup ports={ports} projectId={projectId} />
       <AgentTabsGroup tabs={agentTabs} />
       <ScratchpadsGroup agentTabs={agentTabs} worktreeId={worktreeId} />
       {empty ? (
@@ -160,6 +232,54 @@ function WorktreeContents({
         </Text>
       ) : null}
     </ScrollView>
+  );
+}
+
+/** Open listeners shown directly below terminals, matching desktop inventory. */
+function PortsGroup({ ports, projectId }: { ports: OpenPort[]; projectId: string }) {
+  const { client } = useConnection();
+  const [forwarding, setForwarding] = useState<string | null>(null);
+  // The state above lags a render; the ref is what guards against two confirmed
+  // taps racing the same forward through (stale closure during the await).
+  const busyRef = useRef<string | null>(null);
+  if (!client || !projectId || ports.length === 0) return null;
+
+  const open = async (port: OpenPort): Promise<void> => {
+    const key = `${port.tabId}:${port.port}`;
+    if (busyRef.current || !(await confirmPortForward(port)) || busyRef.current) return;
+    busyRef.current = key;
+    setForwarding(key);
+    hapticImpact();
+    try {
+      const result = await client.ports.forward({ projectId, port });
+      await Linking.openURL(result.url);
+      hapticSuccess();
+    } catch (error) {
+      hapticWarning();
+      Alert.alert(
+        "Couldn't forward port",
+        error instanceof Error ? error.message : "The host could not expose this port.",
+      );
+    } finally {
+      busyRef.current = null;
+      setForwarding(null);
+    }
+  };
+
+  return (
+    <NavGroup title="Ports">
+      {ports.map((port) => {
+        const key = `${port.tabId}:${port.port}`;
+        return (
+          <NavRow
+            key={key}
+            onPress={() => void open(port)}
+            subtitle={`${port.process} (PID ${port.pid})`}
+            title={forwarding === key ? `Forwarding ${port.port}...` : String(port.port)}
+          />
+        );
+      })}
+    </NavGroup>
   );
 }
 
@@ -276,7 +396,7 @@ function TerminalsGroup({ tabs, worktreeId }: { tabs: TerminalTab[]; worktreeId:
   const { openTerminal } = useTerminalActions();
   const { status } = useConnection();
   const [opening, setOpening] = useState(false);
-  const [closingTab, setClosingTab] = useState<TerminalTab | null>(null);
+  const [menuTab, setMenuTab] = useState<TerminalTab | null>(null);
 
   if (status !== "paired") return null;
 
@@ -298,7 +418,7 @@ function TerminalsGroup({ tabs, worktreeId }: { tabs: TerminalTab[]; worktreeId:
       {tabs.map((tab) => (
         <NavRow
           key={tab.id}
-          onLongPress={() => setClosingTab(tab)}
+          onLongPress={() => setMenuTab(tab)}
           onPress={() =>
             router.push({
               pathname: "/terminal/[tabId]",
@@ -313,35 +433,37 @@ function TerminalsGroup({ tabs, worktreeId }: { tabs: TerminalTab[]; worktreeId:
         onPress={open}
         title={opening ? "Opening terminal…" : "New terminal"}
       />
-      <CloseTerminalSheet onOpenChange={() => setClosingTab(null)} tab={closingTab} />
+      <TerminalTabActionSheets menuTab={menuTab} onMenuTabChange={setMenuTab} />
     </NavGroup>
   );
 }
 
 /**
- * Confirms ending a terminal.
+ * Long-press actions for one terminal: rename it, or end it.
  *
- * Closing is not a local dismissal: the process ends and the tab disappears on
- * the desktop too, which is worth a sentence before it happens — the session
- * may be a project script someone is watching run.
+ * Deliberately the same shape as the agent sheet — a tab is a tab, and having
+ * one kind of session renamed from a sheet and the other from somewhere else is
+ * how a user learns two gestures for one idea. Ending is not a local dismissal:
+ * the process stops and the tab disappears on the desktop too, which the sheet
+ * says before the tap rather than after it.
  */
-function CloseTerminalSheet({
-  onOpenChange,
-  tab,
+function TerminalTabActionSheets({
+  menuTab,
+  onMenuTabChange,
 }: {
-  onOpenChange: (open: boolean) => void;
-  tab: TerminalTab | null;
+  menuTab: TerminalTab | null;
+  onMenuTabChange: (tab: TerminalTab | null) => void;
 }) {
-  const { closeTerminal } = useTerminalActions();
+  const { closeTerminal, renameTab } = useTerminalActions();
   const [closing, setClosing] = useState(false);
+  const [renamingTab, setRenamingTab] = useState<TerminalTab | null>(null);
 
-  const close = (): void => {
-    if (!tab || closing) return;
+  function close(tab: TerminalTab): void {
+    if (closing) return;
     setClosing(true);
     void closeTerminal(tab.id)
       .then(() => {
         hapticSuccess();
-        onOpenChange(false);
         return undefined;
       })
       .catch(() => {
@@ -349,22 +471,50 @@ function CloseTerminalSheet({
         Alert.alert("Couldn't close terminal", "The session could not be ended.");
       })
       .finally(() => setClosing(false));
-  };
+  }
 
   return (
-    <BottomSheet onOpenChange={(open) => !open && onOpenChange(false)} open={!!tab}>
-      <View className="gap-1">
-        <Text className="text-lg font-semibold">{tab?.title}</Text>
-        <Text className="text-sm text-muted-foreground">
-          Closing ends this session and removes it everywhere, including on your computer.
-        </Text>
-      </View>
-      <View className="mt-5 gap-3">
-        <Button disabled={closing} onPress={close} variant="destructive">
-          <Text>{closing ? "Closing…" : "Close terminal"}</Text>
-        </Button>
-      </View>
-    </BottomSheet>
+    <>
+      <BottomSheet onOpenChange={(open) => !open && onMenuTabChange(null)} open={!!menuTab}>
+        <View className="gap-1">
+          <Text className="text-lg font-semibold">{menuTab?.title}</Text>
+          <Text className="text-sm text-muted-foreground">
+            Closing ends this session and removes it everywhere, including on your computer.
+          </Text>
+        </View>
+        <View className="mt-5 gap-3">
+          <Button
+            onPress={() => {
+              if (!menuTab) return;
+              setRenamingTab(menuTab);
+              onMenuTabChange(null);
+            }}
+            variant="outline"
+          >
+            <Text>Rename</Text>
+          </Button>
+          <Button
+            disabled={closing}
+            onPress={() => {
+              if (!menuTab) return;
+              close(menuTab);
+              onMenuTabChange(null);
+            }}
+            variant="destructive"
+          >
+            <Text>{closing ? "Closing…" : "Close terminal"}</Text>
+          </Button>
+        </View>
+      </BottomSheet>
+      <RenameTabSheet
+        description="Choose a title for this terminal."
+        errorTitle="Couldn't rename terminal"
+        heading="Rename terminal"
+        onDone={() => setRenamingTab(null)}
+        rename={renameTab}
+        tab={renamingTab}
+      />
+    </>
   );
 }
 
@@ -420,11 +570,9 @@ function AgentTabActionSheets({
   menuTab: AgentTab | null;
   onMenuTabChange: (tab: AgentTab | null) => void;
 }) {
-  const { clearAgent, renameAgent } = useAgentActions();
+  const { clearAgent, renameTab } = useAgentActions();
   const [clearingTabId, setClearingTabId] = useState<string | null>(null);
   const [renamingTab, setRenamingTab] = useState<AgentTab | null>(null);
-  const [title, setTitle] = useState("");
-  const [renaming, setRenaming] = useState(false);
 
   function clear(tab: AgentTab): void {
     if (clearingTabId) return;
@@ -432,22 +580,6 @@ function AgentTabActionSheets({
     void clearAgent(tab.id)
       .catch(() => Alert.alert("Couldn't clear agent", "The agent process could not be ended."))
       .finally(() => setClearingTabId(null));
-  }
-
-  async function rename(): Promise<void> {
-    const nextTitle = title.trim();
-    if (!renamingTab || !nextTitle) return;
-    setRenaming(true);
-    try {
-      await renameAgent(renamingTab.id, nextTitle);
-      hapticSuccess();
-      setRenamingTab(null);
-    } catch {
-      hapticWarning();
-      Alert.alert("Couldn't rename agent", "The agent process could not be renamed.");
-    } finally {
-      setRenaming(false);
-    }
   }
 
   return (
@@ -461,7 +593,6 @@ function AgentTabActionSheets({
           <Button
             onPress={() => {
               if (!menuTab) return;
-              setTitle(menuTab.title);
               setRenamingTab(menuTab);
               onMenuTabChange(null);
             }}
@@ -481,35 +612,14 @@ function AgentTabActionSheets({
           </Button>
         </View>
       </BottomSheet>
-      <BottomSheet
-        footer={
-          <View className="mt-3 flex-row justify-end gap-2">
-            <Button onPress={() => setRenamingTab(null)} size="sm" variant="outline">
-              <Text>Cancel</Text>
-            </Button>
-            <Button disabled={!title.trim() || renaming} onPress={() => void rename()} size="sm">
-              <Text>{renaming ? "Renaming..." : "Rename"}</Text>
-            </Button>
-          </View>
-        }
-        onOpenChange={(open) => !open && setRenamingTab(null)}
-        open={!!renamingTab}
-      >
-        <View className="gap-1">
-          <Text className="text-lg font-semibold">Rename agent</Text>
-          <Text className="text-sm text-muted-foreground">
-            Choose a title for this agent session.
-          </Text>
-        </View>
-        <View className="mt-5 gap-3">
-          <Input
-            autoFocus
-            onChangeText={setTitle}
-            onSubmitEditing={() => void rename()}
-            value={title}
-          />
-        </View>
-      </BottomSheet>
+      <RenameTabSheet
+        description="Choose a title for this agent session."
+        errorTitle="Couldn't rename agent"
+        heading="Rename agent"
+        onDone={() => setRenamingTab(null)}
+        rename={renameTab}
+        tab={renamingTab}
+      />
     </>
   );
 }

@@ -12,6 +12,16 @@ export interface GitHubStatus {
   error?: string;
 }
 
+/** A repository's branches, and the two that matter for a publish. */
+export interface GitHubBranches {
+  /** Every branch on the remote, sorted by name. Empty for a non-GitHub remote. */
+  branches: string[];
+  /** What a publish merges into when no base is chosen. */
+  defaultBranch: string;
+  /** The worktree's own branch — never a valid base for its pull request. */
+  headBranch: string;
+}
+
 /** Options for {@link GitHubClient.publish}. */
 export interface PublishPullRequestOptions {
   /** Absolute worktree root whose branch is being published. */
@@ -61,6 +71,17 @@ export class GitHubClient {
       options.signal,
     );
     return result.pullRequest;
+  }
+
+  /**
+   * The branches a pull request from this worktree could merge into, plus the
+   * default and the worktree's own branch.
+   *
+   * The host answers, not the client: the token stays on the host, and every
+   * client would otherwise need its own GitHub API code.
+   */
+  branches(root: string, options: { signal?: AbortSignal } = {}): Promise<GitHubBranches> {
+    return this.githubRpc<GitHubBranches>({ action: "branches", root }, options.signal);
   }
 
   /** Pushes the branch and creates its pull request. */

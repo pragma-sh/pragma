@@ -47,8 +47,8 @@ interface DataContextValue {
   markAgentSeen: (tabId: string) => void;
   /** End an agent's PTY and remove it from mobile navigation. */
   clearAgent: (tabId: string) => Promise<void>;
-  /** Rename an agent's workspace tab. */
-  renameAgent: (tabId: string, title: string) => Promise<void>;
+  /** Rename a workspace tab — an agent session or an ordinary terminal. */
+  renameTab: (tabId: string, title: string) => Promise<void>;
   /** Open a host-owned terminal in a worktree and return its tab id. */
   openTerminal: (worktreeId: string) => Promise<string>;
   /** Close a terminal tab and end its process, on every device showing it. */
@@ -172,7 +172,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [client, handleUnauthorized, paired, setHiddenTabIds],
   );
 
-  const renameAgent = useCallback(
+  const renameTab = useCallback(
     async (tabId: string, title: string) => {
       await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
         activeClient.sessions.rename(tabId, title),
@@ -227,7 +227,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       resolveInboxItem,
       markAgentSeen,
       clearAgent,
-      renameAgent,
+      renameTab,
       openTerminal,
       closeTerminal,
     }),
@@ -240,7 +240,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       resolveInboxItem,
       markAgentSeen,
       clearAgent,
-      renameAgent,
+      renameTab,
       openTerminal,
       closeTerminal,
     ],
@@ -572,10 +572,10 @@ export function useAgentTab(tabId: string): AgentTab | undefined {
 /** Actions affecting one agent session. */
 export function useAgentActions(): Pick<
   DataContextValue,
-  "markAgentSeen" | "clearAgent" | "renameAgent"
+  "markAgentSeen" | "clearAgent" | "renameTab"
 > {
-  const { markAgentSeen, clearAgent, renameAgent } = useData();
-  return { markAgentSeen, clearAgent, renameAgent };
+  const { markAgentSeen, clearAgent, renameTab } = useData();
+  return { markAgentSeen, clearAgent, renameTab };
 }
 
 /** Aggregate agent status for a worktree AND everything nested beneath it. */
@@ -647,7 +647,10 @@ export function useTerminalTab(tabId: string): TerminalTab | undefined {
 }
 
 /** Actions on a worktree's ordinary terminals. */
-export function useTerminalActions(): Pick<DataContextValue, "openTerminal" | "closeTerminal"> {
-  const { openTerminal, closeTerminal } = useData();
-  return { openTerminal, closeTerminal };
+export function useTerminalActions(): Pick<
+  DataContextValue,
+  "openTerminal" | "closeTerminal" | "renameTab"
+> {
+  const { openTerminal, closeTerminal, renameTab } = useData();
+  return { openTerminal, closeTerminal, renameTab };
 }

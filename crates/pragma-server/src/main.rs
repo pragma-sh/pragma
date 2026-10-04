@@ -302,6 +302,10 @@ fn handle_client_request(
     closed: &Arc<AtomicBool>,
 ) {
     let is_control = matches!(request.kind, RequestKind::Control);
+    // An RPC caller reads until the `Rpc` frame carrying its request id and
+    // ignores everything else, so a failure answered with a plain `Response`
+    // frame is not an error to it — it is silence, and it waits forever.
+    let is_rpc = matches!(request.kind, RequestKind::Rpc);
     let request_id = request.request_id.clone();
     let (response, rpc_response, event_stream, control_rx) =
         match handle_request(request, registry, core) {
@@ -326,6 +330,21 @@ fn handle_client_request(
                 }
                 return;
             }
+            Err(error) if is_rpc => (
+                None,
+                Some(RpcResponseFrame {
+                    request_id: request_id.clone(),
+                    ok: false,
+                    payload: None,
+                    error: Some(RpcError {
+                        code: pragma_constants::ProtocolErrorCode::InvalidPayload,
+                        message: error.to_string(),
+                        details: None,
+                    }),
+                }),
+                None,
+                None,
+            ),
             Err(error) => (
                 Some(ResponseFrame {
                     request_id: request_id.clone(),

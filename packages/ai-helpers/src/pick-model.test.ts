@@ -6,6 +6,7 @@ import { insightKey } from "./model-insights.ts";
 import { priceCeiling, quantile, selectModel, selectModelCandidates } from "./pick-model.ts";
 
 const NOW = new Date(Date.UTC(2026, 5, 22));
+const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 function model(overrides: Partial<Model<Api>> & Pick<Model<Api>, "id">): Model<Api> {
   return {
@@ -402,5 +403,64 @@ describe("selectModel — high", () => {
       model({ id: "newer-20260601", reasoning: true }),
     ];
     expect(selectModel("high", models, { now: NOW })?.id).toBe("newer-20260601");
+  });
+});
+
+describe("stored credentials", () => {
+  it("ranks a provider the user signed in to ahead of an environment-only one", () => {
+    const models = [
+      model({ id: "free-20260601", provider: "opencode", reasoning: true, cost: ZERO_COST }),
+      model({
+        id: "paid-20260601",
+        provider: "opencode-go",
+        reasoning: true,
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+
+    // Without the hint the free model wins on price, which is exactly how an
+    // ambient `OPENCODE_API_KEY` puts a provider nobody signed in to first.
+    expect(selectModel("standard", models, { now: NOW })?.id).toBe("free-20260601");
+    expect(
+      selectModel("standard", models, { now: NOW, credentialedProviders: ["opencode-go"] })?.id,
+    ).toBe("paid-20260601");
+  });
+
+  it("still offers an environment-only provider, just last", () => {
+    const models = [
+      model({ id: "free-20260601", provider: "opencode", reasoning: true, cost: ZERO_COST }),
+      model({
+        id: "paid-20260601",
+        provider: "opencode-go",
+        reasoning: true,
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    expect(
+      selectModelCandidates("standard", models, {
+        now: NOW,
+        credentialedProviders: ["opencode-go"],
+      }).map((candidate) => candidate.id),
+    ).toEqual(["paid-20260601", "free-20260601"]);
+  });
+
+  it("leaves the ranking alone when no candidate belongs to a stored provider", () => {
+    const models = [
+      model({ id: "free-20260601", provider: "opencode", reasoning: true, cost: ZERO_COST }),
+      model({
+        id: "dearer-20260601",
+        provider: "opencode",
+        reasoning: true,
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    expect(
+      selectModelCandidates("standard", models, {
+        now: NOW,
+        credentialedProviders: ["anthropic"],
+      }).map((candidate) => candidate.id),
+    ).toEqual(
+      selectModelCandidates("standard", models, { now: NOW }).map((candidate) => candidate.id),
+    );
   });
 });

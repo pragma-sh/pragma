@@ -1,11 +1,13 @@
 import {
   buildTerminalViewerHtml,
+  terminalBackgroundColor,
   terminalThemeCss,
   type TerminalViewerCommand,
 } from "@pragma/terminal-viewer";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 
+import { createTerminalCommandQueue } from "@/lib/terminal-command-queue";
 import { useHostThemeOverrides } from "@/lib/theme-context";
 import { terminalMessageHandler, type TerminalViewProps } from "./terminal-bridge";
 
@@ -30,21 +32,42 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
       () => buildTerminalViewerHtml({ mode: scheme, themeCss, parentOrigin }),
       [parentOrigin, scheme, themeCss],
     );
+    // Same hand-off as the native twin: the container is already the color the
+    // document will paint, and the frame is revealed only once it has.
+    const background = useMemo(
+      () => terminalBackgroundColor(scheme, overrides),
+      [overrides, scheme],
+    );
+    const [painted, setPainted] = useState(false);
+    useEffect(() => setPainted(false), [html]);
 
-    useImperativeHandle(ref, () => ({
-      send: (command: TerminalViewerCommand) => {
-        // The frame's origin is opaque, so "*" is the only address that
-        // reaches it; the payload is terminal data, not a secret.
-        frame.current?.contentWindow?.postMessage(JSON.stringify(command), "*");
-      },
-    }));
+    // A frame that has not loaded drops what is posted to it, and a session's
+    // replay usually arrives first, so commands wait for the document's ready
+    // signal. Same gate as the native twin, same reason.
+    const queue = useMemo(
+      () =>
+        createTerminalCommandQueue((command: TerminalViewerCommand) => {
+          // The frame's origin is opaque, so "*" is the only address that
+          // reaches it; the payload is terminal data, not a secret.
+          frame.current?.contentWindow?.postMessage(JSON.stringify(command), "*");
+        }),
+      [],
+    );
+    // A new palette rebuilds the document; hold again until it reports ready.
+    useEffect(() => queue.reset(), [html, queue]);
+
+    useImperativeHandle(ref, () => ({ send: queue.send }), [queue]);
 
     const latest = useRef(props);
     latest.current = props;
 
     useEffect(() => {
       const handle = terminalMessageHandler({
-        onReady: () => latest.current.onReady(),
+        onReady: () => {
+          setPainted(true);
+          queue.ready();
+          latest.current.onReady();
+        },
         onInput: (data) => latest.current.onInput(data),
         onResize: (cols, rows) => latest.current.onResize(cols, rows),
         onWritten: (bytes) => latest.current.onWritten?.(bytes),
@@ -59,15 +82,22 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
       };
       globalThis.addEventListener("message", onMessage);
       return () => globalThis.removeEventListener("message", onMessage);
-    }, []);
+    }, [queue]);
 
     return (
-      <View className="flex-1 bg-background">
+      <View className="flex-1" style={{ backgroundColor: background }}>
         <iframe
           ref={frame}
           sandbox="allow-scripts"
           srcDoc={html}
-          style={{ border: "none", flex: 1, height: "100%", width: "100%" }}
+          style={{
+            backgroundColor: background,
+            border: "none",
+            flex: 1,
+            height: "100%",
+            opacity: painted ? 1 : 0,
+            width: "100%",
+          }}
           title="Terminal"
         />
       </View>

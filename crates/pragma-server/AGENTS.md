@@ -30,6 +30,11 @@ grow one:** the gateway proxies that domain to paired phones. The desktop, which
 still needs it for its own Octokit calls, reads the host's file directly — a
 local read that is not reachable over the wire.
 
+`branches` answers what a pull request from a worktree could merge into: the
+remote's branch names, the repository default, and the worktree's own head. A
+client picking a merge target needs all three, and none of them are worth a
+second GitHub implementation per client.
+
 AI commits are **jobs**, in `ai.rs`. They outlive the request that started them,
 record their stage after every step, and are idempotent per caller request id.
 A job still marked running when the server starts is reported as `interrupted`,
@@ -66,6 +71,9 @@ desktop window closed:
 `~/.pragma/config.json` while preserving command overrides and unrelated config. On server
 startup, enabled tunnels restart against gateway discovery beside `daemon.sock`. Tunnel
 process therefore follows persistent server lifetime, not Tauri client lifetime.
+The gateway also asks this registry to expose a short-lived design proxy for a verified
+terminal-owned port. Those forwards reuse the exact configured command and URL matcher;
+starting the same forward again replaces its prior tunnel process.
 
 ## Plugin catalog host
 

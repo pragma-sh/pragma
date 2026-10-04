@@ -11,3 +11,9 @@ export {
   type TerminalViewerCommand,
   type TerminalViewerMessage,
 } from "./messages";
+export {
+  terminalBackgroundColor,
+  TERMINAL_FALLBACK_COLORS,
+  TERMINAL_FALLBACK_SELECTION,
+  type TerminalViewerMode,
+} from "./theme";

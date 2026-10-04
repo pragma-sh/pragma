@@ -39,7 +39,11 @@ pub struct ScriptDefinition {
 
 /// Script operations served by the host that owns the terminals.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(
+    tag = "action",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ScriptsRequest {
     /// Lists the project's named run scripts, and which of them are running in
     /// this worktree. Reading the config from the *project root* is deliberate:
@@ -344,7 +348,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{flatten_commands, parse_config};
+    use super::{flatten_commands, parse_config, ScriptsRequest};
 
     fn path() -> &'static Path {
         Path::new("/repo/.pragma/scripts.json")
@@ -420,5 +424,38 @@ mod tests {
     #[test]
     fn flattening_rejects_a_node_that_is_neither_command_nor_split() {
         assert!(flatten_commands(&[json!(42)]).is_err());
+    }
+
+    // A phone starts a script over the gateway, and the SDK sends camelCase.
+    #[test]
+    fn reads_camel_case_request_fields() {
+        let request: ScriptsRequest = serde_json::from_str(
+            r#"{"action":"run","worktreeId":"w1","name":"dev","requestId":"r1"}"#,
+        )
+        .expect("a client sends camelCase");
+
+        match request {
+            ScriptsRequest::Run {
+                worktree_id,
+                name,
+                request_id,
+            } => {
+                assert_eq!(worktree_id, "w1");
+                assert_eq!(name, "dev");
+                assert_eq!(request_id, "r1");
+            }
+            other => panic!("expected run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_a_camel_case_stop() {
+        let request: ScriptsRequest = serde_json::from_str(r#"{"action":"stop","runId":"run-1"}"#)
+            .expect("a client sends camelCase");
+
+        match request {
+            ScriptsRequest::Stop { run_id } => assert_eq!(run_id, "run-1"),
+            other => panic!("expected stop, got {other:?}"),
+        }
     }
 }

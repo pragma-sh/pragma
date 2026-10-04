@@ -202,6 +202,7 @@ export async function runPromptWithFallback<T>(
   const insights = await loadModelInsights();
   const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
     insights,
+    credentialedProviders: options.authStorage.list(),
   });
   if (candidates.length === 0) {
     throw new Error(
@@ -371,6 +372,7 @@ export async function runPromptStreamingWithFallback(
   const insights = await loadModelInsights();
   const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
     insights,
+    credentialedProviders: options.authStorage.list(),
   });
   if (candidates.length === 0) {
     throw new Error(

@@ -1,9 +1,7 @@
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { buildCommitMessagePrompt, cleanCommitMessage } from "./prompts.ts";
-import { loadModelInsights } from "./model-insights.ts";
-import { selectModelCandidates } from "./pick-model.ts";
-import { createPragmaSession, runPromptToText } from "./session.ts";
+import { runPromptWithFallback } from "./session.ts";
 
 /** Options for {@link generateCommitMessage}. */
 export interface GenerateCommitMessageOptions {
@@ -28,40 +26,19 @@ export class NoStagedChangesError extends Error {
  * (non-reasoning) model. Throws {@link NoStagedChangesError} when the diff is
  * empty.
  */
-export async function generateCommitMessage(
-  options: GenerateCommitMessageOptions,
-): Promise<string> {
+export function generateCommitMessage(options: GenerateCommitMessageOptions): Promise<string> {
   if (!options.stagedDiff.trim()) {
     throw new NoStagedChangesError();
   }
 
-  const prompt = buildCommitMessagePrompt(options.stagedDiff);
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates("fast", options.registry.getAvailable(), { insights });
-  if (candidates.length === 0) {
-    throw new Error("No fast model is available. Sign in to a provider that offers one.");
-  }
-
-  let lastError: unknown;
-  for (const model of candidates) {
-    // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one message.
-    const { session } = await createPragmaSession({
+  return runPromptWithFallback(
+    {
       modelKind: "fast",
-      model,
       cwd: options.cwd,
       authStorage: options.authStorage,
       registry: options.registry,
-    });
-
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- try the next model only after this one fails.
-      const raw = await runPromptToText(session, prompt);
-      return cleanCommitMessage(raw);
-    } catch (error) {
-      lastError = error;
-    } finally {
-      session.dispose();
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    },
+    buildCommitMessagePrompt(options.stagedDiff),
+    cleanCommitMessage,
+  );
 }

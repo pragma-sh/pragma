@@ -19,6 +19,20 @@ export interface PublishPullRequestInput extends PullRequestTarget {
   draft: boolean;
 }
 
+/** Lists a repository's branch names, so a client can choose what to merge into. */
+export async function listBranches(
+  token: string,
+  target: { owner: string; repo: string; baseUrl?: string },
+): Promise<string[]> {
+  const client = createGitHubClient(token, target.baseUrl);
+  const branches = await client.paginate(client.rest.repos.listBranches, {
+    owner: target.owner,
+    repo: target.repo,
+    per_page: 100,
+  });
+  return branches.map((branch) => branch.name).toSorted((a, b) => a.localeCompare(b));
+}
+
 /**
  * Finds the pull request for a head branch, open or closed.
  *

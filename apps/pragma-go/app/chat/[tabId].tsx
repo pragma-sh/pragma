@@ -1,20 +1,23 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback } from "react";
-import { KeyboardAvoidingView, Platform } from "react-native";
+import { useCallback, useState, type ReactNode } from "react";
+import { Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { renderNewWorktreeButton } from "@/components/NewWorktreeButton";
 import { WorktreeBackButton } from "@/components/WorktreeBackButton";
+import { AgentViewTabs } from "@/components/chat/AgentViewTabs";
 import { AttentionDock } from "@/components/chat/AttentionDock";
 import { Composer, composerKeyboardOffset } from "@/components/chat/Composer";
 import { MessageList } from "@/components/chat/MessageList";
 import { ScratchpadPill } from "@/components/chat/ScratchpadPill";
+import { TerminalSurface } from "@/components/terminal/TerminalSurface";
 import {
   useAgentActions,
   useAgentTab,
   useProjectRootPath,
   useWorktree,
 } from "@/lib/data/data-context";
+import { type AgentView } from "@/lib/agent-view";
 import { useThemeColors } from "@/lib/theme";
 import { useAgentConnection } from "@/lib/use-agent-connection";
 import { agentSessionTitle, DEFAULT_TAB_TITLE } from "@/lib/tab-title";
@@ -69,19 +72,90 @@ function ChatSession({ params, tab }: { params: ChatParams; tab: ReturnType<type
     <>
       <ChatNavigation title={details.title} worktreeId={details.worktreeId} />
       <MarkDoneAgent status={details.status} tabId={details.tabId} />
-      <ChatBody
-        attention={attention}
-        onAnswer={answer}
-        onDecide={decide}
-        onInterrupt={interrupt}
-        onSend={send}
-        phase={phase}
-        rows={rows}
-        running={details.status === "running"}
+      <AgentSurfaces
+        chat={
+          <ChatBody
+            attention={attention}
+            onAnswer={answer}
+            onDecide={decide}
+            onInterrupt={interrupt}
+            onSend={send}
+            phase={phase}
+            rows={rows}
+            running={details.status === "running"}
+            tabId={details.tabId}
+            worktreeId={details.worktreeId}
+          />
+        }
         tabId={details.tabId}
-        worktreeId={details.worktreeId}
       />
     </>
+  );
+}
+
+/**
+ * The chat transcript and the session's raw TUI, behind one tab switcher.
+ *
+ * An agent tab *is* a terminal session on the host, so both surfaces speak to
+ * the same process — the switcher only chooses which one is on screen.
+ *
+ * The terminal is mounted on first use and then kept mounted, hidden but laid
+ * out: unmounting it would throw away the emulator's screen and force a full
+ * replay on every switch, and collapsing its layout would make xterm measure a
+ * zero-column grid. Detaching instead releases the viewport lease, so a session
+ * the desktop is also showing keeps the desktop's size while the phone reads
+ * the transcript.
+ */
+function AgentSurfaces({ chat, tabId }: { chat: ReactNode; tabId: string }) {
+  const [view, setView] = useState<AgentView>("chat");
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+
+  const change = useCallback((next: AgentView) => {
+    // The hidden surface keeps its text inputs, and a keyboard raised for one
+    // of them would otherwise stay up over the other.
+    Keyboard.dismiss();
+    if (next === "terminal") setTerminalMounted(true);
+    setView(next);
+  }, []);
+
+  return (
+    <View className="flex-1 bg-background">
+      <AgentViewTabs onValueChange={change} value={view} />
+      <View className="flex-1">
+        <SurfacePane active={view === "chat"}>{chat}</SurfacePane>
+        {terminalMounted ? (
+          <SurfacePane active={view === "terminal"}>
+            <SafeAreaView className="flex-1" edges={["bottom"]}>
+              <TerminalSurface attached={focused && view === "terminal"} tabId={tabId} />
+            </SafeAreaView>
+          </SurfacePane>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** One stacked surface: laid out either way, but inert and invisible when not selected. */
+function SurfacePane({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <View
+      accessibilityElementsHidden={!active}
+      importantForAccessibility={active ? "auto" : "no-hide-descendants"}
+      style={[
+        StyleSheet.absoluteFill,
+        { opacity: active ? 1 : 0, pointerEvents: active ? "auto" : "none" },
+      ]}
+    >
+      {children}
+    </View>
   );
 }
 

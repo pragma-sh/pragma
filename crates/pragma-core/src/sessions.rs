@@ -9,7 +9,11 @@ use serde::{Deserialize, Serialize};
 
 /// Session operations served by the host that owns the PTY.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(
+    tag = "action",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SessionsRequest {
     /// Reports a session's grid, liveness, and whether its viewport is leased.
     Info { session_id: String },
@@ -40,4 +44,45 @@ pub enum SessionsRequest {
         #[serde(default)]
         lease_id: Option<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The phone leases a session's viewport over the gateway, in camelCase.
+    #[test]
+    fn reads_camel_case_fields() {
+        let request: SessionsRequest = serde_json::from_str(
+            r#"{"action":"acquireViewport","sessionId":"s1","cols":80,"rows":24}"#,
+        )
+        .expect("a client sends camelCase");
+
+        match request {
+            SessionsRequest::AcquireViewport {
+                session_id,
+                cols,
+                rows,
+            } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!((cols, rows), (80, 24));
+            }
+            other => panic!("expected acquireViewport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_an_optional_camel_case_lease() {
+        let request: SessionsRequest = serde_json::from_str(
+            r#"{"action":"resize","sessionId":"s1","cols":80,"rows":24,"leaseId":"l1"}"#,
+        )
+        .expect("a client sends camelCase");
+
+        match request {
+            SessionsRequest::Resize { lease_id, .. } => {
+                assert_eq!(lease_id.as_deref(), Some("l1"));
+            }
+            other => panic!("expected resize, got {other:?}"),
+        }
+    }
 }

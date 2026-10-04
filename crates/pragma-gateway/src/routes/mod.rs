@@ -2,6 +2,7 @@ pub mod agents;
 pub mod assets;
 pub mod control;
 pub mod health;
+pub mod ports;
 pub mod push;
 pub mod rpc;
 pub mod scratchpads;

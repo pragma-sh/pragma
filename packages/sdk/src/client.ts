@@ -11,6 +11,7 @@ import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
 import { GitHubClient } from "./github-client";
 import { HealthClient } from "./health-client";
+import { PortsClient } from "./ports-client";
 import { PushClient } from "./push-client";
 import { routes } from "./routes";
 import { ScratchpadsClient } from "./scratchpads-client";
@@ -37,6 +38,7 @@ export class PragmaClient {
   readonly push: PushClient;
   readonly theme: ThemeClient;
   readonly health: HealthClient;
+  readonly ports: PortsClient;
   readonly scratchpads: ScratchpadsClient;
   readonly ai: AiClient;
   readonly github: GitHubClient;
@@ -60,6 +62,7 @@ export class PragmaClient {
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
+    this.ports = new PortsClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
     this.ai = new AiClient(this.transport);
     this.github = new GitHubClient(this.transport);

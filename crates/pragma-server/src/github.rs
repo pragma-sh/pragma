@@ -86,6 +86,7 @@ impl GithubHost {
                 Ok(json!({ "ok": true }))
             }
             "pullRequest" => self.pull_request(payload),
+            "branches" => self.branches(payload),
             "publishPullRequest" => self.publish_pull_request(payload),
             other => Err(GithubError::InvalidRequest(format!(
                 "unknown github action: {other}"
@@ -152,6 +153,36 @@ impl GithubHost {
             None,
         )?;
         Ok(json!({ "pullRequest": value.get("pullRequest").cloned().unwrap_or(Value::Null) }))
+    }
+
+    /// Lists the repository's branches, plus which one a publish would default
+    /// to and which one this worktree is on.
+    ///
+    /// A client picking a merge target needs all three: the choices, the one
+    /// already selected, and the branch it must not offer as its own base.
+    fn branches(&self, payload: &Value) -> Result<Value, GithubError> {
+        let root = required_str(payload, "root")?;
+        let token = self.require_token()?;
+        let info = repo_info(&root)?;
+        let Some((owner, repo)) = owner_repo(&info.remote_url) else {
+            // Not a GitHub remote: no branches to merge into, same as having no
+            // pull request.
+            return Ok(json!({
+                "branches": [],
+                "defaultBranch": info.default_branch,
+                "headBranch": info.head_branch,
+            }));
+        };
+        let value = Self::run_sidecar(
+            &token,
+            &["branches", "--owner", &owner, "--repo", &repo],
+            None,
+        )?;
+        Ok(json!({
+            "branches": value.get("branches").cloned().unwrap_or(Value::Array(vec![])),
+            "defaultBranch": info.default_branch,
+            "headBranch": info.head_branch,
+        }))
     }
 
     /// Pushes the branch and creates its pull request.

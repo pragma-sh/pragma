@@ -131,7 +131,10 @@
       "tunnel",
       "scratchpads",
       "wsl",
-      "fanouts"
+      "fanouts",
+      "ports",
+      "sessions",
+      "scripts"
     ],
     "events": [
       "agentStatus",

@@ -1,5 +1,5 @@
 import type { GitHubPullRequest } from "@pragma/constants";
-import { PragmaGatewayError, type AiJob } from "@pragma/sdk";
+import { PragmaGatewayError, type AiJob, type GitHubBranches } from "@pragma/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -28,16 +28,40 @@ export interface CommitAndPr {
   job: AiJob | null;
   /** The pull request for this branch, if it has one. */
   pullRequest: GitHubPullRequest | null;
+  /**
+   * Whether the host is signed in to GitHub — `null` until the first answer.
+   *
+   * The flow ends in a push and a pull request, so a host with no token can
+   * only get as far as commits it never asked for. The screen therefore blocks
+   * the whole flow rather than failing at the last step.
+   */
+  githubReady: boolean | null;
+  /** Branches this pull request can merge into, once they are known. */
+  branches: GitHubBranches | null;
+  /** Why the branch list could not be read, when it could not. */
+  branchesError: string | null;
+  /**
+   * Whether the worktree has anything uncommitted — `null` until the first
+   * answer. A clean worktree has nothing for the flow to commit, so the desktop
+   * disables its Commit & PR button on the same condition.
+   */
+  hasChanges: boolean | null;
   /** Starts committing. Returns once the host has accepted the job. */
   start: () => Promise<void>;
-  /** Asks the host to stop before its next step; commits already made stay. */
-  cancel: () => Promise<void>;
   /** Pushes and creates the pull request from reviewed text. */
-  publish: (input: { title: string; body: string; draft: boolean }) => Promise<void>;
+  publish: (input: {
+    title: string;
+    body: string;
+    draft: boolean;
+    /** Branch to merge into. Omitted means the repository's default. */
+    base?: string;
+  }) => Promise<void>;
   /** Clears a finished or failed run from the screen. */
   reset: () => void;
   /** Re-reads the branch's pull request. */
   refreshPullRequest: () => void;
+  /** Re-reads the branches a pull request could merge into. */
+  refreshBranches: () => void;
 }
 
 /**
@@ -54,6 +78,13 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
   const { client, handleUnauthorized } = useConnection();
   const [job, setJob] = useState<AiJob | null>(null);
   const [pullRequest, setPullRequest] = useState<GitHubPullRequest | null>(null);
+  const [githubReady, setGithubReady] = useState<boolean | null>(null);
+  const [branches, setBranches] = useState<GitHubBranches | null>(null);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  // Bumped to re-read the branch list: a run that just made commits does not
+  // change it, but a failed read should be retryable from the picker.
+  const [branchRevision, setBranchRevision] = useState(0);
+  const [hasChanges, setHasChanges] = useState<boolean | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [prRevision, setPrRevision] = useState(0);
   // The request id belongs to the attempt, not the render: a retry after a lost
@@ -61,6 +92,92 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
   const requestId = useRef<string | null>(null);
 
   const refreshPullRequest = useCallback(() => setPrRevision((value) => value + 1), []);
+
+  // Asked once per connection rather than per render: the answer is a stored
+  // token, and the host re-checks it against GitHub on every call.
+  useEffect(() => {
+    if (!client) {
+      setGithubReady(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const status = await client.github.status();
+        if (!cancelled) setGithubReady(status.authenticated);
+      } catch (error: unknown) {
+        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        // An unreachable host is not a signed-out one; leave it unknown so the
+        // screen does not accuse the user of having no token.
+        if (!cancelled) setGithubReady(null);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, handleUnauthorized]);
+
+  // Read on focus rather than on a timer: the answer only matters when the user
+  // is looking at the action, and a phone should not poll git in the background.
+  const readChanges = useCallback(async () => {
+    if (!client || !root) {
+      setHasChanges(null);
+      return;
+    }
+    try {
+      const changes = await client.git.worktreeChanges({ root });
+      setHasChanges(changes.staged.length > 0 || changes.unstaged.length > 0);
+    } catch (error: unknown) {
+      if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+      // Unknown, not clean: a failed read must not disable the action on a
+      // worktree that has plenty to commit.
+      setHasChanges(null);
+    }
+  }, [client, handleUnauthorized, root]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void readChanges();
+    }, [readChanges]),
+  );
+
+  // A finished run is what made the worktree clean, so re-read on the stage
+  // that finished it rather than waiting for the screen to be focused again.
+  const stage = job?.stage;
+  useEffect(() => {
+    if (stage === undefined) return;
+    void readChanges();
+  }, [readChanges, stage]);
+
+  // Read as soon as the host is known to be signed in, not only once a draft
+  // exists: the picker is the first thing shown on the review step, and a list
+  // that starts loading then leaves the user with a menu that opens empty.
+  useEffect(() => {
+    if (!client || !root || !githubReady) return undefined;
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const found = await client.github.branches(root);
+        if (cancelled) return;
+        setBranches(found);
+        setBranchesError(null);
+      } catch (error: unknown) {
+        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        // Without the list the publish still works — it goes to the default
+        // branch — but the picker must say so rather than opening empty.
+        if (!cancelled) {
+          setBranchesError(
+            error instanceof Error ? error.message : "The branch list could not be read.",
+          );
+        }
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [branchRevision, client, githubReady, handleUnauthorized, root]);
 
   useEffect(() => {
     if (!client || !root) {
@@ -129,13 +246,8 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
     setJob(await client.ai.commitAndDraftPullRequest({ worktreeId, requestId: requestId.current }));
   }, [client, worktreeId]);
 
-  const cancel = useCallback(async () => {
-    if (!client || !job) return;
-    await client.ai.cancelRun(job.jobId);
-  }, [client, job]);
-
   const publish = useCallback(
-    async (input: { title: string; body: string; draft: boolean }) => {
+    async (input: { title: string; body: string; draft: boolean; base?: string }) => {
       if (!client || !root) throw new Error("Not connected to a host");
       setPublishing(true);
       try {
@@ -144,6 +256,7 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
           title: input.title,
           body: input.body,
           draft: input.draft,
+          ...(input.base ? { base: input.base } : {}),
           requestId: `${requestId.current ?? worktreeId}:publish`,
         });
         setPullRequest(published);
@@ -161,12 +274,18 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
     requestId.current = null;
   }, []);
 
+  const refreshBranches = useCallback(() => setBranchRevision((value) => value + 1), []);
+
   return {
     phase: phaseFor(job, publishing),
     job,
     pullRequest,
+    githubReady,
+    branches,
+    branchesError,
+    refreshBranches,
+    hasChanges,
     start,
-    cancel,
     publish,
     reset,
     refreshPullRequest,

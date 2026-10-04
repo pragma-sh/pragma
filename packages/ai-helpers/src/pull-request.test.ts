@@ -1,31 +1,17 @@
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CreatePragmaSessionOptions } from "./session.ts";
+import type { RunPromptWithFallbackOptions } from "./session.ts";
 
 const mocks = vi.hoisted(() => ({
-  createPragmaSession: vi.fn(async (_options: unknown) => ({
-    session: {
-      dispose: vi.fn(),
-    },
-  })),
-  runPromptToText: vi.fn(async () =>
-    JSON.stringify({ title: "Add PR generation", body: "## Summary\n\nAdds generation." }),
+  runPromptWithFallback: vi.fn(
+    async (_options: unknown, _prompt: string, parse: (raw: string) => unknown) =>
+      parse(JSON.stringify({ title: "Add PR generation", body: "## Summary\n\nAdds generation." })),
   ),
-  selectModelCandidates: vi.fn(() => [{ id: "standard-model" }]),
-}));
-
-vi.mock("./pick-model.ts", () => ({
-  selectModelCandidates: mocks.selectModelCandidates,
-}));
-
-vi.mock("./model-insights.ts", () => ({
-  loadModelInsights: vi.fn(async () => new Map()),
 }));
 
 vi.mock("./session.ts", () => ({
-  createPragmaSession: mocks.createPragmaSession,
-  runPromptToText: mocks.runPromptToText,
+  runPromptWithFallback: mocks.runPromptWithFallback,
 }));
 
 import { generatePullRequestDraft } from "./pull-request.ts";
@@ -46,14 +32,15 @@ describe("generatePullRequestDraft", () => {
     });
 
     expect(draft).toEqual({ title: "Add PR generation", body: "## Summary\n\nAdds generation." });
-    const options = mocks.createPragmaSession.mock.calls[0]?.[0] as
-      | CreatePragmaSessionOptions
+    const options = mocks.runPromptWithFallback.mock.calls[0]?.[0] as
+      | RunPromptWithFallbackOptions
       | undefined;
     expect(options).toBeDefined();
     expect(options?.modelKind).toBe("standard");
-    expect(options).not.toHaveProperty("noTools");
+    // Tools stay at pi's defaults: the draft is better when the model can read
+    // the code the commits touched.
     expect(options).not.toHaveProperty("tools");
-    const prompt = (mocks.runPromptToText.mock.calls[0] as unknown[] | undefined)?.[1] as
+    const prompt = (mocks.runPromptWithFallback.mock.calls[0] as unknown[] | undefined)?.[1] as
       | string
       | undefined;
     expect(prompt).toContain("Do not ask the user questions");

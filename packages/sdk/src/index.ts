@@ -36,6 +36,9 @@ export type {
   FanoutStatus,
   FanoutSubscriptionPayload,
   KanbanPromptCard,
+  OpenPort,
+  PortForwardRequest,
+  PortForwardResult,
   GitHubPullRequest,
   GitHubPullRequestState,
   SessionInfo,
@@ -59,7 +62,12 @@ export {
   type AiStatus,
   type CommitAndDraftOptions,
 } from "./ai-client";
-export { GitHubClient, type GitHubStatus, type PublishPullRequestOptions } from "./github-client";
+export {
+  GitHubClient,
+  type GitHubBranches,
+  type GitHubStatus,
+  type PublishPullRequestOptions,
+} from "./github-client";
 export {
   ScriptsClient,
   type RunScriptOptions,
@@ -70,6 +78,7 @@ export {
 export { TabsClient, type ManagedTabs, type OpenTerminalOptions } from "./tabs-client";
 export { UsageLimitsClient, type GetUsageLimitsOptions } from "./usage-limits-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
+export { PortsClient, type ForwardPortOptions, type ListOpenPortsOptions } from "./ports-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";

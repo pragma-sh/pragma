@@ -9,7 +9,7 @@
 import { readStdin } from "@pragma/sidecar-kit";
 
 import { viewerLogin } from "./index.ts";
-import { findPullRequest, publishPullRequest } from "./pull-requests.ts";
+import { findPullRequest, listBranches, publishPullRequest } from "./pull-requests.ts";
 
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -59,6 +59,17 @@ async function runPullRequest(args: string[]): Promise<number> {
   return 0;
 }
 
+/** Lists the repository's branches, for the base-branch picker. */
+async function runBranches(args: string[]): Promise<number> {
+  const branches = await listBranches(tokenFromEnvironment(), {
+    owner: required(args, "owner"),
+    repo: required(args, "repo"),
+    baseUrl: flag(args, "base-url"),
+  });
+  emit({ type: "result", branches });
+  return 0;
+}
+
 /**
  * Creates a pull request. The title and body arrive on stdin rather than as
  * arguments: a PR body is long, multi-line, and not something to put in a
@@ -92,6 +103,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   status: runStatus,
   viewer: runViewer,
   "pull-request": runPullRequest,
+  branches: runBranches,
   "create-pull-request": runCreatePullRequest,
 };
 

@@ -6,9 +6,7 @@ import {
   type PullRequestDraft,
   type PullRequestPromptContext,
 } from "./prompts.ts";
-import { loadModelInsights } from "./model-insights.ts";
-import { selectModelCandidates } from "./pick-model.ts";
-import { createPragmaSession, runPromptToText } from "./session.ts";
+import { runPromptWithFallback } from "./session.ts";
 
 /** Options for {@link generatePullRequestDraft}. */
 export interface GeneratePullRequestDraftOptions extends PullRequestPromptContext {
@@ -31,42 +29,21 @@ export class NoCommittedChangesError extends Error {
  * committed changes using a standard model. Tools are intentionally left enabled
  * so the agent can inspect code when the commits/diff are insufficient.
  */
-export async function generatePullRequestDraft(
+export function generatePullRequestDraft(
   options: GeneratePullRequestDraftOptions,
 ): Promise<PullRequestDraft> {
   if (!options.gitLog.trim() && !options.committedDiff.trim()) {
     throw new NoCommittedChangesError();
   }
 
-  const prompt = buildPullRequestPrompt(options);
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates("standard", options.registry.getAvailable(), {
-    insights,
-  });
-  if (candidates.length === 0) {
-    throw new Error("No standard model is available. Sign in to a provider that offers one.");
-  }
-
-  let lastError: unknown;
-  for (const model of candidates) {
-    // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one draft.
-    const { session } = await createPragmaSession({
+  return runPromptWithFallback(
+    {
       modelKind: "standard",
-      model,
       cwd: options.cwd,
       authStorage: options.authStorage,
       registry: options.registry,
-    });
-
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- try the next model only after this one fails.
-      const raw = await runPromptToText(session, prompt);
-      return cleanPullRequestDraft(raw);
-    } catch (error) {
-      lastError = error;
-    } finally {
-      session.dispose();
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    },
+    buildPullRequestPrompt(options),
+    cleanPullRequestDraft,
+  );
 }

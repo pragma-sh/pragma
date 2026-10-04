@@ -1,4 +1,5 @@
 import { TERMINAL_RUNTIME_SCRIPT, TERMINAL_RUNTIME_STYLES } from "./generated/runtime-script";
+import { terminalBackgroundColor, type TerminalViewerMode } from "./theme";
 
 /** Id of the theme block the host rewrites in place when the theme changes. */
 const THEME_STYLE_ELEMENT_ID = "pragma-terminal-theme";
@@ -6,7 +7,7 @@ const THEME_STYLE_ELEMENT_ID = "pragma-terminal-theme";
 /** Options for {@link buildTerminalViewerHtml}. */
 export interface TerminalViewerHtmlOptions {
   /** Which color scheme the host is rendering in. */
-  mode?: "light" | "dark";
+  mode?: TerminalViewerMode;
   /**
    * Host theme overrides as CSS declarations (`--terminal-background: #09090b;`).
    * Build it with {@link terminalThemeCss}.
@@ -71,7 +72,7 @@ export function buildTerminalViewerHtml(options: TerminalViewerHtmlOptions = {})
 <title>Terminal</title>
 <style id="${THEME_STYLE_ELEMENT_ID}">${options.themeCss ?? ""}</style>
 <style>${TERMINAL_RUNTIME_STYLES}</style>
-<style>${DOCUMENT_STYLES}</style>
+<style>${documentStyles(mode)}</style>
 </head><body><div id="terminal"></div>
 <script>globalThis.pragmaTerminalParentOrigin=${JSON.stringify(options.parentOrigin ?? "*")};</script>
 <script>${TERMINAL_RUNTIME_SCRIPT}</script>
@@ -91,12 +92,20 @@ export function terminalCommandScript(command: unknown): string {
   )});true;`;
 }
 
-const DOCUMENT_STYLES = `
+/**
+ * The document's own chrome, with the mode's background baked into the `var()`
+ * fallback. The literal matters: it is what paints in the instant before xterm
+ * has a canvas, and a hard-coded dark value would flash black behind a light
+ * terminal.
+ */
+function documentStyles(mode: TerminalViewerMode): string {
+  return `
 :root{color-scheme:light dark}
-html,body{margin:0;height:100%;background:var(--terminal-background,#09090b)}
+html,body{margin:0;height:100%;background:var(--terminal-background,${terminalBackgroundColor(mode)})}
 #terminal{position:absolute;inset:0;padding:8px}
 .xterm .xterm-viewport{overflow-y:auto;-webkit-overflow-scrolling:touch;background-color:transparent!important}
 /* Selection has to be reachable by touch: the desktop's hover affordances do
    not exist here, so long-press selection must not be suppressed. */
 .xterm .xterm-screen{-webkit-user-select:text;user-select:text}
 `;
+}

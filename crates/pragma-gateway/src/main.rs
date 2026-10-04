@@ -4,6 +4,7 @@ mod config;
 mod devices;
 mod error;
 mod http;
+mod port_forward;
 mod push;
 mod routes;
 mod web;
@@ -124,6 +125,7 @@ fn run(args: Args) -> GatewayResult<()> {
         devices,
         push: push_worker,
         presence,
+        port_forwards: port_forward::PortForwardRegistry::default(),
         web,
     };
     // Model providers may invoke slow host tools. Keep catalog refresh off the

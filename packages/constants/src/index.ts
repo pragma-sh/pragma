@@ -105,6 +105,8 @@ export type {
   PaletteSearchMatch,
   PaletteSearchResponse,
   OpenPort,
+  PortForwardRequest,
+  PortForwardResult,
   ProjectIcon,
   KanbanPromptStatus,
   KanbanCompletedAction,

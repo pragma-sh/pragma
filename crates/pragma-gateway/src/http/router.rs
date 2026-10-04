@@ -90,6 +90,7 @@ pub fn gateway_router() -> Router {
         .route("GET", "/v1/push/tokens", "push.list")
         .route("POST", "/v1/push/test", "push.test")
         .route("POST", "/v1/push/presence", "push.presence")
+        .route("POST", "/v1/ports/forward", "ports.forward")
         // The Pragma Go web bundle. A catch-all because the app is a
         // single-page bundle: every unknown sub-path under it is a client
         // route that resolves to `index.html`, not a missing file. The

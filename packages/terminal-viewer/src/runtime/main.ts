@@ -10,6 +10,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 
 import { isTerminalViewerCommand, type TerminalViewerMessage } from "../messages";
+import { TERMINAL_FALLBACK_COLORS, TERMINAL_FALLBACK_SELECTION } from "../theme";
 
 declare global {
   interface Window {
@@ -137,12 +138,13 @@ function applyTheme(css: string, mode: "light" | "dark"): void {
   const computed = getComputedStyle(document.documentElement);
   const read = (token: string, fallback: string): string =>
     computed.getPropertyValue(token).trim() || fallback;
-  const foreground = read("--terminal-foreground", mode === "dark" ? "#fafafa" : "#18181b");
+  const fallback = TERMINAL_FALLBACK_COLORS[mode];
+  const foreground = read("--terminal-foreground", fallback.foreground);
   terminal.options.theme = {
-    background: read("--terminal-background", mode === "dark" ? "#09090b" : "#ffffff"),
+    background: read("--terminal-background", fallback.background),
     foreground,
     cursor: read("--terminal-cursor", foreground),
-    selectionBackground: read("--terminal-selection", "rgba(120,120,140,0.35)"),
+    selectionBackground: read("--terminal-selection", TERMINAL_FALLBACK_SELECTION),
   };
 }
 

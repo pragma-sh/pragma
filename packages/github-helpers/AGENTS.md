@@ -21,6 +21,10 @@ Host-side GitHub helper package compiled to the `pragma-github` Bun sidecar.
   existing one is returned rather than an error that invites a retry into the
   same wall.
 
+- **Branches are listed here, not in a client.** `branches` answers the
+  base-branch picker every client needs; the token never leaves the host, so a
+  phone cannot call GitHub itself.
+
 ## Rules
 
 - This package must not run in the frontend.

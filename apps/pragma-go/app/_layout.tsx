@@ -73,12 +73,28 @@ function ConnectionGate() {
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.foreground,
           headerTitleStyle: { color: colors.foreground },
+          // React Navigation's default scene background is white regardless of
+          // the app's theme, so a push flashes white before the screen paints.
+          // Every route in this stack is themed, so the scene behind it is too.
+          contentStyle: { backgroundColor: colors.background },
         }}
       >
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
-        <Stack.Screen name="scratchpad/[scratchpadId]" options={{ headerShown: true }} />
-        <Stack.Screen name="terminal/[tabId]" options={{ headerShown: true }} />
+        {/* `headerBackTitle` is explicit on every full-screen route: the tab
+            navigator underneath has no header of its own, so iOS falls back to
+            the route's own name and labels the back button "(tabs)". */}
+        <Stack.Screen
+          name="chat/[tabId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="scratchpad/[scratchpadId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="terminal/[tabId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
       </Stack>
       <PortalHost />
     </>
