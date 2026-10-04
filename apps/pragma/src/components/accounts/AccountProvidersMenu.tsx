@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { AccountBindingScope } from "@pragma-sh/constants";
-import { Plus, Settings2 } from "lucide-react";
+import { CircleUserRound, Plus, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { AddAccountDialog, type AddAccountTarget } from "@/components/accounts/AddAccountDialog";
@@ -62,7 +62,15 @@ export function AccountProvidersMenu({
         }}
       >
         <PopoverTrigger asChild>
-          <IconButton label="Account providers" size="icon-sm" variant="ghost">
+          {/* Sized to its content: up to six usage bars sit beside the icon, and a
+              square icon button clipped them. */}
+          <IconButton
+            className="gap-1.5 border-border/60 bg-muted/40 px-2 text-muted-foreground"
+            label="Account providers"
+            size="sm"
+            variant="ghost"
+          >
+            <CircleUserRound className="size-3.5" />
             <ProviderMicroBars providers={shown} />
           </IconButton>
         </PopoverTrigger>
