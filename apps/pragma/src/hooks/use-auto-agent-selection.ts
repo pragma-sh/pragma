@@ -48,6 +48,11 @@ export interface AutoSubmit {
   /** True while System 1 is choosing for a submit; hold the submit button. */
   resolving: boolean;
   /**
+   * True while any picker is set to Auto. The agent is unknown until submit, so
+   * per-agent launch options (mode, permission mode) have nothing to apply to.
+   */
+  active: boolean;
+  /**
    * Submits the dialog. Pickers on Auto are decided first — only now, never
    * while the user types — and `submit` then runs against the applied picks.
    */
@@ -68,6 +73,7 @@ export function useAutoSubmit(submit: () => unknown): AutoSubmit {
   const inFlight = useRef(false);
   const [resolving, setResolving] = useState(false);
   const [resolvedCount, setResolvedCount] = useState(0);
+  const [registered, setRegistered] = useState(0);
 
   useEffect(() => {
     if (resolvedCount > 0) void latestSubmit.current();
@@ -77,7 +83,11 @@ export function useAutoSubmit(submit: () => unknown): AutoSubmit {
     () => ({
       register(resolver) {
         resolvers.current.add(resolver);
-        return () => resolvers.current.delete(resolver);
+        setRegistered(resolvers.current.size);
+        return () => {
+          resolvers.current.delete(resolver);
+          setRegistered(resolvers.current.size);
+        };
       },
     }),
     [],
@@ -102,7 +112,7 @@ export function useAutoSubmit(submit: () => unknown): AutoSubmit {
     }
   }, []);
 
-  return { registry, resolving, submit: run };
+  return { registry, resolving, active: registered > 0, submit: run };
 }
 
 /** Builds the IPC request from the loaded agents and their model lists. */

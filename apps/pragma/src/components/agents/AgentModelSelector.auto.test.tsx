@@ -115,6 +115,7 @@ function Dialog({
       <button type="button" disabled={auto.resolving} onClick={() => void auto.submit()}>
         Launch
       </button>
+      {auto.active ? <span>auto-active</span> : null}
     </>
   );
 }
@@ -159,6 +160,7 @@ describe("AgentModelSelector auto mode", () => {
 
     const trigger = screen.getByRole("button", { name: "Agent" });
     expect(trigger.textContent).toBe("Auto");
+    expect(screen.getByText("auto-active")).toBeTruthy();
     expect(window.localStorage.getItem("pragma:agent-auto-mode")).toBe("on");
     // Nothing is asked before the user submits.
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -192,6 +194,7 @@ describe("AgentModelSelector auto mode", () => {
   it("launches the manual pick directly when not on Auto", async () => {
     const onLaunch = vi.fn();
     render(<Dialog onLaunch={onLaunch} />);
+    expect(screen.queryByText("auto-active")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() =>
       expect(onLaunch).toHaveBeenCalledWith("codex", { modelId: "gpt-6-astra", reasoningId: null }),

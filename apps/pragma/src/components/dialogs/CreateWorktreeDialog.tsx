@@ -324,7 +324,11 @@ export function CreateWorktreeDialog({
     workspace,
   });
 
-  const { autoRegistry, ready, submitForm } = useFormAutoSubmit({ submit, message, canSubmit });
+  const { autoRegistry, autoActive, ready, submitForm } = useFormAutoSubmit({
+    submit,
+    message,
+    canSubmit,
+  });
   const handleKeyDown = submitOnModEnter(ready, () => void submitForm());
   const handleEditorKeyDown = promptKeysThen(context, launch, handleKeyDown);
 
@@ -366,6 +370,7 @@ export function CreateWorktreeDialog({
               }
               autoTarget={autoTarget}
               autoRegistry={autoRegistry}
+              autoActive={autoActive}
               agentSelection={{
                 agents,
                 modelsByAgent,
@@ -786,10 +791,16 @@ function useFormAutoSubmit({
   submit: () => Promise<void>;
   message: string;
   canSubmit: boolean;
-}): { autoRegistry: AutoRegistry; ready: boolean; submitForm: () => Promise<void> } {
+}): {
+  autoRegistry: AutoRegistry;
+  autoActive: boolean;
+  ready: boolean;
+  submitForm: () => Promise<void>;
+} {
   const auto = useAutoSubmit(submit);
   return {
     autoRegistry: auto.registry,
+    autoActive: auto.active,
     ready: canSubmit && !auto.resolving,
     submitForm: () => (message.trim() ? auto.submit() : submit()),
   };
@@ -816,6 +827,8 @@ interface CreateWorktreeFormProps {
   autoTarget: AutoSelectTarget;
   /** Where attempt rows set to Auto register, to be decided on submit. */
   autoRegistry: AutoRegistry;
+  /** Whether a picker is on Auto: the agent is unknown, so its launch options are hidden. */
+  autoActive: boolean;
   error: string | null;
   busy: boolean;
   ready: boolean;
@@ -926,7 +939,7 @@ function CreateWorktreeForm(props: CreateWorktreeFormProps): ReactNode {
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="flex items-center gap-2">
         <div className="mr-auto min-w-0">
-          <AgentLaunchOptionsBar launch={props.launch} />
+          <AgentLaunchOptionsBar launch={props.launch} auto={props.autoActive} />
         </div>
         <Button disabled={busy} type="button" variant="ghost" onClick={props.onCancel}>
           Cancel
