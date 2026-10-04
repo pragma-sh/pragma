@@ -217,7 +217,7 @@ export default function HomePage() {
         id="ai"
         flip
         title="Your key, your account, wired into the app"
-        description="Pragma's own AI is small on purpose: it writes the commit, drafts the pull request, edits the file under your cursor, and answers the quick question — using your provider credentials."
+        description="Pragma's own AI is small on purpose: it writes the commit, drafts the pull request, edits the file under your cursor, and answers the quick question — using your provider credentials. Add a System 1 model like TypeSafe's Jev and it makes the fast calls too."
         media={<MediaVideo src="/media/ai.mp4" />}
         points={
           <>
@@ -233,12 +233,52 @@ export default function HomePage() {
               Type a question in the command palette and get a streamed answer scoped to the project
               and the worktree you are in.
             </FeaturePoint>
+            <FeaturePoint title="Jev picks, tracks, and merges.">
+              Connect TypeSafe's Jev and Auto picks the agent, model, and effort for each launch,
+              every agent shows what it is doing and how far it has got, and merge conflicts resolve
+              themselves, with uncertain files double-checked by your built-in AI.
+            </FeaturePoint>
+          </>
+        }
+      />
+
+      <FeatureSection
+        id="accounts"
+        title="Every agent account, one menu away"
+        description="See every account your agents sign in to, how much of each plan is left, and which account each agent launches with — then change it in a click."
+        media={
+          <MediaImage
+            src="/media/accounts.png"
+            alt="Pragma's Account providers menu listing Anthropic and OpenAI accounts with their usage, and Codex's account picker open with a choice for this project only"
+            width={3024}
+            height={1898}
+          />
+        }
+        points={
+          <>
+            <FeaturePoint title="Switch in one click.">
+              Each agent has a picker naming the account it launches with. New sessions start on the
+              new account; running ones keep the account they started with.
+            </FeaturePoint>
+            <FeaturePoint title="A different account per project.">
+              Pin your work subscription to work repositories and your own to side projects —
+              everything else follows the global choice.
+            </FeaturePoint>
+            <FeaturePoint title="Usage limits at a glance.">
+              Every account shows its plan and how much of each limit is used, with a reset
+              countdown, and the toolbar fills to whichever account will stop you first.
+            </FeaturePoint>
+            <FeaturePoint title="Sign in once.">
+              Add an account through the agent's own login without leaving Pragma, and share a
+              sign-in between agents wherever the provider allows it.
+            </FeaturePoint>
           </>
         }
       />
 
       <FeatureSection
         id="editing"
+        flip
         title="Enough editor to never break flow"
         description="A file tree, a real code editor, a markdown WYSIWYG, and viewers for the things agents leave behind — then one click into the editor you actually live in."
         media={<MediaVideo src="/media/files.mp4" />}
@@ -266,7 +306,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="extend"
-        flip
         title="A plugin API, not a settings page"
         description="Pragma's own agent integrations are plugins. Everything they use is public, so anything you build sits at the same level as what ships."
         media={<CodeCard title="review-queue/src/index.tsx" code={PLUGIN_SOURCE} />}
@@ -281,8 +320,8 @@ export default function HomePage() {
               Pragma — hooks, status, icons, verification.
             </FeaturePoint>
             <FeaturePoint title="Bring your own agent plugin.">
-              Package any coding agent with its own launcher, icon, status reporting, and usage
-              limits, then install it alongside the integrations that ship with Pragma.
+              Package any coding agent with its own launcher, icon, status reporting, and account
+              providers, then install it alongside the integrations that ship with Pragma.
             </FeaturePoint>
           </>
         }
@@ -290,6 +329,7 @@ export default function HomePage() {
 
       <FeatureSection
         id="cli"
+        flip
         title="Agents that operate the workspace itself"
         description="pragma-cli and @pragma-sh/sdk make Pragma scriptable, so an agent can create the worktree, launch a peer, compare attempts, and publish a document for you to read."
         media={<TerminalCard title="agent@worktree — fan/8fa2" lines={CLI_LINES} />}
@@ -313,7 +353,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="go"
-        flip
         title="Your workspace, from the couch"
         description="Turn on the tunnel and the local gateway becomes reachable from your phone — or from any browser, over a link you can share."
         media={
