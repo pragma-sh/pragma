@@ -89,7 +89,7 @@ const theme = await client.theme.get({ root }); // overrides only, global ← pr
 const asset = await client.assets.toDataUri(hash); // plugin icon assets, authed fetch
 await client.push.register({ token }); // device push token
 await client.push.presence({ focused: true }); // suppress phone pushes while focused
-const health = await client.health.check(); // { status, protocolVersion, gatewayVersion }
+const health = await client.health.check(); // { status, protocolVersion, gatewayVersion, apiVersion? }
 ```
 
 `client.assets.fetch(hash)` returns `{ bytes, mime }` — the token rides the request

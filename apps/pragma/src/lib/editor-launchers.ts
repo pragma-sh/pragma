@@ -1,4 +1,4 @@
-import { constants, type EditorLauncher } from "@pragma/constants";
+import { constants, type EditorLauncher } from "@pragma-sh/constants";
 
 import { isMacPlatform } from "@/lib/platform";
 
@@ -6,7 +6,7 @@ const SYSTEM_LAUNCHER_ID = constants.editorLaunchers.defaultEditorId;
 
 /**
  * The system file-explorer launcher, renamed/re-iconed to match the platform's
- * actual file manager. `@pragma/constants` only knows the generic "File
+ * actual file manager. `@pragma-sh/constants` only knows the generic "File
  * Explorer" label since it's shared cross-platform; the real app on macOS is
  * Finder.
  */

@@ -1,5 +1,5 @@
-import { PragmaGatewayError } from "@pragma/sdk";
-import type { GatewayHealth, PragmaClient } from "@pragma/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
+import type { GatewayHealth, PragmaClient } from "@pragma-sh/sdk";
 
 // The settings heartbeat: one `/v1/health` round trip, reduced to something a
 // person can read. The pure parts live here (and are tested) so the screen is

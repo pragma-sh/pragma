@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { ChangesTab } from "@/components/right-sidebar/ChangesTab";
 import { FilesTab } from "@/components/right-sidebar/FilesTab";
+import { NonGitProjectNotice } from "@/components/right-sidebar/NonGitProjectNotice";
 import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
@@ -25,15 +26,18 @@ import {
   tabPanelVariants,
   useMotionTransition,
 } from "@/lib/motion";
+import { usePlainProjectId } from "@/hooks/use-plain-project-id";
 import { useAi } from "@/state/ai-context";
+import { storeGeneratedPullRequestDraft } from "@/state/pull-request-draft-store";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 import {
   RenderPluginContribution,
   usePluginSidebarTabs,
   type VisiblePluginContribution,
 } from "@/plugins/rendering";
-import type { SidebarTabDefinition } from "@pragma/plugin";
+import type { SidebarTabDefinition } from "@pragma-sh/plugin";
 
 const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
 
@@ -113,7 +117,12 @@ function useCommitAndPrRun(
     }
     setRunningWorktrees((prev) => new Set(prev).add(worktreeId));
     try {
-      const result = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
+      const result = await trackWorktreeActivity(worktreeId, "commit-and-draft", () =>
+        aiCommitAllAndGeneratePullRequestDraft(worktreeId),
+      );
+      // Stored right away so the sidebar reports the worktree ready for a PR
+      // even when its PR form is not mounted.
+      storeGeneratedPullRequestDraft(worktreeId, result);
       setGeneratedPrDrafts((prev) => ({
         ...prev,
         [worktreeId]: { key: Date.now(), draft: { title: result.title, body: result.body } },
@@ -259,16 +268,32 @@ function RightSidebarHeader({
   );
 }
 
-/** The active subtab body. */
-function RightSidebarBody({
-  activeSubtab,
-  generatedPrDraft,
-  pluginTabs,
-}: {
+/** Subtabs that need git, and how their notice names them on a plain project. */
+const GIT_SUBTAB_FEATURES: Partial<Record<RightSidebarSubtab, string>> = {
+  changes: "Changes",
+  pullRequest: "Pull requests",
+};
+
+interface RightSidebarBodyProps {
   activeSubtab: RightSidebarSubtab;
   generatedPrDraft: { key: number; draft: AiPullRequestDraft } | undefined;
   pluginTabs: VisiblePluginContribution<SidebarTabDefinition>[];
-}) {
+}
+
+/** The active subtab, or — for a git-only subtab on a plain project — the init-git notice. */
+function RightSidebarPane({
+  plainProjectId,
+  ...props
+}: RightSidebarBodyProps & { plainProjectId: string | null }) {
+  const feature = GIT_SUBTAB_FEATURES[props.activeSubtab];
+  if (plainProjectId !== null && feature) {
+    return <NonGitProjectNotice feature={feature} projectId={plainProjectId} />;
+  }
+  return <RightSidebarBody {...props} />;
+}
+
+/** The active subtab body. */
+function RightSidebarBody({ activeSubtab, generatedPrDraft, pluginTabs }: RightSidebarBodyProps) {
   if (activeSubtab === "files") {
     return <FilesTab />;
   }
@@ -318,9 +343,12 @@ export function RightSidebar() {
     useRightSidebar();
   const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
-  const { available: aiAvailable } = useAi();
+  const { available: aiReady } = useAi();
   const pluginTabs = usePluginSidebarTabs(workspace.selectedProjectId);
   const worktreeId = workspace.selectedWorktreeId;
+  const plainProjectId = usePlainProjectId();
+  // Commit & PR needs git: a plain project neither shows it nor polls for it.
+  const aiAvailable = aiReady && plainProjectId === null;
   const { hasUncommittedChanges, setHasUncommittedChanges, availabilityWorktree } =
     useCommitPrAvailability(worktreeId, aiAvailable);
   const { commitPrRunning, generatedPrDraft, runCommitAndPr } = useCommitAndPrRun(
@@ -395,9 +423,10 @@ export function RightSidebar() {
                 transition={motionTransition.fast}
                 variants={tabPanelVariants(direction)}
               >
-                <RightSidebarBody
+                <RightSidebarPane
                   activeSubtab={activeSubtab}
                   generatedPrDraft={generatedPrDraft}
+                  plainProjectId={plainProjectId}
                   pluginTabs={pluginTabs}
                 />
               </motion.div>

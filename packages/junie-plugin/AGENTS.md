@@ -136,11 +136,12 @@ Observed payloads (26.8.3):
 
 `junie` with:
 
-| Selection       | Flag                                         |
-| --------------- | -------------------------------------------- |
-| model           | `--model <id>`                               |
-| reasoning       | `--effort low\|medium\|high`                 |
-| permission mode | `--brave` for `brave`, nothing for `default` |
+| Selection       | Flag                                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------------------- |
+| model           | `--model <id>`                                                                                       |
+| reasoning       | `--effort low\|medium\|high`                                                                         |
+| permission mode | `--brave` for `brave`, `--plan` for `plan`, nothing for `default`                                    |
+| slash commands  | ACP `available_commands_update` (skills included); fallback built-ins + `.junie` commands and skills |
 
 Junie's approval behaviour is the `brave_mode` setting (`off` / `auto` / `on`, default
 `auto`), and `--brave` is its only command-line lever — it forces `on`. There is no flag
@@ -255,3 +256,7 @@ Two more flags matter here:
 - Each session is a JVM. `--jobs 3` is comfortable; the abort scenarios time out on a
   loaded machine well before the plugin is at fault, so re-check a failure with
   `--jobs 1` before believing it.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `jetbrains` with no `login` and no `env`: Junie signs in from its own welcome screen and has no config-dir override, so it has exactly one (default) account.

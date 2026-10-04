@@ -1,0 +1,84 @@
+---
+title: Storage
+description: See how much disk your projects and worktrees use, delete gitignored build output and dependencies, and get reminded to check.
+---
+
+Worktrees add up. Each one has its own `node_modules`, build output, and caches.
+Settings → **Storage** shows where the space went and lets you get it back.
+
+Pragma measures disk only while this page is open. Closing it stops any scan that
+is still running.
+
+## Global and project scope
+
+The scope toggle at the top of Settings picks what the page measures:
+
+| Scope       | What it shows                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| **Global**  | Every project Pragma manages, drawn as boxes in a treemap, with each project's worktrees inside. |
+| **Project** | Only the current project's worktrees, one box each.                                              |
+
+Both scopes show the total at the top. Each worktree is measured on the machine that
+owns it, so an [SSH project](/docs/user-guide/ssh) reports the remote disk.
+
+## The treemap
+
+The treemap is styled after [GrandPerspective](https://grandperspectiv.sourceforge.net):
+shaded boxes on a black background, each box's area its share of the bytes on disk.
+Inside every worktree there is one box per top-level folder of 15 MB or more, showing
+that folder's total size. Individual files are not drawn, and neither are smaller
+folders; the summary and the **Worktrees** list still count everything. Neighboring boxes
+always get different colors.
+
+Hover over a box to outline it and see its name and total size. Click a box to zoom
+into the project or worktree it belongs to, or scroll up to zoom in one level toward the
+pointer. Scroll down, right-click, or use the zoom-out button to go back up a level, or
+click any step of the breadcrumb above the map to jump back to it.
+
+The **Worktrees** list below the map shows each worktree's size on disk.
+
+How sizes are counted:
+
+- Sizes are the space files take up on disk, not their byte length. A file hard-linked
+  into several places (pnpm and bun do this for dependencies) is counted once.
+- A project's main checkout does not include its linked worktrees under
+  `.pragma/worktrees/`. Each worktree gets its own box, so nothing is counted twice.
+- A very large tree stops after three million entries. Its total is then a lower
+  bound, shown with a trailing `+`.
+
+## Free up space
+
+**Free up space** lists every gitignored folder of 1 MB or more, largest first, with
+the worktree it belongs to. Delete folders one at a time with the trash button, or
+all of them with **Delete all**. Pragma asks you to confirm before deleting anything,
+and deletions are permanent.
+
+Before deleting a folder, the host checks again that git still ignores it and that it
+is a real folder, not a link. Pragma never deletes `.git` or `.pragma`, because
+`.pragma` holds the project's settings and, in the main checkout, every linked
+worktree.
+
+Your tools recreate these folders when they need them. Run your install or build
+command again (for example `bun install` or `cargo build`) to restore one.
+
+## Storage reminders
+
+In global scope, **Storage reminder** sets up a recurring reminder to review disk
+usage:
+
+1. Turn on **Remind me to review storage**.
+2. Under **Repeat**, choose every week, every 2 weeks, every 30 days, every 90 days,
+   or a custom number of days.
+3. Under **Starting on**, pick the date of the first reminder on the calendar.
+
+When a reminder is due, a notice appears with an **Open Storage** button. Dismiss it
+and it stays away until the next date. The setting is stored under `storage.reminder`
+in `~/.pragma/config.json`:
+
+```json
+{
+  "storage": {
+    "reminder": { "enabled": true, "startDate": "2026-10-01", "intervalDays": 30 }
+  }
+}
+```

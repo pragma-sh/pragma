@@ -1,6 +1,6 @@
-// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
-import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma/constants";
+import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma-sh/constants";
 
+import { AccountsClient } from "./accounts-client";
 import { AgentsClient } from "./agents-client";
 import { AiClient } from "./ai-client";
 import { AssetsClient } from "./assets-client";
@@ -20,12 +20,14 @@ import { SessionsClient } from "./sessions-client";
 import { TabsClient } from "./tabs-client";
 import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
-import { UsageLimitsClient } from "./usage-limits-client";
 import type { PragmaClientConfig } from "./transport";
+import { WhiteboardsClient } from "./whiteboards-client";
 import { WorkspaceClient } from "./workspace-client";
 
 /** Fetch-based client for the local Pragma HTTP gateway. */
 export class PragmaClient {
+  /** Host-owned account providers: logins, bindings, usage, and launch env. */
+  readonly accounts: AccountsClient;
   readonly fs: FsClient;
   readonly git: GitClient;
   readonly exec: ExecClient;
@@ -44,7 +46,8 @@ export class PragmaClient {
   readonly github: GitHubClient;
   readonly scripts: ScriptsClient;
   readonly tabs: TabsClient;
-  readonly usageLimits: UsageLimitsClient;
+  /** Durable Excalidraw whiteboards. */
+  readonly whiteboards: WhiteboardsClient;
 
   private readonly transport: Transport;
 
@@ -68,7 +71,8 @@ export class PragmaClient {
     this.github = new GitHubClient(this.transport);
     this.scripts = new ScriptsClient(this.transport);
     this.tabs = new TabsClient(this.transport);
-    this.usageLimits = new UsageLimitsClient(this.transport);
+    this.accounts = new AccountsClient(this.transport);
+    this.whiteboards = new WhiteboardsClient(this.transport);
   }
 
   rpc<T = unknown>(

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 
 import { Icon } from "@iconify/react";
-import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma/constants";
+import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma-sh/constants";
 import {
   ArrowLeft,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   Globe,
   LayoutGrid,
   Pencil,
+  PencilRuler,
   Hammer,
   Play,
   Rows2,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { AccountProvidersMenu } from "@/components/accounts/AccountProvidersMenu";
 import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
   ContextMenu,
@@ -50,7 +52,6 @@ import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { TabRenameInput } from "@/components/tabs/TabRenameInput";
 import { type TabRenameApi, useTabRename } from "@/components/tabs/use-tab-rename";
-import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
 import { useWslDistros } from "@/hooks/use-wsl-distros";
@@ -85,7 +86,7 @@ import {
   type SplitPaneNode,
   useWorkspace,
 } from "@/state/workspace-context";
-import type { TopperItemDefinition } from "@pragma/plugin";
+import type { TopperItemDefinition } from "@pragma-sh/plugin";
 
 const SELECTED_EDITOR_STORAGE_KEY = "pragma.selectedEditorLauncher";
 const fallbackEditor =
@@ -324,7 +325,20 @@ function ProjectScriptButtons({ workspace }: { workspace: Workspace }) {
   });
 }
 
-/** The left side of the toolbar: agents menu, usage limits, go-back. */
+/** The toolbar's Account providers menu for the selected project's host. */
+function ToolbarAccountProviders({ workspace }: { workspace: Workspace }) {
+  const kanban = useKanban();
+  const worktreeId = workspace.selectedWorktreeId;
+  return (
+    <AccountProvidersMenu
+      isRemote={worktreeId ? workspace.remoteWorktrees[worktreeId] === true : false}
+      onOpenSettings={() => kanban.openSettings("accounts")}
+      projectId={workspace.selectedProjectId}
+    />
+  );
+}
+
+/** The left side of the toolbar: agents menu, account providers, go-back. */
 function TerminalToolbar({
   workspace,
   topperItems,
@@ -337,7 +351,7 @@ function TerminalToolbar({
     // rather than squeezing its controls into each other.
     <div className="flex shrink-0 items-center gap-1">
       <AgentsMenu />
-      <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
+      <ToolbarAccountProviders workspace={workspace} />
       <PluginTopperItems items={topperItems} />
       {workspace.agentBackAvailable ? (
         <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>
@@ -402,7 +416,8 @@ function tabEntryClassName(active: boolean): string {
 /**
  * The "parent" entry shown in the top bar for a collapsed split. Its X closes
  * the whole split — every tab in every pane — because the split's panes are not
- * individually reachable from this strip.
+ * individually reachable from this strip. It carries the split accent so it
+ * never reads as an ordinary top-bar tab in any theme.
  */
 function SplitParentTab({
   tab,
@@ -431,7 +446,10 @@ function SplitParentTab({
       <ContextMenuTrigger asChild>
         <motion.div
           animate="visible"
-          className={tabEntryClassName(splitIsActive)}
+          className={cn(
+            tabEntryClassName(splitIsActive),
+            "border-split-accent/45 bg-split-accent/10",
+          )}
           exit="exit"
           initial="hidden"
           key="split-parent"
@@ -451,7 +469,7 @@ function SplitParentTab({
               }}
               onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
             >
-              <ParentIcon className="text-primary size-3.5 shrink-0" />
+              <ParentIcon className="text-split-accent size-3.5 shrink-0" />
               <TabAgentDot tabId={tab.id} />
               <ShortcutHint value={shortcutHint} />
               <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
@@ -713,7 +731,7 @@ function KanbanToggle() {
 }
 
 /**
- * The "new tab" dropdown for creating a terminal or browser tab.
+ * The "new tab" dropdown for creating a terminal, browser, or whiteboard tab.
  *
  * `worktreeId` scopes the distribution list to the host the new tab would spawn
  * on. For a project opened over SSH that is the remote daemon's machine, whose
@@ -726,6 +744,7 @@ function NewTabMenu({
   worktreeId,
   onCreateTerminal,
   onCreateBrowser,
+  onCreateWhiteboard,
 }: {
   shortcutModifier: string;
   disabled: boolean;
@@ -733,6 +752,7 @@ function NewTabMenu({
   worktreeId: string | null;
   onCreateTerminal: (shell?: ShellProfile | null) => void;
   onCreateBrowser: () => void;
+  onCreateWhiteboard: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wsl = useWslDistros(worktreeId);
@@ -801,6 +821,11 @@ function NewTabMenu({
           <Globe />
           Browser
           <DropdownMenuShortcut>{shortcutModifier}B</DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onCreateWhiteboard}>
+          <PencilRuler />
+          Whiteboard
+          <DropdownMenuShortcut>⇧{shortcutModifier}W</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -959,6 +984,7 @@ function TerminalTabStrip({
       <NewTabMenu
         disabled={!workspace.selectedWorktree}
         onCreateBrowser={() => void workspace.createBrowserTab()}
+        onCreateWhiteboard={() => void workspace.createWhiteboard()}
         onCreateTerminal={(shell) =>
           void workspace.createTerminalTab(undefined, shell === undefined ? undefined : { shell })
         }

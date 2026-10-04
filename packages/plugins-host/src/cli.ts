@@ -1,10 +1,9 @@
 /** `pragma-plugins` host-side sidecar: resolves the agent catalog + icon assets. */
 import { stat } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 
-import type { PluginContext, PluginDefinition } from "@pragma/plugin";
-import { PragmaClient } from "@pragma/sdk";
-import { readStdinLines } from "@pragma/sidecar-kit";
+import type { PluginContext, PluginDefinition } from "@pragma-sh/plugin";
+import { PragmaClient } from "@pragma-sh/sdk";
+import { freshImportSpecifier, readStdinLines } from "@pragma-sh/sidecar-kit";
 
 import {
   assembleCatalog,
@@ -14,17 +13,12 @@ import {
 } from "./catalog";
 import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
-import {
-  assembleUsageProviders,
-  loadUsageLimits,
-  type UsageLimitsProviderMeta,
-} from "./usage-limits";
+import { handleAccountsOp, type AccountsOp } from "./accounts";
+import { loadUsageLimits } from "./usage-limits";
 
 interface LoadCommand {
   type: "load";
   roots?: string[];
-  /** Directory holding the plugin bundles shipped with the app, if any. */
-  bundledDir?: string;
   gatewayUrl: string;
   gatewayToken: string;
   stateDir: string;
@@ -35,18 +29,16 @@ interface UsageLimitsCommand {
   type: "usageLimits";
   requestId: string;
   pluginId?: string;
-  /** Absolute project root whose scope the response should cover. */
-  root?: string;
 }
 
-type Command = LoadCommand | UsageLimitsCommand;
+type AccountsCommand = { type: "accounts"; requestId: string } & AccountsOp;
+
+type Command = LoadCommand | UsageLimitsCommand | AccountsCommand;
 
 interface LoadedState {
   plugins: ResolvedPlugin[];
   sdk: PragmaClient;
   root?: string;
-  /** Static provider metadata, resolved once with the catalog. */
-  usageProviders: UsageLimitsProviderMeta[];
 }
 
 // Static agent definitions must be available while the gateway discovery file
@@ -96,24 +88,24 @@ async function loadPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | 
 }
 
 /**
- * Builds the import URL for a plugin bundle with its mtime as a query
- * parameter. The sidecar is long-lived and `reload` re-imports every bundle;
- * without cache-busting, the ESM module cache would keep serving the bytes
- * from the first import even after the bundle is rebuilt on disk.
+ * The import specifier for a plugin bundle, versioned by its mtime. The sidecar
+ * is long-lived and `reload` re-imports every bundle; without cache-busting the
+ * ESM module cache keeps serving the bytes from the first import after the
+ * bundle is rebuilt on disk (see `freshImportSpecifier` for why a `file:` URL
+ * cannot carry the version).
  */
 async function bundleImportUrl(mainPath: string): Promise<string> {
-  const url = pathToFileURL(mainPath);
   try {
-    url.searchParams.set("mtime", String((await stat(mainPath)).mtimeMs));
+    return freshImportSpecifier(mainPath, (await stat(mainPath)).mtimeMs);
   } catch {
     // A missing bundle fails at import() below with the real error.
+    return mainPath;
   }
-  return url.href;
 }
 
-async function resolvePlugins(roots: string[], bundledDir?: string): Promise<ResolvedPlugin[]> {
+async function resolvePlugins(roots: string[]): Promise<ResolvedPlugin[]> {
   const home = process.env.HOME ?? "";
-  const manifests = await resolveManifests(home, roots, bundledDir);
+  const manifests = await resolveManifests(home, roots);
   const plugins = await Promise.all(manifests.map(loadPlugin));
   return plugins.filter((plugin): plugin is ResolvedPlugin => plugin !== undefined);
 }
@@ -131,9 +123,9 @@ async function load(
     baseUrl: command.gatewayUrl || UNAVAILABLE_GATEWAY_URL,
     token: command.gatewayToken || UNAVAILABLE_GATEWAY_TOKEN,
   });
-  const plugins = await resolvePlugins(roots, command.bundledDir);
+  const plugins = await resolvePlugins(roots);
   // Each plugin resolves its async model providers against its *own* project
-  // root; a global or bundled plugin falls back to the primary root. Sharing
+  // root; a global plugin falls back to the primary root. Sharing
   // one context here let a project-scoped override answer for every project.
   const catalog = await assembleCatalog(
     plugins,
@@ -148,26 +140,20 @@ async function load(
       }),
     previous,
   );
-  // Usage-provider icons register into the same asset map as agent icons, so a
-  // provider card fetches its mark through `/v1/assets/{hash}` like every other
-  // plugin asset. They are hashed here, at catalog time, because the icon is
-  // static metadata: a usage *reading* must not depend on reading a file.
-  const usageProviders = assembleUsageProviders(
-    plugins,
-    catalog.assets,
-    (pluginId, providerId, error) =>
-      emit({
-        type: "log",
-        pluginId,
-        level: "error",
-        message: `usage provider ${providerId} icon: ${error instanceof Error ? error.message : String(error)}`,
-      }),
-  );
   return {
-    state: { plugins, sdk, root: roots[0], usageProviders },
+    state: { plugins, sdk, root: roots[0] },
     catalog,
     watchers: assembleWatchers(plugins),
   };
+}
+
+/** Resolves to `{ value }` or `{ error }` so a failed op still answers its request. */
+async function settle(work: Promise<unknown>): Promise<{ value?: unknown; error?: string }> {
+  try {
+    return { value: (await work) ?? null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 class StdinLines {
@@ -175,37 +161,77 @@ class StdinLines {
   /** Last successfully assembled catalog, the fallback for flaky providers. */
   private lastCatalog: CatalogResult | undefined;
   private queue = Promise.resolve();
+  /** Counts `load` commands, so a follow-up never outruns a newer load. */
+  private loadGeneration = 0;
   private lifecycleQueue = Promise.resolve();
 
   constructor() {
     readStdinLines(
       (line) => {
-        this.queue = this.queue.then(() => this.dispatch(line));
+        let command: Command;
+        try {
+          command = JSON.parse(line) as Command;
+        } catch (error) {
+          emitError(error);
+          return;
+        }
+        // Account ops shell out to harness CLIs that take seconds; running them
+        // beside the queue keeps one slow usage load from stalling a launch.
+        if (command.type === "accounts") {
+          void this.handleAccounts(command);
+          return;
+        }
+        this.queue = this.queue.then(() => this.dispatch(command));
       },
       () => process.exit(0),
     );
   }
 
-  private async dispatch(line: string): Promise<void> {
+  private async dispatch(
+    command: LoadCommand | UsageLimitsCommand,
+    followUp = false,
+  ): Promise<void> {
     try {
-      const command = JSON.parse(line) as Command;
       if (command.type === "load") {
-        const loaded = await load(command, this.lastCatalog);
-        this.loaded = loaded.state;
-        this.lastCatalog = loaded.catalog;
-        emit({
-          type: "catalog",
-          catalog: loaded.catalog.catalog,
-          assets: loaded.catalog.assets,
-          watchers: loaded.watchers,
-        });
-        this.scheduleLifecycles(command, loaded.state);
+        await this.handleLoad(command, followUp);
         return;
       }
       await this.handleUsageLimits(command);
     } catch (error) {
       emitError(error);
     }
+  }
+
+  /** Assembles and publishes the catalog; a follow-up reuses the load's generation. */
+  private async handleLoad(command: LoadCommand, followUp: boolean): Promise<void> {
+    const generation = followUp ? this.loadGeneration : ++this.loadGeneration;
+    const loaded = await load(command, this.lastCatalog);
+    this.loaded = loaded.state;
+    this.lastCatalog = loaded.catalog;
+    emit({
+      type: "catalog",
+      catalog: loaded.catalog.catalog,
+      assets: loaded.catalog.assets,
+      watchers: loaded.watchers,
+    });
+    this.scheduleLifecycles(command, loaded.state);
+    if (!followUp) this.scheduleFollowUp(command, generation, loaded.catalog.pending);
+  }
+
+  /**
+   * Options that overran their budget finish in the background; reload once
+   * they have (a single follow-up), unless a newer load superseded this one.
+   */
+  private scheduleFollowUp(
+    command: LoadCommand,
+    generation: number,
+    pending?: Promise<void>,
+  ): void {
+    void pending?.then(() => {
+      if (generation !== this.loadGeneration) return undefined;
+      this.queue = this.queue.then(() => this.dispatch(command, true));
+      return undefined;
+    });
   }
 
   private scheduleLifecycles(command: LoadCommand, state: LoadedState): void {
@@ -237,6 +263,19 @@ class StdinLines {
     });
   }
 
+  private async handleAccounts(command: AccountsCommand): Promise<void> {
+    emit({
+      type: "accountsResult",
+      requestId: command.requestId,
+      ...(await this.runAccounts(command)),
+    });
+  }
+
+  private runAccounts(command: AccountsCommand): Promise<{ value?: unknown; error?: string }> {
+    if (!this.loaded) return Promise.resolve({ error: "plugin catalog has not loaded" });
+    return settle(handleAccountsOp(this.loaded.plugins, this.loaded.sdk, command));
+  }
+
   private async handleUsageLimits(command: UsageLimitsCommand): Promise<void> {
     if (!this.loaded) {
       emit({
@@ -250,21 +289,9 @@ class StdinLines {
       const providers = await loadUsageLimits(
         this.loaded.plugins,
         this.loaded.sdk,
-        command.root ?? this.loaded.root,
-        { pluginId: command.pluginId, known: this.loaded.usageProviders },
+        this.loaded.root,
+        command.pluginId,
       );
-      for (const provider of providers) {
-        // Every client reads this cache, so a provider that threw is logged
-        // once here rather than once per client that noticed.
-        if (provider.result?.status === "unavailable" && provider.result.reason === "error") {
-          emit({
-            type: "log",
-            pluginId: provider.pluginId,
-            level: "error",
-            message: `usage limits ${provider.providerId}: ${provider.result.message}`,
-          });
-        }
-      }
       emit({ type: "usageLimits", requestId: command.requestId, providers });
     } catch (error) {
       emit({

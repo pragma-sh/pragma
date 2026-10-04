@@ -1,4 +1,4 @@
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 import { githubFetchAndSync } from "@/lib/tauri";
 

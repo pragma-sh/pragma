@@ -1,4 +1,4 @@
-import type { constants } from "@pragma/constants";
+import type { constants } from "@pragma-sh/constants";
 
 /** A color scheme a `.pragma/theme.json` may declare under `colors`. */
 export type ThemeMode = (typeof constants.theme.modes)[number];

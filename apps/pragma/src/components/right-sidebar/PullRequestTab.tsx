@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
 
 import { CreatePullRequestView } from "@/components/github/CreatePullRequestView";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { ViewPullRequestView } from "@/components/github/ViewPullRequestView";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
+import { useMergeSettle } from "@/components/right-sidebar/use-merge-settle";
 import { findPullRequestForBranch, getPullRequest, type PullRequestSummary } from "@/lib/github";
 import { type AiPullRequestDraft, githubRepoRef } from "@/lib/tauri";
 import { useGitHub } from "@/state/github-context";
@@ -94,6 +95,7 @@ function PullRequestResolver({
   // Keep the last viewed PR number so a poll after merge still refreshes that PR
   // (open-only branch lookup would otherwise drop us onto the create view).
   const viewedPrNumber = useRef<number | null>(null);
+  const settle = useMergeSettle();
 
   const refresh = useCallback(
     async (force = false) => {
@@ -118,7 +120,7 @@ function PullRequestResolver({
         hasResolved.current = true;
         if (pr) {
           viewedPrNumber.current = pr.number;
-          setState({ kind: "view", repo, pr });
+          setState({ kind: "view", repo, pr: settle.apply(pr) });
         } else {
           viewedPrNumber.current = null;
           setState({ kind: "create", repo });
@@ -129,7 +131,7 @@ function PullRequestResolver({
         }
       }
     },
-    [worktreeId],
+    [settle, worktreeId],
   );
 
   useEffect(() => {
@@ -166,7 +168,13 @@ function PullRequestResolver({
   }
   return (
     <ViewPullRequestView
-      onChanged={() => void refresh(true)}
+      onChanged={(change) => {
+        if (change?.conflictsPushed) {
+          setState({ ...state, pr: settle.start(state.pr, () => refresh(true)) });
+        } else {
+          void refresh(true);
+        }
+      }}
       pr={state.pr}
       repo={state.repo}
       worktreeId={worktreeId}

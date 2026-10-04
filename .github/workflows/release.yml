@@ -22,6 +22,13 @@ jobs:
       desktop-sha: ${{ steps.release.outputs['apps/pragma--sha'] }}
       desktop-tag: ${{ steps.release.outputs['apps/pragma--tag_name'] }}
       desktop-version: ${{ steps.release.outputs['apps/pragma--version'] }}
+      go-created: ${{ steps.release.outputs['apps/pragma-go--release_created'] }}
+      go-tag: ${{ steps.release.outputs['apps/pragma-go--tag_name'] }}
+      go-version: ${{ steps.release.outputs['apps/pragma-go--version'] }}
+      releases-created: ${{ steps.release.outputs.releases_created }}
+      # Every path-keyed output (`packages/<dir>--release_created`, `--tag_name`),
+      # so `publish-plugins` can find whichever plugins this run released.
+      release-outputs: ${{ toJSON(steps.release.outputs) }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v4
@@ -48,11 +55,17 @@ jobs:
           - runner: ubuntu-24.04
             platform: linux-x86_64
             formats: deb rpm
+            bundles: --bundles deb,rpm
           - runner: ubuntu-24.04-arm
             platform: linux-aarch64
             formats: deb rpm
+            bundles: --bundles deb,rpm
           - runner: windows-latest
             platform: windows-x86_64
+            source: target/release/bundle/nsis/*-setup.exe
+            extension: exe
+          - runner: windows-11-arm
+            platform: windows-aarch64
             source: target/release/bundle/nsis/*-setup.exe
             extension: exe
     runs-on: ${{ matrix.runner }}
@@ -90,7 +103,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PRAGMA_UPDATE_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-        run: bun run --filter pragma tauri build
+        # Linux restricts the bundle list to what this job uploads. `tauri.conf.json`
+        # also targets AppImage, whose linuxdeploy step needs FUSE and fails on the
+        # ubuntu-24.04 runners — and nothing downstream ships an AppImage: the matrix
+        # collects deb/rpm and the release manifest never names one.
+        #
+        # No `--` before the flags: bun already forwards trailing args to the script
+        # verbatim, and tauri treats a literal `--` as "pass the rest to cargo", which
+        # dies with `unexpected argument '--bundles' found`.
+        run: bun run --filter pragma tauri build ${{ matrix.bundles }}
       - name: Normalize installer name
         shell: bash
         env:
@@ -169,6 +190,10 @@ jobs:
           RELEASE_NOTES: ${{ needs.release-please.outputs.desktop-body }}
           RELEASE_SHA: ${{ needs.release-please.outputs.desktop-sha }}
           RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
+          # Signing release.json needs the same key as the overlay above; without it
+          # `tauri signer sign` dies with "Unable to find the private key".
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           bun scripts/generate-release-manifest.ts
           bunx tauri signer sign release-assets/release.json
@@ -177,3 +202,240 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+      # Only now does this release carry installers, so only now may it become
+      # the one `/releases/latest` — and the website's Download button — resolve to.
+      - name: Mark the desktop release Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bun scripts/pin-latest-desktop-release.ts
+
+  # Every component release Release Please publishes takes GitHub's "Latest"
+  # flag, so a run that releases only plugins or packages would leave the
+  # Download button on a plugin. Hand the flag back to the newest desktop release
+  # that has installers. A desktop run does this itself in `publish-desktop`,
+  # once its upload has landed.
+  pin-latest-desktop:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases-created == 'true' && needs.release-please.outputs.desktop-created != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Mark the newest desktop release Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bun scripts/pin-latest-desktop-release.ts
+
+  # Pragma Go ships each platform one of two ways, and nobody picks: under the
+  # `fingerprint` runtime policy an over-the-air update only reaches a binary with
+  # the same native fingerprint, so if a finished build of the release profile
+  # already has the tag's fingerprint the release is JavaScript-only and ships as
+  # an update; otherwise a native input moved and a new binary is built. The
+  # release PR shows the same plan ahead of time (`pragma-go-ship-plan.yml`).
+  pragma-go-plan:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.go-created == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      ios-action: ${{ steps.plan.outputs.ios-action }}
+      ios-channel: ${{ steps.plan.outputs.ios-channel }}
+      android-action: ${{ steps.plan.outputs.android-action }}
+      android-channel: ${{ steps.plan.outputs.android-channel }}
+      android-artifact-url: ${{ steps.plan.outputs.android-artifact-url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.go-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - id: plan
+        run: bun scripts/pragma-go-ship-plan.ts
+
+  # Pragma Go ships to Android outside the Play Store as a sideloadable APK attached
+  # to its own `pragma-go-v*` release, which is what Obtainium watches (see the README).
+  # EAS builds it: the `preview` profile is the store-shaped APK build, and EAS holds the
+  # signing keystore, so every APK is signed with the same key and upgrades in place.
+  # An update-only release re-attaches the existing APK with the matching fingerprint,
+  # so a fresh Obtainium install still gets a binary that receives this release's update.
+  android-apk:
+    needs: [release-please, pragma-go-plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      # The profile sets this on the worker; eas-cli also resolves the app config
+      # locally, and the fingerprint must match the one the worker computes. For
+      # `eas update` it is the whole difference between an update the shipped
+      # binaries accept and one they silently never download.
+      PRAGMA_STORE_BUILD: "1"
+      ACTION: ${{ needs.pragma-go-plan.outputs.android-action }}
+      VERSION: ${{ needs.release-please.outputs.go-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.go-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build the APK on EAS
+        if: ${{ env.ACTION == 'build' }}
+        working-directory: apps/pragma-go
+        run: |
+          eas build --platform android --profile preview --non-interactive --wait --json > "$RUNNER_TEMP/build.json"
+          url="$(jq -r '.[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl' "$RUNNER_TEMP/build.json")"
+          test -n "$url" && test "$url" != null
+          echo "APK_URL=$url" >> "$GITHUB_ENV"
+      - name: Publish the update on EAS
+        if: ${{ env.ACTION == 'update' }}
+        working-directory: apps/pragma-go
+        env:
+          APK_URL: ${{ needs.pragma-go-plan.outputs.android-artifact-url }}
+          CHANNEL: ${{ needs.pragma-go-plan.outputs.android-channel }}
+        # Metro bundles here rather than on an EAS worker, so the workspace packages
+        # need the same build the worker runs as `eas-build-post-install`.
+        run: |
+          bun run eas-build-post-install
+          eas update --branch "$CHANNEL" --platform android --message "pragma-go v$VERSION" --non-interactive
+          echo "APK_URL=$APK_URL" >> "$GITHUB_ENV"
+      - name: Attach the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.go-tag }}
+        run: |
+          test -n "$APK_URL"
+          mkdir -p "$RUNNER_TEMP/apk"
+          curl -fsSL "$APK_URL" -o "$RUNNER_TEMP/apk/Pragma-Go-$VERSION-android.apk"
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP"/apk/*.apk --clobber
+
+  # Pragma Go ships to iOS through TestFlight. EAS builds the `production` profile on
+  # its own macOS workers (so this job needs no macOS runner) and signs it with the
+  # distribution certificate and profile it already stores; `eas submit` then uploads
+  # the build with the App Store Connect API key stored on EAS. Both credentials must
+  # already exist on EAS — `--non-interactive` cannot create them (see CONTRIBUTING.md).
+  # An update-only release skips all of that and publishes to the `production` channel.
+  ios-testflight:
+    needs: [release-please, pragma-go-plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      # Same reason as the APK job: the locally-resolved config must fingerprint
+      # identically to the worker's, or OTA updates never reach this build.
+      PRAGMA_STORE_BUILD: "1"
+      ACTION: ${{ needs.pragma-go-plan.outputs.ios-action }}
+      VERSION: ${{ needs.release-please.outputs.go-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.go-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build on EAS and submit to TestFlight
+        if: ${{ env.ACTION == 'build' }}
+        working-directory: apps/pragma-go
+        # Build and submit are separate steps, not `--auto-submit`, so a rejected
+        # upload fails this job instead of only showing up on the EAS dashboard.
+        run: |
+          eas build --platform ios --profile production --non-interactive --wait --json > "$RUNNER_TEMP/build.json"
+          id="$(jq -r '.[0].id' "$RUNNER_TEMP/build.json")"
+          test -n "$id" && test "$id" != null
+          eas submit --platform ios --profile production --id "$id" --non-interactive
+      - name: Publish the update on EAS
+        if: ${{ env.ACTION == 'update' }}
+        working-directory: apps/pragma-go
+        env:
+          CHANNEL: ${{ needs.pragma-go-plan.outputs.ios-channel }}
+        run: |
+          bun run eas-build-post-install
+          eas update --branch "$CHANNEL" --platform ios --message "pragma-go v$VERSION" --non-interactive
+
+  # The ten official agent plugins are their own Release Please components, so a
+  # plugin release cuts a tag here but never reaches npm on its own. npm trusts
+  # `plugins.yml`, not this file, for those packages, so this job does not
+  # publish: it dispatches that workflow once per released plugin, pinned to the
+  # plugin's release tag. `plugins.yml` then publishes it under `latest` and
+  # refreshes `official.lock.json`, which is what the desktop installs from.
+  publish-plugins:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases-created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # A workflow_dispatch is the one event GITHUB_TOKEN may trigger.
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dispatch a publish for each released plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_OUTPUTS: ${{ needs.release-please.outputs.release-outputs }}
+        run: |
+          jq -r '.packages[]' packages/plugin-registry/official.json | while read -r package; do
+            directory="packages/${package#@pragma-sh/}"
+            created="$(jq -r --arg key "$directory--release_created" '.[$key] // ""' <<<"$RELEASE_OUTPUTS")"
+            [ "$created" = true ] || continue
+            tag="$(jq -r --arg key "$directory--tag_name" '.[$key]' <<<"$RELEASE_OUTPUTS")"
+            echo "dispatch $package@$tag"
+            gh workflow run plugins.yml --ref main \
+              -f operation=publish -f dist-tag=latest -f package="$package" -f ref="$tag"
+          done
+
+  publish-packages:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.desktop-created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # npm authenticates this job by OIDC: the id-token is both the credential
+      # (each package trusts pragma-sh/pragma + release.yml) and what signs
+      # provenance. There is no npm token here on purpose — see CONTRIBUTING.md.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.desktop-tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@latest
+      - run: bun install --frozen-lockfile
+      - name: Build the packages that ship a bundle
+        run: bunx turbo run build --filter="./packages/*"
+      - name: Publish every public package with provenance
+        # Dependency order, so a fresh scope never has a dangling reference.
+        # A version that is already on the registry is skipped rather than
+        # failing the job, which is what makes a re-run safe.
+        run: bun scripts/publish-packages.ts --publish

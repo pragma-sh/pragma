@@ -6,22 +6,30 @@
 //! moves remote-first.
 
 use serde_json::Value;
+use std::path::Path;
 use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod accounts;
 pub mod ai;
+pub mod cancel;
 pub mod exec;
 pub mod fanout;
 pub mod fs;
 pub mod git;
+pub mod merge_conflicts;
+pub mod prelaunch;
 pub mod process_env;
 pub mod rpc;
 pub mod scratchpads;
 pub mod scripts;
 pub mod sessions;
+pub mod storage;
+mod storage_tree;
 pub mod tabs;
 pub mod watcher;
+pub mod whiteboards;
 
 /// Result type for host-side core operations.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -62,10 +70,18 @@ impl From<std::io::Error> for CoreError {
 /// Business modules are moved behind this seam incrementally. Until a method is
 /// implemented, the router returns a typed unsupported-method error instead of
 /// letting server protocol code grow ad-hoc dispatch branches.
-#[derive(Default)]
-pub struct Core;
+pub struct Core {
+    whiteboards: whiteboards::WhiteboardStore,
+}
 
 impl Core {
+    /// Opens host-owned durable stores under the server state directory.
+    pub fn new(state_dir: &Path) -> CoreResult<Self> {
+        Ok(Self {
+            whiteboards: whiteboards::WhiteboardStore::new(state_dir)?,
+        })
+    }
+
     /// Handles one JSON RPC payload and returns a JSON response payload.
     ///
     /// Path-based domains (`filesystem`, `git`) execute against the host's own
@@ -78,6 +94,7 @@ impl Core {
             ProtocolRpcMethod::Git => git::handle(payload),
             ProtocolRpcMethod::Exec => exec::handle(payload),
             ProtocolRpcMethod::Scratchpads => scratchpads::handle(payload),
+            ProtocolRpcMethod::Whiteboards => self.whiteboards.handle(payload),
             ProtocolRpcMethod::Database
             | ProtocolRpcMethod::Kanban
             | ProtocolRpcMethod::Worktrees
@@ -99,6 +116,9 @@ impl Core {
             // Owned by `pragma-server`: running a script means owning the
             // terminals it runs in, and the record of which run they belong to.
             | ProtocolRpcMethod::Scripts
+            // Owned by `pragma-server`, which runs plugin account callbacks in the
+            // plugins sidecar and hosts the hidden login terminals.
+            | ProtocolRpcMethod::Accounts
             // Answered by `pragma-server`, which owns the host's process
             // spawning; the core router never sees it.
             | ProtocolRpcMethod::Wsl => Err(CoreError::UnsupportedMethod(

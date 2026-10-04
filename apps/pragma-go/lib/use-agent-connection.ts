@@ -1,5 +1,5 @@
-import type { AgentConnection } from "@pragma/sdk";
-import { PragmaGatewayError } from "@pragma/sdk";
+import type { AgentConnection } from "@pragma-sh/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useReducer, useRef, useState, type Dispatch, type RefObject } from "react";
 

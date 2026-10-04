@@ -11,7 +11,7 @@ describe("prepareMdxSource", () => {
 
   it("drops imports the web view has no resolver for", () => {
     const source = [
-      'import { AskQuestion } from "@pragma/scratchpad/ui";',
+      'import { AskQuestion } from "@pragma-sh/scratchpad/ui";',
       'import Local from "./local.tsx";',
       "",
       "<AskQuestion question='Ship it?' />",

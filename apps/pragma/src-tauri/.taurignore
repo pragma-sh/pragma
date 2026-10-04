@@ -16,7 +16,6 @@
 # `src-tauri` therefore has to avoid *writing* when nothing changed; see
 # `packages/constants/scripts/generate-types.ts`.
 
-# Sidecar binaries and bundled plugin resources, staged by
-# scripts/stage-daemon-sidecar.sh immediately before `tauri dev` starts.
+# Sidecar binaries staged by scripts/stage-daemon-sidecar.sh immediately before
+# `tauri dev` starts.
 binaries/
-resources/plugins/

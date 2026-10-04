@@ -4,7 +4,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
-import { CANVAS } from "@pragma/brand";
+import { CANVAS } from "@pragma-sh/brand";
 
 const imagesDir = join(import.meta.dirname, "..", "assets", "images");
 const iconComposerDir = join(import.meta.dirname, "..", "assets", "AppIcon.icon");

@@ -3,7 +3,7 @@ import { ChevronDown, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { renderSVG } from "uqr";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -136,9 +136,13 @@ function usePairingTunnel(open: boolean): PairingTunnel {
 export function PragmaGoSettings({
   webEnabled,
   onWebEnabledChange,
+  keepAwake,
+  onKeepAwakeChange,
 }: {
   webEnabled: boolean;
   onWebEnabledChange: (enabled: boolean) => void;
+  keepAwake: boolean;
+  onKeepAwakeChange: (enabled: boolean) => void;
 }) {
   const { status, token, hostName, busy, error, toggleRemote, regenerateToken } =
     usePairingTunnel(true);
@@ -161,6 +165,20 @@ export function PragmaGoSettings({
             checked={enabled}
             disabled={busy}
             onCheckedChange={(next) => void toggleRemote(next)}
+          />
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-keep-awake">Keep awake</Label>
+            <p className="text-xs text-muted-foreground">
+              Keeps this computer from sleeping while remote access is on, so sleep will not
+              interrupt pairing. Also blocks sleep on lid close where the OS allows it.
+            </p>
+          </div>
+          <Switch
+            id="settings-keep-awake"
+            checked={keepAwake}
+            onCheckedChange={onKeepAwakeChange}
           />
         </div>
         {status.state === "error" ? (
@@ -228,7 +246,10 @@ function PairingQr({ url, token, hostName }: PairingQrProps) {
     encodePairingPayload({
       url,
       token,
-      protocolVersion: constants.daemon.protocolVersion,
+      // The gateway's client-facing API version, not the daemon wire protocol:
+      // a paired phone embeds its copy at build time and ships on its own
+      // cadence, so it must not be invalidated by every desktop release.
+      protocolVersion: constants.gateway.apiVersion,
       hostName,
     }),
   );

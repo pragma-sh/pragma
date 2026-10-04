@@ -1,4 +1,4 @@
-import type { CatalogAgent } from "@pragma/sdk";
+import type { CatalogAgent } from "@pragma-sh/sdk";
 
 import type { MockAgent } from "./data/agents";
 

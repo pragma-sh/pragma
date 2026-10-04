@@ -1,5 +1,5 @@
-import type { ScratchpadFile } from "@pragma/sdk";
-import { PragmaGatewayError } from "@pragma/sdk";
+import type { ScratchpadFile } from "@pragma-sh/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useConnection } from "./connection-context";

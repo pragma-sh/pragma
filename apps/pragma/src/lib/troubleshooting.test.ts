@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 const restartDaemon = vi.fn(() => Promise.resolve());
 vi.mock("@/lib/tauri", () => ({ restartDaemon: () => restartDaemon() }));

@@ -18,30 +18,29 @@
     "apps/www/src/lib/*.test.ts",
     // Desktop plugin installation executes this through `pragma-plugin.json`.
     "packages/opencode-plugin/scripts/install.mjs",
+    // Vercel runs this as the project's Ignored Build Step (`vercel.json`'s
+    // `ignoreCommand`), so it is an entry point with no importer.
+    "apps/www/scripts/should-deploy.ts",
+    // Run by the `publish-packages` job in the release workflow.
+    "scripts/publish-packages.ts",
   ],
-  // Staged sidecar bundles under `src-tauri/resources/plugins/**` are build
-  // artifacts (bunup output copied from analyzed source packages by
-  // `stage-daemon-sidecar.sh`), not hand-written code. Analyzing them for
-  // complexity double-counts the source and always estimates ~0 coverage
-  // (bundling strips comments, so inline `fallow-ignore` never reaches them),
-  // producing spurious CRAP findings. The source packages are analyzed directly.
-  "ignorePatterns": ["apps/pragma/src-tauri/resources/plugins/**"],
   // `test-fixtures/**` plugin bundles are loaded at runtime (blob-URL dynamic
   // import by the plugin loader; path resolution by Rust tests), never
   // statically imported — they are not dead files.
   "dynamicallyLoaded": [
     "**/test-fixtures/**",
-    // Plugin resource bundles loaded at runtime by the Rust sidecar launcher
-    // (plugins.rs), never statically imported by any entry point.
-    "**/resources/plugins/**",
     // `packages/bench/src/runner.js` is pulled in via Rust `include_str!`
     // (scenarios.rs) and injected into the webview at runtime — never
     // statically imported by any JS/TS entry point.
     "packages/bench/src/runner.js",
+    // `packages/jev/src/page-agent.js` is read as text by `page.ts` and
+    // injected into the dev webview through the bridge — never imported.
+    "packages/jev/src/page-agent.js",
     // The scratchpad viewer's in-page runtime is an esbuild entry point
     // (`packages/scratchpad-viewer/scripts/build.ts`) bundled into a string and
     // inlined into the generated document — never imported by a module graph.
     "packages/scratchpad-viewer/src/runtime/main.tsx",
+    "packages/scratchpad-viewer/src/runtime/export.ts",
     // Metro platform extensions: `apps/pragma-go` ships a `*.web.ts(x)` twin
     // beside each of these, and fallow's resolver follows the `.web` file — so
     // the native original looks unreachable even though it is exactly what an
@@ -65,6 +64,9 @@
     // directory at build time (`defineDocs` in `apps/www/src/lib/source.ts`),
     // never statically imported.
     "apps/www/content/docs/**",
+    // Blog articles are also compiled by Fumadocs from `content/blog`
+    // (`defineDocs` in `apps/www/src/lib/blog.ts`), not statically imported.
+    "apps/www/content/blog/**",
   ],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],
@@ -116,15 +118,15 @@
     "expo-system-ui",
     "react-native-web",
   ],
-  // `@pragma/constants` imports generated TS types that may not exist before
+  // `@pragma-sh/constants` imports generated TS types that may not exist before
   // `bun run generate`; don't report that intentional generated edge.
-  // `@pragma/scratchpad/ui/primitives` is a real export in that package's
+  // `@pragma-sh/scratchpad/ui/primitives` is a real export in that package's
   // `exports` map (and resolves for tsc, Vite and Vitest); fallow's resolver
   // only handles single-segment subpaths, so it reports the nested one as
   // unresolved. Drop this entry once fallow resolves multi-segment subpaths.
   "ignoreUnresolvedImports": [
     "./generated/constants",
-    "@pragma/scratchpad/ui/primitives",
+    "@pragma-sh/scratchpad/ui/primitives",
     // Fumadocs resolves these package CSS entry points through Next's bundler,
     // but fallow's TypeScript resolver has no CSS package-resolution support.
     "fumadocs-ui/css/shadcn.css",
@@ -179,6 +181,19 @@
       // failure policies, and actions differ; shared context access already
       // lives in `useRequiredContext`.
       "apps/pragma/src/state/updates-context.tsx",
+      // These components share formatter-produced button/control JSX structure,
+      // but their media, onboarding, and tab behavior is unrelated and cannot
+      // be extracted into a meaningful shared component.
+      "apps/pragma/src/components/media/AudioPlayer.tsx",
+      "apps/pragma/src/components/onboarding/OnboardingFrame.tsx",
+      "apps/pragma/src/components/tabs/TerminalTabs.tsx",
+      // Excalidraw requires one explicit custom-property mapping table. Its
+      // repeated var(--token) declarations resemble index.css's token catalog,
+      // but generating or extracting CSS would split the theme source of truth.
+      "apps/pragma/src/components/whiteboard/whiteboard.css",
+      // SDK namespace methods deliberately repeat the typed RPC wrapper shape;
+      // each public method preserves its distinct input and return contract.
+      "packages/sdk/src/whiteboards-client.ts",
       // Same story for the website's shadcn/ui token table: light `:root` and
       // dark `.dark` must declare the same `--token` names, and the block is
       // generated by `shadcn init`. It reads as a clone of the desktop app's

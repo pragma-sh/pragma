@@ -1,17 +1,93 @@
 import {
+  accountProviderTitle,
+  apiKeyTokenKind,
+  credentialFileSharedToken,
+  credentialStoreAccount,
+  credentialStorePath,
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  identifyFromCredentialStore,
+  modelsDevAccountProviders,
+  type AccountProviderDefinition,
+  commandAndSkillDirs,
+  slashCommandProvider,
+  type AgentMode,
   type AgentModelEntry,
+  type CredentialStore,
+  type ModelsDevAccountProvider,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { pluginCwd } from "./cwd";
 import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
+/**
+ * OpenCode keeps every provider's credential in one `auth.json` under
+ * `$XDG_DATA_HOME/opencode`, keyed by provider id.
+ */
+const OPENCODE_STORE: CredentialStore = {
+  dirEnv: "XDG_DATA_HOME",
+  defaultDir: "~/.local/share",
+  file: "opencode/auth.json",
+};
+
+/**
+ * API-key providers OpenCode signs in to, named by their models.dev ids in
+ * `auth.json`; `opencode auth login` preselects the first. OpenAI and OpenCode
+ * Go are declared above with their own logins.
+ *
+ * Every entry is a key the provider sells for use in any client. Anthropic is
+ * key-only on purpose: Claude Free/Pro/Max OAuth may only be used in Claude
+ * Code and claude.ai. Google is the Gemini API key; Gemini CLI and Antigravity
+ * OAuth are not offered, since Google suspends accounts that use them here.
+ */
+export const OPENCODE_API_KEY_PROVIDERS: ModelsDevAccountProvider[] = modelsDevAccountProviders([
+  "openai",
+  "opencode-go",
+]);
+
+function openCodeApiKeyProvider({
+  provider,
+  modelsDevIds,
+}: ModelsDevAccountProvider): AccountProviderDefinition {
+  return credentialStoreAccount({
+    provider,
+    agent: "opencode",
+    store: OPENCODE_STORE,
+    entries: modelsDevIds,
+    apiKeyOnly: true,
+    login: {
+      command: ["opencode", "auth", "login", "--provider", modelsDevIds[0]],
+      instructions: `Paste your ${accountProviderTitle(provider)} API key here, then send.`,
+    },
+  });
+}
+
+/** OpenCode's own GitHub OAuth app (`opencode auth login --provider github-copilot`). */
+const OPENCODE_GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
+
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
+
+/** OpenCode's own primary agents, used when `opencode agent list` is unavailable. */
+const DEFAULT_MODES: AgentMode[] = [
+  { id: "build", name: "Build" },
+  { id: "plan", name: "Plan" },
+];
+/** Primary agents OpenCode runs internally and never offers in its Tab cycle. */
+const HIDDEN_AGENTS = new Set(["compaction", "summary", "title"]);
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "init", description: "Create or update AGENTS.md" },
+  { name: "review", description: "Review changes", argumentHint: "[commit|branch|pr]" },
+];
+/** Fallback when the ACP list is unavailable (OpenCode also accepts singular `command`). */
+const SLASH_COMMAND_SOURCES = [
+  ...commandAndSkillDirs([".opencode", "~/.config/opencode"]),
+  { dir: ".opencode/command", layout: "files" as const },
+  { dir: "~/.config/opencode/command", layout: "files" as const },
+];
 
 /**
  * Pragma plugin for OpenCode, bundled to `dist/pragma-plugin.mjs` and loaded by
@@ -30,16 +106,93 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       questionFinalizeKeys: "\r",
     }),
   ],
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "opencode-go",
-      title: "OpenCode Go",
+  accounts: defineAccounts([
+    {
+      provider: "opencode-go",
+      agent: "opencode",
       dashboardUrl: "https://opencode.ai/auth",
       iconPath: "assets/opencode.svg",
-      primaryLimitId: "rolling",
-      load: loadOpenCodeGoUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["opencode", "auth", "login"],
+        instructions:
+          "Pick OpenCode Go when asked (type to filter, then send), then paste the key from opencode.ai/auth.",
+      },
+      // OpenCode keeps `auth.json` and its session database under
+      // `$XDG_DATA_HOME/opencode`, so a separate data home is a separate
+      // account — with its own session history.
+      env: (home) => ({ XDG_DATA_HOME: home }),
+      credentialPath: (home) => credentialStorePath(OPENCODE_STORE, home),
+      identify: identifyFromCredentialStore(OPENCODE_STORE, "opencode-go", "opencode-go"),
+      // The key is shared with Pi, Prime Agent, and Kimi Code holding OpenCode Go.
+      sharedToken: credentialFileSharedToken(OPENCODE_STORE, {
+        kind: apiKeyTokenKind("opencode-go"),
+        entry: "opencode-go",
+        type: "api",
+      }),
+      usageLimits: {
+        primaryLimitId: "rolling",
+        load: loadOpenCodeGoUsageLimits,
+      },
+    },
+    // OpenAI and Copilot live in the same `auth.json` as OpenCode Go, so they
+    // cannot take a data directory of their own. They switch accounts by
+    // swapping their entries in that file at launch instead (`switchable`):
+    // a new account signs in inside its own Pragma home, and merges with the
+    // Codex and Copilot CLI accounts it belongs to. Their usage comes from
+    // those harnesses, and so does the row's icon: no `iconPath`, or
+    // OpenCode's logo could head the OpenAI row.
+    {
+      ...credentialStoreAccount({
+        provider: "openai",
+        agent: "opencode",
+        store: OPENCODE_STORE,
+        entries: ["openai"],
+        switchable: true,
+        // Same OAuth client as Codex: a ChatGPT account signed in through
+        // Codex (or Pi) can be used here without signing in again.
+        sharedToken: { kind: "chatgpt", entry: "openai", type: "oauth" },
+        login: {
+          command: [
+            "opencode",
+            "auth",
+            "login",
+            "--provider",
+            "openai",
+            "--method",
+            "ChatGPT Pro/Plus (browser)",
+          ],
+          instructions: "Sign in with ChatGPT in the browser tab that opens.",
+        },
+      }),
+      dashboardUrl: "https://chatgpt.com/codex/settings/usage",
+    },
+    {
+      ...credentialStoreAccount({
+        provider: "github-copilot",
+        agent: "opencode",
+        store: OPENCODE_STORE,
+        entries: ["github-copilot"],
+        switchable: true,
+        // OpenCode signs in through its own GitHub OAuth app, so its Copilot
+        // sign-in is only exchanged with harnesses that use the same app.
+        sharedToken: {
+          kind: `github-copilot:${OPENCODE_GITHUB_CLIENT_ID}`,
+          entry: "github-copilot",
+          type: "oauth",
+        },
+        login: {
+          command: ["opencode", "auth", "login", "--provider", "github-copilot"],
+          // Accept the preselected GitHub.com deployment.
+          input: [""],
+          instructions: "Enter the code shown here on the GitHub page that opens.",
+        },
+      }),
+      dashboardUrl: "https://github.com/settings/copilot",
+    },
+    // Keys for every other provider share the same `auth.json`, so they follow
+    // OpenCode's own sign-in too.
+    ...OPENCODE_API_KEY_PROVIDERS.map(openCodeApiKeyProvider),
+  ]),
   agents: [
     defineAgent({
       id: "opencode",
@@ -56,10 +209,16 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
           ),
         ),
       permissionModes: [],
+      modes: async (ctx) =>
+        parseOpenCodeAgents(await execFirst(ctx, "opencode agent list 2>/dev/null")),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["opencode", "acp"] },
+      }),
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: () => [],
         permissionMode: () => [],
+        mode: (modeId: string) => ["--agent", modeId],
       },
     }),
   ],
@@ -70,6 +229,29 @@ export default opencodeAgentPlugin;
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const [result] = await ctx.sdk.exec.run({ cwd: pluginCwd(ctx), commands: [command] });
   return result?.stdout ?? "";
+}
+
+/**
+ * Parses `opencode agent list` (`name (mode)` header lines, each followed by
+ * its permission JSON) into the primary agents Tab cycles through, with
+ * `build` and `plan` first. Falls back to those two when nothing parses.
+ */
+export function parseOpenCodeAgents(output: string): AgentMode[] {
+  const names = output
+    .replaceAll(ansiEscapePattern, "")
+    .split("\n")
+    .flatMap((line) => {
+      const match = /^(\S+) \((primary|all|subagent)\)$/.exec(line.trim());
+      return match && match[2] !== "subagent" && !HIDDEN_AGENTS.has(match[1]!) ? [match[1]!] : [];
+    });
+  if (names.length === 0) return DEFAULT_MODES;
+  const rank = (name: string) => {
+    const index = DEFAULT_MODES.findIndex((mode) => mode.id === name);
+    return index === -1 ? DEFAULT_MODES.length : index;
+  };
+  return [...new Set(names)]
+    .toSorted((a, b) => rank(a) - rank(b))
+    .map((id) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) }));
 }
 
 /** Parses OpenCode's `models` output (JSON or table form) into model entries. */
@@ -193,8 +375,20 @@ function splitWhitespaceModel(line: string): [string | undefined, string | undef
     : [undefined, undefined];
 }
 
+/**
+ * Derives a readable name from a bare model id.
+ *
+ * OpenCode ids spell version dots as hyphens (`claude-opus-4-5` is Opus 4.5),
+ * so a blanket hyphen-to-space rewrite silently drops the dot from the version
+ * number. A hyphen sitting between two digits becomes `.`; every other
+ * separator becomes a space.
+ */
 function displayName(id: string): string {
-  return id.split("/").at(-1)?.replaceAll(/[-_]/g, " ") ?? id;
+  const bare = id.split("/").at(-1);
+  if (!bare) {
+    return id;
+  }
+  return bare.replaceAll(/(?<=\d)-(?=\d)/g, ".").replaceAll(/[-_]/g, " ");
 }
 
 function withProvider(

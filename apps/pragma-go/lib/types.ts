@@ -6,10 +6,10 @@ import type {
   Project,
   QuestionOption,
   Worktree,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 // Re-export the shared domain types so screens import them from one place while
-// keeping @pragma/constants the single source of truth.
+// keeping @pragma-sh/constants the single source of truth.
 export type { AgentAttentionKind, AgentMessageRole, AgentStatus, Project, Worktree };
 
 /**

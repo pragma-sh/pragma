@@ -5,7 +5,7 @@ catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pra
 
 ## Files
 
-- `src/index.ts` — Pi extension entry point using `@pragma/sdk`.
+- `src/index.ts` — Pi extension entry point using `@pragma-sh/sdk`.
 - `src/extension-factory.ts` — reusable lifecycle extension factory for Pi-derived agents.
 - `src/reporter.ts` — serialized lifecycle state machine.
 - `src/pragma-plugin.ts` — `defineAgent` launcher and interjection watcher.
@@ -41,6 +41,13 @@ on a graceful quit. The exact launched-session watcher also reports `cleared`
 when its session exits, covering crashes and kills that skip `session_shutdown`; reporting
 failures are swallowed so cleanup cannot disrupt watcher shutdown.
 
+## Launch options
+
+`createPiPragmaPlugin` gives every Pi-compatible launcher `/compact` and `/session` plus
+prompt templates (`/<name>`) and skills (`/skill:<name>`) discovered in Pi's directories
+(`PI_SLASH_COMMAND_SOURCES`); a fork with other config roots passes
+`agent.slashCommandSources`. Pi has no modes or permission modes.
+
 ## Build and install
 
 ```sh
@@ -71,3 +78,7 @@ square SVG badge used at `assets/pi-badge.svg`. Original source:
 `https://pi.dev/favicon.svg`, retrieved 2026-07-16. The press-kit page identifies the
 site and assets as MIT licensed. Preserve original geometry and colors; do not replace
 it with a traced or third-party mark.
+
+## Account provider
+
+`piAccountProviders(agentId, store)` (in `pragma-plugin-factory.ts`) declares one provider per entry in `PI_ACCOUNT_ENTRIES`: `openai` (`openai-codex`, then an `openai` key), `anthropic`, `github-copilot`, `opencode-go`, then every API-key provider pi-ai reads from `auth.json` (OpenCode Zen, Google Gemini API, xAI, OpenRouter, DeepSeek, Groq, Mistral, Cerebras, Fireworks, Together, Hugging Face, NVIDIA, Vercel AI Gateway, Z.ai, MiniMax, Kimi Code, Moonshot AI Platform, Xiaomi MiMo). **Only add a provider whose credential may be used outside its own first-party harness.** Claude Free/Pro/Max OAuth is restricted by Anthropic's terms to Claude Code and claude.ai, and Google suspends accounts that use Gemini CLI or Antigravity OAuth in other tools — so in any other harness, Anthropic and Google are API-key only (`apiKeyOnly: true`), and their OAuth sign-ins are never identified or presented as accounts. ChatGPT (Codex OAuth) and GitHub Copilot sign-ins are sanctioned in OpenCode and Pi. Pi's `/login` still offers Claude, but Pragma treats that entry as signed out. Pi and Prime Agent both use it. No provider has an `env`, because the agent dir (`PI_CODING_AGENT_DIR`, Prime: `PRIME_AGENT_CODING_AGENT_DIR`) also holds settings and the installed Pragma extension, so a Pragma-owned dir per account would stop status reporting. A provider given a scripted login in `piAccountProviders`' third argument (OpenAI, for Pi and Prime Agent) is instead `switchable`: Pragma swaps its entries in `auth.json` at launch (see `credential-swap.ts` in `@pragma-sh/plugin`) and signs in in place. Pi signs in only from `/login` inside its TUI (`pi /login` as an argument is sent to the model as a prompt), so the login runs `pi --offline` and types `input: ["/login openai-codex", ""]`: `/login <provider>` skips the picker, the Enter takes the preselected browser login, and each line is written with its Enter so it submits before the autocomplete opens. `--offline` drops the update banner, whose changelog link would otherwise be the dialog's first URL. Every provider is switchable and lends its sign-in (`credentialStoreAccount` defaults): API keys as `key:<provider>`, ChatGPT as `chatgpt`, and Copilot as `github-copilot:Iv1.b507a08c87ecfe98` — pi-ai's Copilot login uses VS Code's GitHub OAuth app, so it is exchanged only with Prime Agent, not OpenCode (its own app) or Copilot CLI. The stores set `apiKeyType: "api_key"`, which is how Pi writes keys. `identify` reads the entry via `identifyFromCredentialStore`, so the sign-in merges with the Codex / Copilot / OpenCode account it belongs to. No usage is declared; the merged account's usage comes from the dedicated harness. Tokens are never refreshed — Anthropic and OpenAI rotate refresh tokens, and using one without writing it back would sign Pi out.

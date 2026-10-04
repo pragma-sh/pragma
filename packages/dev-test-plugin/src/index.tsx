@@ -4,13 +4,15 @@ import {
   defineSettingsPage,
   defineSidebarCard,
   defineSidebarTab,
-} from "@pragma/plugin";
+} from "@pragma-sh/plugin";
 
 import { AgentPulseCard } from "./agent-pulse-card";
+import { DevTestDiagnosticsPage } from "./diagnostics-page";
 import { FORTUNE_REROLL_EVENT, FortuneTab } from "./fortune-tab";
 import { OverviewTab } from "./overview-tab";
 import { openReportWebView, reportWebView } from "./report-webview";
 import { DevTestSettingsPage } from "./settings-page";
+import { testMentionsProvider } from "./test-mentions";
 
 export default definePlugin({
   name: "Pragma Dev Test Plugin",
@@ -25,12 +27,18 @@ export default definePlugin({
     settingsPages: [
       defineSettingsPage({
         id: "dev-test",
-        title: "Dev Test Plugin",
+        title: "Board Drafts",
         component: DevTestSettingsPage,
+      }),
+      defineSettingsPage({
+        id: "diagnostics",
+        title: "Diagnostics",
+        component: DevTestDiagnosticsPage,
       }),
     ],
     webViews: [reportWebView],
   },
+  contextProviders: [testMentionsProvider],
   commands: [
     defineCommand({
       id: "pragma-dev-test-plugin.hello",

@@ -1,25 +1,149 @@
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { alignDiffLines } from "./diff";
 import type { DiffLine } from "./diff";
 import { promptAgent, scratchpadBridge } from "./index";
 import type { PromptAgentOptions, ScratchpadAgentProgress } from "./index";
+import type { ScratchpadWhiteboardSnapshot } from "./index";
 import { OTHER_VALUE, composeAnswer, toggleChoice } from "./question";
 import { Badge, Button, Card, Input, Progress, Textarea, type Tone } from "./primitives";
 
 const EMPTY_OPTIONS: readonly AskQuestionOption[] = [];
 
+/** Props for a live, read-only whiteboard rendering. */
+export interface WhiteboardProps {
+  id: string;
+  /** Poll interval for host-side version checks. Set to zero to disable polling. */
+  refreshIntervalMs?: number;
+}
+
+/** Live read-only PNG rendering of a worktree-scoped Pragma whiteboard. */
+// fallow-ignore-next-line complexity -- one preview owns polling, host-open support, and its loading/error/image states; splitting it would duplicate the shared snapshot lifecycle.
+export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): React.JSX.Element {
+  const [snapshot, setSnapshot] = useState<ScratchpadWhiteboardSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const versionRef = useRef<number | undefined>(undefined);
+  const darkRef = useRef<boolean | undefined>(undefined);
+  const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const openWhiteboard = globalThis.pragmaScratchpad?.openWhiteboard;
+
+  const open = (): void => {
+    if (!openWhiteboard) return;
+    void openWhiteboard(id).catch((cause: unknown) => {
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+  };
+
+  // fallow-ignore-next-line complexity -- one bounded poll updates theme/version refs and the three request outcomes atomically.
+  const refresh = useCallback(async () => {
+    // One snapshot request at a time: a poll tick or a manual refresh landing
+    // while the host is still rendering would otherwise stack requests (and
+    // native PNG renders) instead of applying backpressure.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const dark = document.documentElement.classList.contains("dark");
+      const knownVersion = darkRef.current === dark ? versionRef.current : undefined;
+      const next = await scratchpadBridge().getWhiteboardSnapshot(id, knownVersion, dark);
+      if (!mountedRef.current) return;
+      if (next) {
+        versionRef.current = next.version;
+        darkRef.current = dark;
+        setSnapshot(next);
+      }
+      setError(null);
+    } catch (cause) {
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      inFlightRef.current = false;
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    inFlightRef.current = false;
+    versionRef.current = undefined;
+    darkRef.current = undefined;
+    setSnapshot(null);
+    setLoading(true);
+    void refresh();
+    const interval =
+      refreshIntervalMs > 0
+        ? globalThis.setInterval(() => void refresh(), Math.max(1000, refreshIntervalMs))
+        : null;
+    return () => {
+      mountedRef.current = false;
+      if (interval !== null) globalThis.clearInterval(interval);
+    };
+  }, [refresh, refreshIntervalMs]);
+
+  return (
+    <Card>
+      <div className="pragma-row pragma-row--between">
+        <div>
+          <span className="pragma-eyebrow">Whiteboard</span>
+          <p className="pragma-title">{snapshot?.title ?? id}</p>
+        </div>
+        <div className="pragma-row">
+          <Badge>Read only</Badge>
+          {openWhiteboard ? (
+            <Button onClick={open} size="sm" variant="ghost">
+              Open
+            </Button>
+          ) : null}
+          <Button disabled={loading} onClick={() => void refresh()} size="sm" variant="ghost">
+            Refresh
+          </Button>
+        </div>
+      </div>
+      {error ? (
+        <p className="pragma-whiteboard__error" role="alert">
+          {error}
+        </p>
+      ) : snapshot ? (
+        openWhiteboard ? (
+          <button
+            aria-label={`Open ${snapshot.title} whiteboard`}
+            className="pragma-whiteboard__open"
+            onClick={open}
+            type="button"
+          >
+            <img
+              alt={`${snapshot.title} whiteboard`}
+              className="pragma-whiteboard__image"
+              src={snapshot.dataUrl}
+            />
+          </button>
+        ) : (
+          <img
+            alt={`${snapshot.title} whiteboard`}
+            className="pragma-whiteboard__image"
+            src={snapshot.dataUrl}
+          />
+        )
+      ) : (
+        <div className="pragma-empty">Loading whiteboard...</div>
+      )}
+    </Card>
+  );
+}
+
 /** A pending-aware send to the attached agent, shared by the interactive cards. */
 interface AgentAction {
   pending: boolean;
+  enabled: boolean;
   /** Resolves to whether the text reached an agent tab. */
   run: (text: string, onSent: () => void | Promise<void>) => Promise<boolean>;
 }
 
 function useAgentAction(options: PromptAgentOptions): AgentAction {
   const [pending, setPending] = useState(false);
+  const disabled = globalThis.pragmaScratchpad?.agentFeedbackEnabled === false;
   const run = async (text: string, onSent: () => void | Promise<void>): Promise<boolean> => {
-    if (pending) return false;
+    if (pending || disabled) return false;
     setPending(true);
     try {
       const delivered = await promptAgent(text, options);
@@ -29,7 +153,7 @@ function useAgentAction(options: PromptAgentOptions): AgentAction {
       setPending(false);
     }
   };
-  return { pending, run };
+  return { pending, enabled: !disabled, run };
 }
 
 /** One labeled answer option for {@link AskQuestion}. */
@@ -68,7 +192,7 @@ export function AskQuestion({
   onMissingAgent,
 }: AskQuestionProps): React.JSX.Element {
   const [sent, setSent] = useState<string | null>(null);
-  const { pending, run } = useAgentAction({ onMissingAgent });
+  const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const submit = (value: string): Promise<boolean> =>
     run(`Answer to scratchpad question "${question}": ${value}`, async () => {
@@ -84,14 +208,20 @@ export function AskQuestion({
       </div>
       <p className="pragma-title">{question}</p>
       {sent === null ? (
-        <AskQuestionControls
-          allowOpenResponse={allowOpenResponse}
-          options={options}
-          pending={pending}
-          submit={submit}
-          submitLabel={submitLabel}
-          type={type}
-        />
+        <>
+          <AskQuestionControls
+            allowOpenResponse={allowOpenResponse}
+            enabled={enabled}
+            options={options}
+            pending={pending}
+            submit={submit}
+            submitLabel={submitLabel}
+            type={type}
+          />
+          {!enabled ? (
+            <p className="pragma-hint">Agent feedback is disabled in this export.</p>
+          ) : null}
+        </>
       ) : (
         <SettledNotice
           detail={`Answered “${sent}”.`}
@@ -105,6 +235,7 @@ export function AskQuestion({
 
 interface AskQuestionControlsProps {
   allowOpenResponse: boolean;
+  enabled: boolean;
   options: readonly AskQuestionOption[];
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
@@ -115,6 +246,7 @@ interface AskQuestionControlsProps {
 /** Choice list or free-text form of an unanswered {@link AskQuestion}. */
 function AskQuestionControls({
   allowOpenResponse,
+  enabled,
   options,
   pending,
   submit,
@@ -122,12 +254,20 @@ function AskQuestionControls({
   type,
 }: AskQuestionControlsProps): React.JSX.Element {
   if (type === "text") {
-    return <AskQuestionForm pending={pending} submit={submit} submitLabel={submitLabel} />;
+    return (
+      <AskQuestionForm
+        enabled={enabled}
+        pending={pending}
+        submit={submit}
+        submitLabel={submitLabel}
+      />
+    );
   }
   return (
     <AskQuestionChoices
       allowOpenResponse={allowOpenResponse}
       choices={type === "yes-no" ? YES_NO_OPTIONS : options}
+      enabled={enabled}
       multiple={type === "multi-select"}
       pending={pending}
       submit={submit}
@@ -148,6 +288,7 @@ function choiceValue(option: AskQuestionOption): string {
 interface AskQuestionChoicesProps {
   allowOpenResponse: boolean;
   choices: readonly AskQuestionOption[];
+  enabled: boolean;
   multiple: boolean;
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
@@ -162,6 +303,7 @@ interface AskQuestionChoicesProps {
 function AskQuestionChoices({
   allowOpenResponse,
   choices,
+  enabled,
   multiple,
   pending,
   submit,
@@ -178,7 +320,7 @@ function AskQuestionChoices({
   const answer = composeAnswer(selected, other);
 
   const send = (): void => {
-    if (!answer) return;
+    if (!enabled || !answer) return;
     void submit(answer).then((delivered) => {
       if (delivered) {
         setSelected([]);
@@ -211,7 +353,7 @@ function AskQuestionChoices({
           />
         ))}
       </div>
-      <ChoiceSubmit answer={answer} label={submitLabel} pending={pending} />
+      <ChoiceSubmit answer={answer} enabled={enabled} label={submitLabel} pending={pending} />
     </form>
   );
 }
@@ -224,16 +366,18 @@ function choiceGroupRole(multiple: boolean): "group" | "radiogroup" {
 /** Submit row for {@link AskQuestionChoices}, disabled until something is selected. */
 function ChoiceSubmit({
   answer,
+  enabled,
   label,
   pending,
 }: {
   answer: string;
+  enabled: boolean;
   label: string;
   pending: boolean;
 }): React.JSX.Element {
   return (
     <div className="pragma-row pragma-row--end">
-      <Button disabled={pending || !answer} type="submit" variant="primary">
+      <Button disabled={!enabled || pending || !answer} type="submit" variant="primary">
         {pending ? "Sending…" : label}
       </Button>
     </div>
@@ -322,10 +466,12 @@ function Choice({
 
 /** Free-text answer field for a `text` {@link AskQuestion}. */
 function AskQuestionForm({
+  enabled,
   pending,
   submit,
   submitLabel,
 }: {
+  enabled: boolean;
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
   submitLabel: string;
@@ -333,7 +479,7 @@ function AskQuestionForm({
   const [answer, setAnswer] = useState("");
   const send = (): void => {
     const value = answer.trim();
-    if (!value) return;
+    if (!enabled || !value) return;
     void submit(value).then((delivered) => {
       if (delivered) setAnswer("");
       return delivered;
@@ -354,7 +500,7 @@ function AskQuestionForm({
         value={answer}
       />
       <div className="pragma-row pragma-row--end">
-        <Button disabled={pending || !answer.trim()} type="submit" variant="primary">
+        <Button disabled={!enabled || pending || !answer.trim()} type="submit" variant="primary">
           {pending ? "Sending…" : submitLabel}
         </Button>
       </div>
@@ -381,7 +527,7 @@ export function DiffReview({
   onMissingAgent,
 }: DiffReviewProps): React.JSX.Element {
   const [decision, setDecision] = useState<boolean | null>(null);
-  const { pending, run } = useAgentAction({ onMissingAgent });
+  const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const decide = (accepted: boolean): Promise<boolean> =>
     run(`Scratchpad diff${file ? ` for ${file}` : ""} was ${verdict(accepted)}.`, async () => {
@@ -394,7 +540,7 @@ export function DiffReview({
       <DiffHeader decision={decision} file={file} title={title} />
       <DiffPanes after={after} before={before} />
       {decision === null ? (
-        <DiffActions decide={decide} pending={pending} />
+        <DiffActions decide={decide} pending={pending || !enabled} />
       ) : (
         <SettledNotice
           detail={`Change ${verdict(decision)}.`}

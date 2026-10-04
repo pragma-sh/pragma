@@ -1,4 +1,4 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { isNumber, isString, matchesShape, nullable } from "./guards";
 

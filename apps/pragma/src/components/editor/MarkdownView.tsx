@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import type { EditorView as CodeMirrorView } from "@codemirror/view";
 import type { EditorView as ProseMirrorView } from "@tiptap/pm/view";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";

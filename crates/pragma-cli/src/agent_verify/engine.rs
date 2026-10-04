@@ -60,7 +60,11 @@ impl<'a> ScenarioCtx<'a> {
             worktree_id: self.worktree_id,
             agent_id: self.catalog_agent_id,
             model_id: self.model_id,
+            reasoning_id: None,
             model_cmd: self.model_cmd,
+            mode_id: None,
+            permission_mode_id: None,
+            slash_command: None,
             headless: self.headless,
             prompt,
         })?;

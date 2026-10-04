@@ -82,9 +82,10 @@ impl Db {
                id           TEXT PRIMARY KEY,
                project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                worktree_id  TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
-               title        TEXT,
-               file_path    TEXT,
-               diff_side    TEXT,
+                title        TEXT,
+                file_path    TEXT,
+                whiteboard_id TEXT,
+                diff_side    TEXT,
                diff_commit  TEXT,
                pr_number    INTEGER,
                user_renamed INTEGER NOT NULL DEFAULT 0,
@@ -341,13 +342,58 @@ impl Db {
             }
             conn.execute_batch("PRAGMA user_version = 16;")?;
         }
+        // v17 adds `icon_emoji` to `projects`: the emoji the user picked for the
+        // project switcher. NULL (the default, and every pre-existing row) means
+        // "no override" — the switcher keeps falling back to a favicon found in
+        // the checkout, then to the project name's initial.
+        if version < 17 {
+            let has_icon_emoji: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'icon_emoji'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_icon_emoji == 0 {
+                conn.execute_batch("ALTER TABLE projects ADD COLUMN icon_emoji TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 17;")?;
+        }
+        // v18 adds the durable host-owned whiteboard reference to client tab rows.
+        // Whiteboard contents remain in pragma-server's SQLite store.
+        if version < 18 {
+            let has_whiteboard_id: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'whiteboard_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_whiteboard_id == 0 {
+                conn.execute_batch("ALTER TABLE tabs ADD COLUMN whiteboard_id TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 18;")?;
+        }
+        // v19 adds `is_git` to `projects`. 0 marks a folder that is not a git
+        // repository: it keeps a single root worktree and no git features until
+        // the user initializes a repository. Every pre-existing row is a git
+        // project, which the default of 1 preserves.
+        if version < 19 {
+            let has_is_git: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'is_git'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_is_git == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE projects ADD COLUMN is_git INTEGER NOT NULL DEFAULT 1;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 19;")?;
+        }
         Ok(())
     }
 
     pub fn list_projects(&self) -> AppResult<Vec<Project>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, path, order_index, created_at FROM projects ORDER BY order_index, created_at",
+            "SELECT id, name, path, icon_emoji, order_index, created_at, is_git FROM projects ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([], project_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
@@ -359,6 +405,23 @@ impl Db {
         path: String,
         branch: String,
     ) -> AppResult<Project> {
+        self.insert_project(name, path, branch, true)
+    }
+
+    /// Persists a folder that is not a git repository. It gets the same single
+    /// main worktree a git project has — tabs, agent sessions and statuses all
+    /// hang off it — but no branch, since there is none to name.
+    pub fn insert_plain_project(&self, name: String, path: String) -> AppResult<Project> {
+        self.insert_project(name, path, String::new(), false)
+    }
+
+    fn insert_project(
+        &self,
+        name: String,
+        path: String,
+        branch: String,
+        is_git: bool,
+    ) -> AppResult<Project> {
         let project_id = Uuid::new_v4().to_string();
         let worktree_id = Uuid::new_v4().to_string();
         {
@@ -369,8 +432,8 @@ impl Db {
             let order_index: i64 =
                 tx.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
             tx.execute(
-                "INSERT INTO projects (id, name, path, order_index) VALUES (?1, ?2, ?3, ?4)",
-                params![project_id, name, path, order_index],
+                "INSERT INTO projects (id, name, path, order_index, is_git) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![project_id, name, path, order_index, is_git],
             )?;
             tx.execute(
                 "INSERT INTO worktrees (id, project_id, parent_id, branch, title, path, is_main)
@@ -386,11 +449,43 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, name, path, order_index, created_at FROM projects WHERE id = ?1",
+                "SELECT id, name, path, icon_emoji, order_index, created_at, is_git FROM projects WHERE id = ?1",
                 [project_id],
                 project_from_row,
             )
             .map_err(AppError::from)
+    }
+
+    /// Promotes a plain project to a git project once its folder has become a
+    /// repository, recording the branch its main worktree is on. Ids are kept,
+    /// so every tab, agent session and status attached to the project survives.
+    pub fn mark_project_git(&self, project_id: &str, branch: &str) -> AppResult<()> {
+        let mut conn = self.0.lock()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE projects SET is_git = 1 WHERE id = ?1",
+            params![project_id],
+        )?;
+        tx.execute(
+            "UPDATE worktrees SET branch = ?1 WHERE project_id = ?2 AND is_main = 1",
+            params![branch, project_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Sets (or, with `None`, clears) the emoji shown for a project in the
+    /// project switcher.
+    pub fn set_project_icon_emoji(
+        &self,
+        project_id: &str,
+        icon_emoji: Option<&str>,
+    ) -> AppResult<()> {
+        self.0.lock()?.execute(
+            "UPDATE projects SET icon_emoji = ?1 WHERE id = ?2",
+            params![icon_emoji, project_id],
+        )?;
+        Ok(())
     }
 
     pub fn delete_project(&self, project_id: &str) -> AppResult<()> {
@@ -585,7 +680,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -598,7 +693,7 @@ impl Db {
     pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs ORDER BY project_id, order_index, created_at",
         )?;
         let rows = stmt.query_map([], tab_from_row)?;
@@ -628,6 +723,7 @@ impl Db {
             title,
             url,
             file_path,
+            None,
             diff_side,
             diff_commit,
             pr_number,
@@ -637,6 +733,58 @@ impl Db {
             None,
             shell,
         )
+    }
+
+    /// Creates or reuses a tab projecting one host-owned whiteboard.
+    ///
+    /// The dedupe lookup and the insert run under a single connection lock:
+    /// two concurrent opens of the same board would otherwise both observe
+    /// "no tab yet" and insert duplicates into the workspace snapshot.
+    pub fn create_whiteboard_tab(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+        whiteboard_id: &str,
+        title: String,
+    ) -> AppResult<Tab> {
+        let conn = self.0.lock()?;
+        let existing = conn
+            .query_row(
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
+                 FROM tabs
+                 WHERE project_id = ?1 AND worktree_id = ?2 AND kind = ?3 AND whiteboard_id = ?4
+                 ORDER BY order_index, created_at LIMIT 1",
+                params![
+                    project_id,
+                    worktree_id,
+                    kind_as_str(TabKind::Whiteboard),
+                    whiteboard_id
+                ],
+                tab_from_row,
+            )
+            .optional()?;
+        if let Some(tab) = existing {
+            return Ok(tab);
+        }
+        let id = insert_tab_record(
+            &conn,
+            project_id,
+            worktree_id,
+            TabKind::Whiteboard,
+            Some(title),
+            None,
+            None,
+            Some(whiteboard_id.to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        tab_row(&conn, &id)
     }
 
     // A tab row carries enough locating data that insertion exceeds clippy's
@@ -662,6 +810,7 @@ impl Db {
             None,
             None,
             None,
+            None,
             plugin_id,
             plugin_view_id,
             plugin_payload,
@@ -681,6 +830,7 @@ impl Db {
         title: Option<String>,
         url: Option<String>,
         file_path: Option<String>,
+        whiteboard_id: Option<String>,
         diff_side: Option<DiffSide>,
         diff_commit: Option<String>,
         pr_number: Option<i64>,
@@ -690,39 +840,27 @@ impl Db {
         plugin_dedupe_key: Option<String>,
         shell: Option<ShellProfile>,
     ) -> AppResult<Tab> {
-        let id = Uuid::new_v4().to_string();
-        {
-            let (shell_backend, shell_distro) = shell_to_columns(shell.as_ref());
+        let id = {
             let conn = self.0.lock()?;
-            let order_index: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
-                [project_id],
-                |row| row.get(0),
-            )?;
-            conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
-                params![
-                    id,
-                    project_id,
-                    worktree_id,
-                    kind_as_str(kind),
-                    title,
-                    url,
-                    file_path,
-                    diff_side.map(diff_side_as_str),
-                    diff_commit,
-                    pr_number,
-                    plugin_id,
-                    plugin_view_id,
-                    plugin_payload,
-                    plugin_dedupe_key,
-                    order_index,
-                    shell_backend,
-                    shell_distro
-                ],
-            )?;
-        }
+            insert_tab_record(
+                &conn,
+                project_id,
+                worktree_id,
+                kind,
+                title,
+                url,
+                file_path,
+                whiteboard_id,
+                diff_side,
+                diff_commit,
+                pr_number,
+                plugin_id,
+                plugin_view_id,
+                plugin_payload,
+                plugin_dedupe_key,
+                shell,
+            )?
+        };
         self.tab(&id)
     }
 
@@ -999,7 +1137,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro FROM tabs WHERE id = ?1",
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -1010,7 +1148,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -1025,6 +1163,76 @@ impl Db {
     }
 }
 
+/// Inserts one tab row on an already-locked connection and returns its id.
+///
+/// Free-standing so callers that must keep the dedupe lookup and the insert
+/// under one lock (`create_whiteboard_tab`) can reuse the exact insert the
+/// locking `Db::create_tab_record` performs.
+// A tab row carries enough locating data that insertion exceeds clippy's
+// default argument ceiling; the columns are all genuinely independent.
+#[allow(clippy::too_many_arguments)]
+fn insert_tab_record(
+    conn: &Connection,
+    project_id: &str,
+    worktree_id: &str,
+    kind: TabKind,
+    title: Option<String>,
+    url: Option<String>,
+    file_path: Option<String>,
+    whiteboard_id: Option<String>,
+    diff_side: Option<DiffSide>,
+    diff_commit: Option<String>,
+    pr_number: Option<i64>,
+    plugin_id: Option<String>,
+    plugin_view_id: Option<String>,
+    plugin_payload: Option<String>,
+    plugin_dedupe_key: Option<String>,
+    shell: Option<ShellProfile>,
+) -> AppResult<String> {
+    let id = Uuid::new_v4().to_string();
+    let (shell_backend, shell_distro) = shell_to_columns(shell.as_ref());
+    let order_index: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, whiteboard_id, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        params![
+            id,
+            project_id,
+            worktree_id,
+            kind_as_str(kind),
+            title,
+            url,
+            file_path,
+            whiteboard_id,
+            diff_side.map(diff_side_as_str),
+            diff_commit,
+            pr_number,
+            plugin_id,
+            plugin_view_id,
+            plugin_payload,
+            plugin_dedupe_key,
+            order_index,
+            shell_backend,
+            shell_distro
+        ],
+    )?;
+    Ok(id)
+}
+
+/// Reads one tab by id on an already-locked connection.
+fn tab_row(conn: &Connection, tab_id: &str) -> AppResult<Tab> {
+    conn.query_row(
+        "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id FROM tabs WHERE id = ?1",
+        [tab_id],
+        tab_from_row,
+    )
+    .map_err(AppError::from)
+}
+
 /// Serializes a tab kind to the lowercase string stored in the `tabs.kind` column.
 fn kind_as_str(kind: TabKind) -> &'static str {
     match kind {
@@ -1032,6 +1240,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Browser => "browser",
         TabKind::Editor => "editor",
         TabKind::Scratchpad => "scratchpad",
+        TabKind::Whiteboard => "whiteboard",
         TabKind::Diff => "diff",
         TabKind::Log => "log",
         TabKind::PrReview => "pr-review",
@@ -1045,6 +1254,7 @@ fn kind_from_str(value: &str) -> TabKind {
         "browser" => TabKind::Browser,
         "editor" => TabKind::Editor,
         "scratchpad" => TabKind::Scratchpad,
+        "whiteboard" => TabKind::Whiteboard,
         "diff" => TabKind::Diff,
         "log" => TabKind::Log,
         "pr-review" => TabKind::PrReview,
@@ -1143,8 +1353,10 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         id: row.get(0)?,
         name: row.get(1)?,
         path: row.get(2)?,
-        order_index: row.get::<_, i64>(3)?,
-        created_at: row.get(4)?,
+        icon_emoji: row.get(3)?,
+        order_index: row.get::<_, i64>(4)?,
+        created_at: row.get(5)?,
+        is_git: row.get(6)?,
     })
 }
 
@@ -1171,6 +1383,7 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         title: row.get(4)?,
         url: row.get(5)?,
         file_path: row.get(6)?,
+        whiteboard_id: row.get(20)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
         diff_commit: row.get(8)?,
         pr_number: row.get::<_, Option<i64>>(9)?,
@@ -1226,6 +1439,63 @@ mod tests {
     use super::Db;
     use pragma_constants::TabKind;
 
+    /// A plain folder keeps its ids when it becomes a repository, so tabs and
+    /// agent sessions attached to its root worktree carry over.
+    #[test]
+    fn promotes_a_plain_project_in_place() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_plain_project("notes".to_string(), "/tmp/notes".to_string())
+            .expect("plain project should insert");
+        assert!(!project.is_git);
+        let root = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .remove(0);
+        assert!(root.is_main);
+        assert_eq!(root.branch, "");
+
+        db.mark_project_git(&project.id, "main")
+            .expect("project should promote");
+
+        assert!(db.project(&project.id).expect("project should read").is_git);
+        let promoted = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .remove(0);
+        assert_eq!(promoted.id, root.id);
+        assert_eq!(promoted.branch, "main");
+    }
+
+    #[test]
+    fn sets_and_clears_a_project_icon_emoji() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/icon-repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        assert_eq!(project.icon_emoji, None);
+
+        db.set_project_icon_emoji(&project.id, Some("\u{1f680}"))
+            .expect("emoji should save");
+        let stored = db.project(&project.id).expect("project should read");
+        assert_eq!(stored.icon_emoji.as_deref(), Some("\u{1f680}"));
+        let listed = db.list_projects().expect("projects should list");
+        assert_eq!(listed[0].icon_emoji.as_deref(), Some("\u{1f680}"));
+
+        db.set_project_icon_emoji(&project.id, None)
+            .expect("emoji should clear");
+        assert_eq!(
+            db.project(&project.id)
+                .expect("project should read")
+                .icon_emoji,
+            None
+        );
+    }
+
     #[test]
     fn migrates_and_cruds_projects_worktrees_and_tabs() {
         let db = Db::in_memory().expect("db should open");
@@ -1261,10 +1531,53 @@ mod tests {
             1
         );
         db.delete_tab(&tab.id).expect("tab should delete");
-        assert!(db
-            .list_tabs(&project.id)
-            .expect("tabs should list")
-            .is_empty());
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list"),
+            [] as [pragma_constants::Tab; 0]
+        );
+    }
+
+    #[test]
+    fn reuses_one_tab_per_whiteboard_under_a_single_lock() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktree = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+
+        let first = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "board", "Board".to_string())
+            .expect("whiteboard tab should insert");
+        let second = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "board", "Renamed".to_string())
+            .expect("whiteboard tab should be reused");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.kind, TabKind::Whiteboard);
+        assert_eq!(first.whiteboard_id.as_deref(), Some("board"));
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list").len(),
+            1
+        );
+
+        // A different board in the same worktree is still its own tab.
+        let other = db
+            .create_whiteboard_tab(&project.id, &worktree.id, "other", "Other".to_string())
+            .expect("second whiteboard tab should insert");
+        assert_ne!(other.id, first.id);
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list").len(),
+            2
+        );
     }
 
     #[test]
@@ -1762,10 +2075,10 @@ mod tests {
         assert_eq!(remaining.len(), 1);
         assert!(remaining[0].is_main);
         assert!(!remaining.iter().any(|w| w.id == child.id));
-        assert!(db
-            .list_tabs(&project.id)
-            .expect("tabs should list")
-            .is_empty());
+        assert_eq!(
+            db.list_tabs(&project.id).expect("tabs should list"),
+            [] as [pragma_constants::Tab; 0]
+        );
         let _ = tab;
     }
 
@@ -1841,10 +2154,11 @@ mod tests {
 
         db.delete_kanban_card(&card.id)
             .expect("delete should succeed");
-        assert!(db
-            .list_kanban_cards(&project.id)
-            .expect("cards should list")
-            .is_empty());
+        assert_eq!(
+            db.list_kanban_cards(&project.id)
+                .expect("cards should list"),
+            [] as [pragma_constants::KanbanPromptCard; 0]
+        );
     }
 
     #[test]
@@ -1860,10 +2174,11 @@ mod tests {
         db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None, None)
             .expect("card should insert");
         db.delete_project(&project.id).expect("project delete");
-        assert!(db
-            .list_kanban_cards(&project.id)
-            .expect("cards should list")
-            .is_empty());
+        assert_eq!(
+            db.list_kanban_cards(&project.id)
+                .expect("cards should list"),
+            [] as [pragma_constants::KanbanPromptCard; 0]
+        );
     }
 
     #[test]

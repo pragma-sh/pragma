@@ -1,4 +1,4 @@
-import type { GitHubBranches } from "@pragma/sdk";
+import type { GitHubBranches } from "@pragma-sh/sdk";
 
 /** Builds sorted merge-target choices without ES2023 methods missing from Hermes. */
 export function baseBranchChoices(branches: GitHubBranches | null): string[] {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 
 import { mediaKind, mediaMimeType, type MediaKind } from "@/components/media/media-path";
 import { formatBytes, useBinaryFile, type BinaryFileState } from "@/lib/binary-file";

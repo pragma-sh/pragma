@@ -5,7 +5,7 @@
 //! found by probing a candidate list against `PATH`: PowerShell 7 (`pwsh.exe`)
 //! when it is installed, and the in-box Windows PowerShell otherwise.
 //!
-//! Every default here comes from `@pragma/constants`, because the Settings UI
+//! Every default here comes from `@pragma-sh/constants`, because the Settings UI
 //! shows the same list the session layer launches from.
 
 use std::ffi::OsStr;
@@ -438,7 +438,10 @@ mod tests {
     #[test]
     fn a_blank_distro_means_the_wsl_default() {
         assert_eq!(parse_profile("wsl", Some("   ")), Some(wsl(None)));
-        assert!(on_windows(&wsl(Some("  ")), None).args.is_empty());
+        assert_eq!(
+            on_windows(&wsl(Some("  ")), None).args,
+            [] as [std::string::String; 0]
+        );
     }
 
     /// A typo must surface, not silently launch a native shell where the user
@@ -470,7 +473,7 @@ mod tests {
             launch.program,
             pragma_constants::CONSTANTS.platform.wsl.launcher
         );
-        assert!(launch.args.is_empty());
+        assert_eq!(launch.args, [] as [std::string::String; 0]);
     }
 
     /// `wsl.exe` does not exist on macOS or Linux, and a WSL profile reaches
@@ -565,7 +568,10 @@ mod tests {
     /// `cmd.exe` rejects both `-l` and `-NoLogo`.
     #[test]
     fn the_legacy_command_interpreter_takes_no_arguments() {
-        assert!(super::interactive_args("cmd.exe").is_empty());
+        assert_eq!(
+            super::interactive_args("cmd.exe"),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

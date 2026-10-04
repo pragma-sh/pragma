@@ -19,6 +19,12 @@ use crate::{CoreError, CoreResult};
 pub enum ScratchpadsRequest {
     /// Lists every managed scratchpad in the worktree, source included.
     List { root: String },
+    /// Saves a standalone HTML document under the ignored exports directory.
+    ExportHtml {
+        root: String,
+        title: String,
+        html: String,
+    },
 }
 
 /// Managed metadata stored as one JSON line in scratchpad frontmatter.
@@ -43,7 +49,49 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
     match request {
         ScratchpadsRequest::List { root } => serde_json::to_value(list(&root)?)
             .map_err(|error| CoreError::Operation(error.to_string())),
+        ScratchpadsRequest::ExportHtml { root, title, html } => {
+            serde_json::to_value(export_html(&root, &title, &html)?)
+                .map_err(|error| CoreError::Operation(error.to_string()))
+        }
     }
+}
+
+/// Writes a uniquely named standalone export through the path-validated filesystem.
+pub fn export_html(root: &str, title: &str, html: &str) -> CoreResult<String> {
+    if std::path::Path::new(root).join(".git").exists() {
+        crate::git::handle(
+            serde_json::to_value(crate::git::GitRequest::EnsurePragmaExcluded {
+                project_root: root.to_string(),
+            })
+            .map_err(|error| CoreError::Operation(error.to_string()))?,
+        )?;
+    }
+    let directory = &CONSTANTS.scratchpads.exports_directory;
+    let target = fs::resolve_in_worktree(std::path::Path::new(root), directory)?;
+    std::fs::create_dir_all(target)?;
+    let slug: String = title
+        .chars()
+        .take(80)
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let slug = if slug.is_empty() { "scratchpad" } else { slug };
+    let path = format!("{directory}/{slug}-{}.html", uuid::Uuid::new_v4());
+    fs::handle(
+        serde_json::to_value(fs::FsRequest::WriteFile {
+            root: root.to_string(),
+            path: path.clone(),
+            contents: html.to_string(),
+        })
+        .map_err(|error| CoreError::Operation(error.to_string()))?,
+    )?;
+    Ok(path)
 }
 
 /// Lists every managed scratchpad file in a worktree's scratchpad directory,
@@ -81,7 +129,7 @@ pub fn list(root: &str) -> CoreResult<Vec<ScratchpadFile>> {
 
 /// Path of a scratchpad's sibling comment thread.
 ///
-/// The name is part of the `@pragma/scratchpad-contract` file contract; keep
+/// The name is part of the `@pragma-sh/scratchpad-contract` file contract; keep
 /// it in step with `scratchpadCommentsPath` there.
 #[must_use]
 pub fn comments_path(file_path: &str) -> String {
@@ -133,6 +181,43 @@ mod tests {
     use pragma_constants::CONSTANTS;
 
     use super::{list, parse_frontmatter};
+
+    #[test]
+    fn exports_are_unique_and_gitignored() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let root = temporary.path();
+        let output = pragma_platform::process::command("git")
+            .args(["init", "--quiet"])
+            .current_dir(root)
+            .output()
+            .expect("git init");
+        assert!(output.status.success());
+        let first =
+            super::export_html(&root.to_string_lossy(), "../A plan", "<!doctype html>first")
+                .expect("first export");
+        let second = super::export_html(
+            &root.to_string_lossy(),
+            "../A plan",
+            "<!doctype html>second",
+        )
+        .expect("second export");
+        assert_ne!(first, second);
+        assert!(std::path::Path::new(&first).starts_with(&CONSTANTS.scratchpads.exports_directory));
+        assert_eq!(
+            std::fs::read_to_string(root.join(&first)).expect("read export"),
+            "<!doctype html>first"
+        );
+        let ignored = pragma_platform::process::command("git")
+            .args(["check-ignore", "--quiet", &first])
+            .current_dir(root)
+            .output()
+            .expect("check-ignore");
+        assert!(ignored.status.success());
+        assert_eq!(
+            list(&root.to_string_lossy()).expect("list"),
+            [] as [pragma_constants::ScratchpadFile; 0]
+        );
+    }
 
     fn scratchpad(id: &str, extra: &str) -> String {
         format!(
@@ -209,6 +294,6 @@ mod tests {
     fn missing_directory_lists_nothing() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let files = list(&temporary.path().to_string_lossy()).expect("list should succeed");
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [pragma_constants::ScratchpadFile; 0]);
     }
 }

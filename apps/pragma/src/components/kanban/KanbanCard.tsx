@@ -2,7 +2,8 @@ import { type KeyboardEvent, type MouseEvent, useCallback } from "react";
 
 import { GitBranch, Loader2, Trash2 } from "lucide-react";
 
-import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma/constants";
+import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma-sh/constants";
+import { splitPromptContext } from "@pragma-sh/plugin/catalog";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AgentIcon } from "@/components/agents/AgentIcon";
@@ -206,7 +207,9 @@ export function KanbanCard({
     <div className="space-y-2 rounded-lg border border-border bg-card p-3 shadow-sm" {...cardProps}>
       <KanbanCardHeader card={card} agentStatus={agentStatus} badge={badge} />
 
-      <p className="line-clamp-3 whitespace-pre-wrap text-sm">{card.prompt || "No prompt"}</p>
+      <p className="line-clamp-3 whitespace-pre-wrap text-sm">
+        {splitPromptContext(card.prompt).prompt.trim() || "No prompt"}
+      </p>
 
       <KanbanCardFooter card={card} displayAgent={displayAgent} onDelete={handleDelete} />
     </div>

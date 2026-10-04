@@ -4,10 +4,11 @@ import { Icon } from "@iconify/react";
 import { Blocks, BookOpen, Check, FolderPlus, Palette, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants } from "@pragma/constants";
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import { constants } from "@pragma-sh/constants";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
+import { System1OnboardingCard } from "@/components/ai/System1OnboardingCard";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { OnboardingFrame } from "@/components/onboarding/OnboardingFrame";
 import { PreviewVideo } from "@/components/onboarding/PreviewVideo";
@@ -15,6 +16,7 @@ import { ThemePresetGrid } from "@/components/settings/ThemePresetGrid";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { errorMessage } from "@/lib/errors";
+import { requestAddProject } from "@/lib/non-git-project";
 import { installLockedPlugin } from "@/lib/plugin-registry";
 import { installPragmaSkill, writeTheme } from "@/lib/tauri";
 import { serializeThemeFile, THEME_CHANGED_EVENT } from "@/lib/theme";
@@ -128,7 +130,10 @@ export function AiStep({ onBack, onNext }: StepProps) {
       onSkip={skip}
       title="Connect an AI provider"
     >
-      <AiAuthOptions />
+      <div className="flex w-full flex-col gap-4">
+        <System1OnboardingCard />
+        <AiAuthOptions />
+      </div>
     </OnboardingFrame>
   );
 }
@@ -153,6 +158,11 @@ export function AgentPluginsStep({ onBack, onNext }: StepProps) {
           : "Agent integrations report status, questions, and usage back into Pragma. None of the supported CLIs were found on this machine — install one later from Settings → Plugins."
       }
       icon={<Blocks className="size-6" />}
+      footnote={
+        <p>
+          Don&apos;t see your agent? Ask it to build itself an agent plugin using the Pragma skill.
+        </p>
+      }
       nextDisabled={recommended.length > 0 && packages.size === 0}
       nextLabel={recommended.length > 0 ? "Install selected" : "Continue"}
       onBack={onBack}
@@ -332,13 +342,13 @@ export function ThemeStep({ onBack, onNext }: StepProps) {
 export function ProjectStep({ onBack, onNext }: StepProps) {
   return (
     <OnboardingFrame
-      description="A project is a git checkout. Pragma creates a worktree per task inside it, so agents work in parallel without stepping on each other. Open a local checkout, clone a repo, or connect one over SSH."
+      description="A project is usually a git checkout. Pragma creates a worktree per task inside it, so agents work in parallel without stepping on each other. Open a local folder, clone a repo, or connect one over SSH."
       icon={<FolderPlus className="size-6" />}
       nextLabel="Add a project"
       onBack={onBack}
       onNext={() => {
         onNext();
-        window.dispatchEvent(new Event("pragma:create-project"));
+        requestAddProject();
       }}
       onSkip={onNext}
       skipLabel="Later"

@@ -3,7 +3,7 @@ import { AnimatePresence } from "motion/react";
 
 import { GitPullRequestCreate, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
-import type { KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma-sh/constants";
 
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";

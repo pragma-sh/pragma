@@ -9,16 +9,21 @@
     "core-model",
     "worktrees",
     "agent-board",
+    "prompt-context",
     "browser",
     "files",
     "github",
     "project-scripts",
-    "usage-limits",
+    "account-providers",
     "ai",
+    "auto-mode",
     "scratchpads",
+    "whiteboards",
     "ssh",
     "mobile",
     "keybindings",
-    "theming"
+    "theming",
+    "storage",
+    "updates"
   ]
 }

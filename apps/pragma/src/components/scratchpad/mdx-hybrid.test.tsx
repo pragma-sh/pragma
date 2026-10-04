@@ -13,7 +13,7 @@ describe("preprocessMdxForTiptap", () => {
   it("keeps markdown editable and preserves MDX regions exactly", () => {
     const source = `# Editable
 
-import { AskQuestion } from "@pragma/scratchpad/ui"
+import { AskQuestion } from "@pragma-sh/scratchpad/ui"
 
 <AskQuestion question="Choose">
 
@@ -26,7 +26,7 @@ import { AskQuestion } from "@pragma/scratchpad/ui"
     const rawBlocks = [...prepared.matchAll(/data-source="([^"]+)"/g)].map((match) =>
       decodeURIComponent(match[1] ?? ""),
     );
-    expect(rawBlocks).toEqual(['import { AskQuestion } from "@pragma/scratchpad/ui"']);
+    expect(rawBlocks).toEqual(['import { AskQuestion } from "@pragma-sh/scratchpad/ui"']);
     const opens = [...prepared.matchAll(/data-open="([^"]+)"/g)].map((match) =>
       decodeURIComponent(match[1] ?? ""),
     );

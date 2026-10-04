@@ -3,11 +3,14 @@ import type {
   AgentAttentionKind,
   AgentCatalog,
   AgentDecision,
-  PluginIconRef,
+  AgentIcon,
   AgentInput,
   AgentInterrupt,
   AgentMessage,
+  AgentMode,
   AgentModelEntry,
+  AgentPermissionMode,
+  AgentSlashCommand,
   QuestionOption,
   AgentQuestion,
   AgentReasoning,
@@ -16,18 +19,21 @@ import type {
   AgentStatus,
   CatalogAgent,
   WorkspaceSnapshot,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 export type {
   AgentAnswer,
   AgentAttentionKind,
   AgentCatalog,
   AgentDecision,
-  PluginIconRef,
+  AgentIcon,
   AgentInput,
   AgentInterrupt,
   AgentMessage,
+  AgentMode,
   AgentModelEntry,
+  AgentPermissionMode,
+  AgentSlashCommand,
   QuestionOption,
   AgentQuestion,
   AgentReasoning,
@@ -37,6 +43,13 @@ export type {
   CatalogAgent,
   WorkspaceSnapshot,
 };
+
+/** Result of `client.agents.launchOptions(...)`: what an agent can start with. */
+export interface AgentLaunchOptions {
+  slashCommands: AgentSlashCommand[];
+  modes: AgentMode[];
+  permissionModes: AgentPermissionMode[];
+}
 
 /** Result of `client.agents.launch(...)`: the resolved worktree + tab. */
 export interface AgentSessionLaunchResult {

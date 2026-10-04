@@ -1,13 +1,17 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  type AccountIdentity,
+  modeProvider,
+  slashCommandProvider,
+  type AgentMode,
   type PluginContext,
   type PluginDefinition,
   type UsageLimit,
   type UsageLimitsResult,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 /** Lets Claude Code's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
@@ -27,6 +31,34 @@ const reasoningFull = [
 ];
 const reasoningStandard = reasoningFull.slice(0, 3);
 
+/** Built-in commands worth starting a session with; project/user commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "init", description: "Initialize a CLAUDE.md with codebase documentation" },
+  { name: "review", description: "Review a pull request", argumentHint: "[pr]" },
+  { name: "security-review", description: "Security review of the pending changes" },
+];
+/** Project first so a project command shadows a user one with the same name. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: ".claude/commands", layout: "files" as const },
+  { dir: ".claude/skills", layout: "skills" as const },
+  { dir: "~/.claude/commands", layout: "files" as const },
+  { dir: "~/.claude/skills", layout: "skills" as const },
+];
+const AGENT_SOURCES = [
+  { dir: ".claude/agents", layout: "files" as const, nameFromFrontmatter: true },
+  { dir: "~/.claude/agents", layout: "files" as const, nameFromFrontmatter: true },
+];
+/** Claude Code's own name for the default session agent (no `--agent` flag). */
+const DEFAULT_MODE = "claude";
+/** Built-in agents that are utilities, not a way to run a session. */
+const HIDDEN_AGENTS = new Set(["statusline-setup"]);
+/**
+ * `--agent` with an unknown name makes Claude Code print every agent it can
+ * start — built-in, user, project, and plugin — and exit before any model
+ * call, which makes it the authoritative (and cheap) agent list.
+ */
+const AGENT_PROBE = "claude -p --agent __pragma_list_agents__ ok 2>&1";
+
 /**
  * Pragma plugin for Claude Code, bundled to `dist/pragma-plugin.mjs` and loaded
  * by the pragma-plugins sidecar, the desktop webview, and the `pragma-watch`
@@ -36,19 +68,31 @@ const reasoningStandard = reasoningFull.slice(0, 3);
 export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
   name: "Claude Code",
   description: "Launch Claude Code from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "claude-code",
-      title: "Claude Code",
+  accounts: defineAccounts([
+    {
+      provider: "anthropic",
+      agent: "claude-code",
       dashboardUrl: "https://claude.ai/new#settings/usage",
       iconPath: "assets/claude-code.svg",
-      primaryLimitId: "five-hour",
-      // Each refresh spawns a headless `claude -p` session that queries Anthropic's
-      // strictly rate-limited OAuth usage endpoint; polling faster causes 429s.
-      refreshIntervalMs: 300_000,
-      load: loadClaudeUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["claude", "auth", "login"],
+        instructions: "Finish signing in to Claude in the browser tab that opens.",
+      },
+      // Claude Code keeps every credential and setting under its config dir, so
+      // pointing it at a Pragma-owned one gives each account its own login.
+      env: (home) => ({ CLAUDE_CONFIG_DIR: home }),
+      credentialPath: claudeCredentialPath,
+      identify: identifyClaudeAccount,
+      usageLimits: {
+        primaryLimitId: "five-hour",
+        // Each refresh spawns a headless `claude -p` session that queries
+        // Anthropic's strictly rate-limited OAuth usage endpoint; polling
+        // faster causes 429s.
+        refreshIntervalMs: 300_000,
+        load: loadClaudeUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     createTuiWatcher({
       agent: "claude-code",
@@ -62,15 +106,49 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       name: "Claude Code",
       icon: () => null,
       iconPath: "assets/claude-code.svg",
-      launch: { command: ["claude", "--permission-mode", "auto"] },
+      launch: { command: ["claude"] },
+      // `claude --model` takes aliases that always resolve to the newest model in
+      // the family; `canonicalId` names that model so auto mode can find its
+      // benchmarks. Update it when an alias moves to a new release.
       models: [
-        { id: "sonnet", name: "Sonnet", reasoning: reasoningFull },
-        { id: "opus", name: "Opus", reasoning: reasoningStandard },
-        { id: "fable", name: "Fable", reasoning: reasoningFull },
-        { id: "haiku", name: "Haiku", reasoning: reasoningStandard },
+        {
+          id: "sonnet",
+          name: "Sonnet",
+          canonicalId: "anthropic/claude-sonnet-5-5",
+          reasoning: reasoningFull,
+        },
+        {
+          id: "opus",
+          name: "Opus",
+          canonicalId: "anthropic/claude-opus-5-5",
+          reasoning: reasoningStandard,
+        },
+        {
+          id: "fable",
+          name: "Fable",
+          canonicalId: "anthropic/claude-fable-5-1",
+          reasoning: reasoningFull,
+        },
+        {
+          id: "haiku",
+          name: "Haiku",
+          canonicalId: "anthropic/claude-haiku-4-5",
+          reasoning: reasoningStandard,
+        },
       ],
-      permissionModes: [],
-      // `--permission-mode auto` auto-approves every shell command, so a
+      // First entry is the default: `auto` keeps unattended launches moving.
+      permissionModes: [
+        { id: "auto", name: "Auto", description: "Classifier approves safe actions" },
+        { id: "manual", name: "Ask before actions" },
+        { id: "acceptEdits", name: "Accept edits" },
+        { id: "plan", name: "Plan mode", description: "Read-only planning" },
+        { id: "dontAsk", name: "Don't ask", description: "Deny anything not pre-approved" },
+        { id: "bypassPermissions", name: "Bypass permissions" },
+      ],
+      // `--agent` starts the session as one of the user's or project's agents.
+      modes: loadClaudeAgents,
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES),
+      // `--permission-mode auto` (the default) auto-approves every shell command, so a
       // command-approval attention can never be raised for a launched
       // session (`pragma-cli agent verify` `command-allow`/`command-deny`):
       // the model runs the tool and the turn settles. The blocking
@@ -81,13 +159,89 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: (reasoningId: string) => ["--effort", reasoningId],
-        permissionMode: () => [],
+        permissionMode: (permissionModeId: string) => ["--permission-mode", permissionModeId],
+        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
       },
     }),
   ],
 });
 
 export default claudeCodeAgentPlugin;
+
+/** Where Claude Code keeps a login's token: the macOS Keychain, else the config dir. */
+export function claudeCredentialPath(home: string | null): string {
+  if (globalThis.process?.platform === "darwin") return "macOS Keychain (Claude Code-credentials)";
+  return `${home ?? "~/.claude"}/.credentials.json`;
+}
+
+/** Reports the signed-in Claude account from `claude auth status --json`. */
+export async function identifyClaudeAccount(ctx: PluginContext): Promise<AccountIdentity | null> {
+  const cwd = ctx.project?.path ?? "/tmp";
+  const [result] = await ctx.sdk.exec.run({ cwd, commands: ["claude auth status --json"] });
+  if (!result || result.status !== 0) {
+    return null;
+  }
+  return parseClaudeAuthStatus(result.stdout);
+}
+
+/** Parses `claude auth status --json`; a signed-out config dir yields null. */
+export function parseClaudeAuthStatus(stdout: string): AccountIdentity | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!isRecord(value) || value.loggedIn !== true) {
+    return null;
+  }
+  const email = typeof value.email === "string" ? value.email : undefined;
+  const orgId = typeof value.orgId === "string" ? value.orgId : undefined;
+  const id = orgId && email ? `${orgId}:${email}` : (orgId ?? email);
+  if (!id) {
+    return null;
+  }
+  const plan = typeof value.subscriptionType === "string" ? value.subscriptionType : undefined;
+  return {
+    id,
+    ...(email ? { email } : {}),
+    ...(typeof value.orgName === "string" ? { name: value.orgName } : {}),
+    ...(plan ? { plan: plan.charAt(0).toUpperCase() + plan.slice(1) } : {}),
+  };
+}
+
+/** Lists the agents `--agent` accepts, falling back to agent files on disk. */
+export async function loadClaudeAgents(ctx: PluginContext): Promise<AgentMode[]> {
+  const cwd = ctx.project?.path ?? "/tmp";
+  const [result] = await ctx.sdk.exec
+    .run({ cwd, commands: [AGENT_PROBE] })
+    .catch(() => [undefined]);
+  const agents = parseClaudeAgents(result?.stdout ?? "");
+  if (agents.length > 0) return agents;
+  return modeProvider([{ id: DEFAULT_MODE, name: "Default" }], AGENT_SOURCES)(ctx);
+}
+
+/**
+ * Parses the `Available agents: a, b, c` line Claude Code prints for an unknown
+ * `--agent`. The default agent comes first as "Default"; utility agents are dropped.
+ */
+export function parseClaudeAgents(output: string): AgentMode[] {
+  const list = /Available agents:\s*(.+)/.exec(output)?.[1];
+  if (!list) return [];
+  const ids = list
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id && !HIDDEN_AGENTS.has(id) && id !== DEFAULT_MODE);
+  return [{ id: DEFAULT_MODE, name: "Default" }, ...ids.map((id) => ({ id, name: agentName(id) }))];
+}
+
+function agentName(id: string): string {
+  return id
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join(" ");
+}
 
 /** Loads plan usage through Claude Code's structured `/usage` control request. */
 export async function loadClaudeUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {

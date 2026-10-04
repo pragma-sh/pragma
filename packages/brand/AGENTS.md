@@ -1,4 +1,4 @@
-# `@pragma/brand`
+# `@pragma-sh/brand`
 
 The Pragma mark as vector geometry, plus the colour treatments it is painted
 in. Source of truth for every rendered Pragma icon.

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { GripVertical, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import type { KanbanPromptCard, KanbanPromptStatus } from "@pragma/constants";
+import type { KanbanPromptCard, KanbanPromptStatus } from "@pragma-sh/constants";
 
 import { KanbanCard } from "@/components/kanban/KanbanCard";
 import { KanbanCompletionDialog } from "@/components/kanban/KanbanCompletionDialog";

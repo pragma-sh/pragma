@@ -1,5 +1,5 @@
-import { defineWebView, useWebViewPayload } from "@pragma/plugin";
-import { Button } from "@pragma/plugin/ui";
+import { defineWebView, useWebViewPayload } from "@pragma-sh/plugin";
+import { Button } from "@pragma-sh/plugin/ui";
 
 interface ReportPayload {
   message: string;

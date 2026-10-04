@@ -1,5 +1,5 @@
-import type { GitHubPullRequest } from "@pragma/constants";
-import { PragmaGatewayError, type AiJob, type GitHubBranches } from "@pragma/sdk";
+import type { GitHubPullRequest } from "@pragma-sh/constants";
+import { PragmaGatewayError, type AiJob, type GitHubBranches } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 

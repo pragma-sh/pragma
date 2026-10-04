@@ -26,6 +26,7 @@ apps/pragma/
 │   │   ├── brand-icons.ts/json  # Curated offline icon subset (lucide + simple-icons)
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
+│   ├── generated/               # Git-ignored codegen output (emoji-catalog.ts; `bun run generate`)
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
 │   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
     │   ├── state/
@@ -35,6 +36,9 @@ apps/pragma/
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
+│   │   ├── agent-progress-store.ts # System 1 progress/activity per agent (sidebar)
+│   │   ├── worktree-activity-store.ts # Commit/push/PR actions in flight per worktree
+│   │   ├── sidebar-preferences.ts  # Compact worktree rows (localStorage)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
@@ -61,7 +65,6 @@ apps/pragma/
     ├── installer-hooks.nsh      # NSIS hooks: stop the detached sidecars before install/uninstall
     ├── installer-hooks.test.ts  # Guards NSIS sidecar coverage and safe MSI process handling
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
-    ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
     ├── icons/                   # Production app icons
     └── icons-dev/               # Dev icons
@@ -71,7 +74,7 @@ apps/pragma/
 
 1. **Rust** (`src-tauri/src/lib.rs`): write `#[tauri::command] fn my_command(...) -> T`
    and register it in `tauri::generate_handler![...]`. Prefer payload/return types from
-   `@pragma/constants` so the contract is shared.
+   `@pragma-sh/constants` so the contract is shared.
 2. **TS** (`src/lib/tauri.ts`): add a typed wrapper
    `export function myCommand(...): Promise<T> { return invoke<T>("my_command", ...) }`.
 3. **Components** import the wrapper — never call `invoke()` directly.
@@ -211,7 +214,7 @@ also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports 
   Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
   authoritative; merged values equal to a stylesheet default are also omitted.
 - Plugins may contribute selectable palettes with `defineTheme` and `definePlugin({ themes })`.
-  Theme Settings shows bundled/global contributions at global scope and adds active-project
+  Theme Settings shows global contributions at global scope and adds active-project
   contributions at project scope. Applying one copies its light/dark token values into
   `.pragma/theme.json`; runtime theme resolution never depends on plugin remaining installed.
 - The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
@@ -281,7 +284,7 @@ secret/PKCE), `gh` CLI detection/adoption, `origin`→`owner/repo`, fetch+ahead/
 conflict-aborting pull/sync, push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
 GitHub git operations must run through the owning host's `git` RPC so remote project
 paths are evaluated on the remote host, not the desktop client. The
-`oauthClientId`, scopes, and endpoint URLs are in `@pragma/constants` (`github` block);
+`oauthClientId`, scopes, and endpoint URLs are in `@pragma-sh/constants` (`github` block);
 the setup-skip flag persists in the `settings` table (`github.setupDismissed`).
 
 Auth state is held by `state/github-context.tsx` (`useGitHub`) and gates both the
@@ -301,6 +304,16 @@ conflict-resolution changes. A PR review opens a `pr-review` `TabKind`
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
 (fed lazily near the viewport by `github_pr_file_diff`), and inline thread resolve/unresolve.
+Each diff pane (`github/ReviewFileDiff`) is drag-resizable (`hooks/use-vertical-resize.ts`),
+and polls git only while near the viewport. A pane is `overflow: hidden` until the user clicks
+into it, so the wheel reaches the page natively. Don't go back to a JS wheel redirect: a
+non-passive wheel listener pushes every scroll through the main thread. Refreshes keep
+unchanged file/thread references (`github/review-data.ts`) so the memoized file sections
+don't all re-render. Comment navigation goes through `settleCommentIntoView`
+(`github/review-scroll.ts`), which re-centers the comment in its pane and the pane on screen
+each frame until it holds still. Don't use `scrollIntoView` (smooth or `EditorView`'s)
+here: the diff is virtualized, so it aims at estimated line heights and overshoots, and
+CodeMirror's version also scrolls every ancestor.
 
 Each `ReviewThreadCard` also offers two fix affordances: **Fix** (opens
 `github/FixCommentDialog` to launch an agent on that one comment) and **Add to fix it
@@ -352,6 +365,35 @@ from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the stor
 on-screen and when a `done` report arrives for an already-visible tab. Closing a tab
 drops all its status (`removeAgentStatusForTab`).
 
+**Detailed sidebar rows.** Agents are listed only inside their worktree's row — there is no
+separate flat agents list. Worktree rows are **detailed** by default (`WorktreeRowFrame`'s
+`details` slot: a GitHub mark + open-PR number, git action, one line per agent with an
+always-drawn progress bar floored at 10%) and fold back to the one-line layout with the
+**Compact rows** switch in Settings → Sidebar (`components/settings/SidebarSection.tsx` over
+`state/sidebar-preferences.ts`, a persisted per-device `createToggleSetStore` — deliberately
+not `config.json`). The title line never changes shape between the two. Status colors and labels live once in
+`lib/agent-status-style.ts`, shared by `AgentStatusDot` and the progress bars.
+
+**System 1 agent progress is owned by Pragma, not the plugins.** `state/agent-progress-store.ts`
+listens to every rich message (`subscribeAgentMessageEvents` — the same stream Pragma Go renders) and,
+per agent, debounces (`system1.agentProgress.debounceMs`), keeps one request in flight (a
+message landing meanwhile re-runs it once), and pauses for `errorBackoffMs` after a failure.
+It sends the first user prompt, a differing latest follow-up, the last assistant reply, and
+recent tool names through `system1_agent_progress` (Rust adds the key, the activity verbs,
+and the progress levels from `CONSTANTS.system1.agentProgress`) to the `pragma-ai
+agent-progress` sidecar. An agent whose status disappears is forgotten, so its next prompt
+is a new task. The tracker is mounted once, in `ProjectSidebar`, and only runs while a
+System 1 key is configured.
+
+**Git actions report like agents.** Wrap commit / push / PR / merge work in
+`trackWorktreeActivity(worktreeId, kind, work)` (`state/worktree-activity-store.ts`); the
+sidebar shows it while it runs and briefly after it settles. Its wording per kind and
+state is the table in that file. New call sites that commit, push, or open a PR should be wrapped
+too. Between actions, a row says **Ready for PR** while an AI-drafted PR waits to be
+opened: the PR form is persisted per worktree by `state/pull-request-draft-store.ts`, whose
+`drafted` mark is set only by an AI draft (Commit & PR or Shift+Tab), survives edits, and
+clears when the PR opens or the form is emptied. Write PR form state through that store.
+
 **Alerts (chime + system notification) are gated by a latch separate from the dot
 store.** `lib/agent-alert.ts` keeps an `alertedStatusByKey` latch keyed by
 worktree+tab+agent: a `done`/`attention` alerts at most once
@@ -362,7 +404,7 @@ re-notifying. **Viewing a tab latches every `done`/`attention` status it current
 shows as seen** — the `visibleTabIds` effect reads `agentStatusesForTab` and latches
 them before `clearDoneStatusForTab` when a tab comes on screen.
 
-**Alert wording is templated in `@pragma/constants`, not written inline.**
+**Alert wording is templated in `@pragma-sh/constants`, not written inline.**
 `lib/agent-notification-text.ts` renders `agentStatus.notificationText` into a title
 (agent name + what it wants) and a body naming the project, worktree, and tab the report
 came from — `workspace-context` resolves those names with `describeAgentLocation` and
@@ -386,13 +428,13 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
-plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
+plugins use `@pragma-sh/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
 Copilot CLI agent definitions live in their host-tool plugin packages as the single source
-of truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
-resource directory. Desktop and `pragma-plugins` discover them through the same manifest
-path as global/project plugins; no built-in registry seam exists. Agent definitions
-with the same plugin id obey scope precedence (`project > global > bundled`), so a local
-development plugin replaces its shipped copy instead of contributing duplicate agents.
+of truth. None ships as an active Pragma plugin: onboarding offers integrations for agent
+CLIs found on the machine, and only user-approved installs register global plugin paths.
+Desktop and `pragma-plugins` discover global/project plugins through `.pragma/config.json`.
+Agent definitions with the same plugin id obey scope precedence (`project > global`), so a
+project plugin replaces its global copy instead of contributing duplicate agents.
 Agent definitions carry `id`, `name`, optional `iconPath`, `launch.command`, optional model
 providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
@@ -412,14 +454,16 @@ matching `PRAGMA_CLI` and prepend its directory to `PATH`; production still warn
 Agent definitions may also declare typed `excludeFeatures`; this metadata crosses the
 shared catalog so `agent verify` skips unsupported optional capability groups.
 
-Model providers may be static arrays or async plugin functions. Pragma resolves model
-lists lazily when the selector submenu is hovered/focused and caches the last result.
+Model providers may be static arrays or async plugin functions. The shared selector is one
+nested dropdown (`NestedDropdown`): hovering an agent reveals a searchable model submenu,
+and hovering a model that has reasoning reveals a regular effort submenu. It resolves
+model lists lazily when an agent submenu is hovered and caches the last result.
 Host-specific CLI parsing belongs in the plugin agent's model provider, not Rust/Tauri
 IPC. There is no provider-level Auto model; when a model has reasoning entries, the
-model-only choice is shown as Auto reasoning. Built-in agents use the plugin SDK exec
-service, which runs in the active project/worktree context.
+model-only choice is shown as Auto reasoning. Agent plugins use the plugin SDK exec service,
+which runs in the active project/worktree context.
 
-Built-in agent icons live in each agent plugin package's `assets/` directory and are
+Agent icons live in each agent plugin package's `assets/` directory and are
 referenced as Vite asset URLs passed through `iconPath`; do not store these host-tool
 brand assets in `apps/pragma`. External plugin agents may pass a browser URL, an
 absolute filesystem path, or a plugin-dir-relative icon path; relative paths resolve
@@ -433,11 +477,11 @@ must not wait for GitHub or execute every candidate CLI with `--version`: either
 the final onboarding step indefinitely.
 
 Manual terminal launches get a second chance after onboarding: when the submitted command
-matches an official agent whose active plugin still comes from bundled scope, the desktop
-offers to install its reviewed integration while letting the command continue. A global or
-project plugin record suppresses the prompt because it overrides the bundled launcher. The
-user can dismiss one run or persist `plugins.agentCommandPromptDismissed` in the settings
-table with **Don't show again**.
+matches an official agent without a loaded integration, the desktop offers to install its
+reviewed integration while letting the command continue. A loaded global/project plugin
+that contributes the same agent executable suppresses the prompt. The user can dismiss one
+run or persist `plugins.agentCommandPromptDismissed` in the settings table with **Don't show
+again**.
 
 Both agent-plugin install dialogs close before installation starts. Installation continues
 in the background; success or failure is reported later through a toast, so npm/network or
@@ -475,7 +519,10 @@ The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns
 pairing; the project sidebar has no phone shortcut. `PragmaGoSettings` toggles the tunnel
 and renders a `PairingPayload` QR (via `uqr`, offline). Its separate browser-pairing card
 persists `gateway.webEnabled` in global `.pragma/config.json`; the gateway serves `/web`
-only while this explicit setting is true. Encode/validate helpers live in
+only while this explicit setting is true. The **Keep awake** switch persists
+`gateway.keepAwake` (default `constants.gateway.keepAwake`, on); the tunnel supervisor
+holds a `pragma_platform::power::SleepInhibitor` while the tunnel runs and the setting is
+on, and `tunnel_sync_keep_awake` makes it re-read the setting without a restart. Encode/validate helpers live in
 `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 "Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
@@ -497,6 +544,8 @@ project. It replaced the separate `GitHubSetupModal`, `AiSetupModal`, and
   `ThemePresetGrid` that Settings → Theme also renders, and
   `useRecommendedAgentPlugins` (the agent-CLI probe the old modal owned). A step is
   copy plus layout, never a second implementation of the thing it configures.
+- **The agent-plugin step points unsupported-agent users to the Pragma skill.** Keep that
+  self-service route visible even when no supported CLI is detected.
 - **Preview clips stream** from `constants.onboarding.mediaBaseUrl` (the marketing
   site's `public/media`) instead of being bundled: the two clips are ~12 MB and play
   once. `PreviewVideo` falls back to a placeholder when the site is unreachable.
@@ -535,24 +584,85 @@ automations context rather than `config.json`, so like Theme it renders past the
 config load state. `openSettings(section?)` deep-links a section (the command
 palette's "Open automations" uses it).
 
+**Storage** (`components/settings/storage/`) also renders past the config load state:
+it scans disk, not `config.json`. Global scope boxes every project, project scope the
+current project's worktrees. `useStorageScan` runs `constants.storage.scanConcurrency`
+host scans at a time **only while mounted** — unmounting cancels the running ones on
+the host — and `storage-model.ts` turns the results into treemap boxes without counting
+a byte twice (a large file inside an ignored folder is inside that folder's box).
+`StorageReminderWatcher` (mounted in `App.tsx`) raises the global `storage.reminder`
+toast; which occurrence was dismissed is a cosmetic per-install localStorage value.
+The treemap is drawn on a `<canvas>` in GrandPerspective's style — its fixed palette
+deliberately ignores the theme — from the host's per-worktree `tree` (every top-level folder's total, plus the root's
+loose files). `storage-model.ts` draws only folders of `TREEMAP_MIN_FOLDER_BYTES`
+(15 MB) or more, whole, and never individual files.
+
 Plugins add React settings sections with `defineSettingsPage` and
 `definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
 render under the standard plugin boundary, and use the same host hooks as sidebar tabs.
+They are **not** top-level navigation items: `PluginsSection` nests each plugin's pages
+under that plugin's row in the Plugins list (matched by `package.json` name, falling back
+to the config specifier), and opening one swaps the Plugins pane for the page behind a
+"Plugins" back button. Only the current scope's pages nest, since the list shows only that
+scope's configured plugins; a page whose plugin has no row in this scope still gets a row
+of its own so its settings stay reachable.
+
+**`useSdk` throws until the gateway is up, and the gateway spawns lazily.** Any
+contribution that calls it — a sidebar card is the common case, since it renders at
+startup — throws during that window, so `RenderPluginContribution` resets the plugin error
+boundary on SDK connectivity as well as the caller's reset key. The reset clears the caught
+error without remounting healthy child subtrees; only a contribution that actually crashed
+renders afresh, so component-local state in working plugins survives the connectivity flip.
+Without it the boundary latches a startup transient as a permanent "Plugin … crashed.
+Pragma SDK is not connected yet" card, even though `useRuntimeSdk` retries every 2s and
+connects seconds later. A crash card that _survives_ connection is a real failure: check the
+console for `plugin SDK bridge: gateway unavailable, retrying`.
+
+**AI** is in `PROJECT_SECTIONS` and holds both the AI providers and System 1
+(`System1Section.tsx`). Global scope shows the connected providers, the System 1 connection (`components/ai/System1ConnectionForm.tsx`, shared with the
+onboarding AI step's `System1OnboardingCard`) and the global `automode.md` editor;
+project scope shows only that project's `automode.md`. The key is written through
+`system1_set_api_key` and is never read back — the UI only sees `System1Status`, cached
+in `state/system1.ts` so every picker shows or hides **Auto** together. `system1.baseUrl`
+goes through the page's queued `persist`; onboarding (no Settings page mounted) patches
+the global file with `saveGlobalSystem1Settings`.
 
 **Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
 `other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
 `updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default
 to `http://localhost:3000/api/updates`; production uses `https://pragma-app.sh/api/updates`.
 `InstallUpdateButton` sits above the project switcher when a shipped-into-the-app
-component is behind. Reload writes a UI overlay version marker; restart always launches
-the OS installer named by the manifest. Release CI packages `dist/` as a tar archive for
+component is behind. Reload writes a UI overlay version marker; restart installs the
+verified native installer **in place and relaunches** (`install_restart_update` in
+`updates.rs`, OS work in `pragma_platform::install`): macOS stages the `.app` out of the
+read-only, Finder-less mounted DMG next to the bundle the app runs from, then a detached
+helper swaps it in by rename after exit and `open`s it; Windows runs the NSIS setup `/S`
+after exit and relaunches; Linux installs the `.deb`/`.rpm` through `pkexec` before
+quitting and relaunches. The app quits itself ~750ms after returning
+`{ relaunching: true }`; the helper logs to `install.log` beside the downloaded
+installers. When in place is impossible (not a bundle, read-only destination, no
+`pkexec`, prompt cancelled, `.msi`) it falls back to opening the installer and returns
+`fallbackReason`, which the toast shows. Bytes reach the installer only after the sha256
+and minisign checks. The relaunched app replaces the old `pragma-server` only if its
+hello `buildId` differs from the bundled binary's hash (see `crates/pragma-client`).
+Under today's linked release train the protocol version — and so the server binary —
+changes on every desktop release, so in practice every restart update restarts it. Release CI packages `dist/` as a tar archive for
 React-only releases. Rust extracts it under the instance update directory and serves only
 that tree through the private `pragma-ui` protocol; subsequent launches navigate back to
 the installed overlay. A `.pending` marker is removed only after `UpdatesProvider` mounts;
 an overlay that fails before that point is deleted on next launch so bundled UI recovers.
 Do not broaden that protocol to arbitrary app-data paths. Every production asset and the
 manifest binding its version/apply mode/URL are minisign-verified against
-`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. Linux selects `.deb` vs `.rpm`
+`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. **That key and every `.sig` are
+base64-wrapped minisign boxes** — the form `tauri signer generate` and `tauri signer sign`
+emit, starting `dW50cnVzdGVk…` — and `minisign` parses only the unwrapped
+`untrusted comment:` text, so `minisign_box_text` unwraps both before parsing. 0.4.0
+shipped without that step and rejected every update with `invalid update public key:
+Missing encoded key in public key`; its tests had signed in raw minisign form and never
+met a real key. `verifies_a_real_tauri_signed_release_manifest` pins the real format with
+the 0.4.0 manifest and CI's signature under `src/testdata/updates/`. A local release build
+needs the variable exported, or it compiles in an empty key and refuses every update:
+`PRAGMA_UPDATE_PUBLIC_KEY="$(cat <the .key.pub tauri signer generate wrote>)"`. Linux selects `.deb` vs `.rpm`
 from its package family; AppImage sessions are deliberately not offered a restart update
 until replacement can be atomic. Any change outside `apps/pragma/src/` produces restart
 metadata and platform installers.
@@ -658,6 +768,22 @@ best-effort. Fanout snapshots are host-wide, so tab adoption filters each fanout
 `projectId`; it also enforces that a tab's project matches its worktree and repairs legacy
 cross-project rows from older builds.
 
+## Account providers
+
+The toolbar's `components/accounts/AccountProvidersMenu.tsx` replaced the usage-limits
+popover. All state is host-owned and read through `accounts_rpc` (routed to the project's
+host) into `state/accounts-store.ts`, one shared store per project that polls usage once per
+account while subscribed. The store itself (`ProjectAccounts`), the provider → account views,
+and the usage-limit helpers live in `@pragma-sh/accounts-view`, shared with Pragma Go —
+`state/accounts-store.ts` only keys stores by project and adapts them to React, and
+`lib/usage-limits.ts` only maps severity onto Tailwind classes. Binding resolution stays on
+the host (`effective`, `loginKeys`) — never re-derive it here. Every agent launch passes the bound accounts' env to its PTY spawn: `startAgentInTab`
+through `terminalManager.setSpawnEnv`, background launches directly; `resolveAgentLaunchEnv`
+never blocks a launch for more than 5 s. Settings → Account Providers
+(`components/settings/AccountsSection.tsx`) renders the menu's own
+`components/accounts/ProviderSection.tsx` with `wide` + `manage` — keep the two one UI, never
+a second Settings-only layout. The page pins the chips' write scope via `rowActions(…, scope)`.
+
 ## Remote agent session launch
 
 `control.rs` handles the brokered `agentSessionLaunch` control method: it resolves or
@@ -688,17 +814,19 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 (`cargo build -p pragma-server`, `cargo build -p pragma-gateway`, plus copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
-it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`bun run --filter pragma sidecar:server` before `cargo check` because Tauri validates
+`externalBin` paths during compilation. Use the package script rather than bare `bash`
+so Windows resolves Git Bash instead of WSL's launcher.
+Release jobs run natively on each architecture, including `windows-11-arm`, so the host
+triple names and builds matching Rust and Bun sidecars instead of cross-compiling only
+the app shell.
 `tauri:dev` also runs `web:stage` before Tauri starts so the gateway receives the latest
 Pragma Go browser bundle in its copied debug resources. Staging after startup is too late
 because the gateway loads that manifest once.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
-by the same script. Shipped plugin packages are staged under `resources/plugins/` using
-`CONSTANTS.plugins.bundledDirName`; staging is serialized because pre-push and Tauri dev
-may invoke it concurrently. While `tauri dev` is running, use
-`bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
-frontend mtime poll then hot-reloads the staged bundle.
+by the same script. Agent integration plugins are installed separately by users and are
+never copied into app resources.
 
 **The Windows installer must stop the sidecars, not just the app.** Windows locks a
 running executable's image file, and Pragma's sidecars outlive the window on purpose —
@@ -737,8 +865,8 @@ runs never block on it. None of this touches runtime: the macros exist only insi
 **Anything the build writes into a watched directory will restart `tauri dev`.** The
 watcher covers `src-tauri` _and_ every Cargo path dependency (`packages/constants`,
 `crates/*`), and it reacts to the write itself, not to a content change. Because
-`tauri:dev` stages sidecars, restages bundled plugins, and regenerates constants
-immediately before starting `tauri dev`, each of those can kill the app and force a full
+`tauri:dev` stages sidecars and regenerates constants immediately before starting
+`tauri dev`, each can kill the app and force a full
 rebuild — on Windows the relink then collides with the still-running `pragma.exe`, which
 holds a lock on its own binary.
 
@@ -746,7 +874,7 @@ The two halves are fixed differently, and the boundary was measured rather than 
 
 - **Inside `src-tauri`** — ignore it in `.taurignore` or `src-tauri/.gitignore`. The
   repo-root `.gitignore` does **not** work; the watcher never reads it. `binaries/` and
-  `resources/plugins/` are ignored for exactly this reason.
+  `resources/web/` are ignored for exactly this reason.
 - **Outside `src-tauri`** — ignoring is not available: a `**/src/generated/` pattern in
   `.taurignore` did not stop `packages/constants/src/generated/constants.ts`, and neither
   did a `.gitignore` placed inside that package. Such a generator must instead **not
@@ -769,6 +897,16 @@ release-built dev app keeps its own per-worktree instance.
   `<app_data_dir>/<channel>`. The app hands the channel to the server via
   `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
   `daemon.sock` for SSH streamlocal compatibility.
+- **The OS-level single-instance guard must key off the channel too, not the bare
+  bundle identifier.** `tauri-plugin-single-instance` (Linux + Windows only, wired in
+  `run()` in `lib.rs`) defaults to deduping on `Config::identifier` alone
+  (`com.pragma.app`), which every dev worktree shares with production — a second dev
+  checkout would redirect into the first instead of starting its own. On Linux,
+  `Builder::dbus_id` lets us scope the D-Bus service name to
+  `"{identifier}.{channel}"`. On Windows the plugin hardcodes its named mutex to
+  `Config::identifier` with **no** override in its public API, so there the guard is
+  only installed when the channel is `pragma_protocol::PROD_CHANNEL`; every dev
+  worktree runs unguarded on Windows rather than colliding.
 
 **Remote projects use the same host-server protocol through an SSH streamlocal
 bridge.** `ssh_host::connect_remote_project` probes the remote project, ensures a
@@ -802,12 +940,23 @@ Mode) **must** be real menu items — the webview otherwise swallows chords like
 `install_workspace_menu` builds them once into a `WorkspaceMenuItems` struct (one struct,
 not a growing argument list — clippy's `too_many_arguments` caps it at seven), then hands
 that to `install_macos_workspace_menu` or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
-share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
-it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
-generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated
+share Ctrl-based chords. The non-macOS arm builds its **own leading `Pragma` submenu**
+rather than appending to `Menu::default`'s `window` one: `Menu::default` gives Linux no
+File submenu at all and Windows' carries a generated id, and appending left "Settings…"
+as the last entry of an unrelated menu — which on Linux reads as "there is no way to open
+settings". Keep that arm gated
 `#[cfg(not(target_os = "macos"))]`, never `#[cfg(target_os = "linux")]`: the latter
 silently drops every accelerator on Windows _and_ trips `-D warnings` there, since all
 five bindings then go unused.
+
+**Settings must never depend on the native menu alone.** Outside macOS the menu bar is
+drawn inside the window and several Linux desktops (and any GTK build with the menu bar
+hidden) never show it, so Settings also has a gear button in the project-sidebar footer,
+an "Open settings" command-palette entry, and a real `openSettings` keybinding
+(`⌘,`/`Ctrl+,`) handled in the webview. `menu_accelerator` therefore returns `None` for
+`settings.open` off macOS, and `use-shortcuts.ts` only defers that chord to the native
+menu when the platform is `mac` (`MAC_ONLY_NATIVE_MENU_ACTIONS`) — otherwise the two would
+both claim it.
 
 ## Deep links (`pragma://open`)
 
@@ -823,6 +972,19 @@ event. `workspace-context` parses it with `parseNewSessionDeepLink` (`lib/deep-l
 auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new-session`
 window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
 deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
+
+**On Linux and Windows a deep link only reaches a _running_ app through
+`tauri-plugin-single-instance`.** macOS hands the URL to the app that already owns the
+scheme; the other two just execute the binary again, so without that plugin every
+`pragma://` link cold-starts a **second** Pragma — which shows an empty duplicate window,
+loses the link, and collides with the running instance over the server lock
+(`pragma-server is already running (lock held at ...)`). It is registered **first** in the
+builder chain (it decides primacy before anything else initialises) and gated
+`#[cfg(any(target_os = "linux", windows))]`, because on macOS a single-instance guard would
+be the bug rather than the fix. Its `deep-link` feature re-emits the forwarded URL through
+the deep-link plugin's own `on_open_url`, so all three platforms converge on one code path
+— which is why the single-instance callback only raises the window and must **not** emit
+`DEEP_LINK_EVENT` itself, or every link is handled twice.
 
 `pragma://install-plugin?package=<npm-name>` opens install review. Package name is only a
 selector: app resolves exact version, integrity, cached manifest, and command from official
@@ -898,18 +1060,41 @@ before both xterm and PTY resize — fullscreen TUIs redraw the entire grid per
 interaction, so unbounded sizes regress latency.
 
 **Wheel reports are renderer-response-paced** while a TUI has mouse tracking on. Every wheel
-event reaches xterm so trackpad pixel deltas keep accumulating; the first generated report is
-sent immediately, then only the latest report waits until response bytes finish parsing and
-`terminal.onRender` confirms WebGL painted the next frame. The write callback alone is not
-backpressure: it fires before rendering.
-Never release several reports per redraw: macOS trackpad momentum then outruns fullscreen TUI
-rendering again and eventually starves the webview. A 250ms watchdog applies only when the prior
-report produces no output. Once response bytes arrive, no further report is admitted while they
-wait in xterm's parser; a separate short render watchdog covers a missing `onRender`. Sensitivity is 1 while mouse tracking is active (each
-threshold crossing is one report) and 3 for local scrollback's pixel damping. Pacing applies **only when
-`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its own
-viewport and is left untouched. A new gesture after `MOUSE_WHEEL_GESTURE_QUIET_MS` recovers
-from a prior report that produced no output at a scroll boundary.
+event reaches xterm, but xterm emits at most **one** report per event however far it scrolled,
+so the manager sets xterm's sensitivity to `TUI_REPORT_SENSITIVITY` (every non-zero event emits)
+and counts the distance itself with the same sensitivity/trackpad damping as local scrollback,
+repeating the report once per whole line. Letting xterm count (sensitivity 1) made a TUI scroll
+at roughly a third of the shell's speed. The first batch is sent immediately; later reports wait
+until response bytes finish parsing and `terminal.onRender` confirms WebGL painted the next
+frame, then leave as one write. The write callback alone is not backpressure: it fires before
+rendering. The queue is capped at `TUI_WHEEL_PENDING_REPORTS` (about a screen) so macOS
+trackpad momentum cannot outrun a TUI that redraws per report; a cap of 4 visibly threw away
+most of a swipe. A 250ms watchdog applies only when the prior report produces no output; a
+separate short render watchdog covers a missing `onRender`. Pacing applies **only when
+`terminal.modes.mouseTrackingMode !== "none"`**. A new gesture after
+`MOUSE_WHEEL_GESTURE_QUIET_MS` recovers from a prior report that produced no output.
+
+**The scrollbar is hidden while a TUI owns the viewport** (alternate screen or mouse tracking),
+checked on `onWriteParsed` since xterm has no mode-change event. The wheel already goes to the
+program then, so the scrollbar only led into stale pre-TUI history that rendered as garbage under
+a program redrawing in place. For the same reason Cmd+K (`clear`) writes ED3 (drop scrollback)
+instead of calling `terminal.clear()`, which would blank the program's screen.
+
+**Drops onto a terminal paste paths**, like Terminal.app. Listeners run in the capture phase so
+WebKit's default drop into xterm's textarea never runs. The webview never exposes a dropped file's
+real path (`dragDropEnabled` is off for tab dragging), and a remote PTY could not open it anyway,
+so `src/lib/terminal-drop.ts` sends the bytes through `save_dropped_file` → `FsRequest::SaveDroppedFile`
+to the PTY's host, which writes them to an owner-only `<temp>/pragma-dropped-files/<uuid>/` and
+returns the absolute path; the path is shell-quoted (backslash-escaped POSIX, single-quoted
+PowerShell, double-quoted `cmd.exe`) and pasted with bracketed paste. Native-Windows quoting is
+resolved from the actual configured `terminal.shell` (`nativeShellQuoteStyle` in
+`lib/shell-profile.ts`), not assumed to be PowerShell — `cmd.exe` cannot parse a PowerShell
+single-quoted string, and would split a quoted path with a space apart. File-tree drags paste
+absolute worktree paths; text drops paste verbatim. Size limit:
+`terminalDefaults.maxDroppedFileBytes`. A WSL tab still gets a Windows path until host-level WSL
+exists. Dropped-file directories are swept once at `pragma-server` startup and hourly after that
+(`start_dropped_files_sweeper`), removing any older than `terminalDefaults.droppedFilesMaxAgeMs` —
+otherwise repeated drops would retain copies, and disk space, indefinitely.
 
 **Terminal font:** Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`, …) at **fontSize
 14 / lineHeight 1.0**. 14px is required — at 13px macOS WebKit rounds the cell to 15px
@@ -1124,7 +1309,7 @@ keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
 - **The buffer is the source of truth, not the file.** The request carries the live
   (often unsaved) document and the model gets **read-only** tools (`read`, `grep`,
   `find`, `ls`) so it can search the repo but cannot write it — see
-  `INLINE_EDIT_TOOLS` in `@pragma/ai-helpers`. Nothing reaches disk until the user
+  `INLINE_EDIT_TOOLS` in `@pragma-sh/ai-helpers`. Nothing reaches disk until the user
   accepts a hunk and saves.
 - **Local worktrees only (for now).** `ai_inline_edit` (and the other worktree-scoped
   AI commands) spawn `pragma-ai` on the desktop client with a local `--cwd`. Remote
@@ -1192,8 +1377,19 @@ components and document root render under error boundaries. Range comments persi
 sibling JSON and submit as one prompt to attached agent; missing attachment opens
 same-worktree agent-tab picker. Renderer bridge requests are token-scoped and can only
 prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/components
-live in `@pragma/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
+live in `@pragma-sh/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
 document contains MDX regions.
+
+**Scratchpad exports** use the toolbar's **Export HTML** action in either mode. The
+live buffer is compiled with the existing `esbuild-wasm` pipeline (automatic JSX for
+imported TSX/JSX), with static media
+and literal whiteboard embeds inlined. `@pragma-sh/scratchpad-viewer` supplies the
+prebundled standalone runtime and HTML builder; its shared `frame-runtime.tsx` is also
+used by desktop previews. Exports have no host bridge, stub SDK host calls, and disable
+only built-in send/decision buttons while keeping local controls active. Every export
+carries a Created with Pragma watermark. `scratchpads::ExportHtml` writes a uniquely named file on the owning host to
+`constants.scratchpads.exportsDirectory`, under the already git-excluded scratchpad
+directory. The desktop opens the local exports folder; SSH exports remain on their host.
 
 **A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
 this for every editor surface (plain, Markdown, scratchpad). Its `load()` — initial mount
@@ -1223,18 +1419,45 @@ live `<html>` element and hands the frame one `:root` block in a
 components for free. Theme edits (`THEME_CHANGED_EVENT`) and root class changes rewrite
 that block through a `theme` bridge message rather than rebuilding the bundle — a rebuild
 would discard the component state the scratchpad is holding. Never hard-code a hex value
-in the preview document or in `@pragma/scratchpad`.
+in the preview document or in `@pragma-sh/scratchpad`.
 
 Vite must allow CORS from the literal `null` origin in development: sandboxing removes
 the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
 graph until production bundling. Keep that exception alongside Vite's restricted localhost
 origin matcher; never replace it with unrestricted `cors: true` or weaken the iframe with
-`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` dependencies
+`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` and
+`packages/scratchpad-viewer/dist` dependencies
 are also excluded from `@vitejs/plugin-react`: React Refresh expects the app's preamble
 and crashes when its injected HMR code runs in the isolated frame; Vite's standard
 TSX/JavaScript transforms are sufficient there. The frame bootstrap still defines
 no-op `$RefreshReg$` / `$RefreshSig$` hooks because Vite's optimized development build of
 `react-dom/client` contains signature calls even though the frame itself does not use HMR.
+
+**Whiteboard tabs** — worktree-scoped Excalidraw scenes are host-owned, not files in the
+checkout. `WhiteboardView` lazy-loads `@excalidraw/excalidraw`, serializes complete scene
+JSON, and debounces optimistic writes through typed Tauri adapters. Sidebar and new-tab
+menus create/open deduplicated `whiteboard` tabs. Scratchpad `<Whiteboard id="…" />` embeds
+a host-rendered PNG through the token-scoped frame bridge and rejects cross-worktree ids;
+unchanged version polls do not rerender, while theme changes request the matching Excalidraw
+export palette. Clicking the preview opens the same board in its deduplicated interactive tab.
+Native PNG output comes from `pragma-core`, never canvas APIs in the webview.
+Three invariants are load-bearing: tab dedupe holds one `Db` lock across the lookup and
+the insert, so concurrent opens of one board cannot both insert; a save that loses the
+optimistic version race re-reads the head version and retries on top of it, because
+resending the stale `expectedVersion` would stall every later save; and deleting a
+worktree fails rather than logs when the `DeleteForWorktree` RPC fails, since nothing
+garbage-collects host-side scenes and the checkout removal it follows is idempotent.
+
+**The crate builds no `cdylib`, and cannot.** `pragma-core` reaches whiteboard rendering
+through `excalidraw-image` -> `deno_core` -> `v8`, and v8's prebuilt objects carry TLS
+relocations a Linux shared object may not have: linking one dies with
+`relocation R_X86_64_TPOFF32 against v8::internal::g_current_isolate_ cannot be used with
+-shared`. macOS links it happily, so this only ever shows up in Linux CI — as a
+`cargo test --workspace` failure, since cargo builds every declared crate-type of the lib.
+The `cdylib` in the Tauri template exists for Tauri's mobile targets, which Pragma does
+not ship (the phone client is `apps/pragma-go`), so `crate-type` is `["staticlib",
+"rlib"]` and `main.rs` links the rlib. Do not add `cdylib` back without first getting v8
+out of this crate's dependency graph.
 
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
@@ -1283,9 +1506,17 @@ once in `main.tsx`) — never add the full multi-MB `@iconify-json/{lucide,simpl
 packages; when you add a `brandIcon` to `values.json`, add that icon's body to
 `brand-icons.json` too.
 
-**All filesystem + git work is worktree-scoped:** every `fs.rs` / `git.rs` command takes
-a `worktreeId` + relative path; `resolve_in_worktree` rejects `..`/absolute/symlink
-escapes — **no absolute path ever crosses IPC**.
+**All filesystem + git work is worktree-scoped:** every `fs.rs` / `git.rs` command that
+reads or writes a worktree entry takes a `worktreeId` + relative path; `resolve_in_worktree`
+rejects `..`/absolute/symlink escapes — **no absolute path ever crosses IPC for a
+worktree-relative operation.** Two `fs.rs` commands are deliberate, narrow exceptions to
+that, not violations of it, because their whole job is to hand back a real host path:
+`HomeDir` (a client anchoring user-scoped files like `~/.pragma/theme.json` cannot know a
+remote host's home directory any other way) and `save_dropped_file` (see "Drops onto a
+terminal paste paths" above — the path is meant to be visible, typed at the shell prompt,
+so hiding it from the IPC response would not reduce what the renderer ends up displaying).
+Neither accepts an absolute path as input, and `resolve_in_worktree` still rejects one if
+either result were ever fed back into a worktree-scoped command.
 
 **⌘+End** (mac) / **Ctrl+End** (linux) is registered as `scrollTerminalBottom` and
 scrolls the active terminal to the live cursor row.
@@ -1338,6 +1569,38 @@ Trigger via `toast.success(…)` from action handlers — never from inside the 
 Clipboard reads/writes go through `navigator.clipboard` with a try/catch surfacing
 errors via `toast.error(…)`.
 
+## Project icons
+
+The project switcher paints one glyph per project, resolved in this order:
+
+1. `project.iconEmoji` — the emoji the user picked from the project's context
+   menu ("Set icon…"). It is a column on the `projects` row (v17 migration),
+   written by the `set_project_icon` command; blank input clears it.
+2. A favicon found in the checkout — `icons.rs` probes a fixed list of
+   directories and names and returns the bytes, which the switcher paints as a
+   `currentColor` CSS mask so it stays legible selected or not.
+3. The project name's leading initial.
+
+**The emoji list is Unicode's, not ours.**
+`scripts/generate-emoji-catalog.ts` compiles `emojibase-data` (a devDependency)
+into the git-ignored `src/generated/emoji-catalog.ts`: every emoji Unicode
+defines, with its CLDR label and keyword tags, minus the component group
+(skin-tone modifiers, regional indicators) that never stands alone. Run
+`bun run generate` after bumping the dependency; `pretypecheck` / `pretest` /
+`prebuild` run it for you. `src/lib/emoji-catalog.ts` only reshapes that data
+and owns the search.
+
+Two things to know before editing the generator:
+
+- **Developer synonyms go in `EXTRA_TERMS`**, which layers words like "docker"
+  onto 🐳 without inventing entries. Keys are matched with U+FE0F stripped,
+  because emojibase fully-qualifies emoji-presentation glyphs (its "package" is
+  `1f4e6 fe0f`); a key that resolves to nothing fails the build rather than
+  silently adding no terms.
+- **The catalog is a dynamic import** in `EmojiPicker`, so its ~105 KB lands in
+  its own chunk instead of the startup bundle. Importing `emoji-catalog`
+  statically from app code would undo that.
+
 ## Worktree lifecycle
 
 `CreateWorktreeDialog` collects input and fetches the project main worktree's remote
@@ -1346,6 +1609,36 @@ without pulling, or pull then create. A single-worktree run hands off to
 `worktree-creation-context` and closes. A fanout stays open and busy until the host has
 provisioned its worktrees/tabs and the desktop has adopted and refreshed them, so every
 attempt row can immediately attach to its live agent session.
+
+Both it and `NewAgentSessionDialog` take agent launch options through
+`hooks/use-agent-launch-options.ts` + `components/agents/AgentLaunchOptions.tsx`: `/` at
+the start of the prompt opens the agent's slash-command picker — rendered through
+`MarkdownEditor`'s `caretPopover`, positioned under the caret from TipTap's
+`coordsAtPos` — Shift+Tab in the prompt cycles its modes, and the footer dropdown sets the
+permission mode. A mode or permission control with fewer than two choices is not shown. The hook resolves the
+lists through `resolvePluginAgentOptions` (plugins/agents.ts), whose cache also supplies
+the default mode/permission mode when `pluginAgentLaunchArgs` runs for a launch that picked
+none. The new-session dialog turns a leading known `/command` into
+`AgentModelSelection.slashCommand`; the create-worktree dialog keeps the prompt verbatim
+(a failed run restores it as a draft) and sends only the mode and permission mode.
+Escape closes an open picker before the dialog (`useEscapeToClose` runs in the capture
+phase, so `useEscapeClosesPickerFirst` takes the list of pickers and checks them first).
+
+Every agent prompt has the `@` context picker — `NewAgentSessionDialog`,
+`CreateWorktreeDialog` (single and fanout), and `KanbanDraftDialog` — through
+`hooks/use-prompt-context.ts` + `components/agents/PromptContextMenu.tsx`
+(`promptCaretPopover` picks `@` over `/`). `MarkdownEditor`'s `onCaretTextChange` feeds the
+text before the caret, `contextQuery` detects the mention, and every provider from
+`plugins/context-providers.ts` (built-ins in `lib/builtin-context-providers.ts` first, then
+plugin `contextProviders`) is searched, debounced and aborted when superseded. Picking
+inserts `@displayName` via the handle's `replaceBeforeCaret`; on submit `attachContext`
+resolves the attached mentions still in the prompt (`hasMention` on the markdown-unescaped
+text) and appends them with `formatPromptWithContext`. A prompt that is **stored and shown
+again** (a Kanban card, a failed worktree run's draft) goes back into the editor through
+`seedPrompt`, which splits the blocks off with `splitPromptContext` and keeps them attached,
+so the editor shows only the user's text and a re-save does not re-fetch. Anything that
+displays a stored prompt (e.g. `KanbanCard`) shows `splitPromptContext(prompt).prompt`.
+Dialog tests share the textarea editor stub and a fake provider from `src/test/prompt-editor.tsx`.
 
 Its **Fan out** mode is the same form with the single agent picker swapped for the
 repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display
@@ -1367,6 +1660,20 @@ event means no setup scripts and no step. A failure keeps the screen up with the
 Failures before creation offer Dismiss; failures while refreshing or opening an already-created
 worktree retain the launch request and offer Retry, which reopens it without creating the branch again.
 
+**Leaving the screen never cancels the run, and a same-row click must still leave it.**
+`WorktreeTree` calls the provider's explicit `leaveCreation()` on every row click, because
+clicking the worktree that is already selected changes no selection identity — the
+`viewedFrom` key effect alone would leave the user stuck on the full-frame screen. The
+optimistic pending row is the one row that calls `viewCreation()` instead. At completion
+the provider decides foreground vs background from `viewingRef` (which the key effect
+keeps live): a background completion must call `startSession` with `focus: false`, which
+routes through `startBackgroundAgentSession` (`lib/agent-launch.ts`) — spawning the daemon
+PTY directly, since an unmounted tab's `terminalManager.whenConnected` would wait for a
+focus that never comes. `WorktreeTargetOptions.worktreePath` carries the new worktree's
+path for that path, because `refreshProject` deliberately skips state writes for a project
+the user already switched away from — and `createTerminalTab` returns the host-side tab
+for a foreign project instead of false-failing.
+
 `Worktree` rows carry a `hidden` boolean (v3 migration). Hidden rows are filtered out of
 the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` and
 surfaced through a "Show N hidden" toggle. When the user hides the currently-selected
@@ -1384,6 +1691,38 @@ stores the string verbatim (same pattern as split layouts). The mount-time `relo
 rehydrates via `hydrate-selection`; a persist effect writes on every selection change,
 gated by `didHydrateRef` and deduped by `lastPersistedRef`.
 
+### Projects without git ("plain" projects)
+
+`Project.isGit` (DB `projects.is_git`, v19; omitted on the wire means `true`) marks a
+local folder that is not a git repository root. It still gets a main worktree row — with
+an empty `branch` — so tabs, agent sessions and statuses work unchanged; the sidebar labels
+it `constants.projects.nonGitRootLabel` ("root"). Read the flag through
+`lib/non-git-project.ts` (`projectIsGit`, `worktreeDisplayLabel`), never `=== false` inline.
+A folder counts as git only when it is a repository **root whose `HEAD` has a commit**
+(`RepoStatus::is_usable`) — an unborn `HEAD` has nothing for `git worktree add` to branch
+from. Detection and initialization are the host's `git` RPC (`repoStatus` /
+`initRepository` in `pragma-core`), never git run from the Tauri shell.
+
+- **Adding.** `CreateProjectDialog` asks `project_directory_is_git` after the picker; a plain
+  folder shows `NonGitFolderWarning` (Initialize / Open another / Continue / Don't show again)
+  unless global `other.nonGitProjectWarning` is `false` (Settings → Other). `add_project`
+  refuses a plain folder unless `allowNonGit` is passed. Initialize passes `initializeGit`,
+  which makes the repository **before** the row is inserted, so a failed init saves nothing
+  and a retry is not refused as a duplicate path.
+- **Gating.** `useSidebarDialogs.openWorktreeDialog` is the single choke point for worktree
+  creation: on a plain project it opens `InitGitDialog` instead and continues into the create
+  dialog once git exists. `RightSidebar` swaps Changes and Pull Request for
+  `NonGitProjectNotice` and hides Commit & PR; the agent board refuses to start a card.
+  The Files pane stays, but its delete asks first (`FileDeleteDialog`): git worktrees delete
+  without confirming because git can restore the file, and a plain folder cannot.
+- **Promotion is in place.** `init_project_git` runs `git init` plus an empty
+  `--no-verify` first commit and `Db::mark_project_git` flips the flag and records the
+  branch on the existing main row — ids never change. A commit git refuses (no identity)
+  is an **error**, never a logged warning, so nothing is promoted with an unborn `HEAD`.
+  `list_projects` also promotes a plain project whose folder gained a `.git` — but only
+  once it has a commit, so a bare `git init` in a terminal leaves it plain.
+  Remote (SSH) projects are always git.
+
 ## Importing another tool's project scripts
 
 A repository that used Superset, Emdash, or Orca already carries the commands Pragma
@@ -1396,7 +1735,7 @@ generated file and commits it as `scripts.migrationCommitMessage`. The commit ca
 verified email, never to an organization, so a `pragma-sh` credit would render as an
 unlinked name.
 
-- **The sources and their paths live in `@pragma/constants`** (`scripts.migrationSources`),
+- **The sources and their paths live in `@pragma-sh/constants`** (`scripts.migrationSources`),
   in detection priority order. A project carrying several configs is offered exactly one —
   the first that yields commands — because the point is one decision, not a queue of them.
 - **No offer is made when it would be empty or unwanted**: `.pragma/scripts.json` already
@@ -1418,7 +1757,7 @@ unlinked name.
 in selected project. Local worktree/tab/agent rows render immediately; PR discovery and
 host filename/code search hydrate independently. Selecting a worktree scopes palette
 without navigating; Backspace on empty scoped query clears scope. Agent status rows resolve
-their qualified agent id through the plugin catalog and render the agent's bundled icon.
+their qualified agent id through the plugin catalog and render the agent's plugin icon.
 Escape returns from a scoped worktree or editor submenu before closing the palette.
 Active run/build commands appear as running-script rows with their worktree. Enter opens
 the script tab; Shift+Enter closes that script tab through normal managed-script cleanup.
@@ -1465,7 +1804,7 @@ keypress events needed for shifted input.
 ## Agent board
 
 A **project-scoped agent board** lives behind the agent-board button in the top tab
-toolbar (`TerminalTabs`, between the usage-limits popover and the editor launcher; it
+toolbar (`TerminalTabs`, between the Account providers menu and the editor launcher; it
 replaced the new-session button). `state/kanban-context.tsx` (`useKanban`) is mounted in
 `App.tsx` **inside** `WorkspaceProvider` and is **always alive**, so it works in both
 shell modes. It owns a `mode: "normal" | "kanban" | "settings"` switch: `WorkspaceShell` renders
@@ -1478,7 +1817,7 @@ Settings menu or `openSettings("automations")`.
 
 Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
 commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The
-shared `KanbanPromptCard` shape lives in `@pragma/constants` (`KanbanPromptStatus` /
+shared `KanbanPromptCard` shape lives in `@pragma-sh/constants` (`KanbanPromptStatus` /
 `KanbanCompletedAction` / `KanbanSchedulingMode`). The board is project-scoped: cards
 load by `selectedProjectId` and reload after every mutation. SDK callers create drafts
 with `client.createBoardDraft`; the brokered desktop controller resolves its worktree to

@@ -1,5 +1,5 @@
-import { PragmaGatewayError } from "@pragma/sdk";
-import type { GatewayHealth, PragmaClient } from "@pragma/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
+import type { GatewayHealth, PragmaClient } from "@pragma-sh/sdk";
 import { describe, expect, it } from "vitest";
 
 import { checkHeartbeat, heartbeatFailure, heartbeatSummary } from "./heartbeat";

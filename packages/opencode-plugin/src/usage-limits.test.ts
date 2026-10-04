@@ -1,4 +1,4 @@
-import type { PluginContext } from "@pragma/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { describe, expect, it, vi } from "vitest";
 
 import opencodeAgentPlugin from "./pragma-plugin";
@@ -17,9 +17,10 @@ const aggregate = {
 
 describe("OpenCode Go usage limits", () => {
   it("registers the provider as an agent capability", () => {
-    expect(opencodeAgentPlugin.usageLimits?.[0]).toMatchObject({
-      id: "opencode-go",
-      primaryLimitId: "rolling",
+    expect(opencodeAgentPlugin.accounts?.[0]).toMatchObject({
+      provider: "opencode-go",
+      agent: "opencode",
+      usageLimits: { primaryLimitId: "rolling" },
     });
     expect(opencodeAgentPlugin.agents?.[0]?.excludeFeatures ?? []).not.toContain("usageLimits");
   });

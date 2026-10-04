@@ -1,4 +1,4 @@
-import type { Project, Tab, Worktree } from "@pragma/constants";
+import type { Project, Tab, Worktree } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import { type SplitLayoutNode, workspaceReducer } from "./workspace-context";
@@ -21,7 +21,7 @@ const baseState: WorkspaceState = {
 };
 
 function project(id: string): Project {
-  return { id, name: id, path: `/tmp/${id}`, orderIndex: 0, createdAt: "now" };
+  return { id, name: id, path: `/tmp/${id}`, iconEmoji: null, orderIndex: 0, createdAt: "now" };
 }
 
 function tab(id: string, worktreeId = "worktree"): Tab {
@@ -33,6 +33,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     title: null,
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

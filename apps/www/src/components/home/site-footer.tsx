@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-import { appName, docsRoute, gitConfig } from "@/lib/shared";
+import { privacyRoute } from "@/lib/legal";
+import { supportRoute } from "@/lib/support";
+import { appName, blogRoute, compareRoute, docsRoute, gitConfig } from "@/lib/shared";
 
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 
@@ -13,7 +15,7 @@ const COLUMNS = [
       { label: "Fan out", href: "#fanout" },
       { label: "Pull requests", href: "#github" },
       { label: "Pragma Go", href: "#go" },
-      { label: "Comparison", href: "#comparison" },
+      { label: "Pragma vs Competitors", href: compareRoute },
     ],
   },
   {
@@ -29,8 +31,11 @@ const COLUMNS = [
     title: "Project",
     links: [
       { label: "Documentation", href: docsRoute },
+      { label: "Blog", href: blogRoute },
+      { label: "Support", href: supportRoute },
       { label: "GitHub", href: repoUrl },
       { label: "Issues", href: `${repoUrl}/issues` },
+      { label: "Privacy", href: privacyRoute },
       { label: "License (AGPL-3.0)", href: `${repoUrl}/blob/main/LICENSE` },
     ],
   },

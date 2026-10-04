@@ -18,11 +18,12 @@ use pragma_constants::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::merge_conflicts::{self, MergeIdentity, ResolutionWrite};
 use crate::process_env;
 use crate::{CoreError, CoreResult};
 
 /// Git exclude entry that hides Pragma's worktree storage from the repo.
-const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
+pub(crate) const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
 /// Git exclude entry that keeps local scratchpad documents out of commits.
 const PRAGMA_SCRATCHPADS_EXCLUDE: &str = ".pragma/scratchpads/";
 
@@ -65,6 +66,27 @@ pub struct HeadlessWorktree {
     pub path: String,
     /// The branch checked out.
     pub branch: String,
+}
+
+/// Where a folder stands as a git repository. Pragma treats a folder as a git
+/// project only when it is a repository **root** whose `HEAD` has a commit:
+/// `git worktree add` refuses an unborn `HEAD`, so a repository without one
+/// would offer worktrees that cannot be created.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoStatus {
+    /// The folder is the top level of a repository, not merely inside one.
+    pub is_root: bool,
+    /// `HEAD` resolves to a commit.
+    pub has_commit: bool,
+}
+
+impl RepoStatus {
+    /// Whether the folder can back a git project: a root with a first commit.
+    #[must_use]
+    pub fn is_usable(self) -> bool {
+        self.is_root && self.has_commit
+    }
 }
 
 /// One git operation request. `root` is always the trusted absolute worktree
@@ -167,6 +189,27 @@ pub enum GitRequest {
     GithubAbortMerge { root: String },
     /// Returns whether the worktree has an active merge.
     GithubMergeInProgress { root: String },
+    /// Lists paths Git still marks as unmerged (conflicted) in the index.
+    GithubUnmergedPaths { root: String },
+    /// Reads every conflicted file of the active merge, with the commits that
+    /// touched it on each side and the merge's identity.
+    MergeConflictInputs { root: String },
+    /// Writes and stages resolved files, only into the merge in `identity`.
+    ApplyMergeResolutions {
+        root: String,
+        identity: MergeIdentity,
+        resolutions: Vec<ResolutionWrite>,
+    },
+    /// Reads the staged diff a merge commit message is written from; fails
+    /// while any file is still conflicted.
+    MergeCommitContext { root: String },
+    /// Commits the merge, provided `identity` and the index `tree` are unchanged.
+    CommitMerge {
+        root: String,
+        identity: MergeIdentity,
+        tree: String,
+        message: String,
+    },
     /// Pushes the current branch to `origin`, setting the upstream.
     GithubPushBranch { root: String },
     /// Deletes the current branch from `origin`.
@@ -223,6 +266,12 @@ pub enum GitRequest {
     /// Lists checkouts under `<project_root>/.pragma/worktrees/` with their
     /// checked-out branches, for headless-worktree adoption.
     ListHeadlessWorktrees { project_root: String },
+    /// Reports whether `root` is a repository root and whether it has a commit.
+    RepoStatus { root: String },
+    /// Makes `root` a repository with a first commit, doing only the steps
+    /// still missing. Fails — rather than leaving an unborn `HEAD` — when the
+    /// commit cannot be made.
+    InitRepository { root: String },
 }
 
 /// Dispatches a `git` RPC payload to the matching operation and returns a JSON
@@ -345,6 +394,33 @@ fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::GithubMergeInProgress { root } => {
             to_value(github_merge_in_progress(Path::new(root))?)?
         }
+        GitRequest::GithubUnmergedPaths { root } => to_value(unmerged_paths(Path::new(root))?)?,
+        GitRequest::MergeConflictInputs { root } => {
+            to_value(merge_conflicts::conflict_inputs(Path::new(root))?)?
+        }
+        GitRequest::ApplyMergeResolutions {
+            root,
+            identity,
+            resolutions,
+        } => to_value(merge_conflicts::apply_resolutions(
+            Path::new(root),
+            identity,
+            resolutions,
+        )?)?,
+        GitRequest::MergeCommitContext { root } => {
+            to_value(merge_conflicts::merge_commit_context(Path::new(root))?)?
+        }
+        GitRequest::CommitMerge {
+            root,
+            identity,
+            tree,
+            message,
+        } => to_value(merge_conflicts::commit_merge(
+            Path::new(root),
+            identity,
+            tree,
+            message,
+        )?)?,
         GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
         GitRequest::GithubDeleteRemoteBranch { root } => {
             to_value(github_delete_remote_branch(Path::new(root))?)?
@@ -412,6 +488,8 @@ fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::ListHeadlessWorktrees { project_root } => {
             to_value(list_headless_worktrees(Path::new(project_root)))?
         }
+        GitRequest::RepoStatus { root } => to_value(repo_status(Path::new(root))?)?,
+        GitRequest::InitRepository { root } => to_value(init_repository(Path::new(root))?)?,
         _ => return Ok(None),
     };
     Ok(Some(value))
@@ -1440,6 +1518,56 @@ fn head_commit(root: &Path) -> CoreResult<String> {
     Ok(commit)
 }
 
+/// Whether `root` is the top level of a repository, and whether `HEAD` has a
+/// commit. `rev-parse --show-toplevel` succeeds anywhere *inside* a
+/// repository, so the answer is compared against `root` itself — a plain
+/// folder under an ancestor repository is not a root.
+fn repo_status(root: &Path) -> CoreResult<RepoStatus> {
+    let Ok(toplevel) = git_stdout(root, &["rev-parse", "--show-toplevel"]) else {
+        return Ok(RepoStatus {
+            is_root: false,
+            has_commit: false,
+        });
+    };
+    // Git answers in its own path style (forward slashes on Windows); compare
+    // the two as canonical paths rather than as strings.
+    let is_root = pragma_platform::path::canonicalize(&toplevel)?
+        == pragma_platform::path::canonicalize(root)?;
+    let has_commit =
+        is_root && run_git(root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).is_ok();
+    Ok(RepoStatus {
+        is_root,
+        has_commit,
+    })
+}
+
+/// Turns `root` into a repository with an empty first commit.
+///
+/// The commit is what makes worktrees possible: `git worktree add` needs one to
+/// branch from. It is empty so nothing in the folder is committed behind the
+/// user's back, and `--no-verify` because there is no content for a hook to
+/// judge. Without a commit identity git refuses, and that is reported as an
+/// error so the caller never promotes a project whose `HEAD` is unborn.
+fn init_repository(root: &Path) -> CoreResult<()> {
+    let status = repo_status(root)?;
+    if !status.is_root {
+        run_git(root, &["init"])?;
+    }
+    if status.has_commit {
+        return Ok(());
+    }
+    run_git(
+        root,
+        &["commit", "--allow-empty", "--no-verify", "-m", "Initial commit"],
+    )
+    .map_err(|error| {
+        CoreError::Operation(format!(
+            "Initialized a git repository, but could not create its first commit, which worktrees need: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
 /// Rejects anything that is not a plain hex commit hash before it reaches a
 /// git argument list, so a base commit can never smuggle in a flag or a ref
 /// expression.
@@ -1690,6 +1818,19 @@ fn remove_untracked(root: &Path, path: &str) -> CoreResult<()> {
         std::fs::remove_file(&target)?;
     }
     Ok(())
+}
+
+/// Worktree-relative paths Git still marks as unmerged, sorted.
+fn unmerged_paths(root: &Path) -> CoreResult<Vec<String>> {
+    let stdout = run_git(root, &["diff", "--name-only", "-z", "--diff-filter=U"])?;
+    let mut paths: Vec<String> = stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
 }
 
 fn has_unmerged_paths(root: &Path) -> CoreResult<bool> {
@@ -1968,13 +2109,13 @@ pub fn stdout_optional_in(root: &Path, args: &[&str]) -> Option<String> {
     git_stdout(root, args).ok()
 }
 
-fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
+pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
     Ok(String::from_utf8_lossy(&run_git(root, args)?)
         .trim()
         .to_string())
 }
 
-fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
+pub(crate) fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
     let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
@@ -2043,9 +2184,10 @@ mod tests {
         discard_all_unstaged, discard_unstaged_file, ensure_pragma_excluded, file_diff,
         github_abort_merge, github_fetch_and_sync, github_merge_base_branch,
         github_merge_in_progress, github_pull_branch, github_sync_branch, has_unmerged_paths,
-        list_headless_worktrees, merge_worktree_to_parent, merged_status, remove_worktree,
-        stage_file, unstage_file, worktree_changes, worktree_commits, worktree_is_dirty,
-        MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
+        init_repository, list_headless_worktrees, merge_worktree_to_parent, merged_status,
+        remove_worktree, repo_status, stage_file, unmerged_paths, unstage_file, worktree_changes,
+        worktree_commits, worktree_is_dirty, MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE,
+        PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -2069,6 +2211,47 @@ mod tests {
         run(dir, args);
         run(dir, &["config", "core.autocrlf", "false"]);
         run(dir, &["config", "core.eol", "lf"]);
+    }
+
+    /// Only a repository root with a commit can back a git project: a folder
+    /// inside an ancestor repository is not a root, and an unborn `HEAD` has
+    /// nothing for `git worktree add` to branch from.
+    #[test]
+    fn repo_status_requires_a_root_with_a_commit() {
+        let dir = tempdir().expect("tempdir");
+        assert!(!repo_status(dir.path()).expect("plain folder").is_root);
+
+        init_repo(dir.path(), &["init", "-b", "main"]);
+        let unborn = repo_status(dir.path()).expect("unborn repo");
+        assert!(unborn.is_root && !unborn.has_commit && !unborn.is_usable());
+
+        let nested = dir.path().join("scratch");
+        std::fs::create_dir(&nested).expect("nested dir");
+        assert!(!repo_status(&nested).expect("nested folder").is_root);
+
+        run(dir.path(), &["config", "user.email", "test@example.com"]);
+        run(dir.path(), &["config", "user.name", "Test"]);
+        std::fs::write(dir.path().join("notes.txt"), "keep me\n").expect("write file");
+        init_repository(dir.path()).expect("first commit");
+        assert!(repo_status(dir.path()).expect("committed repo").is_usable());
+        let untracked = super::git_stdout(dir.path(), &["status", "--porcelain"]).expect("status");
+        assert_eq!(
+            untracked, "?? notes.txt",
+            "the first commit must stay empty"
+        );
+    }
+
+    /// A first commit that git refuses is an error, never a silent success
+    /// that would promote a project whose worktrees cannot be created.
+    #[test]
+    fn init_repository_fails_without_a_commit_identity() {
+        let dir = tempdir().expect("tempdir");
+        init_repo(dir.path(), &["init", "-b", "main"]);
+        run(dir.path(), &["config", "user.name", ""]);
+        run(dir.path(), &["config", "user.useConfigOnly", "true"]);
+
+        assert!(init_repository(dir.path()).is_err());
+        assert!(!repo_status(dir.path()).expect("unborn repo").has_commit);
     }
 
     /// Excluding must never fabricate a `.git` git would not recognise: git
@@ -2326,7 +2509,7 @@ mod tests {
     fn parentless_worktree_has_empty_committed_list() {
         let (_child_path, main_path) = project_with_child();
         let changes = worktree_changes(&main_path, None).expect("changes");
-        assert!(changes.committed.is_empty());
+        assert_eq!(changes.committed, [] as [pragma_constants::ChangedFile; 0]);
     }
 
     #[test]
@@ -2371,7 +2554,7 @@ mod tests {
 
         unstage_file(&child_path, "base.txt", None).expect("unstage");
         let changes = worktree_changes(&child_path, Some("main")).expect("changes");
-        assert!(changes.staged.is_empty());
+        assert_eq!(changes.staged, [] as [pragma_constants::ChangedFile; 0]);
         assert!(changes.unstaged.iter().any(|c| c.path == "base.txt"));
     }
 
@@ -2419,7 +2602,7 @@ mod tests {
         assert!(commit_staged(&child_path, "  \n ").is_err());
         commit_staged(&child_path, "add feature").expect("commit");
         let changes = worktree_changes(&child_path, Some("main")).expect("changes");
-        assert!(changes.staged.is_empty());
+        assert_eq!(changes.staged, [] as [pragma_constants::ChangedFile; 0]);
     }
 
     #[test]
@@ -2625,6 +2808,10 @@ mod tests {
         )
         .expect("merge base"));
         assert!(has_unmerged_paths(local.path()).expect("unmerged paths"));
+        assert_eq!(
+            unmerged_paths(local.path()).expect("unmerged paths"),
+            vec!["base.txt".to_string()]
+        );
         assert!(std::fs::read_to_string(local.path().join("base.txt"))
             .expect("read conflict")
             .contains("<<<<<<< HEAD"));

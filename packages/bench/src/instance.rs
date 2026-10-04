@@ -86,7 +86,6 @@ impl DevInstance {
                     .to_string(),
             ));
         }
-        Driver::check_available()?;
         check_dev_port_free(&options.repo_root)?;
 
         let channel = pragma_protocol::dev_channel(&options.repo_root);
@@ -575,36 +574,21 @@ fn dev_url_port(repo_root: &Path) -> Option<u16> {
 
 /// The OS directory Tauri resolves `appDataDir` to for this app.
 ///
-/// Resolved by `tauri-agent-tools`, which implements Tauri's own path rules, so
-/// the benchmark does not keep a second copy of them.
+/// Tauri's rule on the two platforms the benchmark runs on: macOS keeps app
+/// data under `~/Library/Application Support`, Linux under `$XDG_DATA_HOME`
+/// (default `~/.local/share`), each in a folder named for the bundle identifier.
 fn app_data_dir() -> BenchResult<PathBuf> {
     let identifier = CONSTANTS.app.identifier.as_str();
-    let output = pragma_platform::process::command("tauri-agent-tools")
-        .args(["app-paths", "--identifier", identifier, "--json"])
-        .output()
-        .map_err(|_| BenchError::ToolMissing)?;
-    if !output.status.success() {
-        return Err(BenchError::Command {
-            command: "tauri-agent-tools app-paths".to_string(),
-            status: output.status.to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let platform = value
-        .get("platform")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    value
-        .pointer(&format!("/paths/{platform}/appDataDir"))
-        .and_then(serde_json::Value::as_str)
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            BenchError::Setup(format!(
-                "tauri-agent-tools app-paths reported no appDataDir for {platform}"
-            ))
-        })
+    let home = pragma_platform::path::home_dir()
+        .ok_or_else(|| BenchError::Setup("cannot resolve the home directory".to_string()))?;
+    let base = if cfg!(target_os = "macos") {
+        home.join("Library").join("Application Support")
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| home.join(".local").join("share"), PathBuf::from)
+    };
+    Ok(base.join(identifier))
 }
 
 #[cfg(test)]
@@ -640,7 +624,7 @@ mod tests {
     #[test]
     fn teardown_never_reaches_outside_the_instance_it_launched() {
         assert!(descendants_of(&dev_tree(), 10).iter().all(|pid| *pid != 60));
-        assert!(descendants_of(&dev_tree(), 40).is_empty());
+        assert_eq!(descendants_of(&dev_tree(), 40), [] as [u32; 0]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import type { PragmaClient } from "@pragma/sdk";
+import type { PragmaClient } from "@pragma-sh/sdk";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 

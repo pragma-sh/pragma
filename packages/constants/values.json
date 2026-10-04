@@ -1,11 +1,12 @@
 {
   "daemon": {
-    "protocolVersion": "0.0.0",
+    "protocolVersion": "1.2.0",
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
   },
   "gateway": {
+    "apiVersion": "0.0.0",
     "discoveryFile": "gateway.json",
     "tokenFile": "gateway-token",
     "devicesFile": "gateway-devices.json",
@@ -20,25 +21,35 @@
       "sendUrl": "https://exp.host/--/api/v2/push/send",
       "batchSize": 100,
       "presenceTtlMs": 90000,
-      "tokenPrefixes": ["ExponentPushToken[", "ExpoPushToken["]
+      "tokenPrefixes": [
+        "ExponentPushToken[",
+        "ExpoPushToken["
+      ]
     },
     "web": {
       "enabled": false,
       "basePath": "/web",
       "manifestFile": "manifest.json",
       "resourceDir": "web"
-    }
+    },
+    "keepAwake": true
   },
   "platform": {
     "defaultBackend": "native",
     "shells": {
       "macos": "/bin/zsh",
       "linux": "/bin/sh",
-      "windows": ["pwsh.exe", "powershell.exe"]
+      "windows": [
+        "pwsh.exe",
+        "powershell.exe"
+      ]
     },
     "wsl": {
       "launcher": "wsl.exe",
-      "listArgs": ["--list", "--verbose"],
+      "listArgs": [
+        "--list",
+        "--verbose"
+      ],
       "serverBinary": "pragma-server"
     }
   },
@@ -48,12 +59,17 @@
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
-    "storageScopes": ["global", "project"],
-    "bundledDirName": "plugins"
+    "storageScopes": [
+      "global",
+      "project"
+    ]
   },
   "theme": {
     "fileName": ".pragma/theme.json",
-    "modes": ["light", "dark"]
+    "modes": [
+      "light",
+      "dark"
+    ]
   },
   "keybindings": {
     "configFileName": ".pragma/keybindings.json"
@@ -68,7 +84,16 @@
     "soundsDirName": ".pragma/assets/sounds",
     "maxSoundSeconds": 5,
     "maxSoundBytes": 5242880,
-    "soundExtensions": ["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "webm"],
+    "soundExtensions": [
+      "mp3",
+      "wav",
+      "ogg",
+      "oga",
+      "m4a",
+      "aac",
+      "flac",
+      "webm"
+    ],
     "notificationsEnabled": true,
     "notificationText": {
       "doneTitle": "{agent} finished",
@@ -81,8 +106,14 @@
     }
   },
   "terminalDefaults": {
-    "hiddenDistros": ["docker-desktop", "docker-desktop-data"],
-    "rememberLastShell": false
+    "hiddenDistros": [
+      "docker-desktop",
+      "docker-desktop-data"
+    ],
+    "rememberLastShell": false,
+    "maxDroppedFileBytes": 10485760,
+    "droppedFilesDirName": "pragma-dropped-files",
+    "droppedFilesMaxAgeMs": 86400000
   },
   "tabs": {
     "defaultTitles": {
@@ -90,6 +121,7 @@
       "browser": "New tab",
       "log": "Server Logs",
       "scratchpad": "Scratchpad",
+      "whiteboard": "Whiteboard",
       "prReview": "PR Review",
       "pluginWebview": "Plugin"
     }
@@ -109,9 +141,18 @@
   },
   "scratchpads": {
     "directory": ".pragma/scratchpads",
+    "exportsDirectory": ".pragma/scratchpads/exports",
+    "exportHomepageUrl": "https://pragma-app.sh",
     "extension": "mdx",
     "frontmatterKey": "pragmaScratchpad",
     "version": 1
+  },
+  "whiteboards": {
+    "databaseFile": "whiteboards.db",
+    "defaultTitle": "Whiteboard",
+    "maxTitleChars": 200,
+    "maxSceneBytes": 8388608,
+    "maxRenderDimension": 4096
   },
   "protocol": {
     "rpcMethods": [
@@ -130,11 +171,13 @@
       "plugins",
       "tunnel",
       "scratchpads",
+      "whiteboards",
       "wsl",
       "fanouts",
       "ports",
       "sessions",
-      "scripts"
+      "scripts",
+      "accounts"
     ],
     "events": [
       "agentStatus",
@@ -164,17 +207,25 @@
       {
         "id": "superset",
         "label": "Superset",
-        "configPaths": [".superset/config.json"]
+        "configPaths": [
+          ".superset/config.json"
+        ]
       },
       {
         "id": "emdash",
         "label": "Emdash",
-        "configPaths": [".emdash.json"]
+        "configPaths": [
+          ".emdash.json"
+        ]
       },
       {
         "id": "orca",
         "label": "Orca",
-        "configPaths": ["orca.yaml", "orca.yml", ".orca/config.json"]
+        "configPaths": [
+          "orca.yaml",
+          "orca.yml",
+          ".orca/config.json"
+        ]
       }
     ],
     "migrationCommitMessage": "chore(config): add pragma-app.sh config"
@@ -182,11 +233,15 @@
   "agents": {
     "startDelayMs": 500,
     "altScreenExtraWaitMs": 15000,
-    "altScreenSettleMs": 500
+    "altScreenSettleMs": 500,
+    "prelaunchCommandPrefix": "!!",
+    "prelaunchOutputLimit": 20000
   },
   "github": {
     "oauthClientId": "Ov23li1WfY05SeQNp5tk",
-    "scopes": ["repo"],
+    "scopes": [
+      "repo"
+    ],
     "deviceCodeUrl": "https://github.com/login/device/code",
     "deviceVerifyUrl": "https://github.com/login/device",
     "accessTokenUrl": "https://github.com/login/oauth/access_token",
@@ -203,15 +258,23 @@
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",
-    "version": "0.0.0"
+    "version": "1.2.0"
   },
   "onboarding": {
     "mediaBaseUrl": "https://pragma-app.sh/media",
     "skill": {
       "id": "pragma",
       "targets": [
-        { "id": "all-agents", "directory": ".agents/skills", "label": "All agents" },
-        { "id": "claude-code", "directory": ".claude/skills", "label": "Claude Code" }
+        {
+          "id": "all-agents",
+          "directory": ".agents/skills",
+          "label": "All agents"
+        },
+        {
+          "id": "claude-code",
+          "directory": ".claude/skills",
+          "label": "Claude Code"
+        }
       ]
     }
   },
@@ -226,7 +289,10 @@
     "changelogLabel": "View changelog",
     "restartWarningTitle": "This update restarts the app server",
     "restartWarningBody": "Open terminal sessions will stop. Save anything you need before installing.",
-    "applyModes": ["reload", "restart"],
+    "applyModes": [
+      "reload",
+      "restart"
+    ],
     "platforms": [
       "darwin-aarch64",
       "darwin-x86_64",
@@ -236,7 +302,8 @@
       "linux-aarch64-deb",
       "linux-aarch64-rpm",
       "linux-aarch64-appimage",
-      "windows-x86_64"
+      "windows-x86_64",
+      "windows-aarch64"
     ]
   },
   "window": {
@@ -246,10 +313,6 @@
     "minHeight": 480,
     "titlebarHeight": 38,
     "trafficLightInset": 12
-  },
-  "links": {
-    "homepage": "https://pragma.example.com",
-    "support": "https://pragma.example.com/support"
   },
   "editorLaunchers": {
     "defaultEditorId": "system",
@@ -305,12 +368,6 @@
       }
     ]
   },
-  "usageLimits": {
-    "minRefreshIntervalMs": 15000,
-    "maxRetryIntervalMs": 900000,
-    "staleAfterMs": 300000,
-    "loadTimeoutMs": 120000
-  },
   "terminalViewport": {
     "leaseMs": 30000,
     "renewIntervalMs": 10000,
@@ -332,5 +389,121 @@
       "What should we make next?",
       "Ready when you are — what should we build?"
     ]
+  },
+  "storage": {
+    "largeFileMinBytes": 10485760,
+    "largeFileLimit": 25,
+    "ignoredFolderMinBytes": 1048576,
+    "maxScanEntries": 3000000,
+    "scanConcurrency": 2,
+    "protectedFolders": [
+      ".git",
+      ".pragma"
+    ],
+    "reminderIntervalDays": 30,
+    "reminderIntervalPresets": [
+      7,
+      14,
+      30,
+      90
+    ]
+  },
+  "projects": {
+    "nonGitWarning": true,
+    "nonGitRootLabel": "root"
+  },
+  "accounts": {
+    "stateFile": "accounts.json",
+    "homeDir": "accounts",
+    "defaultLoginPrefix": "default",
+    "minRefreshMs": 15000,
+    "maxRetryMs": 900000,
+    "loginOutputMaxBytes": 16384,
+    "loginTimeoutMs": 600000
+  },
+  "system1": {
+    "defaultBaseUrl": "https://api.typesafe.ai",
+    "defaultModel": "jev-latest",
+    "evaluatePath": "/v1/systemone",
+    "credentialFileName": "system1-key",
+    "autoModeFileName": ".pragma/automode.md",
+    "requestTimeoutMs": 5000,
+    "promptCharLimit": 6000,
+    "preferencesCharLimit": 4000,
+    "hostModels": [
+      {
+        "host": "openrouter.ai",
+        "model": "~typesafe/jev-latest"
+      }
+    ],
+    "agentProgress": {
+      "activities": [
+        {
+          "id": "planning",
+          "label": "Planning",
+          "description": "Deciding on an approach or writing a plan; little code has been read or changed yet."
+        },
+        {
+          "id": "exploring",
+          "label": "Exploring",
+          "description": "Reading code, searching the repository, or gathering context."
+        },
+        {
+          "id": "coding",
+          "label": "Coding",
+          "description": "Writing or editing source files to implement the change."
+        },
+        {
+          "id": "testing",
+          "label": "Testing",
+          "description": "Writing tests or running the test suite."
+        },
+        {
+          "id": "debugging",
+          "label": "Debugging",
+          "description": "Investigating a failure, error, or unexpected behaviour."
+        },
+        {
+          "id": "verifying",
+          "label": "Verifying",
+          "description": "Running builds, linters, or type checks, or double-checking finished work."
+        },
+        {
+          "id": "reviewing",
+          "label": "Reviewing",
+          "description": "Reviewing a diff, a pull request, or its own changes."
+        },
+        {
+          "id": "documenting",
+          "label": "Documenting",
+          "description": "Updating documentation, comments, or guides."
+        },
+        {
+          "id": "waiting",
+          "label": "Waiting",
+          "description": "Asking the user a question or waiting for their input or approval."
+        },
+        {
+          "id": "wrapping-up",
+          "label": "Wrapping up",
+          "description": "Summarising the result, committing, or otherwise finishing the task."
+        }
+      ],
+      "progressLevels": [
+        "not started",
+        "just started",
+        "early",
+        "about a quarter",
+        "about a third",
+        "about half",
+        "past half",
+        "about three quarters",
+        "nearly done",
+        "complete"
+      ],
+      "messageCharLimit": 4000,
+      "debounceMs": 750,
+      "errorBackoffMs": 60000
+    }
   }
 }

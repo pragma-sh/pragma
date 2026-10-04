@@ -7,7 +7,6 @@
   "required": [
     "app",
     "window",
-    "links",
     "editorLaunchers",
     "scripts",
     "agents",
@@ -26,12 +25,16 @@
     "bench",
     "files",
     "scratchpads",
+    "whiteboards",
     "fanout",
     "updates",
     "onboarding",
     "welcome",
-    "usageLimits",
-    "terminalViewport"
+    "terminalViewport",
+    "storage",
+    "projects",
+    "accounts",
+    "system1"
   ],
   "properties": {
     "app": {
@@ -39,9 +42,6 @@
     },
     "window": {
       "$ref": "#/definitions/WindowDefaults"
-    },
-    "links": {
-      "$ref": "#/definitions/Links"
     },
     "editorLaunchers": {
       "$ref": "#/definitions/EditorLaunchers"
@@ -97,6 +97,9 @@
     "scratchpads": {
       "$ref": "#/definitions/Scratchpads"
     },
+    "whiteboards": {
+      "$ref": "#/definitions/WhiteboardDefaults"
+    },
     "fanout": {
       "$ref": "#/definitions/FanoutDefaults"
     },
@@ -109,11 +112,20 @@
     "welcome": {
       "$ref": "#/definitions/Welcome"
     },
-    "usageLimits": {
-      "$ref": "#/definitions/UsageLimitsPolicy"
-    },
     "terminalViewport": {
       "$ref": "#/definitions/TerminalViewportPolicy"
+    },
+    "storage": {
+      "$ref": "#/definitions/StorageDefaults"
+    },
+    "projects": {
+      "$ref": "#/definitions/ProjectDefaults"
+    },
+    "accounts": {
+      "$ref": "#/definitions/AccountsDefaults"
+    },
+    "system1": {
+      "$ref": "#/definitions/System1"
     }
   },
   "definitions": {
@@ -130,15 +142,25 @@
       "description": "The pull request associated with a worktree's branch, found by repository plus exact head branch — which is what makes one opened outside Pragma appear.",
       "required": ["number", "title", "url", "state", "headBranch", "baseBranch"],
       "properties": {
-        "number": { "type": "integer" },
-        "title": { "type": "string" },
+        "number": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
         "url": {
           "type": "string",
           "description": "Canonical `https://github.com/owner/repo/pull/number`, as GitHub reports it. Clients open it with the platform link handler so the OS can route it to the GitHub app; there is no `github://` scheme to invent."
         },
-        "state": { "$ref": "#/definitions/GitHubPullRequestState" },
-        "headBranch": { "type": "string" },
-        "baseBranch": { "type": "string" }
+        "state": {
+          "$ref": "#/definitions/GitHubPullRequestState"
+        },
+        "headBranch": {
+          "type": "string"
+        },
+        "baseBranch": {
+          "type": "string"
+        }
       }
     },
     "GitHubPublishRequest": {
@@ -148,14 +170,22 @@
       "description": "An explicit request to push a branch and create its pull request. Separate from committing on purpose: a commit is local and a publish is not, and the user reviews the text in between.",
       "required": ["worktreeId", "title", "body", "draft", "requestId"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "title": { "type": "string" },
-        "body": { "type": "string" },
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
         "base": {
           "type": ["string", "null"],
           "description": "Base branch. Null falls back to the parent worktree's branch, then the repository default."
         },
-        "draft": { "type": "boolean" },
+        "draft": {
+          "type": "boolean"
+        },
         "requestId": {
           "type": "string",
           "description": "Caller-generated id. Pushing succeeds and the create response is lost often enough that a blind retry would open a second pull request; the host replays the first result instead."
@@ -190,9 +220,15 @@
       "description": "What a client needs to know before attaching to a session it does not own.",
       "required": ["sessionId", "cols", "rows", "alive", "leased", "generation"],
       "properties": {
-        "sessionId": { "type": "string" },
-        "cols": { "type": "integer" },
-        "rows": { "type": "integer" },
+        "sessionId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
         "alive": {
           "type": "boolean",
           "description": "The shell is still running. An exited session is never resized or respawned."
@@ -214,45 +250,30 @@
       "description": "A granted viewport lease. The holder resizes with `leaseId`; everyone else's resize is recorded as a desired size and applied when the lease ends. `previousCols`/`previousRows` are the grid captured at acquisition, restored on release unless a newer desired size arrived meanwhile.",
       "required": ["leaseId", "sessionId", "cols", "rows", "generation", "expiresInMs"],
       "properties": {
-        "leaseId": { "type": "string" },
-        "sessionId": { "type": "string" },
-        "cols": { "type": "integer" },
-        "rows": { "type": "integer" },
-        "previousCols": { "type": "integer" },
-        "previousRows": { "type": "integer" },
-        "generation": { "type": "integer" },
+        "leaseId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "previousCols": {
+          "type": "integer"
+        },
+        "previousRows": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
         "expiresInMs": {
           "type": "integer",
           "description": "Milliseconds until the host expires this lease without a renewal."
-        }
-      }
-    },
-    "UsageLimitsPolicy": {
-      "title": "UsageLimitsPolicy",
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Host refresh policy for plugin usage-limit providers. The host owns the single cache every client reads, so these bounds are shared rather than restated per client.",
-      "required": ["minRefreshIntervalMs", "maxRetryIntervalMs", "staleAfterMs", "loadTimeoutMs"],
-      "properties": {
-        "minRefreshIntervalMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "description": "Floor the host clamps a provider's requested `refreshIntervalMs` to. A provider is never invoked more often than this, however many clients ask."
-        },
-        "maxRetryIntervalMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "description": "Ceiling for the exponential backoff applied after consecutive provider failures."
-        },
-        "staleAfterMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "description": "How long a cached reading is served as last-good before clients label it stale. The reading is still shown: an unavailable or unknown provider is never rendered as zero usage."
-        },
-        "loadTimeoutMs": {
-          "type": "integer",
-          "minimum": 1000,
-          "description": "How long the host waits for the plugins sidecar to answer one usage-limits request before failing it."
         }
       }
     },
@@ -263,9 +284,18 @@
       "description": "One finite or unlimited usage category reported by a provider.",
       "required": ["id", "title", "used", "limit"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "title": { "type": "string", "minLength": 1 },
-        "used": { "type": "number", "minimum": 0 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "used": {
+          "type": "number",
+          "minimum": 0
+        },
         "limit": {
           "type": ["number", "null"],
           "description": "A null limit represents unlimited usage."
@@ -290,15 +320,22 @@
       "description": "A successful provider snapshot. `summary` is an optional collapsed-row metric derived separately from the detailed limits.",
       "required": ["status", "observedAt", "limits"],
       "properties": {
-        "status": { "type": "string", "const": "ready" },
+        "status": {
+          "type": "string",
+          "const": "ready"
+        },
         "observedAt": {
           "type": "number",
           "description": "Unix time in milliseconds when the provider observed these values."
         },
-        "summary": { "$ref": "#/definitions/UsageLimit" },
+        "summary": {
+          "$ref": "#/definitions/UsageLimit"
+        },
         "limits": {
           "type": "array",
-          "items": { "$ref": "#/definitions/UsageLimit" }
+          "items": {
+            "$ref": "#/definitions/UsageLimit"
+          }
         }
       }
     },
@@ -309,78 +346,36 @@
       "description": "A provider state that requires user or platform action before loading.",
       "required": ["status", "reason", "message"],
       "properties": {
-        "status": { "type": "string", "const": "unavailable" },
-        "reason": { "$ref": "#/definitions/UsageLimitsUnavailableReason" },
-        "message": { "type": "string" }
+        "status": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "reason": {
+          "$ref": "#/definitions/UsageLimitsUnavailableReason"
+        },
+        "message": {
+          "type": "string"
+        }
       }
     },
     "UsageLimitsResult": {
       "title": "UsageLimitsResult",
       "description": "Result returned by a usage-limit provider, discriminated by `status`.",
       "anyOf": [
-        { "$ref": "#/definitions/UsageLimitsReady" },
-        { "$ref": "#/definitions/UsageLimitsUnavailable" }
+        {
+          "$ref": "#/definitions/UsageLimitsReady"
+        },
+        {
+          "$ref": "#/definitions/UsageLimitsUnavailable"
+        }
       ]
     },
-    "UsageLimitsProvider": {
-      "title": "UsageLimitsProvider",
-      "type": "object",
-      "additionalProperties": false,
-      "description": "One usage-limit provider as the host reports it: the static metadata declared by the plugin, plus the host's cached reading. Metadata travels with the reading so a client renders the card without a second catalog lookup. `icon` is present only when the plugin declares a file icon; a component icon is desktop-only and never crosses the wire. `result` is absent when the provider has never produced a reading, which is not the same as zero usage.",
-      "required": ["pluginId", "providerId", "title", "dashboardUrl", "primaryLimitId"],
-      "properties": {
-        "pluginId": { "type": "string", "minLength": 1 },
-        "providerId": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Provider id as declared by the plugin, unique within that plugin."
-        },
-        "title": { "type": "string", "minLength": 1 },
-        "dashboardUrl": {
-          "type": "string",
-          "description": "Absolute URL for viewing this provider's usage in its own dashboard."
-        },
-        "primaryLimitId": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Id of the category rendered in the provider's collapsed summary row. `UsageLimitsReady.summary` overrides it when present."
-        },
-        "refreshIntervalMs": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Cadence the plugin asked for. The host clamps it to `usageLimits.minRefreshIntervalMs`."
-        },
-        "icon": { "$ref": "#/definitions/PluginIconRef" },
-        "result": { "$ref": "#/definitions/UsageLimitsResult" },
-        "observedAt": {
-          "type": "number",
-          "description": "Unix milliseconds when the host cached `result`. Clients compare it against `usageLimits.staleAfterMs` to label a last-good reading stale."
-        },
-        "loading": {
-          "type": "boolean",
-          "description": "A load for this provider is in flight on the host right now."
-        }
-      }
-    },
-    "UsageLimitsSnapshot": {
-      "title": "UsageLimitsSnapshot",
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Response of the `plugins`/`usageLimits` RPC: every provider visible in the requested scope.",
-      "required": ["providers"],
-      "properties": {
-        "providers": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/UsageLimitsProvider" }
-        }
-      }
-    },
-    "PluginIconRef": {
-      "title": "PluginIconRef",
+    "AgentIcon": {
+      "title": "AgentIcon",
       "type": "object",
       "additionalProperties": false,
       "required": ["hash", "mime"],
-      "description": "Reference to a plugin-contributed icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
+      "description": "Reference to a plugin-contributed agent icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
       "properties": {
         "hash": {
           "type": "string",
@@ -407,13 +402,19 @@
         "located": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Headings for a surface that knows which project/worktree is selected. Every entry must contain `locationPlaceholder` exactly once."
         },
         "generic": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Headings for a surface with no selected location, such as the mobile all-projects home. Authored to parallel `located` index for index, never derived from it by string surgery."
         }
       }
@@ -439,10 +440,12 @@
         "tunnel",
         "ports",
         "scratchpads",
+        "whiteboards",
         "wsl",
         "fanouts",
         "sessions",
-        "scripts"
+        "scripts",
+        "accounts"
       ]
     },
     "ProtocolEventKind": {
@@ -899,6 +902,10 @@
         "idempotencyKey": {
           "type": ["string", "null"],
           "description": "Repeating a create with the same key returns the existing fanout instead of provisioning a second one."
+        },
+        "commandRunId": {
+          "type": ["string", "null"],
+          "description": "Names the `exec` runs of the prompt's pre-launch commands, so a concurrent `exec` cancel with this id skips them: the running attempt's commands stop and later attempts skip theirs."
         }
       }
     },
@@ -1450,7 +1457,7 @@
       "properties": {
         "oauthClientId": {
           "type": "string",
-          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret \u2014 a distributed desktop app can't keep one secret."
+          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret — a distributed desktop app can't keep one secret."
         },
         "scopes": {
           "type": "array",
@@ -1544,6 +1551,10 @@
         "autoDownload": {
           "type": "boolean",
           "description": "When true, Pragma polls on launch, on an interval, and when the window becomes visible. When false, only Check now runs. The download itself starts when the user clicks Install Update."
+        },
+        "nonGitProjectWarning": {
+          "type": "boolean",
+          "description": "When false, adding a folder that is not a git repository skips the warning and adds it as a plain project. Omitted uses `projects.nonGitWarning`."
         }
       }
     },
@@ -1621,7 +1632,7 @@
       "title": "BranchSyncStatus",
       "type": "object",
       "additionalProperties": false,
-      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch \u2014 the create-PR pre-flight.",
+      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch — the create-PR pre-flight.",
       "required": ["branch", "ahead", "behind", "hasUpstream"],
       "properties": {
         "branch": {
@@ -1669,7 +1680,7 @@
         },
         "parentBranch": {
           "type": ["string", "null"],
-          "description": "The branch of the worktree's parent worktree \u2014 the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
+          "description": "The branch of the worktree's parent worktree — the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
         }
       }
     },
@@ -1731,7 +1742,9 @@
         "windows": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Windows shell candidates, probed in order and resolved against `PATH`. PowerShell 7+ (`pwsh.exe`) is preferred over the in-box Windows PowerShell (`powershell.exe`) because it ships the modern ConPTY behaviour; the last entry must be a shell that is present on every Windows install so resolution cannot fail."
         }
       }
@@ -1749,7 +1762,9 @@
         },
         "listArgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Arguments that list installed distributions with their state and WSL version. The output is UTF-16LE encoded, which the parser has to decode before splitting."
         },
         "serverBinary": {
@@ -1767,7 +1782,7 @@
       "properties": {
         "protocolVersion": {
           "type": "string",
-          "description": "Wire-protocol SemVer the host speaks on Hello, gateway.json, health, and pairing. Mirrored from crates/pragma-protocol's package version by `bun run generate`; do not edit by hand. Comparison is exact equality."
+          "description": "Internal daemon wire-protocol SemVer, spoken on Hello, `gateway.json` and `/v1/health`. Mirrored from crates/pragma-protocol's package version by `bun run generate`; do not edit by hand. Comparison is exact equality, and that is load-bearing: every peer here ships in one bundle, so a version that no longer matches is a stale process to evict, not a peer to negotiate with. Remote clients use `gateway.apiVersion` instead."
         },
         "socketFile": {
           "type": "string",
@@ -1787,7 +1802,7 @@
       "title": "Plugins",
       "type": "object",
       "additionalProperties": false,
-      "required": ["bundledDirName", "configFileName", "storageScopes"],
+      "required": ["configFileName", "storageScopes"],
       "description": "Plugin-system constants shared by the Rust config reader and the TypeScript loader.",
       "properties": {
         "configFileName": {
@@ -1802,10 +1817,6 @@
           },
           "uniqueItems": true,
           "description": "Plugin storage scopes supported by the host runtime. v1 persists global plugin key/value state; project scope is reserved for project-addressed plugin config/storage layers."
-        },
-        "bundledDirName": {
-          "type": "string",
-          "description": "Directory name (under the app resource dir) holding the plugin bundles shipped with Pragma. Each subdirectory is a normal plugin package (package.json + bundle + assets), resolved by the same manifest readers as user-configured plugins."
         }
       }
     },
@@ -1836,16 +1847,22 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "apiVersion",
         "discoveryFile",
         "tokenFile",
         "devicesFile",
         "tokenHeader",
         "deviceHeaders",
         "push",
-        "web"
+        "web",
+        "keepAwake"
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
+        "apiVersion": {
+          "type": "string",
+          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value — a client that never launches cannot be updated first."
+        },
         "discoveryFile": {
           "type": "string",
           "description": "Filename written beside daemon.sock with gateway port, token, pid, and protocol version."
@@ -1867,10 +1884,18 @@
           "additionalProperties": false,
           "required": ["id", "name", "platform", "appVersion"],
           "properties": {
-            "id": { "type": "string" },
-            "name": { "type": "string" },
-            "platform": { "type": "string" },
-            "appVersion": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "appVersion": {
+              "type": "string"
+            }
           },
           "description": "HTTP headers carrying installation-scoped mobile device metadata."
         },
@@ -1879,6 +1904,10 @@
         },
         "web": {
           "$ref": "#/definitions/GatewayWeb"
+        },
+        "keepAwake": {
+          "type": "boolean",
+          "description": "Default for keeping the host awake while remote access is on, so system sleep does not interrupt a Pragma Go pairing. Users override it with gateway.keepAwake in the global config file; pragma-server holds the sleep inhibitor alongside the tunnel."
         }
       }
     },
@@ -1930,7 +1959,9 @@
         },
         "tokenPrefixes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true,
           "description": "Accepted Expo push token prefixes. A token that matches none is rejected at registration rather than failing later inside Expo."
         }
@@ -1949,7 +1980,7 @@
         },
         "defaultUrlPattern": {
           "type": "string",
-          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://\u2026\"` log and plain `https://\u2026` URLs (e.g. cloudflared)."
+          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://…\"` log and plain `https://…` URLs (e.g. cloudflared)."
         }
       }
     },
@@ -1971,7 +2002,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["hookGlobal", "runnerGlobal", "markerPrefix", "tabTitle"],
-      "description": "Names the terminal benchmark (`@pragma/bench`) and the desktop app agree on. The app installs the hook global in dev builds only; the benchmark's injected runner reads it back by the same name.",
+      "description": "Names the terminal benchmark (`@pragma-sh/bench`) and the desktop app agree on. The app installs the hook global in dev builds only; the benchmark's injected runner reads it back by the same name.",
       "properties": {
         "hookGlobal": {
           "type": "string",
@@ -2046,15 +2077,38 @@
         "defaultTitles": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["fallback", "browser", "log", "scratchpad", "prReview", "pluginWebview"],
+          "required": [
+            "fallback",
+            "browser",
+            "log",
+            "scratchpad",
+            "whiteboard",
+            "prReview",
+            "pluginWebview"
+          ],
           "description": "Fallback title per tab kind, used for a tab whose shell or page has not named itself. A tab still carrying its default title has no name worth showing in a notification, so both languages compare against these.",
           "properties": {
-            "fallback": { "type": "string" },
-            "browser": { "type": "string" },
-            "log": { "type": "string" },
-            "scratchpad": { "type": "string" },
-            "prReview": { "type": "string" },
-            "pluginWebview": { "type": "string" }
+            "fallback": {
+              "type": "string"
+            },
+            "browser": {
+              "type": "string"
+            },
+            "log": {
+              "type": "string"
+            },
+            "scratchpad": {
+              "type": "string"
+            },
+            "whiteboard": {
+              "type": "string"
+            },
+            "prReview": {
+              "type": "string"
+            },
+            "pluginWebview": {
+              "type": "string"
+            }
           }
         }
       }
@@ -2124,18 +2178,41 @@
       "title": "TerminalDefaults",
       "type": "object",
       "additionalProperties": false,
-      "required": ["hiddenDistros", "rememberLastShell"],
+      "required": [
+        "hiddenDistros",
+        "rememberLastShell",
+        "maxDroppedFileBytes",
+        "droppedFilesDirName",
+        "droppedFilesMaxAgeMs"
+      ],
       "description": "Shipped defaults for terminal launching. A user overrides these per install/project via the `terminal` key of `.pragma/config.json` (`TerminalSettings`).",
       "properties": {
         "hiddenDistros": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true,
           "description": "WSL distribution names hidden from the shell picker by default because they back other tools rather than interactive shells (Docker Desktop's VM distros)."
         },
         "rememberLastShell": {
           "type": "boolean",
           "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        },
+        "maxDroppedFileBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest file (typically an image) that may be dropped onto a terminal. The bytes are copied to the host that runs the PTY in one `filesystem` RPC, so this plus its base64 expansion must stay inside the protocol's frame limit."
+        },
+        "droppedFilesDirName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory under the host's temporary directory that holds copies of files dropped onto a terminal, whose absolute paths are pasted into the PTY."
+        },
+        "droppedFilesMaxAgeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a per-drop directory under `droppedFilesDirName` may sit on disk before a sweep deletes it. The host sweeps once at startup and on a fixed interval after that (`DROPPED_FILES_SWEEP_INTERVAL` in `pragma-server`), so a drop is retained for at most this age plus one sweep interval."
         }
       }
     },
@@ -2159,7 +2236,9 @@
         },
         "hiddenDistros": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "WSL distribution names omitted from the shell picker. Replaces the shipped TerminalDefaults list rather than merging with it."
         },
         "rememberLastShell": {
@@ -2207,7 +2286,9 @@
         },
         "distros": {
           "type": "array",
-          "items": { "$ref": "#/definitions/WslDistro" },
+          "items": {
+            "$ref": "#/definitions/WslDistro"
+          },
           "description": "Installed WSL distributions, before any user-configured hiding."
         }
       }
@@ -2259,7 +2340,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
-      "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma/plugin so the catalog wire type has one source of truth.",
+      "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma-sh/plugin so the catalog wire type has one source of truth.",
       "properties": {
         "id": {
           "type": "string"
@@ -2287,6 +2368,10 @@
           "items": {
             "$ref": "#/definitions/AgentReasoning"
           }
+        },
+        "canonicalId": {
+          "type": "string",
+          "description": "Optional provider-qualified model id (for example `anthropic/claude-sonnet-5-5`) used to match an alias such as `sonnet` against public benchmark catalogs. Auto mode falls back to `id` when absent."
         }
       }
     },
@@ -2302,7 +2387,8 @@
         "abort",
         "interrupt",
         "usageLimits",
-        "sessionName"
+        "sessionName",
+        "slashCommands"
       ]
     },
     "CatalogAgent": {
@@ -2324,12 +2410,12 @@
         },
         "scope": {
           "type": ["string", "null"],
-          "enum": ["bundled", "global", "project", null],
+          "enum": ["global", "project", null],
           "description": "Where the contributing plugin was resolved from. A `project` agent belongs to exactly one project root and must not be offered to another one."
         },
         "root": {
           "type": ["string", "null"],
-          "description": "Absolute root the contributing plugin was resolved from: the project root for `project` scope, the home directory for `global`, the bundle directory for `bundled`."
+          "description": "Absolute root the contributing plugin was resolved from: the project root for `project` scope or the home directory for `global`."
         },
         "runtimeAgentId": {
           "type": ["string", "null"],
@@ -2338,7 +2424,7 @@
         "icon": {
           "anyOf": [
             {
-              "$ref": "#/definitions/PluginIconRef"
+              "$ref": "#/definitions/AgentIcon"
             },
             {
               "type": "null"
@@ -2349,6 +2435,27 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/AgentModelEntry"
+          }
+        },
+        "slashCommands": {
+          "type": "array",
+          "description": "Slash commands the agent accepts, for a `/` picker. Applied through `AgentSessionLaunchPayload.slashCommand`.",
+          "items": {
+            "$ref": "#/definitions/AgentSlashCommand"
+          }
+        },
+        "modes": {
+          "type": "array",
+          "description": "Primary agents/modes the agent can start in (Shift+Tab in the launcher). Selected through `AgentSessionLaunchPayload.modeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentMode"
+          }
+        },
+        "permissionModes": {
+          "type": "array",
+          "description": "Permission modes the agent can start in. Selected through `AgentSessionLaunchPayload.permissionModeId`.",
+          "items": {
+            "$ref": "#/definitions/AgentPermissionMode"
           }
         },
         "excludeFeatures": {
@@ -2396,6 +2503,20 @@
         "prefillSubmitDelayMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "modeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.modes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
+        },
+        "permissionModeArgs": {
+          "type": "array",
+          "description": "Launch args per `CatalogAgent.permissionModes` id.",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchArgs"
+          }
         }
       }
     },
@@ -2535,22 +2656,6 @@
         }
       }
     },
-    "Links": {
-      "title": "Links",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["homepage", "support"],
-      "properties": {
-        "homepage": {
-          "type": "string",
-          "format": "uri"
-        },
-        "support": {
-          "type": "string",
-          "format": "uri"
-        }
-      }
-    },
     "EditorLaunchers": {
       "title": "EditorLaunchers",
       "type": "object",
@@ -2658,13 +2763,18 @@
         }
       }
     },
-
     "Agents": {
       "title": "Agents",
       "type": "object",
       "additionalProperties": false,
       "description": "Shared agent-launch timing used by both the frontend's terminal-write scheduling and the Rust CLI/broker launch path.",
-      "required": ["startDelayMs", "altScreenExtraWaitMs", "altScreenSettleMs"],
+      "required": [
+        "startDelayMs",
+        "altScreenExtraWaitMs",
+        "altScreenSettleMs",
+        "prelaunchCommandPrefix",
+        "prelaunchOutputLimit"
+      ],
       "properties": {
         "startDelayMs": {
           "type": "integer",
@@ -2680,6 +2790,16 @@
           "type": "integer",
           "minimum": 0,
           "description": "Delay after a late alternate-screen entry before sending the prompt, allowing the TUI input widget to mount."
+        },
+        "prelaunchCommandPrefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prefix of an inline shell command in an agent prompt, written `!!` + a code span (``!!`bun run test` ``). The command runs headlessly in the agent's worktree before it starts; the agent reads it as a plain code span, followed by its output. Read by the prompt editor, the desktop launch paths, and the host's fanout provisioning."
+        },
+        "prelaunchOutputLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most characters of each pre-launch command stream (stdout, stderr) handed to the agent; the tail is kept."
         }
       }
     },
@@ -2880,11 +3000,28 @@
       "type": "string",
       "enum": ["idle", "running", "stopping"]
     },
+    "ProjectDefaults": {
+      "title": "ProjectDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for adding projects.",
+      "required": ["nonGitWarning", "nonGitRootLabel"],
+      "properties": {
+        "nonGitWarning": {
+          "type": "boolean",
+          "description": "Whether adding a folder that is not a git repository warns first. Overridden by `other.nonGitProjectWarning` in global `.pragma/config.json`."
+        },
+        "nonGitRootLabel": {
+          "type": "string",
+          "description": "Sidebar label for the single worktree of a project that is not a git repository (git projects show `main`)."
+        }
+      }
+    },
     "Project": {
       "title": "Project",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "path", "orderIndex", "createdAt"],
+      "required": ["id", "name", "path", "iconEmoji", "orderIndex", "createdAt"],
       "properties": {
         "id": {
           "type": "string"
@@ -2895,11 +3032,20 @@
         "path": {
           "type": "string"
         },
+        "iconEmoji": {
+          "type": ["string", "null"],
+          "description": "User-chosen emoji shown in the project switcher; null falls back to a favicon found in the checkout, then to the project name's initial."
+        },
         "orderIndex": {
           "type": "integer"
         },
         "createdAt": {
           "type": "string"
+        },
+        "isGit": {
+          "type": "boolean",
+          "default": true,
+          "description": "False when the project directory is not the root of a git repository. Such a project has a single root worktree and no git features (worktrees, changes, pull requests) until the user initializes a repository. Omitted means true, so snapshots written before this field existed still read as git projects."
         }
       }
     },
@@ -3017,13 +3163,14 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a scratchpad, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a scratchpad, a whiteboard, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
       "type": "string",
       "enum": [
         "terminal",
         "browser",
         "editor",
         "scratchpad",
+        "whiteboard",
         "diff",
         "log",
         "pr-review",
@@ -3035,10 +3182,25 @@
       "description": "Managed scratchpad file contract shared by the CLI, desktop host, and editor.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["directory", "extension", "frontmatterKey", "version"],
+      "required": [
+        "directory",
+        "exportsDirectory",
+        "exportHomepageUrl",
+        "extension",
+        "frontmatterKey",
+        "version"
+      ],
       "properties": {
         "directory": {
           "type": "string"
+        },
+        "exportsDirectory": {
+          "type": "string",
+          "description": "Worktree-relative directory for standalone HTML exports."
+        },
+        "exportHomepageUrl": {
+          "type": "string",
+          "description": "Pragma homepage linked from the standalone export watermark."
         },
         "extension": {
           "type": "string"
@@ -3103,6 +3265,197 @@
         "createdAt": {
           "type": "number",
           "description": "Epoch milliseconds the scratchpad was created, from its managed frontmatter."
+        }
+      }
+    },
+    "WhiteboardDefaults": {
+      "title": "WhiteboardDefaults",
+      "description": "Host persistence and validation limits for worktree-scoped whiteboards.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "databaseFile",
+        "defaultTitle",
+        "maxTitleChars",
+        "maxSceneBytes",
+        "maxRenderDimension"
+      ],
+      "properties": {
+        "databaseFile": {
+          "type": "string"
+        },
+        "defaultTitle": {
+          "type": "string"
+        },
+        "maxTitleChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxSceneBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxRenderDimension": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ExcalidrawScene": {
+      "title": "ExcalidrawScene",
+      "description": "Serializable Excalidraw scene. Core fields are validated while element, app-state, and binary-file extensions remain forward compatible with Excalidraw releases.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "elements", "appState", "files"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["excalidraw"]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["id", "type"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "appState": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Whiteboard": {
+      "title": "Whiteboard",
+      "description": "One durable worktree-scoped Excalidraw document.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "worktreeId", "title", "scene", "version", "createdAt", "updatedAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "WhiteboardCreateInput": {
+      "title": "WhiteboardCreateInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "title", "scene"],
+      "properties": {
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        }
+      }
+    },
+    "WhiteboardEditInput": {
+      "title": "WhiteboardEditInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "id", "title", "scene", "expectedVersion"],
+      "properties": {
+        "worktreeId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scene": {
+          "$ref": "#/definitions/ExcalidrawScene"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "WhiteboardListInput": {
+      "title": "WhiteboardListInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId"],
+      "properties": {
+        "worktreeId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "WhiteboardIdInput": {
+      "title": "WhiteboardIdInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "id"],
+      "properties": {
+        "worktreeId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "WhiteboardViewResult": {
+      "title": "WhiteboardViewResult",
+      "description": "Base64-encoded PNG rendering of one whiteboard.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "type": "string"
         }
       }
     },
@@ -3502,6 +3855,18 @@
         "reasoningId": {
           "type": ["string", "null"]
         },
+        "modeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.modes`. Omitted selects the agent's first (default) mode."
+        },
+        "permissionModeId": {
+          "type": ["string", "null"],
+          "description": "Id from `CatalogAgent.permissionModes`. Omitted selects the agent's first (default) permission mode."
+        },
+        "slashCommand": {
+          "type": ["string", "null"],
+          "description": "Name from `CatalogAgent.slashCommands`. The launch prompt becomes the command's invocation followed by `prompt`."
+        },
         "modelCmd": {
           "type": ["string", "null"],
           "description": "Raw shell snippet appended to the agent's base launch command instead of catalog model/reasoning args (for example `--model moonshot/kimi-k3`). Overrides `modelId`/`reasoningId` when set."
@@ -3545,6 +3910,7 @@
         "title",
         "url",
         "filePath",
+        "whiteboardId",
         "diffSide",
         "diffCommit",
         "prNumber",
@@ -3580,6 +3946,10 @@
         "filePath": {
           "type": ["string", "null"],
           "description": "Worktree-relative path for editor/diff tabs; null for terminal/browser tabs."
+        },
+        "whiteboardId": {
+          "type": ["string", "null"],
+          "description": "Durable whiteboard id for whiteboard tabs; null for every other tab kind."
         },
         "diffSide": {
           "description": "Which diff side a diff tab shows; null for non-diff tabs.",
@@ -3673,7 +4043,7 @@
     },
     "DiffSide": {
       "title": "DiffSide",
-      "description": "Which axis of change a diff/listing record refers to. committed (base branch \u2192 HEAD), staged (HEAD \u2192 index), and unstaged (index \u2192 working tree) are the three listing axes. worktree (base branch \u2192 working tree) is the unified review side every Changes-sidebar click opens \u2014 it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
+      "description": "Which axis of change a diff/listing record refers to. committed (base branch → HEAD), staged (HEAD → index), and unstaged (index → working tree) are the three listing axes. worktree (base branch → working tree) is the unified review side every Changes-sidebar click opens — it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
       "type": "string",
       "enum": ["committed", "staged", "unstaged", "worktree"]
     },
@@ -3922,7 +4292,9 @@
       "additionalProperties": false,
       "required": ["worktreeId", "path", "kind", "score"],
       "properties": {
-        "worktreeId": { "type": "string" },
+        "worktreeId": {
+          "type": "string"
+        },
         "path": {
           "type": "string",
           "description": "Worktree-relative POSIX path."
@@ -3958,9 +4330,13 @@
       "properties": {
         "matches": {
           "type": "array",
-          "items": { "$ref": "#/definitions/PaletteSearchMatch" }
+          "items": {
+            "$ref": "#/definitions/PaletteSearchMatch"
+          }
         },
-        "truncated": { "type": "boolean" }
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "ProjectIcon": {
@@ -4037,7 +4413,7 @@
         },
         "branchName": {
           "type": "string",
-          "description": "Branch the card targets \u2014 an existing project worktree branch or a new one to create."
+          "description": "Branch the card targets — an existing project worktree branch or a new one to create."
         },
         "prompt": {
           "type": "string"
@@ -4169,6 +4545,7 @@
         "closeTopTab",
         "newTerminalTab",
         "newBrowserTab",
+        "newWhiteboard",
         "clearTerminal",
         "browserReload",
         "browserDevtools",
@@ -4179,6 +4556,7 @@
         "scrollTerminalBottom",
         "openCommandPalette",
         "openCommandMode",
+        "openSettings",
         "switchToWorkspace1",
         "switchToWorkspace2",
         "switchToWorkspace3",
@@ -4223,6 +4601,9 @@
         "newBrowserTab": {
           "$ref": "#/definitions/PlatformChord"
         },
+        "newWhiteboard": {
+          "$ref": "#/definitions/PlatformChord"
+        },
         "clearTerminal": {
           "$ref": "#/definitions/PlatformChord"
         },
@@ -4251,6 +4632,9 @@
           "$ref": "#/definitions/PlatformChord"
         },
         "openCommandMode": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "openSettings": {
           "$ref": "#/definitions/PlatformChord"
         },
         "switchToWorkspace1": {
@@ -4370,7 +4754,8 @@
         "linux-aarch64-deb",
         "linux-aarch64-rpm",
         "linux-aarch64-appimage",
-        "windows-x86_64"
+        "windows-x86_64",
+        "windows-aarch64"
       ]
     },
     "Onboarding": {
@@ -4403,7 +4788,9 @@
         "targets": {
           "type": "array",
           "description": "Install destinations offered by the skills step.",
-          "items": { "$ref": "#/definitions/OnboardingSkillTarget" }
+          "items": {
+            "$ref": "#/definitions/OnboardingSkillTarget"
+          }
         }
       }
     },
@@ -4414,12 +4801,18 @@
       "description": "One skill install destination. The frontend sends `id` over IPC; the backend resolves `directory` against the home directory.",
       "required": ["id", "directory", "label"],
       "properties": {
-        "id": { "type": "string", "description": "Stable identifier sent over IPC." },
+        "id": {
+          "type": "string",
+          "description": "Stable identifier sent over IPC."
+        },
         "directory": {
           "type": "string",
           "description": "Directory holding the skill, relative to the user's home directory."
         },
-        "label": { "type": "string", "description": "Button label shown in onboarding." }
+        "label": {
+          "type": "string",
+          "description": "Button label shown in onboarding."
+        }
       }
     },
     "Updates": {
@@ -4498,6 +4891,964 @@
             "$ref": "#/definitions/UpdatePlatform"
           },
           "description": "Installer platform ids the check API accepts."
+        }
+      }
+    },
+    "StorageDefaults": {
+      "title": "StorageDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for the Settings → Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
+      "required": [
+        "largeFileMinBytes",
+        "largeFileLimit",
+        "ignoredFolderMinBytes",
+        "maxScanEntries",
+        "scanConcurrency",
+        "protectedFolders",
+        "reminderIntervalDays",
+        "reminderIntervalPresets"
+      ],
+      "properties": {
+        "largeFileMinBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Smallest file a worktree scan lists as a large file."
+        },
+        "largeFileLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most large files one worktree scan returns, largest first."
+        },
+        "ignoredFolderMinBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Smallest gitignored folder offered under Free up space. Tiny folders are still counted in the totals."
+        },
+        "maxScanEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Most filesystem entries one worktree scan visits before it stops and reports itself truncated."
+        },
+        "scanConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many worktree scans the Storage page runs at once."
+        },
+        "protectedFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Worktree-relative folders (and everything beneath them) the host never deletes as a gitignored folder, even when git reports them ignored. `.pragma` holds project config and, in the main checkout, every linked worktree."
+        },
+        "reminderIntervalDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default days between storage reminders when the user enables them without choosing an interval."
+        },
+        "reminderIntervalPresets": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Interval choices, in days, offered by the storage reminder picker."
+        }
+      }
+    },
+    "StorageSettings": {
+      "title": "StorageSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `storage` block of global `.pragma/config.json`. Global-only. Every field is optional.",
+      "properties": {
+        "reminder": {
+          "$ref": "#/definitions/StorageReminderSettings"
+        }
+      }
+    },
+    "StorageReminderSettings": {
+      "title": "StorageReminderSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "When Pragma reminds the user to review disk usage. Reminders recur every `intervalDays` days starting on `startDate`.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether storage reminders are shown."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Local calendar date (YYYY-MM-DD) of the first reminder."
+        },
+        "intervalDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days between reminders. Missing uses StorageDefaults.reminderIntervalDays."
+        }
+      }
+    },
+    "StorageFile": {
+      "title": "StorageFile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "ignored"],
+      "description": "One large file found by a worktree storage scan.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative path with `/` separators."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes the file occupies on disk."
+        },
+        "ignored": {
+          "type": "boolean",
+          "description": "True when the file lies inside a gitignored folder."
+        }
+      }
+    },
+    "StorageFolder": {
+      "title": "StorageFolder",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "fileCount"],
+      "description": "One gitignored folder a worktree storage scan found and the user may delete.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative folder path with `/` separators and no trailing slash."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes the folder's contents occupy on disk."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files inside the folder."
+        }
+      }
+    },
+    "WorktreeStorage": {
+      "title": "WorktreeStorage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "totalBytes",
+        "fileCount",
+        "gitBytes",
+        "ignoredBytes",
+        "largeFiles",
+        "ignoredFolders",
+        "truncated"
+      ],
+      "description": "Disk usage of one worktree, computed on the host that owns it. Linked Pragma worktrees nested under `.pragma/worktrees` are excluded so the main checkout never double-counts them.",
+      "properties": {
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes every scanned file occupies, including `.git` and gitignored folders."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files scanned."
+        },
+        "gitBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes under the worktree's own `.git` entry (object store in a main checkout)."
+        },
+        "ignoredBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes inside every gitignored folder, deletable or protected."
+        },
+        "largeFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageFile"
+          },
+          "description": "Largest files at or above StorageDefaults.largeFileMinBytes, largest first."
+        },
+        "ignoredFolders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageFolder"
+          },
+          "description": "Deletable gitignored folders at or above StorageDefaults.ignoredFolderMinBytes, largest first."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the scan stopped at StorageDefaults.maxScanEntries or was cancelled, so totals are a lower bound."
+        },
+        "tree": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageTreeEntry"
+          },
+          "description": "Top-level folder totals under the worktree root, for the treemap. Optional on the wire: a host built before it existed omits it, and the worktree is then drawn as one box."
+        }
+      }
+    },
+    "StorageTreeEntryKind": {
+      "title": "StorageTreeEntryKind",
+      "type": "string",
+      "enum": ["folder", "file", "files"],
+      "description": "What a treemap entry stands for: a top-level folder, or the files directly in the worktree root (`files`). `file` is reserved for a single file."
+    },
+    "StorageTreeEntry": {
+      "title": "StorageTreeEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bytes", "fileCount", "kind", "children"],
+      "description": "One box of a worktree's treemap: a top-level folder's total size, or the root's own files.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "File or folder name (not a path). Empty for a `files` remainder."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes on disk."
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files the entry holds, counting everything beneath a folder."
+        },
+        "kind": {
+          "$ref": "#/definitions/StorageTreeEntryKind"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StorageTreeEntry"
+          },
+          "description": "Always empty today: the treemap stops at top-level folders. Kept so a deeper tree can be added without a wire change."
+        }
+      }
+    },
+    "AccountsDefaults": {
+      "title": "AccountsDefaults",
+      "description": "Host-owned account-provider storage and polling limits. Accounts, their credential directories, and harness bindings live on the host that runs the harness.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stateFile",
+        "homeDir",
+        "defaultLoginPrefix",
+        "minRefreshMs",
+        "maxRetryMs",
+        "loginOutputMaxBytes",
+        "loginTimeoutMs"
+      ],
+      "properties": {
+        "stateFile": {
+          "type": "string",
+          "description": "File under the host's `~/.pragma` holding logins, labels, and bindings."
+        },
+        "homeDir": {
+          "type": "string",
+          "description": "Directory under the host's `~/.pragma` holding one owner-only credential directory per Pragma-created login."
+        },
+        "defaultLoginPrefix": {
+          "type": "string",
+          "description": "Login-id prefix for a harness's own existing login (no Pragma-owned credential directory)."
+        },
+        "minRefreshMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Smallest usage refresh interval the host honours, whatever a plugin requests."
+        },
+        "maxRetryMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Upper bound on exponential usage-refresh backoff after failures."
+        },
+        "loginOutputMaxBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "Tail of a login command's terminal output returned to clients."
+        },
+        "loginTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "A login session still running after this long is killed and discarded."
+        }
+      }
+    },
+    "AccountIdentity": {
+      "title": "AccountIdentity",
+      "description": "Who a login is signed in as, reported by the plugin's `identify`. Logins of one provider with the same `id` are one account.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountLogin": {
+      "title": "AccountLogin",
+      "description": "One harness x provider credential slot on this host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pluginId",
+        "providerId",
+        "provider",
+        "agentId",
+        "home",
+        "credentialPath",
+        "identity",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Resolved account-provider id inside the plugin."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Well-known provider key rows merge on, e.g. `anthropic`."
+        },
+        "agentId": {
+          "type": "string",
+          "description": "Catalog agent (harness) id this login belongs to."
+        },
+        "home": {
+          "type": ["string", "null"],
+          "description": "Pragma-owned credential directory, or null for the harness's own default login."
+        },
+        "credentialPath": {
+          "type": ["string", "null"],
+          "description": "Where the token lives, as reported by the plugin. Never the token itself."
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/AccountIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "tokenGroup": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Logins that share one sign-in (copied from each other instead of signed in separately) have the same group. Pragma keeps every login in a group on the newest token, so a refresh by one harness reaches the others."
+        }
+      }
+    },
+    "AccountBindings": {
+      "title": "AccountBindings",
+      "description": "Harness (agent id) -> provider key -> account key.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountBindingState": {
+      "title": "AccountBindingState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "projects"],
+      "properties": {
+        "global": {
+          "$ref": "#/definitions/AccountBindings"
+        },
+        "projects": {
+          "type": "object",
+          "description": "Per-project overrides keyed by the project root on this host.",
+          "additionalProperties": {
+            "$ref": "#/definitions/AccountBindings"
+          }
+        }
+      }
+    },
+    "AccountsState": {
+      "title": "AccountsState",
+      "description": "Persisted host account state (`accounts.stateFile`).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "logins", "labels", "bindings"],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "logins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountLogin"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "description": "User labels keyed by account key.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "bindings": {
+          "$ref": "#/definitions/AccountBindingState"
+        }
+      }
+    },
+    "AccountBindingScope": {
+      "title": "AccountBindingScope",
+      "type": "string",
+      "enum": ["global", "project"]
+    },
+    "AccountProviderInfo": {
+      "title": "AccountProviderInfo",
+      "description": "One plugin-declared account provider, as resolved by the plugins sidecar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pluginId",
+        "providerId",
+        "provider",
+        "title",
+        "agentIds",
+        "dashboardUrl",
+        "iconPath",
+        "pluginDir",
+        "hasLogin",
+        "loginInstructions",
+        "multiAccount",
+        "identifies",
+        "legacy",
+        "primaryLimitId",
+        "refreshIntervalMs"
+      ],
+      "properties": {
+        "pluginId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Catalog agent ids (harnesses) that use this provider."
+        },
+        "dashboardUrl": {
+          "type": ["string", "null"]
+        },
+        "iconPath": {
+          "type": ["string", "null"]
+        },
+        "pluginDir": {
+          "type": ["string", "null"]
+        },
+        "hasLogin": {
+          "type": "boolean"
+        },
+        "loginInstructions": {
+          "type": ["string", "null"]
+        },
+        "multiAccount": {
+          "type": "boolean",
+          "description": "True when the plugin can point its harness at a Pragma-owned credential directory."
+        },
+        "sharedTokenKind": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Kind of sign-in this provider can lend (e.g. `chatgpt`, `key:openrouter`). Harnesses with the same kind can use one another's sign-in for an account, so a harness can switch to an account it never signed in to."
+        },
+        "sharedTokenWritable": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when the provider can also take a sign-in lent by another harness (it has per-account slots to store one)."
+        },
+        "swaps": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when accounts switch by swapping entries in the harness's one shared credential file at launch (a multi-provider harness), instead of through `env`. Running sessions of such a harness follow the switch."
+        },
+        "identifies": {
+          "type": "boolean",
+          "description": "True when the plugin reports who a login is signed in as (`identify`). A default login it cannot identify is signed out, not an account."
+        },
+        "legacy": {
+          "type": "boolean",
+          "description": "Adapted from a deprecated `defineUsageLimitProvider`."
+        },
+        "primaryLimitId": {
+          "type": ["string", "null"]
+        },
+        "refreshIntervalMs": {
+          "type": ["integer", "null"]
+        }
+      }
+    },
+    "AccountSessionUse": {
+      "title": "AccountSessionUse",
+      "description": "Which account a live agent session was launched with.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tabId", "agentId", "provider", "accountKey"],
+      "properties": {
+        "tabId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "accountKey": {
+          "type": "string"
+        }
+      }
+    },
+    "AccountsListResult": {
+      "title": "AccountsListResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providers", "state", "loginKeys", "effective", "sessions"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountProviderInfo"
+          }
+        },
+        "state": {
+          "$ref": "#/definitions/AccountsState"
+        },
+        "loginKeys": {
+          "type": "object",
+          "description": "Account key of every login (login id -> key), as the host groups them.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "effective": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountEffectiveBinding"
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AccountSessionUse"
+          }
+        }
+      }
+    },
+    "AccountUsageEntry": {
+      "title": "AccountUsageEntry",
+      "description": "Usage limits for one account, loaded once through one of its logins.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountKey", "loginId", "result"],
+      "properties": {
+        "accountKey": {
+          "type": "string"
+        },
+        "loginId": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "description": "A plugin `UsageLimitsResult`, validated by the client."
+        }
+      }
+    },
+    "AccountLoginSession": {
+      "title": "AccountLoginSession",
+      "description": "A running hidden login terminal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loginId", "instructions", "urls", "output", "exited"],
+      "properties": {
+        "loginId": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": ["string", "null"]
+        },
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "http(s) URLs the login command printed, oldest first."
+        },
+        "output": {
+          "type": "string",
+          "description": "ANSI-stripped tail of the login terminal."
+        },
+        "exited": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AccountEffectiveBinding": {
+      "title": "AccountEffectiveBinding",
+      "description": "The login a harness launches with for one provider in the requested project, resolved by the host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "provider", "accountKey", "loginId", "scope"],
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "accountKey": {
+          "type": ["string", "null"],
+          "description": "Account the harness uses; null when it has no login for this provider yet."
+        },
+        "loginId": {
+          "type": ["string", "null"]
+        },
+        "scope": {
+          "description": "Where the binding came from; null when the harness falls back to its own default login.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/AccountBindingScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AgentSlashCommand": {
+      "title": "AgentSlashCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "One slash command an agent accepts in its prompt (`/review`, `/init`, a project command). Applied at launch by prefixing the prompt with `invocation`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Command name without the leading slash, as typed after `/` (for example `review` or `frontend:component`)."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "One-line description shown in the slash-command picker."
+        },
+        "argumentHint": {
+          "type": ["string", "null"],
+          "description": "Hint for the text expected after the command (for example `[pr-number]`)."
+        },
+        "invocation": {
+          "type": ["string", "null"],
+          "description": "Text the agent's TUI expects to invoke the command; the launch prompt becomes `<invocation> <input>`. Defaults to `/<name>`."
+        }
+      }
+    },
+    "AgentMode": {
+      "title": "AgentMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One primary agent/mode the host tool can start in (opencode's `build`/`plan`, a Claude Code `--agent`). The first entry is the tool's default.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "AgentPermissionMode": {
+      "title": "AgentPermissionMode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One permission mode an agent can start in. The first entry is the default applied when a launch selects none.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "AgentLaunchArgs": {
+      "title": "AgentLaunchArgs",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "args"],
+      "description": "Resolved launch arguments for one mode or permission-mode id, appended after the model/reasoning command.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "System1": {
+      "title": "System1",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for System 1 models (TypeSafe Jev or any API that speaks its `systemone` evaluation contract). Auto mode uses one to pick an agent, model, and reasoning effort for a launch.",
+      "required": [
+        "defaultBaseUrl",
+        "defaultModel",
+        "evaluatePath",
+        "credentialFileName",
+        "autoModeFileName",
+        "requestTimeoutMs",
+        "promptCharLimit",
+        "preferencesCharLimit",
+        "hostModels",
+        "agentProgress"
+      ],
+      "properties": {
+        "defaultBaseUrl": {
+          "type": "string",
+          "description": "Base URL used when `system1.baseUrl` is not set in the global `.pragma/config.json`."
+        },
+        "defaultModel": {
+          "type": "string",
+          "description": "Model route sent with every request when `system1.model` is not set."
+        },
+        "evaluatePath": {
+          "type": "string",
+          "description": "Path of the evaluation endpoint, appended to the base URL."
+        },
+        "credentialFileName": {
+          "type": "string",
+          "description": "File under the app data directory holding the API key, written owner-only like the GitHub token."
+        },
+        "autoModeFileName": {
+          "type": "string",
+          "description": "Auto-mode preference file, resolved against the home directory (global) or the project's main worktree (project). Project wins."
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on one System 1 request; auto mode falls back rather than stalling a launch."
+        },
+        "promptCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest launch prompt sent to the System 1 model; longer prompts are truncated."
+        },
+        "preferencesCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest `automode.md` body sent to the System 1 model, per scope."
+        },
+        "hostModels": {
+          "type": "array",
+          "description": "Model route to use when `system1.model` is not set, keyed by the API host. Resellers name Jev differently than TypeSafe (OpenRouter wants `~typesafe/jev-latest`); any other host gets `defaultModel`.",
+          "items": {
+            "$ref": "#/definitions/System1HostModel"
+          }
+        },
+        "agentProgress": {
+          "$ref": "#/definitions/System1AgentProgress"
+        }
+      }
+    },
+    "System1AgentProgress": {
+      "title": "System1AgentProgress",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sidebar agent progress: after each new agent message the desktop asks the System 1 model how far along the agent is and what it is doing, from the task prompt and the agent's latest reply.",
+      "required": [
+        "activities",
+        "progressLevels",
+        "messageCharLimit",
+        "debounceMs",
+        "errorBackoffMs"
+      ],
+      "properties": {
+        "activities": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Verbs the System 1 model chooses between to describe what the agent is doing right now. Ids are stable; labels are what the sidebar shows.",
+          "items": {
+            "$ref": "#/definitions/AgentActivityOption"
+          }
+        },
+        "progressLevels": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "description": "Ordered progress descriptions, lowest first. The probability-weighted level is normalised to a 0..1 progress bar.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "messageCharLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest agent reply sent to the System 1 model; longer replies keep their tail, where the latest work is described."
+        },
+        "debounceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Quiet period after a new agent message before evaluating, so a burst (or a snapshot replay) costs one request per agent."
+        },
+        "errorBackoffMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long progress estimation pauses after a failed request, so a bad key or rate limit is not retried on every message."
+        }
+      }
+    },
+    "AgentActivityOption": {
+      "title": "AgentActivityOption",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "description"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "Present-participle verb shown in the sidebar, e.g. `Exploring`."
+        },
+        "description": {
+          "type": "string",
+          "description": "What the System 1 model is told this activity means."
+        }
+      }
+    },
+    "AgentProgressEstimate": {
+      "title": "AgentProgressEstimate",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The System 1 model's estimate of one agent's progress on its task.",
+      "required": ["progress", "activity", "confidence"],
+      "properties": {
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Estimated fraction of the task complete."
+        },
+        "activity": {
+          "type": "string",
+          "description": "Id of the chosen `system1.agentProgress.activities` entry."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence of the activity choice."
+        }
+      }
+    },
+    "System1Settings": {
+      "title": "System1Settings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `system1` block of the global `.pragma/config.json`. Global-only. The API key is never stored here; it lives in the owner-only credential file.",
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL of a Jev-compatible API. Empty/omitted uses `system1.defaultBaseUrl`."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route to request. Empty/omitted uses `system1.defaultModel`."
+        }
+      }
+    },
+    "System1Status": {
+      "title": "System1Status",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether a System 1 model is configured, as reported to the desktop UI. The key itself never leaves the backend.",
+      "required": ["configured", "baseUrl", "model"],
+      "properties": {
+        "configured": {
+          "type": "boolean",
+          "description": "True when an API key is stored."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Effective base URL (configured or default)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Effective model route (configured or default)."
+        }
+      }
+    },
+    "System1HostModel": {
+      "title": "System1HostModel",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "model"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname, matched exactly or as a parent domain (`openrouter.ai` matches `api.openrouter.ai`)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model route that host expects."
         }
       }
     }

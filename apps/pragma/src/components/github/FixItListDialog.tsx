@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
 import { useFixLauncher } from "@/hooks/use-fix-launcher";
 import { buildListFixPrompt, commentLocation } from "@/lib/fix-it-prompt";
 import {
@@ -46,13 +47,14 @@ export function FixItListDialog({
   const comments = useFixItComments(prNumber);
   const launcher = useFixLauncher(open, worktreeId);
   const [commitAndPush, setCommitAndPush] = useState(false);
+  const prompt = comments.length > 0 ? buildListFixPrompt([...comments], { commitAndPush }) : "";
   const commitAndPushId = useId();
 
   async function submit() {
     if (comments.length === 0) {
       return;
     }
-    const ok = await launcher.launch(buildListFixPrompt([...comments], { commitAndPush }));
+    const ok = await launcher.launch(prompt);
     if (ok) {
       toast.success(
         `Launched agent to fix ${comments.length} comment${comments.length === 1 ? "" : "s"}`,
@@ -61,6 +63,7 @@ export function FixItListDialog({
       onOpenChange(false);
     }
   }
+  const auto = useAutoSubmit(submit);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -86,7 +89,7 @@ export function FixItListDialog({
           </ScrollArea>
         )}
 
-        <FixAgentControls launcher={launcher} />
+        <FixAgentControls launcher={launcher} prompt={prompt} autoRegistry={auto.registry} />
 
         <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-canvas px-3 py-2">
           <div className="space-y-0.5">
@@ -105,8 +108,8 @@ export function FixItListDialog({
             Cancel
           </Button>
           <Button
-            disabled={!launcher.canLaunch || comments.length === 0}
-            onClick={() => void submit()}
+            disabled={!launcher.canLaunch || comments.length === 0 || auto.resolving}
+            onClick={() => void auto.submit()}
             size="sm"
           >
             {launcher.busy ? <Loader2 className="animate-spin" /> : null}

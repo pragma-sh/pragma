@@ -1,4 +1,4 @@
-import { PragmaGatewayError, type ScriptList } from "@pragma/sdk";
+import { PragmaGatewayError, type ScriptList } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 

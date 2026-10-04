@@ -10,3 +10,8 @@ next-env.d.ts
 # misc
 .env*.local
 .vercel
+
+# Vercel's `link` appends a bare `.env*` here, which would swallow the checked-in
+# example too. The root .gitignore already ignores `.env` and `.env.*` while keeping
+# `.env.example`; keep it that way.
+!.env.example

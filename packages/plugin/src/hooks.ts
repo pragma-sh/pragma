@@ -5,7 +5,7 @@ import type {
   FileContents,
   PragmaClient,
   WorktreeChanges,
-} from "@pragma/sdk";
+} from "@pragma-sh/sdk";
 import { getBridge } from "./bridge";
 import type {
   PluginAgentStatusEntry,
@@ -18,7 +18,7 @@ import type {
 /**
  * The hook implementations the Pragma host installs at `__PRAGMA__.hooks`.
  * Every plugin-facing hook below is a thin delegator onto this object — the
- * host owns the real React state/effects; `@pragma/plugin` only declares the
+ * host owns the real React state/effects; `@pragma-sh/plugin` only declares the
  * shape so plugin authors get full typing.
  */
 export interface PragmaHooksBridge {

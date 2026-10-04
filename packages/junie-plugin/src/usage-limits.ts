@@ -14,7 +14,7 @@
 // loads inside the production desktop webview (blob-URL import), where Node
 // built-ins make the whole plugin fail to load, and a direct local read would
 // also target the wrong machine for a remote project.
-import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
+import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin/catalog";
 
 import { readJunieAcp, shellQuote } from "./acp";
 

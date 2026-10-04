@@ -1,4 +1,4 @@
-# packages/sdk — @pragma/sdk
+# packages/sdk — @pragma-sh/sdk
 
 Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 (`crates/pragma-gateway`). JS/TS consumers should use this instead of shelling out to
@@ -7,7 +7,8 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `ports`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `ports`, `scratchpads`,
+`whiteboards`, and `accounts`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 `client.createBoardDraft({ prompt, worktreeId, agentId, modelId?, reasoningId? })`
 creates a draft card through the running desktop controller.
@@ -18,7 +19,7 @@ Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL`
 
 ## When to use it
 
-Use `@pragma/sdk` in any JS/TS plugin or consumer that needs gateway access or agent
+Use `@pragma-sh/sdk` in any JS/TS plugin or consumer that needs gateway access or agent
 status reporting. The top-level `reportStarted` / `reportStopped` / `reportAttention` /
 `reportCleared` / `reportSessionName` helpers return `Promise<void>` and no-op unless
 `hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
@@ -57,7 +58,7 @@ publishes are `client.agents.reportInput(...)` / `client.agents.reportInterrupt(
 `client.scratchpads` is the whole scratchpad surface, not just the list route.
 `getScratchpads({ root })` is the gateway call; the rest compose the filesystem
 and agent namespaces over the shared file contract
-(`@pragma/scratchpad-contract`), because that composition **is** the contract:
+(`@pragma-sh/scratchpad-contract`), because that composition **is** the contract:
 `getComments` / `comment` / `setComments` read and write the sibling
 `<file>.mdx.comments.json` (a missing file is an empty thread, not an error),
 `attachAgent({ tabId, agentId })` records the attachment in managed frontmatter,
@@ -93,9 +94,9 @@ the user has not themed.
 `gatewayVersion`). That route is unauthenticated, so it distinguishes an unreachable
 host from a rejected token — which is what the mobile client's Settings heartbeat uses.
 
-## Host-owned terminals, scripts, and usage
+## Host-owned terminals, scripts, and accounts
 
-Four namespaces exist because the _host_ owns the thing, not the client:
+These namespaces exist because the _host_ owns the thing, not the client:
 
 - `client.tabs` — `openTerminal` / `close` / `listManaged`. A tab opened here
   belongs to the host: it survives the desktop republishing its own rows, it
@@ -110,8 +111,11 @@ Four namespaces exist because the _host_ owns the thing, not the client:
   release on the way out, and if the client vanishes the host expires the lease
   and restores the previous size. `attach` also takes `cursor`, which resumes
   from the last byte this renderer accepted instead of replaying everything.
-- `client.usageLimits` — the host's single validated cache of plugin usage
-  providers. Asking often is cheap; the host decides when a provider runs.
+- `client.accounts` — the host's account providers: `list` (providers, logins,
+  bindings, live sessions), `usage` (limits loaded once per account), and
+  `setBinding` to switch which account a harness launches with, globally or for
+  one project. Sign-in runs in a hidden terminal on the host (`beginLogin` …
+  `completeLogin`), so a phone can add an account without a desktop window.
 - `client.ports` — `list(worktreeIds)` returns only listeners descended from those
   worktrees' live terminal shells; `forward({ projectId, port })` revalidates the exact
   listener, exposes an injected design proxy with the configured tunnel command, and
@@ -137,6 +141,12 @@ There is deliberately **no method that returns the GitHub token**: this
 namespace is reachable from a paired phone. `ai.ask` is read-only by
 construction; anything that should change files goes through `agents.launch`,
 where the user sees and approves what it does.
+`client.whiteboards` provides typed `create`, `get`, `list`, `search`, `edit`, `delete`,
+and `view` calls over the host's `whiteboards` RPC. CRUD methods use the shared
+`@pragma-sh/constants` whiteboard contract. `search` sends the same `list` action with a
+required query, every id-based operation also requires `worktreeId`, and `view` decodes
+the RPC's base64 `data` into PNG `Uint8Array` bytes; pass `dark: true` to use Excalidraw's
+dark export palette.
 
 ## Fanouts
 
@@ -157,7 +167,7 @@ callers branch on a code instead of parsing a message.
 
 ## Rules
 
-- **`build` bundles `@pragma/scratchpad-contract` normally.** It used to need
+- **`build` bundles `@pragma-sh/scratchpad-contract` normally.** It used to need
   `--external` to dodge a Windows crash (`panic: Expected pretty file path to
 have only forward slashes`) when bunup walked that workspace-symlinked
   package's source. That was a Bun bug, not a bunup one — a plugin's catch-all
@@ -166,7 +176,7 @@ have only forward slashes`) when bunup walked that workspace-symlinked
   `patches/bunup@0.16.32.patch`, so `dist/` inlines the contract again and is
   self-contained. If that panic ever returns, fix it in the patch rather than
   marking more workspace dependencies external.
-- Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.
+- Never hand-build gateway routes in a plugin — import from `@pragma-sh/sdk`.
 - No `node:` imports in SDK source; keep it fetch/ReadableStream/TextDecoder based.
 - `env.ts` is the only SDK file that touches process env, and it must use guarded
   `globalThis.process?.env` access.

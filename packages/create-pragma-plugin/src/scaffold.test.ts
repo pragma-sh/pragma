@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { normalizePluginName, scaffoldPlugin } from "./index";
 import { detectPackageManager } from "./package-manager";
+import { version } from "../package.json";
 
 describe("create-pragma-plugin", () => {
   it("normalizes package names", () => {
@@ -33,8 +34,12 @@ describe("create-pragma-plugin", () => {
     const packageJson = JSON.parse(await readFile(join(result.directory, "package.json"), "utf8"));
     expect(packageJson.main).toBe("./dist/index.js");
     expect(packageJson.scripts.dev).toBe("vite build --watch");
+    // Pinned to this CLI's own version, never a literal: the two are released
+    // together, so a hardcoded value scaffolds a dependency on a version that
+    // was never published.
+    expect(packageJson.dependencies["@pragma-sh/plugin"]).toBe(`^${version}`);
     await expect(readFile(join(result.directory, "vite.config.ts"), "utf8")).resolves.toContain(
-      '"react/jsx-runtime": "@pragma/plugin/jsx-runtime"',
+      '"react/jsx-runtime": "@pragma-sh/plugin/jsx-runtime"',
     );
     await expect(readFile(join(result.directory, "README.md"), "utf8")).resolves.toContain(
       '{ "path": "./my-plugin" }',

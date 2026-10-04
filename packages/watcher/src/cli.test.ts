@@ -1,4 +1,4 @@
-import { PragmaGatewayError } from "@pragma/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import { waitForExit } from "./session-attach";

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import type { ThemeDefinition } from "@pragma/plugin";
+import type { ThemeDefinition } from "@pragma-sh/plugin";
 
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";

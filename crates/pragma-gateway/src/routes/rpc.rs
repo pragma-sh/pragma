@@ -37,10 +37,12 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "automations" => ProtocolRpcMethod::Automations,
         "plugins" => ProtocolRpcMethod::Plugins,
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
+        "whiteboards" => ProtocolRpcMethod::Whiteboards,
         "fanouts" => ProtocolRpcMethod::Fanouts,
         "sessions" => ProtocolRpcMethod::Sessions,
         "scripts" => ProtocolRpcMethod::Scripts,
         "ports" => ProtocolRpcMethod::Ports,
+        "accounts" => ProtocolRpcMethod::Accounts,
         _ => return None,
     })
 }
@@ -74,6 +76,14 @@ mod tests {
             Some(ProtocolRpcMethod::Ports)
         ));
         assert!(parse_method("tunnel").is_none(), "desktop-only control");
+        assert!(matches!(
+            parse_method("whiteboards"),
+            Some(ProtocolRpcMethod::Whiteboards)
+        ));
+        assert!(matches!(
+            parse_method("accounts"),
+            Some(ProtocolRpcMethod::Accounts)
+        ));
         assert!(parse_method("missing").is_none());
     }
 }

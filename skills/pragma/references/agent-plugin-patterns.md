@@ -50,9 +50,11 @@ verdict keystrokes racing hook return. Add `handleQuestionAnswers: true` only wh
 have a separate reporting signal but require TUI delivery. Answers without matching cached
 question attention must be ignored so wrong/stale request ids cannot dismiss a live prompt.
 
-## Usage Limits
+## Accounts and Usage Limits
 
-Claude Code provider sends supported structured `get_usage` control request through
+Claude Code's account provider (`anthropic`) signs in with `claude auth login`, isolates
+each account with `CLAUDE_CONFIG_DIR`, and identifies it from `claude auth status --json`.
+Its usage loader sends supported structured `get_usage` control request through
 short-lived `claude -p`. Normalize utilization to percentage limits, preserve reset
 times relative to `observedAt`, return authentication-required when account lacks plan
 data, and throw malformed/transport failures.

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { Pressable, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { Text } from "@/components/ui/text";
+import { cn } from "@/lib/utils";
 
 export type { MenuAction };
 
@@ -80,19 +81,44 @@ function MenuGroup({ action, onChoose }: { action: MenuAction; onChoose: (id: st
   );
 }
 
-/** A selectable row, check-marked when the action reports itself as on. */
+/**
+ * A selectable row, check-marked when the action reports itself as on. A
+ * disabled action stays visible but inert, as it does in the native menu, and
+ * its subtitle carries the reason.
+ */
 function MenuRow({ action, onChoose }: { action: MenuAction; onChoose: (id: string) => void }) {
   const id = action.id;
+  const disabled = isDisabled(action);
   return (
     <Pressable
       accessibilityRole="menuitem"
-      accessibilityState={{ selected: action.state === "on" }}
-      className="flex-row items-center justify-between px-3 py-2 hover:bg-accent"
-      disabled={!id}
+      accessibilityState={{ disabled, selected: action.state === "on" }}
+      className={cn(
+        "flex-row items-center justify-between gap-3 px-3 py-2",
+        disabled ? "opacity-50" : "hover:bg-accent",
+      )}
+      disabled={disabled}
       onPress={() => id && onChoose(id)}
     >
-      <Text className="text-sm text-foreground">{action.title}</Text>
+      <MenuRowLabel action={action} />
       {action.state === "on" ? <Text className="text-sm text-foreground">✓</Text> : null}
     </Pressable>
+  );
+}
+
+/** An action with no id has nothing to report back, so it is inert too. */
+function isDisabled(action: MenuAction): boolean {
+  return !action.id || action.attributes?.disabled === true;
+}
+
+/** The row's title, with the subtitle (often a disabled row's reason) beneath. */
+function MenuRowLabel({ action }: { action: MenuAction }) {
+  return (
+    <View className="flex-1">
+      <Text className="text-sm text-foreground">{action.title}</Text>
+      {action.subtitle ? (
+        <Text className="text-xs text-muted-foreground">{action.subtitle}</Text>
+      ) : null}
+    </View>
   );
 }

@@ -1,16 +1,25 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  slashCommandProvider,
   type AgentModelEntry,
+  type AgentSlashCommand,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
-import { loadCodexUsageLimits } from "./usage-limits";
+import { codexSharedToken } from "./shared-token";
+import { identifyCodexAccount, loadCodexUsageLimits } from "./usage-limits";
 
-export { loadCodexUsageLimits, parseCodexUsageLimits } from "./usage-limits";
+export { codexAuth, codexSharedToken, parseCodexAuth } from "./shared-token";
+export {
+  identifyCodexAccount,
+  loadCodexUsageLimits,
+  parseCodexAccount,
+  parseCodexUsageLimits,
+} from "./usage-limits";
 
 const INTERJECT_SUBMIT_DELAY_MS = 200;
 const baseWatcher = createTuiWatcher({
@@ -20,21 +29,46 @@ const baseWatcher = createTuiWatcher({
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 
+/** Built-in commands worth starting a session with; custom prompts are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "init", description: "Create an AGENTS.md file with instructions for Codex" },
+  { name: "review", description: "Review the current changes and find issues" },
+  { name: "status", description: "Show session configuration and token usage" },
+  { name: "diff", description: "Show the git diff, including untracked files" },
+];
+/** Codex custom prompts are invoked as `/prompts:<name>`. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: "~/.codex/prompts", layout: "files" as const, recursive: false, prefix: "prompts:" },
+];
+
 /** Pragma plugin for Codex CLI. */
 export const codexAgentPlugin: PluginDefinition = definePlugin({
   name: "Codex",
   description: "Launch Codex CLI from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "codex",
-      title: "Codex",
+  accounts: defineAccounts([
+    {
+      provider: "openai",
+      agent: "codex",
       dashboardUrl: "https://chatgpt.com/codex/settings/usage",
       iconPath: "assets/codex.png",
-      primaryLimitId: "codex-primary",
-      refreshIntervalMs: 60_000,
-      load: loadCodexUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["codex", "login"],
+        instructions: "Sign in with ChatGPT in the browser tab that opens.",
+      },
+      // `CODEX_HOME` holds Codex's auth, config, and sessions, so each account
+      // gets its own directory.
+      env: (home) => ({ CODEX_HOME: home }),
+      credentialPath: (home) => `${home ?? "~/.codex"}/auth.json`,
+      identify: identifyCodexAccount,
+      // Its ChatGPT sign-in can be handed to OpenCode, Pi, and Prime Agent.
+      sharedToken: codexSharedToken,
+      usageLimits: {
+        primaryLimitId: "codex-primary",
+        refreshIntervalMs: 60_000,
+        load: loadCodexUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "codex",
@@ -68,7 +102,13 @@ export const codexAgentPlugin: PluginDefinition = definePlugin({
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: async (ctx) => parseCodexModels(await execFirst(ctx, "codex debug models")),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        load: async (ctx) =>
+          parseCodexSkills(await execFirst(ctx, "codex debug prompt-input 2>/dev/null")),
+      }),
+      // First entry is the default: no flag, so Codex's own config decides.
       permissionModes: [
+        { id: "default", name: "Use Codex config" },
         { id: "untrusted", name: "Ask for untrusted commands" },
         { id: "on-request", name: "Ask when requested" },
         { id: "never", name: "Never ask" },
@@ -85,13 +125,52 @@ export const codexAgentPlugin: PluginDefinition = definePlugin({
           "--config",
           `model_reasoning_effort=${JSON.stringify(reasoningId)}`,
         ],
-        permissionMode: (permissionModeId: string) => ["--ask-for-approval", permissionModeId],
+        permissionMode: (permissionModeId: string) =>
+          permissionModeId === "default" ? [] : ["--ask-for-approval", permissionModeId],
       },
     }),
   ],
 });
 
 export default codexAgentPlugin;
+
+/**
+ * Reads the skills Codex itself resolved — every root it scans, plugin caches
+ * included — from the "Available skills" section of `codex debug prompt-input`.
+ * Codex invokes a skill as `$name`, so each carries that invocation.
+ */
+export function parseCodexSkills(output: string): AgentSlashCommand[] {
+  const text = promptText(output);
+  const start = text.indexOf("### Available skills");
+  if (start === -1) return [];
+  const skills: AgentSlashCommand[] = [];
+  for (const line of text.slice(start).split("\n").slice(1)) {
+    if (line.startsWith("#")) break;
+    const match = /^- ([\w.:-]+): (.*?)(?: \(file: [^)]*\))?$/.exec(line.trim());
+    if (!match) continue;
+    const [, name, description] = match;
+    skills.push({ name: name!, description: description!, invocation: `$${name}` });
+  }
+  return skills;
+}
+
+/** Every string in the prompt-input JSON, joined; raw output when it is not JSON. */
+function promptText(output: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return output;
+  }
+  const texts: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") texts.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === "object") Object.values(value).forEach(walk);
+  };
+  walk(parsed);
+  return texts.join("\n");
+}
 
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const [result] = await ctx.sdk.exec.run({

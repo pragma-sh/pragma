@@ -2,12 +2,40 @@ export type {
   AgentArgsBuilder,
   AgentDefinition,
   AgentFeature,
+  AgentLaunchSelection,
+  AgentMode,
   AgentModelEntry,
+  AgentOptionSource,
   AgentPermissionMode,
   AgentReasoning,
+  AgentSlashCommand,
   AgentStartupInput,
+  ResolvedAgentOptions,
 } from "./agent";
-export { defineAgent } from "./agent";
+export {
+  agentLaunchArgs,
+  applySlashCommand,
+  dedupeSlashCommands,
+  defaultSlashCommandInvocation,
+  defineAgent,
+  modelArgs,
+  resolveAgentOptions,
+  resolveAgentOptionSource,
+  slashCommandInvocation,
+} from "./agent";
+export type { AcpCommandSource } from "./acp-discovery";
+export { discoverAcpSlashCommands } from "./acp-discovery";
+export type { MarkdownEntry, MarkdownSource, SlashCommandDiscovery } from "./agent-discovery";
+export {
+  commandAndSkillDirs,
+  discoverMarkdownEntries,
+  discoverSlashCommands,
+  markdownModes,
+  markdownSlashCommands,
+  modeProvider,
+  parseFrontmatter,
+  slashCommandProvider,
+} from "./agent-discovery";
 export type {
   PragmaActionsBridge,
   PragmaBridge,
@@ -39,6 +67,25 @@ export {
   defineWebView,
   openWebView,
 } from "./contributions";
+export type {
+  ContextItem,
+  ContextProviderDefinition,
+  ContextResolveInput,
+  ContextSearchInput,
+  ContextWorktree,
+  PromptContextBlock,
+} from "./context";
+export {
+  CONTEXT_PICKER_LIMIT,
+  ContextProviderNotice,
+  contextMention,
+  contextQuery,
+  defineContextProvider,
+  formatPromptWithContext,
+  isContextProviderNotice,
+  matchContextItems,
+  splitPromptContext,
+} from "./context";
 export { PLUGIN_API_VERSION } from "./generated/version";
 export {
   useAgentStatuses,
@@ -70,6 +117,63 @@ export type {
   PluginUiContributions,
 } from "./plugin";
 export { definePlugin } from "./plugin";
+export type {
+  AccountContext,
+  AccountDeclarations,
+  AccountHandle,
+  AccountIdentity,
+  AccountLogin,
+  AccountProviderDefinition,
+  AccountSharedToken,
+  AccountSwap,
+  AccountUsageLimits,
+  ModelsDevAccountProvider,
+  ResolvedAccountProvider,
+  SharedToken,
+  WellKnownAccountProvider,
+  WellKnownAccountProviderInfo,
+} from "./accounts";
+export {
+  ACCOUNT_PROVIDERS,
+  accountProviderFromUsageLimits,
+  accountProviderTitle,
+  apiKeyTokenKind,
+  defineAccounts,
+  modelsDevAccountProviders,
+  resolveAccountProviders,
+  wellKnownProvider,
+} from "./accounts";
+export {
+  anthropicOAuthIdentity,
+  apiKeyIdentity,
+  chatGptIdentity,
+  entryToken,
+  credentialDir,
+  credentialFileSharedToken,
+  credentialStoreAccount,
+  credentialStorePath,
+  gitHubIdentity,
+  identifyFromCredentialStore,
+  jwtClaims,
+  parseAnthropicProfile,
+  readCredentialFile,
+  storedCredentialIdentity,
+  tokenEntry,
+  writeCredentialFile,
+} from "./account-identity";
+export type {
+  CredentialStore,
+  CredentialStoreAccountOptions,
+  StoredSharedTokenOptions,
+  StoredCredentialOptions,
+} from "./account-identity";
+export {
+  activateCredentialSwap,
+  loginCredentialFile,
+  readLoginEntries,
+  sharedCredentialFile,
+  writeLoginEntries,
+} from "./credential-swap";
 export type {
   UsageLimit,
   UsageLimitProviderDefinition,

@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@pragma/sdk": ["../sdk/src/index.ts"]
+      "@pragma-sh/sdk": ["../sdk/src/index.ts"]
     }
   }
 }

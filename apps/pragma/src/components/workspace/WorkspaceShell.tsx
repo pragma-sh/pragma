@@ -4,7 +4,7 @@ import { LayoutGrid, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
@@ -26,6 +26,7 @@ import {
 } from "@/lib/shortcut-hints";
 import { browserDevtools, browserReload, onMenuAction, type MenuAction } from "@/lib/tauri";
 import { errorMessage } from "@/lib/errors";
+import { requestAddProject } from "@/lib/non-git-project";
 import { terminalManager } from "@/lib/terminal-manager";
 import { reloadWebview, restartServer } from "@/lib/troubleshooting";
 import { useKanban } from "@/state/kanban-context";
@@ -51,6 +52,7 @@ function useWorkspaceShortcuts(
   requestClose: (tab: Tab) => void,
   onOpenCommandPalette: () => void,
   onOpenCommandMode: () => void,
+  onOpenSettings: () => void,
 ): ShortcutHints {
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
@@ -73,6 +75,7 @@ function useWorkspaceShortcuts(
     },
     onNewTerminalTab: () => void workspace.createTerminalTab(),
     onNewBrowserTab: () => void workspace.createBrowserTab(),
+    onNewWhiteboard: () => void workspace.createWhiteboard(),
     onClearTerminal: () => {
       if (workspace.activeTabId) terminalManager.clear(workspace.activeTabId);
     },
@@ -103,6 +106,7 @@ function useWorkspaceShortcuts(
     },
     onOpenCommandPalette,
     onOpenCommandMode,
+    onOpenSettings,
   });
 }
 
@@ -215,9 +219,7 @@ function NoProjectsState() {
       <div className="max-w-md space-y-3">
         <h1 className="text-foreground text-2xl font-semibold">What will you build with Pragma?</h1>
         <p className="text-muted-foreground text-sm">Open a project to get started.</p>
-        <Button onClick={() => window.dispatchEvent(new Event("pragma:create-project"))}>
-          Add project
-        </Button>
+        <Button onClick={() => requestAddProject()}>Add project</Button>
       </div>
     </div>
   );
@@ -276,6 +278,7 @@ export function WorkspaceShell() {
     requestClose,
     () => openCommandPalette("search"),
     () => openCommandPalette("command"),
+    () => kanban.openSettings(),
   );
   useNativeMenuActions(
     workspace,
@@ -311,7 +314,7 @@ export function WorkspaceShell() {
                   The sidebar stays; only the terminal/right-sidebar area is swapped. */}
                   {/* Creating a worktree takes over the same area for the same
                   reason: it is a full-frame loading screen, not an overlay. */}
-                  {creation ? (
+                  {creation?.viewing ? (
                     <WorktreeCreationScreen />
                   ) : kanban.mode === "kanban" ? (
                     <ProjectKanbanWorkspace />

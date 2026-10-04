@@ -1,5 +1,5 @@
-import { constants } from "@pragma/constants";
-import { PragmaClient } from "@pragma/sdk";
+import { constants } from "@pragma-sh/constants";
+import { PragmaClient } from "@pragma-sh/sdk";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { gatewayConnectionInfo } from "@/lib/tauri";

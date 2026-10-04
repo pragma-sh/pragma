@@ -1,4 +1,4 @@
-import { constants, type AgentStatusSettings } from "@pragma/constants";
+import { constants, type AgentStatusSettings } from "@pragma-sh/constants";
 
 import { decodeBase64 } from "@/lib/base64";
 import { readAgentSound, readConfig, type ConfigScope } from "@/lib/tauri";

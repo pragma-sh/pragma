@@ -1,4 +1,4 @@
-import { defineAutomation } from "@pragma/automations";
+import { defineAutomation } from "@pragma-sh/automations";
 
 export default defineAutomation({
   name: "Hello Cron",

@@ -1,4 +1,4 @@
-import type { FileChange, Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma-sh/constants";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,8 +27,8 @@ vi.mock("@/components/editor/codemirror-language", () => ({
 }));
 vi.mock("@codemirror/merge", () => ({
   MergeView: class {
-    a = { dispatch: dispatchMock };
-    b = { dispatch: dispatchMock };
+    a = { dispatch: dispatchMock, requestMeasure: () => undefined };
+    b = { dispatch: dispatchMock, requestMeasure: () => undefined, state: { doc: { lines: 0 } } };
     constructor(config: unknown) {
       mergeViewMock(config);
     }
@@ -47,6 +47,7 @@ function diffTab(): Tab {
     title: "app.ts",
     url: null,
     filePath: "src/app.ts",
+    whiteboardId: null,
     diffSide: "committed",
     diffCommit: null,
     prNumber: null,

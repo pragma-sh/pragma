@@ -7,6 +7,11 @@ export function toggleWorktreeCollapsed(worktreeId: string): void {
   store.toggle(worktreeId);
 }
 
+/** Expands a worktree row, so newly-added children under it are visible. */
+export function expandWorktree(worktreeId: string): void {
+  store.set(worktreeId, false);
+}
+
 /** React hook for the current set of collapsed worktree ids, shared across
  *  every row so sidebar-order computation can see collapse state too. */
 export function useCollapsedWorktreeIds(): ReadonlySet<string> {

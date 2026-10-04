@@ -12,9 +12,9 @@ use comfy_table::{ContentArrangement, Table};
 
 use crate::broker;
 use crate::cli::{
-    AgentStartArgs, BrowserCommand, BrowserScreenshotArgs, BrowserScrollArgs, DiffSideArg,
-    ScratchpadCreateArgs, SplitAddTabArgs, SplitCommand, SplitSetArgs, TabExecArgs, TabListArgs,
-    TabOpenArgs, WorktreeCommand, WorktreeCreateArgs, WorktreeDeleteArgs,
+    BrowserCommand, BrowserScreenshotArgs, BrowserScrollArgs, DiffSideArg, ScratchpadCreateArgs,
+    SplitAddTabArgs, SplitCommand, SplitSetArgs, TabExecArgs, TabListArgs, TabOpenArgs,
+    WorktreeCommand, WorktreeCreateArgs, WorktreeDeleteArgs,
 };
 use crate::output::Output;
 use crate::server;
@@ -513,31 +513,6 @@ fn browser_exec(tab: &str, js: &str, out: &Output) -> Result<(), CliError> {
             .unwrap_or(serde_json::Value::Null);
         println!("{result}");
     }
-    Ok(())
-}
-
-// -------------------------- agent start --------------------------
-
-pub fn agent_start(args: &AgentStartArgs, out: &Output) -> Result<(), CliError> {
-    let worktree = server::worktree_id(args.worktree.clone())?;
-    let value = broker::request(
-        ControlMethod::AgentStart,
-        serde_json::json!({
-            "worktreeId": worktree,
-            "agent": args.agent,
-            "model": args.model,
-            "prompt": args.prompt,
-        }),
-    )?;
-    print_line(out, &value, |v| {
-        let tab = v.get("tabId").and_then(|t| t.as_str()).unwrap_or("?");
-        format!(
-            "started {} in {} tab={}",
-            args.agent,
-            short_uuid(&worktree),
-            tab
-        )
-    });
     Ok(())
 }
 

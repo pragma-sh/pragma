@@ -14,6 +14,13 @@ const toRgb = converter("rgb");
 /** An sRGB color as the color picker exchanges it: 0–255 channels, 0–1 alpha. */
 export type Rgba = [number, number, number, number];
 
+/** OKLCh components — the space deliberate hue work happens in. */
+export interface OklchComponents {
+  l: number;
+  c: number;
+  h: number;
+}
+
 function round(value: number, digits: number): number {
   return Number.parseFloat(value.toFixed(digits));
 }
@@ -39,6 +46,18 @@ export function rgbaToOklch([r, g, b, alpha]: Rgba): string {
   const source: Rgb = { mode: "rgb", r: r / 255, g: g / 255, b: b / 255, alpha };
   const color = toOklch(source);
   return formatOklch(color.l, color.c, color.h ?? 0, color.alpha ?? 1);
+}
+
+/** Parses a CSS color into OKLCh components, or `null` when it is not a color. */
+export function cssColorToOklch(value: string): OklchComponents | null {
+  const color = toOklch(value.trim());
+  if (!color) return null;
+  return { l: color.l, c: color.c ?? 0, h: color.h ?? 0 };
+}
+
+/** Formats OKLCh components as an `oklch(...)` string, the way `index.css` writes them. */
+export function oklchToString({ l, c, h }: OklchComponents, alpha = 1): string {
+  return formatOklch(l, c, h, alpha);
 }
 
 /**

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { PluginDefinition, WebViewDefinition } from "@pragma/plugin";
+import type { PluginDefinition, WebViewDefinition } from "@pragma-sh/plugin";
 
 import type { PluginRecord } from "./registry";
 import { openRegisteredWebView, setPluginWebViewOpener, setPluginWebViews } from "./webviews";

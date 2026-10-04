@@ -1,4 +1,4 @@
-import type { TerminalViewerCommand } from "@pragma/terminal-viewer";
+import type { TerminalViewerCommand } from "@pragma-sh/terminal-viewer";
 
 /**
  * How many commands are held while the document loads.

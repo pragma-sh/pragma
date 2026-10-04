@@ -1,5 +1,5 @@
 {
-  "setup": ["bun install", "cd .plannar && npm install"],
+  "setup": ["bun install"],
   "runScripts": {
     "run": { "command": ["bun run dev"] },
     "build": { "command": ["bun run --filter pragma tauri:build"] },

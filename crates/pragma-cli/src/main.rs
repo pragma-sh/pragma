@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
+mod agent_launch;
 mod agent_verify;
 mod broker;
 mod cli;
@@ -20,6 +21,7 @@ mod fanout;
 mod output;
 mod scrollback;
 mod server;
+mod whiteboard;
 
 use cli::{AgentCommand, Cli, ScratchpadCommand, TabCommand, TopCommand};
 use server::CliError;
@@ -60,7 +62,8 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
         TopCommand::Split { split } => commands::split(split, out),
         TopCommand::Browser { browser } => commands::browser(browser, out),
         TopCommand::Agent { agent } => match agent {
-            AgentCommand::Start(args) => commands::agent_start(args, out),
+            AgentCommand::Start(args) => agent_launch::start(args, out),
+            AgentCommand::Options(args) => agent_launch::options(args, out),
             AgentCommand::Status(args) => direct::agent_status(args, out),
             AgentCommand::Report(args) => direct::agent_report(args, out),
             AgentCommand::Message(args) => direct::agent_message(args, out),
@@ -72,6 +75,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Verify(args) => agent_verify::run(args, out),
         },
         TopCommand::Fanout { fanout } => fanout::run(fanout, out),
+        TopCommand::Whiteboard { whiteboard } => whiteboard::run(whiteboard, out),
         TopCommand::Scratchpad { scratchpad } => match scratchpad {
             ScratchpadCommand::Create(args) => commands::scratchpad_create(args, out),
         },

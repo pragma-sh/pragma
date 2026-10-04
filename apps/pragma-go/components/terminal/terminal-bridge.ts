@@ -1,4 +1,4 @@
-import { parseTerminalViewerMessage } from "@pragma/terminal-viewer";
+import { parseTerminalViewerMessage } from "@pragma-sh/terminal-viewer";
 
 /** What the terminal screen wants back from the renderer, on either platform. */
 export interface TerminalViewProps {

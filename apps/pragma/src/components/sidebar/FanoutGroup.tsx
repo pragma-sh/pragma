@@ -1,4 +1,4 @@
-import type { AgentStatus, Fanout, FanoutMember } from "@pragma/constants";
+import type { AgentStatus, Fanout, FanoutMember } from "@pragma-sh/constants";
 import { GitFork } from "lucide-react";
 import { toast } from "sonner";
 

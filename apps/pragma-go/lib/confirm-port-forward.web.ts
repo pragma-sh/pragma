@@ -1,4 +1,4 @@
-import type { OpenPort } from "@pragma/sdk";
+import type { OpenPort } from "@pragma-sh/sdk";
 
 /** Browser confirmation twin for the Expo web build. */
 export async function confirmPortForward(port: OpenPort): Promise<boolean> {

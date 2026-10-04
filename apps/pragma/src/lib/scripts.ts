@@ -1,4 +1,4 @@
-import type { RunScriptEntry, RunScriptNode } from "@pragma/constants";
+import type { RunScriptEntry, RunScriptNode } from "@pragma-sh/constants";
 
 export type RunScriptLayoutTemplate =
   | { kind: "pane"; commandIndex: number }

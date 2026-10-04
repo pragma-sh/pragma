@@ -82,17 +82,21 @@ describe("grokAgentPlugin", () => {
 
   it("maps each permission mode to a real grok launch flag", () => {
     expect(agent?.args.permissionMode("default")).toEqual([]);
-    expect(agent?.args.permissionMode("no-plan")).toEqual(["--no-plan"]);
-    expect(agent?.args.permissionMode("always-approve")).toEqual(["--always-approve"]);
+    expect(agent?.args.permissionMode("plan")).toEqual(["--permission-mode", "plan"]);
+    expect(agent?.args.permissionMode("bypassPermissions")).toEqual([
+      "--permission-mode",
+      "bypassPermissions",
+    ]);
     expect(agent?.args.model("grok-4.5")).toEqual(["--model", "grok-4.5"]);
     expect(agent?.args.reasoning("high")).toEqual(["--reasoning-effort", "high"]);
   });
 
-  it("registers the usage provider against the launcher's icon", () => {
-    const provider = grokAgentPlugin.usageLimits?.[0];
-    expect(provider?.id).toBe("grok");
-    expect(provider?.primaryLimitId).toBe("credits");
+  it("registers the xAI account provider against the launcher's icon", () => {
+    const provider = grokAgentPlugin.accounts?.[0];
+    expect(provider?.provider).toBe("xai");
+    expect(provider?.usageLimits?.primaryLimitId).toBe("credits");
     expect(provider?.iconPath).toBe(agent?.iconPath);
+    expect(provider?.env?.("/h/1")).toEqual({ GROK_HOME: "/h/1" });
   });
 
   it("uses the local agent id for the watcher, so reports and events line up", () => {

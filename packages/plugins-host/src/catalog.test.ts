@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { PluginContext, PluginDefinition } from "@pragma/plugin";
+import type { PluginContext, PluginDefinition } from "@pragma-sh/plugin";
 
 import {
   ICON_MAX_BYTES,
@@ -78,7 +78,7 @@ function flakyAgent(models: unknown, iconPath?: string): Record<string, unknown>
 function plugin(pluginId: string, definition: unknown, dir = "/plugins/one"): ResolvedPlugin {
   return {
     pluginId,
-    scope: "bundled",
+    scope: "global",
     root: "/plugins",
     dir,
     mainPath: join(dir, "plugin.mjs"),
@@ -245,6 +245,7 @@ describe("assembleCatalog", () => {
             id: "first",
             name: "First",
             launch: { command: ["first"] },
+            args: { model: () => [] },
             models: () =>
               new Promise((resolve) => {
                 releaseFirst = () => resolve([]);
@@ -254,6 +255,7 @@ describe("assembleCatalog", () => {
             id: "second",
             name: "Second",
             launch: { command: ["second"] },
+            args: { model: () => [] },
             models: async () => {
               secondStarted = true;
               return [];
@@ -271,6 +273,116 @@ describe("assembleCatalog", () => {
       "p.one.first",
       "p.one.second",
     ]);
+  });
+});
+
+describe("agent launch options", () => {
+  it("publishes modes, permission modes, and slash commands with their launch args", async () => {
+    const plugins: ResolvedPlugin[] = [
+      plugin("p.one", {
+        agents: [
+          {
+            id: "opts",
+            name: "Opts",
+            launch: { command: ["opts"] },
+            models: [],
+            modes: [{ id: "build", name: "Build" }],
+            permissionModes: async () => [
+              { id: "auto", name: "Auto" },
+              { id: "ask", name: "Ask" },
+            ],
+            slashCommands: async () => [{ name: "review", description: "Review" }],
+            args: {
+              model: () => [],
+              mode: (id: string) => ["--agent", id],
+              permissionMode: (id: string) => (id === "auto" ? ["--yolo"] : []),
+              slashCommand: (name: string) => `/prompts:${name}`,
+            },
+          },
+        ],
+      }),
+    ];
+    const [agent] = (await assembleCatalog(plugins, ctx)).catalog.agents;
+    expect(agent?.modes).toEqual([{ id: "build", name: "Build" }]);
+    expect(agent?.permissionModes?.map((mode) => mode.id)).toEqual(["auto", "ask"]);
+    expect(agent?.slashCommands).toEqual([
+      { name: "review", description: "Review", invocation: "/prompts:review" },
+    ]);
+    expect(agent?.launch.modeArgs).toEqual([{ id: "build", args: ["--agent", "build"] }]);
+    expect(agent?.launch.permissionModeArgs).toEqual([
+      { id: "auto", args: ["--yolo"] },
+      { id: "ask", args: [] },
+    ]);
+  });
+
+  it("falls back to last-good options when discovery overruns its budget", async () => {
+    const slow = {
+      id: "slow",
+      name: "Slow",
+      launch: { command: ["slow"] },
+      models: [{ id: "m", name: "M" }],
+      permissionModes: [{ id: "auto", name: "Auto" }],
+      slashCommands: () => new Promise(() => {}),
+      args: { model: () => [], permissionMode: () => ["--yolo"] },
+    };
+    const plugins = [plugin("p.one", { agents: [slow] })];
+    const cold = await assembleCatalog(plugins, ctx, () => {}, undefined, 10);
+    expect(cold.catalog.agents[0]?.slashCommands).toBeUndefined();
+    expect(cold.catalog.agents[0]?.launch.permissionModeArgs).toEqual([
+      { id: "auto", args: ["--yolo"] },
+    ]);
+    const previous = {
+      ...cold,
+      catalog: {
+        agents: [
+          {
+            ...cold.catalog.agents[0]!,
+            slashCommands: [{ name: "fix", invocation: "$fix", description: null }],
+          },
+        ],
+      },
+    };
+    const warm = await assembleCatalog(plugins, ctx, () => {}, previous, 10);
+    expect(warm.catalog.agents[0]?.slashCommands).toEqual([{ name: "fix", invocation: "$fix" }]);
+  });
+
+  it("uses options that finished after the budget on the next load", async () => {
+    let calls = 0;
+    const eventually = {
+      id: "eventually",
+      name: "Eventually",
+      launch: { command: ["eventually"] },
+      models: [{ id: "m", name: "M" }],
+      permissionModes: [],
+      slashCommands: async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, calls === 1 ? 30 : 10_000));
+        return [{ name: "late" }];
+      },
+      args: { model: () => [], permissionMode: () => [] },
+    };
+    const plugins = [plugin("p.late", { agents: [eventually] })];
+    const first = await assembleCatalog(plugins, ctx, () => {}, undefined, 5);
+    expect(first.catalog.agents[0]?.slashCommands).toBeUndefined();
+    expect(first.pending).toBeInstanceOf(Promise);
+    await first.pending;
+    const second = await assembleCatalog(plugins, ctx, () => {}, undefined, 5);
+    expect(second.catalog.agents[0]?.slashCommands).toEqual([
+      { name: "late", invocation: "/late" },
+    ]);
+    // The second slow resolution overran too, so a follow-up is still announced.
+    expect(second.pending).toBeInstanceOf(Promise);
+  });
+
+  it("omits option lists an agent does not declare", async () => {
+    const [agent] = (
+      await assembleCatalog(
+        [plugin("p.one", { agents: [flakyAgent([{ id: "m", name: "M" }])] })],
+        ctx,
+      )
+    ).catalog.agents;
+    expect(agent?.slashCommands).toBeUndefined();
+    expect(agent?.launch.modeArgs).toBeUndefined();
   });
 });
 

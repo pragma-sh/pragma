@@ -29,6 +29,11 @@ GET  /web/{*path}                    (no auth)  — the web client bundle
 
 Every `/v1` route requires the bearer token; only `/v1/health` and `/web` are public.
 
+`/v1/health` and `/v1/version` both answer with `gateway.apiVersion` alongside the
+daemon `protocolVersion` and the gateway's own crate version. Because health needs no
+token, a remote client can check the `/v1` contract before it stores a connection —
+which is how a hand-typed host, with no QR payload to read, is version-checked at all.
+
 ## Auth and discovery
 
 - The token is 48 alphanumeric characters, persisted in `gateway-token` (0600), stable

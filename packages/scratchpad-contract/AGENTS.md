@@ -1,12 +1,12 @@
-# packages/scratchpad-contract — @pragma/scratchpad-contract
+# packages/scratchpad-contract — @pragma-sh/scratchpad-contract
 
 The **scratchpad file contract**: the managed frontmatter of a `.mdx` scratchpad
 (id, title, agent attachment), and the sibling `<file>.mdx.comments.json` thread.
 Pure data — no React, no renderer, no transport. Its only dependency is
-`@pragma/constants` (the frontmatter key and contract version).
+`@pragma-sh/constants` (the frontmatter key and contract version).
 
 Everything that reads or writes those two files goes through here: the desktop
-editor, `@pragma/sdk`'s `client.scratchpads`, `@pragma/scratchpad-viewer`, and
+editor, `@pragma-sh/sdk`'s `client.scratchpads`, `@pragma-sh/scratchpad-viewer`, and
 the mobile client. **Never re-implement frontmatter parsing or comment
 serialization** — a second copy of either is how the clients drift apart and a
 comment written on a phone stops showing up in the desktop's handoff.
@@ -14,12 +14,12 @@ comment written on a phone stops showing up in the desktop's handoff.
 ## Rules
 
 - **This package exists to break a dependency cycle, and must stay able to.**
-  The contract used to live in `@pragma/scratchpad-viewer`, which depends on
-  `@pragma/scratchpad`, which depends on `@pragma/sdk` — so the SDK could not
+  The contract used to live in `@pragma-sh/scratchpad-viewer`, which depends on
+  `@pragma-sh/scratchpad`, which depends on `@pragma-sh/sdk` — so the SDK could not
   import it without a cycle (turbo rejects the graph outright). Keep this
-  package free of every workspace dependency except `@pragma/constants`.
+  package free of every workspace dependency except `@pragma-sh/constants`.
 - **Source is the published artifact.** `exports` points at `src/index.ts`, like
-  `@pragma/constants`, so there is no build step to sequence. Consumers that
+  `@pragma-sh/constants`, so there is no build step to sequence. Consumers that
   bundle (the SDK via bunup, the viewer via esbuild) inline it.
 - **`from`/`to` are ProseMirror positions, and only the desktop can compute
   them.** Any other client writes `0`/`0` and anchors by `quote` +

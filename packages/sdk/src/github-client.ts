@@ -1,5 +1,5 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
-import type { GitHubPullRequest } from "@pragma/constants";
+import type { GitHubPullRequest } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
 import type { Transport } from "./transport";

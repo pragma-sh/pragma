@@ -1,6 +1,6 @@
 [package]
 name = "pragma-client"
-version = "0.0.0"
+version = "1.2.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
@@ -16,13 +16,13 @@ ssh = ["dep:russh", "dep:tokio"]
 
 [dependencies]
 pragma-constants = { path = "../../packages/constants" }
-pragma-platform = { version = "0.0.0", path = "../pragma-platform" }
+pragma-platform = { path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+rusqlite = { workspace = true, optional = true }
 russh = { version = "0.61.2", optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1", features = [
+tokio = { workspace = true, features = [
   "io-util",
   "net",
   "process",

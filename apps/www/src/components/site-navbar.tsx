@@ -1,26 +1,72 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FullSearchTrigger, SearchTrigger } from "fumadocs-ui/layouts/shared/slots/search-trigger";
-import { Download, PanelLeft } from "lucide-react";
+import { ChevronDown, Menu, PanelLeft } from "lucide-react";
 import { useDocsLayout } from "fumadocs-ui/layouts/docs";
 
-import { BrandFavicon } from "@/components/brand-favicon";
+import { BrandIcon } from "@/components/brand-icon";
+import { DownloadButton } from "@/components/download-button";
 import { GithubMark } from "@/components/github-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { appName, docsRoute, downloadUrl, pluginsRoute, repoUrl } from "@/lib/shared";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { compareDetailRoute, COMPETITORS } from "@/lib/compare-data";
+import { appName, blogRoute, compareRoute, docsRoute, pluginsRoute, repoUrl } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
   { label: "Plugins", href: pluginsRoute },
+  { label: "Blog", href: blogRoute },
   { label: "Docs", href: docsRoute },
 ];
 
 interface SiteNavbarProps extends ComponentProps<"header"> {
   docsSidebarTrigger?: ReactNode;
   docs?: boolean;
+}
+
+/** Expandable "Pragma vs Competitors" nav item — one link per competitor, plus the overview. */
+function CompareNavMenu({ active }: { active: boolean }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-current={active ? "page" : undefined}
+        data-active={active}
+        className="text-muted-foreground hover:text-foreground data-[active=true]:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-full px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 data-[state=open]:text-foreground"
+      >
+        Compare
+        <ChevronDown className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" sideOffset={12} className="rounded-2xl p-1.5">
+        <DropdownMenuItem asChild className="rounded-xl">
+          <Link href={compareRoute}>Pragma vs Competitors</Link>
+        </DropdownMenuItem>
+        {COMPETITORS.map((competitor) => (
+          <DropdownMenuItem key={competitor.slug} asChild className="rounded-xl">
+            <Link href={compareDetailRoute(competitor.slug)}>
+              <Image
+                src={competitor.logo}
+                alt=""
+                width={16}
+                height={16}
+                className="size-4 shrink-0 rounded-xs object-contain"
+              />
+              vs {competitor.name}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 /** Shared centered floating navigation for marketing and docs pages. */
@@ -50,11 +96,11 @@ export function SiteNavbar({
           aria-label={`${appName} home`}
           className="focus-visible:ring-ring flex h-11 shrink-0 items-center gap-2 rounded-full px-2 outline-none focus-visible:ring-2"
         >
-          <BrandFavicon className="size-7" />
+          <BrandIcon className="size-7" />
           <span className="font-heading font-semibold max-[420px]:hidden">{appName}</span>
         </Link>
 
-        <div className="hidden items-center sm:flex">
+        <div className="hidden items-center md:flex">
           {navLinks.map(({ label, href }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
@@ -69,28 +115,45 @@ export function SiteNavbar({
               </Link>
             );
           })}
+          <CompareNavMenu active={pathname.startsWith(compareRoute)} />
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Open site menu"
+              className="hover:bg-accent focus-visible:ring-ring flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 md:hidden"
+            >
+              <Menu className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="rounded-2xl p-1.5 md:hidden">
+              {[...navLinks, { label: "Compare", href: compareRoute }].map(({ label, href }) => (
+                <DropdownMenuItem key={href} asChild className="rounded-xl">
+                  <Link href={href}>{label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <FullSearchTrigger
             hideIfDisabled
             className="bg-secondary/50 hidden h-11 w-40 rounded-full border-0 lg:inline-flex"
           />
           <SearchTrigger hideIfDisabled className="size-11 rounded-full p-0 lg:hidden" />
 
-          <Button asChild variant="secondary" className="pill-cta gap-2 max-md:size-11 max-md:p-0">
+          <ThemeToggle />
+
+          <Button
+            asChild
+            variant="secondary"
+            className="pill-cta gap-2 max-md:size-11 max-md:p-0 max-[420px]:hidden"
+          >
             <a href={repoUrl} target="_blank" rel="noreferrer" aria-label="Pragma on GitHub">
               <GithubMark className="size-4" />
               <span className="max-md:hidden">GitHub</span>
             </a>
           </Button>
 
-          <Button asChild className="pill-cta gap-2 max-sm:size-11 max-sm:p-0">
-            <a href={downloadUrl} aria-label="Download Pragma">
-              <Download className="size-4" />
-              <span className="max-sm:hidden">Download</span>
-            </a>
-          </Button>
+          <DownloadButton variant="nav" />
 
           {docsSidebarTrigger}
         </div>

@@ -39,7 +39,7 @@ import { confirmPortForward } from "@/lib/confirm-port-forward";
 import { attachmentLabel } from "@/lib/scratchpad-agent";
 import type { AgentTab, TerminalTab } from "@/lib/types";
 import { useOpenPorts } from "@/lib/use-open-ports";
-import type { OpenPort } from "@pragma/sdk";
+import type { OpenPort } from "@pragma-sh/sdk";
 import { catalogAgentById, useCatalog } from "@/lib/use-catalog";
 import { useCommitAndPr, type CommitAndPr } from "@/lib/use-commit-and-pr";
 import { useScratchpads } from "@/lib/use-scratchpads";

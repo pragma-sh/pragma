@@ -1,4 +1,4 @@
-import type { AgentMessage, PragmaClient } from "@pragma/sdk";
+import type { AgentMessage, PragmaClient } from "@pragma-sh/sdk";
 
 /** Declares a watcher a plugin attaches to one of its agents' sessions. */
 export interface WatcherDefinition<TConfig = unknown> {

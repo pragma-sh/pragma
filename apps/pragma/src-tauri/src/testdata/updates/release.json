@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "releasedAt": "2026-09-22T01:28:50.605Z",
+  "gitSha": "0d94b235563b5c6fffca1e33faaadd311eedeb6b",
+  "apply": "restart",
+  "notes": "## [0.4.0](https://github.com/pragma-sh/pragma/compare/pragma-v0.3.0...pragma-v0.4.0) (2026-09-21)\n\n\n### Miscellaneous Chores\n\n* **pragma:** Synchronize desktop versions\n\n\n### Dependencies\n\n* The following workspace dependencies were updated\n  * dependencies\n    * @pragma-sh/constants bumped to 0.4.0\n    * @pragma-sh/plugin bumped to 0.4.0\n    * @pragma-sh/scratchpad bumped to 0.4.0\n    * @pragma-sh/scratchpad-viewer bumped to 0.4.0\n    * @pragma-sh/sdk bumped to 0.4.0",
+  "changelogUrl": "https://github.com/pragma-sh/pragma/releases/tag/pragma-v0.4.0",
+  "components": {
+    "ui": "0.4.0",
+    "app": "0.4.0",
+    "pragma-server": "0.4.0",
+    "pragma-protocol": "0.4.0"
+  },
+  "assets": {
+    "darwin-aarch64": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-darwin-aarch64.dmg",
+      "sha256": "6d4e8c94c5b9b1dcfb42d0485e4c65360d34e222403ae8bb24f1a95fd0ee0a1b",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWROblBoUVNWWXZxbjc0cURLVnFoUDdoaUVPcFBIYjY3QTZvaE1JMDN4T0NMbGhNcmEwUGpqZDd2R1FjZGRaYkgzbmRMZThUNW45NkFsRFllVkRPSEtFUlFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM2NDQ2CWZpbGU6UHJhZ21hLTAuNC4wLWRhcndpbi1hYXJjaDY0LmRtZwptS2JqYU9VaDZBNnFxaDRPWXZsY29QTnNrRjdLbzdxcUVYTlRlSTRla04yVmdUMURVMTZHdXoyS0xQbnc1cGlnSGk4ZDFZLzlFM0t0ZWVhb0hib2xDUT09Cg=="
+    },
+    "ui": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-ui.tar",
+      "sha256": "d6e5c8e79271ce752226c553066f5b7e9fd73d8ba5c00d93f527e648455f8074",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObkhwUzROWWVqeWR3bFZsUFl0VU5mZW41Zi9BYytDRjYxcDBGd0h6UXRuU2lsSThHYmlmZHRFdHZhQlZSdjFqbVJWbTJ0NGtaOGJFa0J5TGEwZFdjeVFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDQwNTMwCWZpbGU6UHJhZ21hLTAuNC4wLXVpLnRhcgo4b0dYVjd2aXFpRGsyZ29pNEZGY1psVTQ0SUJlNG1UaWdVMmRrZDlvWTlMUk1yMWVSUVQxR3pmTTZTZDh0bW85YjBXbFBFNHI5WUxjb1lxdlhlLzZBdz09Cg=="
+    },
+    "linux-aarch64-deb": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-linux-aarch64-deb.deb",
+      "sha256": "de286ad107692ff8eca36ed03b19dedc1b2a0010f07f2440d45792a86679fef7",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObkdJazZoWkdaNG5oT3NDcFA5TU1RYWxoejNhbFJNQnN4VjA2VXlWbDFQbEJ0emo0dmwxQ3V4RjVKeUo1aFFKVk92ZlRyNERHblUzSGIzTWwyakI2bEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM2NjIyCWZpbGU6UHJhZ21hLTAuNC4wLWxpbnV4LWFhcmNoNjQtZGViLmRlYgpJeCtPUTd5M2FteDVyclViVDVSTzRFR2ZjZU9VNFRzRHJ0OUxULzRDWmg4YzlSWkd5UGRTcy8wcG5zUGxqSFk3UFU0d3h2V1JZR3k5cFV2SjdYQmVEQT09Cg=="
+    },
+    "linux-x86_64-rpm": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-linux-x86_64-rpm.rpm",
+      "sha256": "f28bb9eb0d7f35caec2727418766c694c65c486a651757db3cf98ce733522231",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObkZkdFBxdk1hTWV3dVF2OGpFcmk0dnhwak9tbWpUNVp2UG4xRVRaaVRKeFBPczRHVmxMT1dCR002UzFGNUZxQ1BXcC94WlRJbWJJODJTVzNRYi9tMWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM2MzExCWZpbGU6UHJhZ21hLTAuNC4wLWxpbnV4LXg4Nl82NC1ycG0ucnBtCit4Ujl0WFZqdURDNUk1QWpGaDVJMVlhNHBmd282WE94eTQ3ZmZYUi9KbjB4UWN6VWJDU3FMQ3BXbFY3MDNkSzJZWmFwUGp5TWdUR0FyTlJBNGthcUJ3PT0K"
+    },
+    "darwin-x86_64": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-darwin-x86_64.dmg",
+      "sha256": "a29f43c2f367cea0d31841744bc08aa954d04077dbf822085be4e5accd72d22f",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObktLRlNrdXA5MUVsTkF6RjIxaHZRYXNLUnpsNmFYcmord1JkNENPVlFtRDVPY3RnZGM0dnlyTXU4WVlmSER1WEE0dTUrUmVxUTVYeVRBWWthVmtLSGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM3Mzc2CWZpbGU6UHJhZ21hLTAuNC4wLWRhcndpbi14ODZfNjQuZG1nCkVlZkZ6cFV2NEh4VlNQRFJ6YWpmdjlFU3ZJbzhBbVk5TmIvQ2VRTlMxNzUwM2N4Z0pza1lQWHdjdzIwUlgxdTJzMlhRWmhSRzR6d1NQZDM5eXRCbUJRPT0K"
+    },
+    "linux-aarch64-rpm": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-linux-aarch64-rpm.rpm",
+      "sha256": "4271a9e6a49b33c9299254ad8dfcfad15fd04f4bf1f72abe4f99a7bc50f42563",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObktlVWVRYVk0dStIMkxVd0liNVRTdHVOUENFTXRnamJhdUozbWNDVHVTcFVZRnZsR3pMOGd1bm1HNFZ6QTBlZnlYbkRuUEp0R2w3aHZmQW1BYlM3aHdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM2NjIyCWZpbGU6UHJhZ21hLTAuNC4wLWxpbnV4LWFhcmNoNjQtcnBtLnJwbQpOUjlNdVo0dzU3QWZDcGZrcWt0eUUyUlJWcHR2QzVlZWR2Y2tYYi9UcmxlTVlnNFNrZHJ4RVA1NHBjck9iWEI0Sm8rVnVyRlVMRDNkcWhzSXBEVVRDQT09Cg=="
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-windows-x86_64.exe",
+      "sha256": "e5e08308002109053f753ecec32daa4f537a7dbd93361008bb8dc5a78acafd6e",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObk9VUjZsYVBvSkpTV0o4ZldxZ2FKTFpxY1RIZ09NK3NxUVBmbThCbjlVTjR3MTBWaGZIanNUdkxUSGtkbEdKV1UyRjVQR3lsWktjb2pPMUR1QkU4ZXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDQwMjg5CWZpbGU6UHJhZ21hLTAuNC4wLXdpbmRvd3MteDg2XzY0LmV4ZQpEa3oySXNWQTE1SlJ4aGVvMWdNK2h5R2FMeWg1VHZMYWRqRTkzWS9yWVdDMUdWU09aL0doWDBlN3NJTnFmZ1FqVFRYVVVwRlVOWURqYmMzSDFtS3dCQT09Cg=="
+    },
+    "linux-x86_64-deb": {
+      "url": "https://github.com/pragma-sh/pragma/releases/download/pragma-v0.4.0/Pragma-0.4.0-linux-x86_64-deb.deb",
+      "sha256": "b49aaea4e723ed7b084ad88ebb931a962307c634c4488c174b350dcb94a3ef37",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTWXprNDBxWWRObkpFRWhvVTlrSzF4endGZXc3ZStROHc4OUZtczlyYUowUkFyMUJPR2ViYTZZQWNnRGJ2RFlwdXNhbGlxRFRBZk84S3lkek0wcmRydGd1YmZSdzRZOXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDM2MzExCWZpbGU6UHJhZ21hLTAuNC4wLWxpbnV4LXg4Nl82NC1kZWIuZGViCmg5K09ud001Y0FsbVAzMzhTUGZVWjVubDdPTzVuNzNRL1ZibGtIQWtkVjZVUUREcGVSazV0bkhlZEkybUVhSnhLdFo2RnpyMGFrVHNNd003VGVtdkJBPT0K"
+    }
+  }
+}

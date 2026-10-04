@@ -3,7 +3,7 @@ import type {
   Keybindings,
   KeybindingsConfig,
   PlatformChord,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 export type KeybindingAction = keyof Keybindings;
 export type KeybindingPlatform = "mac" | "linux";
@@ -54,6 +54,7 @@ export const defaultKeybindingsConfig: KeybindingsConfig = {
     closeTopTab: primaryChord("w"),
     newTerminalTab: primaryChord("t"),
     newBrowserTab: primaryChord("b"),
+    newWhiteboard: primaryChord("w", true),
     clearTerminal: primaryChord("k"),
     browserReload: primaryChord("r"),
     browserDevtools: primaryChord("i", true),
@@ -67,6 +68,7 @@ export const defaultKeybindingsConfig: KeybindingsConfig = {
     scrollTerminalBottom: primaryChord("end"),
     openCommandPalette: primaryChord("p"),
     openCommandMode: primaryChord("p", true),
+    openSettings: primaryChord(","),
     switchToWorkspace1: workspaceChord("1"),
     switchToWorkspace2: workspaceChord("2"),
     switchToWorkspace3: workspaceChord("3"),

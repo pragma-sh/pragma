@@ -42,7 +42,7 @@ pub const MAX_SOCKET_PATH_BYTES: usize = 107;
 
 /// Names of the files the server keeps in its server directory.
 ///
-/// These come from `@pragma/constants` so the Rust server, the Rust client, and
+/// These come from `@pragma-sh/constants` so the Rust server, the Rust client, and
 /// the TypeScript frontend cannot drift apart on what the socket is called.
 #[must_use]
 pub fn socket_file_name() -> &'static str {

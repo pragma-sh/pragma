@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-import type { KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma-sh/constants";
 
 import { KanbanCompletionDialog } from "@/components/kanban/KanbanCompletionDialog";
 

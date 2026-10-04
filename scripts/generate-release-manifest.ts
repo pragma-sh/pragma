@@ -35,6 +35,7 @@ const PLATFORM_BY_MARKER: Record<string, string> = {
   "linux-aarch64-rpm": "linux-aarch64-rpm",
   "linux-x86_64-deb": "linux-x86_64-deb",
   "linux-x86_64-rpm": "linux-x86_64-rpm",
+  "windows-aarch64": "windows-aarch64",
   "windows-x86_64": "windows-x86_64",
 };
 
@@ -116,7 +117,8 @@ function requiredTagIndex(tags: string[], tag: string): number {
   return index;
 }
 
-function assetKey(fileName: string): string | undefined {
+/** Returns the release-manifest key encoded in a normalized asset name. */
+export function assetKey(fileName: string): string | undefined {
   if (fileName.includes("-ui.tar")) return "ui";
   return Object.entries(PLATFORM_BY_MARKER).find(([marker]) => fileName.includes(marker))?.[1];
 }
@@ -177,7 +179,8 @@ function releaseNativeComponents(
   return nativeComponentsAtTag(nativeBaseTag(previousTag));
 }
 
-function requiredAssetKeys(apply: "reload" | "restart"): string[] {
+/** Asset keys every release of the given kind must carry. */
+export function requiredAssetKeys(apply: "reload" | "restart"): string[] {
   return apply === "reload"
     ? ["ui"]
     : [
@@ -187,6 +190,7 @@ function requiredAssetKeys(apply: "reload" | "restart"): string[] {
         "linux-aarch64-rpm",
         "linux-x86_64-deb",
         "linux-x86_64-rpm",
+        "windows-aarch64",
         "windows-x86_64",
       ];
 }

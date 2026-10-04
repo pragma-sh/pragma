@@ -1,20 +1,20 @@
-import { pickWelcomeHeading } from "@pragma/constants";
+import { pickWelcomeHeading } from "@pragma-sh/constants";
 import { router, Stack } from "expo-router";
 import { useState } from "react";
 import { RefreshControl, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AccountsSection } from "@/components/AccountsSection";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { Monogram, NavGroup, NavRow } from "@/components/NavRow";
 import { Text } from "@/components/ui/text";
-import { UsageLimitsSection } from "@/components/UsageLimitsSection";
 import { useProjects, useProjectStatus } from "@/lib/data/data-context";
 import { useThemeColors } from "@/lib/theme";
 import type { Project } from "@/lib/types";
-import { useUsageLimits } from "@/lib/use-usage-limits";
+import { useAccounts } from "@/lib/use-accounts";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
-/** The paired home screen: a greeting, every project, then host usage limits. */
+/** The paired home screen: a greeting, every project, then the host's accounts. */
 export default function ProjectsScreen() {
   const projects = useProjects();
   const insets = useSafeAreaInsets();
@@ -24,7 +24,7 @@ export default function ProjectsScreen() {
   const [heading] = useState(() => pickWelcomeHeading("generic"));
   // No project is in view here: the app theme falls back to the global layer.
   useViewedProjectRoot(null);
-  const usage = useUsageLimits();
+  const accounts = useAccounts();
   const [refreshing, setRefreshing] = useState(false);
 
   return (
@@ -43,7 +43,7 @@ export default function ProjectsScreen() {
             tintColor={mutedForeground}
             onRefresh={() => {
               setRefreshing(true);
-              void usage.refresh().finally(() => setRefreshing(false));
+              void accounts.refresh().finally(() => setRefreshing(false));
             }}
           />
         }
@@ -54,7 +54,7 @@ export default function ProjectsScreen() {
             <ProjectRow key={project.id} project={project} />
           ))}
         </NavGroup>
-        <UsageLimitsSection usage={usage} />
+        <AccountsSection accounts={accounts} />
       </ScrollView>
     </>
   );

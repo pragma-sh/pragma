@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { BranchSyncStatus, GitHubRepoRef } from "@pragma/constants";
+import type { BranchSyncStatus, GitHubRepoRef } from "@pragma-sh/constants";
 import { ArrowLeft, ChevronDown, GitPullRequestCreate, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,48 +52,13 @@ import {
   worktreeChanges,
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
-
-const PR_DRAFT_STORAGE_PREFIX = "pragma:pull-request-draft:";
-
-type PullRequestDraft = { title: string; body: string };
-
-/** Reads a worktree's unfinished PR form, ignoring unavailable or malformed storage. */
-function readPullRequestDraft(worktreeId: string): PullRequestDraft {
-  try {
-    const raw = window.localStorage.getItem(`${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`);
-    if (!raw) return { title: "", body: "" };
-    const parsed = JSON.parse(raw) as Partial<PullRequestDraft>;
-    return {
-      title: typeof parsed.title === "string" ? parsed.title : "",
-      body: typeof parsed.body === "string" ? parsed.body : "",
-    };
-  } catch {
-    return { title: "", body: "" };
-  }
-}
-
-/** Persists unfinished PR form content outside git so commits cannot reset it. */
-function savePullRequestDraft(worktreeId: string, draft: PullRequestDraft): void {
-  try {
-    const key = `${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`;
-    if (!draft.title && !draft.body) {
-      window.localStorage.removeItem(key);
-      return;
-    }
-    window.localStorage.setItem(key, JSON.stringify(draft));
-  } catch {
-    // Draft persistence must not prevent editing when localStorage is unavailable.
-  }
-}
-
-/** Removes a worktree's saved form after its PR has been opened successfully. */
-function clearPullRequestDraft(worktreeId: string): void {
-  try {
-    window.localStorage.removeItem(`${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`);
-  } catch {
-    // The PR is open even if the best-effort draft cleanup cannot run.
-  }
-}
+import {
+  clearPullRequestDraft,
+  readPullRequestDraft,
+  savePullRequestDraft,
+  storeGeneratedPullRequestDraft,
+} from "@/state/pull-request-draft-store";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 
 /**
  * A submit blocked or waiting on confirmation by the pre-flight checks. The dirty
@@ -253,11 +218,15 @@ function usePrSubmit({
       if (!baseRepo || !baseBranch) return;
       setSubmitting(true);
       try {
-        if (!sync.hasUpstream) await githubPushBranch(worktreeId);
-        const pr = await createPullRequest(
-          repo,
-          { owner: baseRepo.owner, repo: baseRepo.repo, branch: baseBranch },
-          { title: title.trim(), body, draft, worktreeId },
+        if (!sync.hasUpstream) {
+          await trackWorktreeActivity(worktreeId, "push", () => githubPushBranch(worktreeId));
+        }
+        const pr = await trackWorktreeActivity(worktreeId, "create-pr", () =>
+          createPullRequest(
+            repo,
+            { owner: baseRepo.owner, repo: baseRepo.repo, branch: baseBranch },
+            { title: title.trim(), body, draft, worktreeId },
+          ),
         );
         if (stack && stackBasePr) {
           try {
@@ -341,7 +310,10 @@ function usePrGenerateDraft(
     if (!aiAvailable || generating || !worktreeId) return;
     setGenerating(true);
     try {
-      const draft = await aiGeneratePullRequestDraft(worktreeId);
+      const draft = await trackWorktreeActivity(worktreeId, "pr-draft", () =>
+        aiGeneratePullRequestDraft(worktreeId),
+      );
+      storeGeneratedPullRequestDraft(worktreeId, draft);
       setTitle(draft.title);
       setBody(draft.body);
     } catch (cause) {

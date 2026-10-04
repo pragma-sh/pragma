@@ -26,12 +26,11 @@ const TOKEN_PREFIX: &str = "tauri-dev-bridge-";
 const TOKEN_SUFFIX: &str = ".token";
 
 /// What the bridge publishes about itself once it is listening.
-///
-/// Only the pid is used: the CLI takes `--pid` and rediscovers the port and
-/// token itself, so mirroring those here would be a second source of truth.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BridgeToken {
     pub pid: u32,
+    pub port: u16,
+    pub token: String,
 }
 
 /// Every bridge token currently on disk.
@@ -56,6 +55,12 @@ pub fn tokens() -> BenchResult<Vec<BridgeToken>> {
         }
     }
     Ok(tokens)
+}
+
+/// The bridge published by `pid`, read fresh so a restarted app's new port and
+/// token are picked up.
+pub fn for_pid(pid: u32) -> Option<BridgeToken> {
+    tokens().ok()?.into_iter().find(|token| token.pid == pid)
 }
 
 /// The bridge belonging to `dev_pid`'s process tree, ignoring `exclude` (the

@@ -65,36 +65,21 @@ describe("resolveManifests", () => {
     expect(manifests[0]?.mainPath).toBe(join(dir, "dist/pragma-plugin.mjs"));
   });
 
-  it("scans a bundled dir ahead of config scopes, without config entries", async () => {
-    const bundled = makeRoot();
-    writePluginDir(bundled, "b-plugin", "pragma.bundled", "plugin.mjs");
-    const root = makeRoot();
-    writePluginDir(root, "my-plugin", "@me/plugin", "index.js");
-    writeConfig(root, [{ path: "./my-plugin" }]);
-
-    const manifests = await resolveManifests(makeRoot(), [root], bundled);
-
-    expect(manifests.map((m) => [m.pluginId, m.scope])).toEqual([
-      ["pragma.bundled", "bundled"],
-      ["@me/plugin", "project"],
-    ]);
-    expect(manifests[0]?.config).toBeUndefined();
-  });
-
-  it("uses configured plugins instead of bundled plugins with the same id", async () => {
-    const bundled = makeRoot();
-    writePluginDir(bundled, "shared-bundled", "pragma.shared", "plugin.mjs");
+  it("uses project plugins instead of global plugins with the same id", async () => {
     const home = makeRoot();
     writePluginDir(home, "shared-global", "pragma.shared", "plugin.mjs");
     writeConfig(home, [{ path: "./shared-global", config: { source: "global" } }]);
+    const root = makeRoot();
+    writePluginDir(root, "shared-project", "pragma.shared", "plugin.mjs");
+    writeConfig(root, [{ path: "./shared-project", config: { source: "project" } }]);
 
-    const manifests = await resolveManifests(home, [], bundled);
+    const manifests = await resolveManifests(home, [root]);
 
     expect(manifests).toHaveLength(1);
     expect(manifests[0]).toMatchObject({
       pluginId: "pragma.shared",
-      scope: "global",
-      config: { source: "global" },
+      scope: "project",
+      config: { source: "project" },
     });
   });
 
@@ -110,9 +95,5 @@ describe("resolveManifests", () => {
       "pragma.first",
       "pragma.second",
     ]);
-  });
-
-  it("treats a missing bundled dir as empty", async () => {
-    expect(await resolveManifests(makeRoot(), [], "/does/not/exist")).toEqual([]);
   });
 });

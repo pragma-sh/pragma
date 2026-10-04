@@ -1,4 +1,4 @@
-import type { ScratchpadBlock } from "@pragma/scratchpad-viewer";
+import type { ScratchpadBlock } from "@pragma-sh/scratchpad-viewer";
 import { useEffect, useState } from "react";
 import { View } from "react-native";
 

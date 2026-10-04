@@ -1,6 +1,6 @@
 {
   "name": "www",
-  "version": "0.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Pragma marketing + documentation site (Next.js, Fumadocs, Tailwind, shadcn/ui, react-three-fiber)",
   "type": "module",
@@ -13,8 +13,9 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/brand": "workspace:*",
-    "@pragma/plugin-registry": "workspace:*",
+    "@pragma-sh/brand": "workspace:*",
+    "@pragma-sh/plugin-registry": "workspace:*",
+    "@pragma-sh/treemap": "workspace:*",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "class-variance-authority": "^0.7.1",
@@ -30,7 +31,9 @@
     "react-dom": "^19.2.6",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "uqr": "^0.1.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

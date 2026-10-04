@@ -1,4 +1,4 @@
-import type { OpenPort } from "@pragma/sdk";
+import type { OpenPort } from "@pragma-sh/sdk";
 import { Alert } from "react-native";
 
 /** Native confirmation before publishing a local development server. */

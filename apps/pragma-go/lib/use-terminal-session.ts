@@ -1,5 +1,5 @@
-import { constants } from "@pragma/constants";
-import { base64ToBytes, PragmaGatewayError, type SessionEvent } from "@pragma/sdk";
+import { constants } from "@pragma-sh/constants";
+import { base64ToBytes, PragmaGatewayError, type SessionEvent } from "@pragma-sh/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";

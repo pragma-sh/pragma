@@ -1,13 +1,17 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  modeProvider,
+  slashCommandProvider,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
+import { identifyCopilotAccount } from "./identity";
 import { loadGitHubCopilotUsageLimits } from "./usage-limits";
 
+export { identifyCopilotAccount, parseCopilotConfig } from "./identity";
 export { loadGitHubCopilotUsageLimits, parseGitHubCopilotUsageLimits } from "./usage-limits";
 
 const REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map((id) => ({
@@ -39,21 +43,54 @@ const baseWatcher = createTuiWatcher({
   interjectMode: "plain",
 });
 
+/** Copilot CLI built-ins worth starting a session with; skills are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "review", description: "Review the current changes" },
+  { name: "delegate", description: "Delegate a task to the Copilot coding agent" },
+  { name: "usage", description: "Show session usage" },
+];
+/** Fallback when the ACP list is unavailable: the skill roots Copilot CLI reads. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: ".github/skills", layout: "skills" as const },
+  { dir: ".claude/skills", layout: "skills" as const },
+  { dir: ".agents/skills", layout: "skills" as const },
+  { dir: "~/.copilot/skills", layout: "skills" as const },
+  { dir: "~/.claude/skills", layout: "skills" as const },
+  { dir: "~/.agents/skills", layout: "skills" as const },
+];
+/** Custom agents (`*.agent.md`) are selected with `--agent <name>`. */
+const AGENT_SOURCES = [
+  { dir: ".github/agents", layout: "files" as const, suffix: ".agent.md", recursive: false },
+  { dir: "~/.copilot/agents", layout: "files" as const, suffix: ".agent.md", recursive: false },
+];
+const DEFAULT_MODE = "default";
+
 /** Pragma plugin for GitHub Copilot CLI. */
 export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
   name: "GitHub Copilot CLI",
   description: "Launch GitHub Copilot CLI from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "github-copilot",
-      title: "GitHub Copilot",
+  accounts: defineAccounts([
+    {
+      provider: "github-copilot",
+      agent: "github-copilot",
       dashboardUrl: "https://github.com/settings/copilot",
       iconPath: "assets/copilot.png",
-      primaryLimitId: "ai-credits",
-      refreshIntervalMs: 60_000,
-      load: loadGitHubCopilotUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["copilot", "login"],
+        instructions: "Enter the code shown here on the GitHub page that opens.",
+      },
+      // `COPILOT_HOME` replaces all of `~/.copilot`: config, sessions, and the
+      // plain-text token fallback when no system credential store exists.
+      env: (home) => ({ COPILOT_HOME: home }),
+      credentialPath: (home) => `System credential store, else ${home ?? "~/.copilot"}`,
+      identify: identifyCopilotAccount,
+      usageLimits: {
+        primaryLimitId: "ai-credits",
+        refreshIntervalMs: 60_000,
+        load: loadGitHubCopilotUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "github-copilot",
@@ -91,6 +128,10 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: MODELS,
+      modes: modeProvider([{ id: DEFAULT_MODE, name: "Default" }], AGENT_SOURCES),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["copilot", "--acp"] },
+      }),
       permissionModes: [
         { id: "ask", name: "Ask" },
         { id: "allow-all", name: "Allow all" },
@@ -106,6 +147,7 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
         ],
         permissionMode: (permissionModeId: string) =>
           permissionModeId === "allow-all" ? ["--allow-all"] : [],
+        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
       },
     }),
   ],

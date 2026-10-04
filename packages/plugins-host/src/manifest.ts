@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 /** One resolved plugin manifest: where to import it from and under what id. */
@@ -7,7 +7,7 @@ export interface ResolvedManifest {
   dir: string;
   mainPath: string;
   config: unknown;
-  scope: "bundled" | "global" | "project";
+  scope: "global" | "project";
   root: string;
 }
 
@@ -32,10 +32,8 @@ interface PackageJson {
 const CONFIG_FILE = ".pragma/config.json";
 
 /**
- * Resolves plugin manifests for all three scopes, preserving declaration
- * order: the bundled plugins shipped inside the app resources (when
- * `bundledDir` is given), then the global `~/.pragma/config.json`, then each
- * project root's `.pragma/config.json`.
+ * Resolves configured plugin manifests, preserving declaration order: global
+ * `~/.pragma/config.json`, then each project root's `.pragma/config.json`.
  *
  * Mirrors `plugins.rs` `resolve_local_dir` semantics for local-path specifiers
  * (`./`, `../`, `/`, `~/`); non-local specifiers (npm) are skipped here. This is
@@ -46,10 +44,8 @@ const CONFIG_FILE = ".pragma/config.json";
 export async function resolveManifests(
   homeDir: string,
   roots: string[],
-  bundledDir?: string,
 ): Promise<ResolvedManifest[]> {
   const manifests = await Promise.all([
-    ...(bundledDir ? [resolveBundledDir(bundledDir)] : []),
     resolveScope(homeDir, "global"),
     ...roots.map((root) => resolveScope(root, "project")),
   ]);
@@ -60,26 +56,6 @@ function preferHigherScope(manifests: ResolvedManifest[]): ResolvedManifest[] {
   const winningIndex = new Map<string, number>();
   manifests.forEach((manifest, index) => winningIndex.set(manifest.pluginId, index));
   return manifests.filter((manifest, index) => winningIndex.get(manifest.pluginId) === index);
-}
-
-/**
- * Resolves every subdirectory of the bundled-plugins dir as a plugin package.
- * Bundled plugins carry no user config entry (`config: undefined`).
- */
-async function resolveBundledDir(bundledDir: string): Promise<ResolvedManifest[]> {
-  let names: string[];
-  try {
-    names = (await readdir(bundledDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .toSorted();
-  } catch {
-    return [];
-  }
-  const manifests = await Promise.all(
-    names.map((name) => readManifest(join(bundledDir, name), undefined, "bundled", bundledDir)),
-  );
-  return manifests.filter((manifest): manifest is ResolvedManifest => manifest !== null);
 }
 
 async function resolveScope(

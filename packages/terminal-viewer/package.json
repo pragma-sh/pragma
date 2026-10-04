@@ -1,5 +1,5 @@
 {
-  "name": "@pragma/terminal-viewer",
+  "name": "@pragma-sh/terminal-viewer",
   "version": "0.0.0",
   "private": true,
   "description": "Browser-safe terminal renderer: one self-contained HTML document running xterm.js, plus the message protocol a native client drives it with.",

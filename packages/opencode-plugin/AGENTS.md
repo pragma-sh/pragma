@@ -5,13 +5,13 @@ ESM opencode plugin that reports agent status into Pragma. Built with Bunup
 opencode hooks/events, and reports `started` / `stopped` / `attention` / `cleared` /
 `session-name` (the parent session's title from `session.created`/`session.updated`,
 deduplicated, so Pragma renames the hosting tab on create/rename/switch)
-through `@pragma/sdk`.
+through `@pragma-sh/sdk`.
 
 ## File map
 
 ```
 packages/opencode-plugin/
-├── assets/                 # OpenCode brand assets used by the built-in launcher
+├── assets/                 # OpenCode brand assets used by plugin launcher
 ├── src/
 │   ├── index.ts             # PragmaOpencodePlugin entry point
 │   ├── hooks.ts             # Two-flag state machine (busy + attention)
@@ -32,12 +32,15 @@ catalog and live watcher behavior.
 **Pragma no longer auto-installs the opencode plugin** — the old
 `src-tauri/src/opencode_plugin.rs` installer was removed. Local development registers built
 `packages/opencode-plugin/dist/index.mjs` absolute path in `plugin` array of
-`~/.config/opencode/opencode.json`; official npm install registers package name.
+`~/.config/opencode/opencode.json`; official npm install registers the pinned
+`@pragma-sh/opencode-plugin@<version>` (`scripts/install.mjs`).
 
 **opencode does NOT auto-load plugins from any directory** (verified against opencode
 1.17.8). Only a `plugin`-array entry loads a plugin. A **file path / `file://` URL**
-entry loads fine and is **not** npm-resolved. Bare `@pragma-sh/opencode-plugin` is npm-resolved
-and is what official installer registers.
+entry loads fine and is **not** npm-resolved. A package entry is npm-resolved **once**: opencode
+caches a bare name as `<name>@latest` under `~/.cache/opencode/packages/` and never re-resolves
+it, so an unpinned entry stays on the first version it fetched forever. The installer therefore
+pins its own version and replaces any earlier `@pragma-sh/opencode-plugin[@…]` entry.
 
 ## State machine (hooks.ts)
 
@@ -58,11 +61,14 @@ remain active. Child classification survives partial `session.updated` payloads 
 **`busy` is set by:**
 
 - `chat.message`, `command.execute.before`, non-question `tool.execute.before`,
-  `session.status` busy/retry
+  `session.status` busy/retry, and `session.next.shell.started` for a standalone
+  OpenCode shell command (which may have no session busy/idle pair)
 
 **`busy` is cleared by:**
 
 - `session.idle`, `session.status` idle, a non-abort `session.error`, `session.deleted`
+- `session.next.shell.ended` finishes its matching standalone shell call; overlapping
+  shell calls and agent work keep the tab running until all have finished
 
 **Chat content (mobile/desktop transcript):**
 
@@ -186,10 +192,10 @@ split across two pieces:
    then shows a confirmation step, so the watcher sends a final Enter after the
    answer. Helper: `questionAnswerKeys`.
 
-Each built-in plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
+Each agent plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
 reports matching bundle metadata to server, which starts `pragma-watch` for a headless
 launch. opencode approval/question answering additionally requires opencode status plugin
-(installed in opencode); interjection works for any watcher-backed built-in agent.
+(installed in opencode); interjection works for any watcher-backed agent.
 
 **`dispose` (agent process exiting) reports `cleared`**, not `stopped` — quitting
 opencode removes the indicator; finishing a turn (`session.idle`) still reports `done`.
@@ -199,22 +205,30 @@ front** so opening opencode never inherits a stale indicator from a previous run
 same tab that exited without cleanup (`dispose` only runs on a graceful quit; a crash
 leaves the last status lingering in the long-lived daemon).
 
-Reporting uses the fetch-based `@pragma/sdk` gateway helpers. Plugin options no longer
+Reporting uses the fetch-based `@pragma-sh/sdk` gateway helpers. Plugin options no longer
 accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` unless
 `PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
 `PRAGMA_WORKTREE_ID` are present.
 
-## Built-in launcher
+## Plugin launcher
 
 The launchable OpenCode entry is defined **here** in `src/pragma-plugin.ts` — this is now
 the single source of truth. The `pragma-plugins` catalog sidecar imports its built bundle
 to assemble agent catalog and watcher metadata. Its icon asset stays in this package
 under `assets/`, not in Pragma core.
 
+Modes (Shift+Tab in the launcher) come from `opencode agent list`: every `primary`/`all`
+agent except the internal `compaction`, `summary`, and `title`, with `build` and `plan`
+first (and the fallback when the command fails); `--agent <name>` starts one. Slash commands
+come from `opencode acp` (the ACP `available_commands_update`, which includes skills and
+custom commands), with `/init`, `/review`, and `.opencode` / `~/.config/opencode` command and
+skill folders as the fallback.
+OpenCode has no permission-mode flag, so `permissionModes` stays empty.
+
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.
 
-The built-in model provider owns all opencode-specific parsing. It tries supported
+Plugin model provider owns all opencode-specific parsing. It tries supported
 opencode model-list surfaces (`opencode models --json`, then `--verbose`, then plain
 `opencode models`) and returns Pragma's generic model entries. Each model's display name
 gets its provider appended in parentheses (e.g. `Claude Sonnet 4 (anthropic)`), derived
@@ -234,3 +248,16 @@ provider can undercount account-wide usage. Do not read browser cookies or OpenC
 credential file to improve it; switch to an OpenCode-owned authenticated usage endpoint if
 one becomes available. A machine with no local `opencode-go` messages reports `unsupported`,
 and transport or parser failures throw so `agent verify` detects regressions.
+
+## Account provider
+
+All providers are `agent: "opencode"`:
+
+- `opencode-go` — multi-account. Each account is an `XDG_DATA_HOME`, which moves `auth.json` **and the session database** — an account has its own session history, and the variable is visible to everything the agent's shell runs. Login is `opencode auth login` (interactive provider picker, answered through the sign-in dialog's paste field).
+- `openai` and `github-copilot` — multi-account by **swapping** (`credentialStoreAccount({ switchable: true })`, no `env`). They live in the **same** `auth.json` as OpenCode Go, so they cannot own a data directory: two providers setting `XDG_DATA_HOME` would fight at launch, and the server keeps only the first. Instead the server calls `swap.activate` before every launch, after the env is final, so the swap lands in whichever `auth.json` OpenCode will read (OpenCode Go's account directory included). Sign-in is in place: the new empty login is swapped in, then `opencode auth login` writes to the shared file. Login preselects the provider (`--provider openai --method "ChatGPT Pro/Plus (browser)"`; Copilot's deployment prompt is answered by `input: [""]`). OpenCode reads `auth.json` per request, so running sessions follow a switch. They declare no usage and no `iconPath`, so the merged row takes both from Codex / Copilot CLI. ChatGPT is shared with Codex, Pi and Prime Agent (kind `chatgpt`); Copilot only as `github-copilot:Ov23li8tweQw6odWQebz`, because OpenCode signs in to GitHub through its own OAuth app and no other harness uses it. Every API-key provider lends and takes its key (`credentialStoreAccount` defaults), and OpenCode Go's key is shared through `credentialFileSharedToken` from whichever data directory holds it. `OPENCODE_AUTH_CONTENT` was rejected: it replaces every credential, puts tokens in the environment, and a refresh writes the merged set back into the real `auth.json`.
+
+`identify` reads the provider's entry in `auth.json` through `identifyFromCredentialStore` (`@pragma-sh/plugin`), because OpenCode exposes no command that reports the signed-in account. That is the one sanctioned read of the credential file: in the sidecar, identity only, never refreshed or rewritten. The usage rule above still stands — do not use the raw credentials to fetch usage. OpenAI is decoded offline from the ChatGPT JWT (id = email, matching Codex); Copilot calls `GET api.github.com/user` with the GitHub token (id = lowercased login); OpenCode Go is a SHA-256 digest of the key (`key:<16 hex>`), which merges with Pi and Prime Agent holding the same key.
+
+- `OPENCODE_API_KEY_PROVIDERS` — `modelsDevAccountProviders(["openai", "opencode-go"])` from `@pragma-sh/plugin`: every other provider OpenCode holds a key for (Anthropic, Google Gemini API, xAI, OpenCode Zen, OpenRouter, DeepSeek, Groq, Mistral, Cerebras, Fireworks, Together, Hugging Face, NVIDIA, Vercel AI Gateway, Z.ai, MiniMax, Kimi Code, Moonshot AI Platform, Xiaomi MiMo), each mapped to its `auth.json` entry ids (models.dev ids, most specific first). Built with `credentialStoreAccount`: single-login like `openai`, `apiKeyOnly: true`, and login is `opencode auth login --provider <first entry>`, which prompts for the key. Providers without a plain key in `auth.json` (Bedrock, Azure, Vertex, Cloudflare) are left out. The toolbar menu hides one until OpenCode is signed in to it; Add account still lists it.
+
+**Only add a provider whose credential may be used outside its own first-party harness.** Claude Free/Pro/Max OAuth is restricted by Anthropic's terms to Claude Code and claude.ai, and Google suspends accounts that use Gemini CLI or Antigravity OAuth in other tools — so in any other harness, Anthropic and Google are API-key only (`apiKeyOnly: true`), and their OAuth sign-ins are never identified or presented as accounts. ChatGPT (Codex OAuth) and GitHub Copilot sign-ins are sanctioned in OpenCode and Pi. That is why Anthropic is key-only here even though OpenCode 1.18 no longer ships Claude OAuth: a stale or plugin-written OAuth entry must still not be shown.

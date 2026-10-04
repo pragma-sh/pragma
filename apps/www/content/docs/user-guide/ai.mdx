@@ -1,6 +1,6 @@
 ---
 title: Integrated AI
-description: Pragma's built-in AI helpers — inline edits, commit messages, PR drafts, and palette answers — powered by your own provider accounts.
+description: Pragma's built-in AI helpers — inline edits, commit messages, PR drafts, and palette answers — powered by your own provider accounts, plus System 1 models like Jev.
 ---
 
 <video src="/media/ai.mp4" controls muted loop playsInline />
@@ -23,10 +23,14 @@ sign-in** (browser OAuth) or by pasting an **API key**. Featured providers:
 
 **More options** lists the rest (Anthropic, OpenAI, and others). Connect as many as you
 like; **Add another provider** chains them. Skip is always available, and
-Settings → **AI Providers** lists connected accounts with sign-out.
+Settings → **AI** lists connected accounts with sign-out.
 
 Your credentials, your accounts, your usage — nothing is proxied through a Pragma
 service.
+
+The same step offers an optional **System 1 model** card at the top. That key powers
+[Auto mode](/docs/user-guide/auto-mode) in the agent pickers and, together with these
+helpers, [AI merge-conflict resolution](/docs/user-guide/github#resolving-merge-conflicts-with-ai).
 
 ## Inline edit
 
@@ -49,6 +53,8 @@ not over SSH.
 - The PR create view: **Shift+Tab** drafts a title and body from the branch diff.
 - The **Commit & PR** button (right sidebar header) plans and makes all the commits,
   pushes, and drafts the PR in one action.
+- **Commit and Push Fixes** on a pull request's merge card tells the model the commit
+  resolves merge conflicts, so the message says so.
 - The [agent board's](/docs/user-guide/agent-board) "Commit all and open PR" and a
   fanout pick's final commit message use the same pipeline.
 
@@ -57,3 +63,22 @@ not over SSH.
 Type a question in the [command palette](/docs/user-guide/keybindings#command-palette)
 and the top row becomes `Ask AI {message}`: a streamed answer scoped to the current
 project and worktree, with read-only tools. Escape cancels. Not available over SSH.
+
+## System 1 models (Jev)
+
+The helpers above are chat models. A **System 1 model** is a fast classifier that answers
+typed questions with probabilities instead of text, in well under a second. Pragma uses
+[TypeSafe's Jev](https://docs.typesafe.ai) by default, through TypeSafe or OpenRouter, and
+any Jev-compatible endpoint works. Connect one in **Settings → AI** (setup steps are in
+[Auto mode](/docs/user-guide/auto-mode#setup)) and it powers:
+
+- **[Auto mode](/docs/user-guide/auto-mode)** — picks the agent, model, and reasoning effort
+  for a launch from your prompt, live harness and model benchmarks, and `automode.md`.
+- **[Agent progress](/docs/user-guide/auto-mode#agent-progress-in-the-sidebar)** — each
+  running agent's line in the sidebar names what it is doing (planning, coding, testing, …)
+  beside a progress estimate.
+- **[Merge-conflict resolution](/docs/user-guide/github#resolving-merge-conflicts-with-ai)** —
+  picks ours, theirs, or both for every conflict, then hands the uncertain files to the
+  built-in AI above to verify.
+
+The key is stored in an owner-only file and is only sent to the endpoint you set.

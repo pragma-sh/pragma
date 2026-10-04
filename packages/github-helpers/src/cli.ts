@@ -6,7 +6,7 @@
  * from the environment rather than an argument, so it cannot end up in a
  * process listing.
  */
-import { readStdin } from "@pragma/sidecar-kit";
+import { readStdin } from "@pragma-sh/sidecar-kit";
 
 import { viewerLogin } from "./index.ts";
 import { findPullRequest, listBranches, publishPullRequest } from "./pull-requests.ts";

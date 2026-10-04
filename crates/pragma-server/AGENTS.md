@@ -77,7 +77,7 @@ starting the same forward again replaces its prior tunnel process.
 
 ## Plugin catalog host
 
-`plugins_host.rs` supervises the `pragma-plugins` sidecar (`@pragma/plugins-host`),
+`plugins_host.rs` supervises the `pragma-plugins` sidecar (`@pragma-sh/plugins-host`),
 mirroring the `automations` supervisor: a lazily respawned child with a stdout reader
 thread. It caches the last `catalog` event plus the hash → asset map; a sidecar crash
 never blanks the catalog — a respawn re-runs `load` and the cache holds until a fresh
@@ -96,9 +96,17 @@ before the gateway exists drops gateway-dependent agents (their model providers 
 so the host tracks whether the last load had credentials and re-loads on the next
 `catalog` read once they appear.
 
-Desktop usage-limit refresh failures use `logUsageLimitsError`: background polling keeps
-last-good data instead of raising user-facing errors, while bounded failure details remain
-available in server logs.
+`accounts.rs` serves the `accounts` RPC domain (host-owned account providers). The
+durable record and binding rules are `pragma_core::accounts`; plugin callbacks (login
+command, env, `identify`, usage) go to the sidecar as correlated `accounts` requests. A
+sign-in runs the plugin's login command in a **hidden PTY session**
+(`account-login-<id>`, no worktree) with the new login's env, typed as `<cmd>; exit` so the
+session ends with the command; `loginStatus` returns the ANSI-stripped tail plus every
+printed http(s) URL (OSC 8 targets included). `launch_env` is the one resolver every launch
+path uses: `launch_agent_session` (CLI, fanouts, headless mobile) passes it to
+`spawn_with_env`, and the desktop asks for it through `launchEnv` before its own spawn. It
+never fails a launch — any error falls back to the harness's default login. Usage is
+loaded once per **account** (not per harness), because Anthropic's usage endpoint 429s.
 
 Each server process also generates a boot id passed with the server state directory to
 `pragma-plugins`. The sidecar persists plugin lifecycle markers there: `onInstall` once per
@@ -137,7 +145,11 @@ still brokers to desktop when connected — unless the payload sets `headless: t
 which forces the server-side path even with a controller attached (used by
 `pragma-cli agent verify` so scenario sessions never open desktop tabs). Otherwise the
 server resolves agent launch metadata from the plugin catalog, spawns the PTY, and
-schedules startup/prefill input. The mirrored tab is tagged with the catalog `agentId`
+schedules startup/prefill input. `agent_options.rs` applies the payload's `modeId` /
+`permissionModeId` from the catalog's `launch.modeArgs` / `permissionModeArgs` (an omitted
+id means the agent's first, default entry; an unknown one is an error) and prefixes the
+prompt with the `slashCommand`'s catalog `invocation` — the same rules `agentLaunchArgs` /
+`applySlashCommand` in `@pragma-sh/plugin` apply on the desktop. The mirrored tab is tagged with the catalog `agentId`
 and display name so paired phones render an agent tab (icon) immediately. Bracketed (TUI)
 prefills do not trust `prefillDelayMs`
 alone: after the configured delay the launcher also waits (bounded, +15s) for the
@@ -202,6 +214,13 @@ Invariants worth keeping:
 - **The state file is owner-only and atomic.** `fanouts.json` beside the socket:
   temp file via `pragma_platform::perms::create_private_file`, flush, rename,
   restrict. Prompts can carry sensitive context and are never logged.
+- **Pre-launch `!!` commands run per attempt, on the host.** `provision_member`
+  runs the prompt's `` !!`command` `` chips (split by `pragma_core::prelaunch`)
+  in each attempt's own worktree before `launch_agent`; the agent reads each
+  chip as a plain code span, followed by the commands' output. The record keeps the prompt verbatim, so a `retry`
+  runs them again. A create's `commandRunId` names those `exec` runs: the
+  desktop's **Skip** cancels the one in flight, and `CommandRun` makes that
+  sticky so attempts still waiting skip theirs instead of starting over.
 - **A restart never replays a prompt.** Live members become `interrupted`; the
   attempt worktree may already hold work, so only an explicit `retry` relaunches
   it (into the same worktree, with the old tab id moved into history).
@@ -221,7 +240,7 @@ protocol to report back.
 
 ## Socket And Access Control
 
-- The socket filename comes from `@pragma/constants` (`daemon.socketFile`, still
+- The socket filename comes from `@pragma-sh/constants` (`daemon.socketFile`, still
   `daemon.sock`) so SSH `direct-streamlocal` forwards
   the same path.
 - The socket is restricted to its owner by `pragma_platform::ipc::bind` — `0600` on
@@ -265,7 +284,9 @@ alive at once.
 
 Deliberate replacement still works because the app kills the old server before
 spawning a new one (`kill_stale_server` in `pragma-client`), so nothing answers the
-probe by then. Replacement kills the server's complete descendant tree, not only its
+probe by then. The app replaces a server whose hello shows a different protocol, or —
+for a bundled release — a different `buildId`, the hash of its own executable taken at
+start-up (`record_build_id`; it must not be deferred, see `crates/pragma-protocol`). Replacement kills the server's complete descendant tree, not only its
 pid: Bun plugin/automation hosts, per-agent watchers, PTYs, and tunnel processes must
 not be reparented as orphans. As a second line of defense, long-lived Bun hosts treat
 supervisor stdin EOF as a cleanup-and-exit signal. The client never unlinks `server.lock`;

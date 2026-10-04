@@ -1,4 +1,4 @@
-import type { TerminalViewerCommand } from "@pragma/terminal-viewer";
+import type { TerminalViewerCommand } from "@pragma-sh/terminal-viewer";
 import { describe, expect, it } from "vitest";
 
 import { createTerminalCommandQueue, TERMINAL_COMMAND_QUEUE_LIMIT } from "./terminal-command-queue";

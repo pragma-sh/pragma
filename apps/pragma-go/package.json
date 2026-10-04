@@ -1,6 +1,6 @@
 {
   "name": "pragma-go",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Pragma Go — Expo client for Pragma worktrees on phone, tablet, and web",
   "license": "AGPL-3.0-only",
@@ -18,16 +18,17 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "expo lint",
-    "eas-build-post-install": "bunx turbo run build --filter=pragma-go^..."
+    "eas-build-post-install": "bun x turbo run build --filter=pragma-go^..."
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",
     "@expo/ui": "~57.0.8",
-    "@pragma/brand": "workspace:*",
-    "@pragma/constants": "workspace:*",
-    "@pragma/scratchpad-viewer": "workspace:*",
-    "@pragma/sdk": "workspace:*",
-    "@pragma/terminal-viewer": "workspace:*",
+    "@pragma-sh/accounts-view": "workspace:*",
+    "@pragma-sh/brand": "workspace:*",
+    "@pragma-sh/constants": "workspace:*",
+    "@pragma-sh/scratchpad-viewer": "workspace:*",
+    "@pragma-sh/sdk": "workspace:*",
+    "@pragma-sh/terminal-viewer": "workspace:*",
     "@react-native-menu/menu": "^2.0.0",
     "@rn-primitives/portal": "^1.5.2",
     "@rn-primitives/radio-group": "^1.5.2",

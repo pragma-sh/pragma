@@ -1,4 +1,4 @@
-import type { FileChange, Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma-sh/constants";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,7 @@ const tab: Tab = {
   title: null,
   url: null,
   filePath: null,
+  whiteboardId: null,
   diffSide: null,
   diffCommit: null,
   prNumber: null,

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Network } from "lucide-react";
 
-import type { Tab, Worktree } from "@pragma/constants";
+import type { Tab, Worktree } from "@pragma-sh/constants";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";

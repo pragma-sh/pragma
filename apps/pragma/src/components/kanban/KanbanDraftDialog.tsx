@@ -3,10 +3,11 @@ import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Check, ChevronsUpDown } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 
-import type { KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma-sh/constants";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
-import { MarkdownEditor } from "@/components/github/MarkdownEditor";
+import { promptCaretPopover } from "@/components/agents/PromptContextMenu";
+import { MarkdownEditor, type MarkdownEditorHandle } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -18,8 +19,11 @@ import {
 import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
+import { useEscapeClosesPickerFirst } from "@/hooks/use-agent-launch-options";
 import { useAgentModels } from "@/hooks/use-agent-models";
-import { useEscapeToClose } from "@/hooks/use-escape-to-close";
+import { useAutoTarget } from "@/hooks/use-auto-target";
+import { type PromptContextState, usePromptContext } from "@/hooks/use-prompt-context";
 import {
   EMPTY_MODEL_SELECTION,
   defaultModelSelection,
@@ -301,10 +305,10 @@ interface DraftHandlersContext {
   setError: (value: string | null) => void;
   setAgentId: (value: string | null) => void;
   setModelSelection: (value: AgentModelSelection) => void;
-  canSubmit: boolean;
+  attachContext: PromptContextState["attachContext"];
 }
 
-/** Submit/discard/agent-change/keyboard handlers for the draft form. */
+/** Submit/discard/agent-change handlers for the draft form. */
 function useDraftHandlers(ctx: DraftHandlersContext) {
   const {
     setAgentId,
@@ -318,7 +322,7 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
     prompt,
     modelSelection,
     card,
-    canSubmit,
+    attachContext,
   } = ctx;
   const handleAgentChange = useCallback(
     (nextAgentId: string, nextSelection: AgentModelSelection) => {
@@ -335,7 +339,8 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
     try {
       const input = {
         branchName: branch.trim(),
-        prompt,
+        // The card launches later, so `@` context is resolved and stored now.
+        prompt: await attachContext(prompt),
         agentId,
         modelId: modelSelection.modelId,
         reasoningId: modelSelection.reasoningId,
@@ -351,7 +356,18 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
     } finally {
       setBusy(false);
     }
-  }, [agentId, branch, prompt, modelSelection, card, kanban, onOpenChange, setBusy, setError]);
+  }, [
+    agentId,
+    branch,
+    prompt,
+    modelSelection,
+    card,
+    kanban,
+    onOpenChange,
+    setBusy,
+    setError,
+    attachContext,
+  ]);
   const discard = useCallback(async () => {
     if (!card) {
       onOpenChange(false);
@@ -368,18 +384,24 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
       setBusy(false);
     }
   }, [card, kanban, onOpenChange, setBusy, setError]);
-  const handleKeyDown = useCallback(
-    (event: SubmitKeyEvent) => submitOnModEnter(event, canSubmit, () => void submit()),
-    [canSubmit, submit],
-  );
-  return { handleAgentChange, submit, discard, handleKeyDown };
+  return { handleAgentChange, submit, discard };
 }
 
 /** Owns all draft-form state, effects, and handlers. */
+// fallow-ignore-next-line complexity -- composes draft state, model syncing, prompt context, and submit handlers.
 function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps) {
   const kanban = useKanban();
   const workspace = useWorkspace();
   const state = useDraftFormState();
+  const editorRef = useRef<MarkdownEditorHandle | null>(null);
+  const context = useDraftPromptContext(open, workspace, state.branch, editorRef);
+  const { seedPrompt } = context;
+  const { setPrompt } = state;
+  // A saved card carries its resolved `@` context; the editor shows the text alone.
+  const seedSavedPrompt = useCallback(
+    (value: string) => setPrompt(seedPrompt(value)),
+    [setPrompt, seedPrompt],
+  );
   const setPreviousAgent = useCallback(
     (id: string | null) => {
       state.previousAgentIdRef.current = id;
@@ -389,7 +411,7 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
   const apply: DraftSetters = useMemo(
     () => ({
       setBranch: state.setBranch,
-      setPrompt: state.setPrompt,
+      setPrompt: seedSavedPrompt,
       setAgentId: state.setAgentId,
       setModelSelection: state.setModelSelection,
       setError: state.setError,
@@ -397,8 +419,8 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
     }),
     [
       setPreviousAgent,
+      seedSavedPrompt,
       state.setBranch,
-      state.setPrompt,
       state.setAgentId,
       state.setModelSelection,
       state.setError,
@@ -422,7 +444,6 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
   const handlers = useDraftHandlers({
     agentId: state.agentId,
     branch: state.branch,
-    canSubmit,
     card,
     kanban,
     modelSelection: state.modelSelection,
@@ -432,8 +453,8 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
     setBusy: state.setBusy,
     setError: state.setError,
     setModelSelection: state.setModelSelection,
+    attachContext: context.attachContext,
   });
-
   return {
     agents: state.agents,
     modelsByAgent: state.modelsByAgent,
@@ -448,8 +469,31 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
     busy: state.busy,
     canSubmit,
     branchOptions,
+    context,
+    editorRef,
     ...handlers,
   };
+}
+
+/**
+ * The `@` picker for a draft's prompt. It searches the worktree already on the
+ * draft's branch, or the selected worktree when the branch is new.
+ */
+function useDraftPromptContext(
+  open: boolean,
+  workspace: ReturnType<typeof useWorkspace>,
+  branch: string,
+  editor: RefObject<MarkdownEditorHandle | null>,
+): PromptContextState {
+  const worktrees = workspace.selectedProjectId
+    ? (workspace.worktrees[workspace.selectedProjectId] ?? [])
+    : [];
+  const worktree =
+    worktrees.find((candidate) => candidate.branch === branch.trim()) ??
+    worktrees.find((candidate) => candidate.id === workspace.selectedWorktreeId) ??
+    worktrees.find((candidate) => candidate.isMain) ??
+    null;
+  return usePromptContext({ isOpen: open, project: workspace.activeProject, worktree, editor });
 }
 
 /**
@@ -460,8 +504,17 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
  */
 export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDraftDialogProps) {
   const form = useKanbanDraftForm({ open: isOpen, onOpenChange, card });
+  const autoTarget = useAutoTarget(form.prompt);
+  const auto = useAutoSubmit(form.submit);
+  const canSubmit = form.canSubmit && !auto.resolving;
+  const handleKeyDown = (event: SubmitKeyEvent) =>
+    submitOnModEnter(event, canSubmit, () => void auto.submit());
+  const handleEditorKeyDown = (event: KeyboardEvent) => {
+    form.context.handleKeyDown(event);
+    if (!event.defaultPrevented) handleKeyDown(event);
+  };
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
-  useEscapeToClose(isOpen, () => onOpenChange(false));
+  useEscapeClosesPickerFirst(isOpen, [form.context], () => onOpenChange(false));
 
   return (
     <AnimatePresence>
@@ -478,7 +531,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
             className="mt-5 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void form.submit();
+              if (canSubmit) void auto.submit();
             }}
           >
             <div className="grid grid-cols-2 gap-3">
@@ -488,7 +541,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                   branch={form.branch}
                   branchOptions={form.branchOptions}
                   onBranchChange={form.setBranch}
-                  onKeyDown={form.handleKeyDown}
+                  onKeyDown={handleKeyDown}
                 />
               </div>
               <div className="space-y-2">
@@ -499,6 +552,8 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                   value={{ agentId: form.agentId, selection: form.modelSelection }}
                   onChange={form.handleAgentChange}
                   onLoadModels={form.loadModels}
+                  autoTarget={autoTarget}
+                  autoRegistry={auto.registry}
                 />
               </div>
             </div>
@@ -507,8 +562,11 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
               <MarkdownEditor
                 value={form.prompt}
                 onChange={form.setPrompt}
-                onKeyDown={form.handleKeyDown}
-                placeholder="Describe what you want the agent to do…"
+                onKeyDown={handleEditorKeyDown}
+                handleRef={form.editorRef}
+                onCaretTextChange={form.context.onCaretTextChange}
+                caretPopover={promptCaretPopover(form.context)}
+                placeholder="Describe what you want the agent to do. Type @ for context…"
                 className="min-h-40 max-h-[40vh] overflow-y-auto"
               />
             </div>
@@ -530,7 +588,7 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
                 <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={!form.canSubmit}>
+                <Button type="submit" disabled={!canSubmit}>
                   {card ? "Save draft" : "Add draft"}
                   <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
                 </Button>

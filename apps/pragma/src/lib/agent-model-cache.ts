@@ -24,7 +24,7 @@ export function cachedAgentModels(agentId: string): AgentModel[] | undefined {
  * Resolves model metadata for an agent, caching non-empty results briefly.
  *
  * Only a non-empty resolution is cached and reused on subsequent calls, so
- * repeatedly hovering an agent in the picker does not re-run the underlying —
+ * repeatedly hovering a model submenu does not re-run the underlying —
  * and potentially process-spawning — lookup. Empty results and failures are
  * not cached: an empty list usually means the lookup ran too early (gateway
  * SDK still connecting) or the agent CLI was missing, and caching it would pin

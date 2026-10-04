@@ -1,8 +1,15 @@
 import { useSyncExternalStore } from "react";
 
-import type { AgentDefinition, PluginContext } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { AgentDefinition, PluginContext, ResolvedAgentOptions } from "@pragma-sh/plugin";
+import {
+  agentLaunchArgs,
+  applySlashCommand,
+  resolveAgentOptions,
+  slashCommandInvocation,
+} from "@pragma-sh/plugin/catalog";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
+import { splitSlashPrompt } from "@/lib/agent-launch-options";
 import type { AgentConfig, AgentModel, AgentModelSelection, RawAgentModel } from "@/lib/tauri";
 
 import { notifyFromPlugin } from "./host-hooks";
@@ -25,6 +32,8 @@ const listeners = new Set<() => void>();
 let records: PluginAgentRecord[] = [];
 let configSnapshot: AgentConfig[] = [];
 let runtime: RuntimeServices = { sdk: null, project: null };
+/** Last resolved modes/permission modes/slash commands per agent id. */
+let optionsByAgent = new Map<string, ResolvedAgentOptions>();
 
 /** Replaces active plugin-agent contributions for the current project scope. */
 export function setPluginAgents(
@@ -33,6 +42,7 @@ export function setPluginAgents(
 ): void {
   runtime = nextRuntime;
   records = nextRecords.flatMap(pluginAgentRecords);
+  optionsByAgent = new Map();
   configSnapshot = records.map((record) => record.config);
   for (const listener of listeners) {
     listener();
@@ -68,28 +78,86 @@ export async function resolvePluginAgentModels(agentId: string): Promise<AgentMo
   return (await models(pluginContext(record))).map(toAgentModel);
 }
 
-/** Builds plugin-owned launch args, or `null` when the agent is not plugin-owned. */
+/**
+ * Resolves an agent's modes, permission modes, and slash commands, or `null`
+ * when the id is not plugin-owned. Async providers need the gateway SDK; until
+ * it connects only static lists are returned (and not cached).
+ */
+export async function resolvePluginAgentOptions(
+  agentId: string,
+): Promise<ResolvedAgentOptions | null> {
+  const record = findRecord(agentId);
+  if (!record) {
+    return null;
+  }
+  if (!runtime.sdk) {
+    return staticOptions(record.definition);
+  }
+  const options = await resolveAgentOptions(record.definition, pluginContext(record));
+  optionsByAgent.set(agentId, options);
+  return options;
+}
+
+/**
+ * Builds plugin-owned launch args — model/reasoning, then mode, then permission
+ * mode — or `null` when the agent is not plugin-owned. Unselected modes fall
+ * back to the first declared entry, using the last resolved options for async
+ * providers (see {@link resolvePluginAgentOptions}).
+ */
 export function pluginAgentLaunchArgs(
   agentId: string,
   selection: AgentModelSelection | null | undefined,
 ): string[] | null {
-  const record = records.find((candidate) => candidate.config.id === agentId);
+  const record = findRecord(agentId);
   if (!record) {
     return null;
   }
-  const args: string[] = [];
-  if (selection?.modelId) {
-    const reasoningId = selection.reasoningId;
-    if (reasoningId && record.definition.args.modelReasoning) {
-      args.push(...record.definition.args.modelReasoning(selection.modelId, reasoningId));
-    } else {
-      args.push(...record.definition.args.model(selection.modelId));
-      if (reasoningId) {
-        args.push(...record.definition.args.reasoning(reasoningId));
-      }
-    }
+  return agentLaunchArgs(record.definition, selection, optionsByAgent.get(agentId) ?? {});
+}
+
+/**
+ * The prompt to prefill for a launch: the slash command's invocation followed
+ * by `prompt`. Without an explicit command, a prompt that starts with a known
+ * `/command` is rewritten only when the agent invokes it differently.
+ */
+export function pluginAgentPrompt(
+  agentId: string,
+  slashCommand: string | null | undefined,
+  prompt: string | undefined,
+): string | undefined {
+  const record = findRecord(agentId);
+  const commands = optionsByAgent.get(agentId)?.slashCommands;
+  const invocation = (name: string) => {
+    const command = commands?.find((candidate) => candidate.name === name) ?? name;
+    return record ? slashCommandInvocation(record.definition, command) : `/${name}`;
+  };
+  if (slashCommand) {
+    return applySlashCommand(invocation(slashCommand), prompt);
   }
-  return args;
+  if (!prompt || !commands) {
+    return prompt;
+  }
+  const typed = splitSlashPrompt(prompt, commands);
+  if (!typed.slashCommand || invocation(typed.slashCommand) === `/${typed.slashCommand}`) {
+    return prompt;
+  }
+  return applySlashCommand(invocation(typed.slashCommand), typed.prompt);
+}
+
+function findRecord(agentId: string): PluginAgentRecord | undefined {
+  return records.find((candidate) => candidate.config.id === agentId);
+}
+
+function staticList<T>(source: T[] | ((...args: never[]) => unknown) | undefined): T[] {
+  return Array.isArray(source) ? source : [];
+}
+
+function staticOptions(definition: AgentDefinition): ResolvedAgentOptions {
+  return {
+    modes: staticList(definition.modes),
+    permissionModes: staticList(definition.permissionModes),
+    slashCommands: staticList(definition.slashCommands),
+  };
 }
 
 function subscribe(listener: () => void): () => void {
@@ -120,9 +188,7 @@ function toAgentConfig(
   definition: AgentDefinition,
   record: PluginRecord,
 ): AgentConfig {
-  const staticModels = Array.isArray(definition.models)
-    ? definition.models.map(toRawAgentModel)
-    : [];
+  const staticModels = Array.isArray(definition.models) ? definition.models.map(toAgentModel) : [];
   return {
     id: pluginAgentId(pluginId, definition.id),
     name: definition.name,
@@ -138,17 +204,18 @@ function toAgentConfig(
   };
 }
 
-export function pluginAgentId(pluginId: string, agentId: string): string {
+function pluginAgentId(pluginId: string, agentId: string): string {
   if (pluginId === `pragma.${agentId}`) return pluginId;
   return agentId.includes(".") ? agentId : `${pluginId}.${agentId}`;
 }
 
-function toRawAgentModel(model: RawAgentModel): RawAgentModel {
-  return { id: model.id, name: model.name, reasoning: model.reasoning ?? [] };
-}
-
 function toAgentModel(model: RawAgentModel): AgentModel {
-  return { id: model.id, name: model.name, reasoning: model.reasoning ?? [] };
+  return {
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning ?? [],
+    ...(model.canonicalId ? { canonicalId: model.canonicalId } : {}),
+  };
 }
 
 function pluginContext(record: PluginAgentRecord): PluginContext {

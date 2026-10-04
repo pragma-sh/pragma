@@ -1,4 +1,4 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { Button } from "@/components/ui/button";
 import { useUpdates } from "@/state/updates-context";

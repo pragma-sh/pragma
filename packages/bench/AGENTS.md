@@ -1,4 +1,4 @@
-# @pragma/bench — terminal lag benchmark
+# @pragma-sh/bench — terminal lag benchmark
 
 Measures what a user actually feels in a Pragma terminal: how long a keystroke
 takes to appear, and how long a scroll takes to move. It does this by launching a
@@ -31,7 +31,7 @@ Dual TS + Rust in one package, like `packages/constants`:
 | `src/lines.rs`     | The scrollback payload: same corpus, dumped and parked                   |
 | `src/corpus.rs`    | The content both payloads render                                         |
 | `src/instance.rs`  | Dev-instance lifecycle: spawn, discover, register project, open tabs     |
-| `src/driver.rs`    | Everything that talks to `tauri-agent-tools`                             |
+| `src/driver.rs`    | Everything that talks to the dev bridge (`/eval` over loopback HTTP)     |
 | `src/runner.js`    | The scenario loop, injected into the webview                             |
 | `src/scenarios.rs` | Scenario definitions and the install/start/poll cycle                    |
 | `src/stats.rs`     | Percentiles                                                              |
@@ -39,8 +39,6 @@ Dual TS + Rust in one package, like `packages/constants`:
 
 ## Prerequisites
 
-- **`tauri-agent-tools`** on `PATH` (`npm install -g tauri-agent-tools`). The run
-  fails immediately with that message if it is missing.
 - **macOS or Linux.** `dev_bridge.rs` writes its token to a hard-coded `/tmp`
   path, so the benchmark refuses to start on Windows rather than scanning a
   directory that will always be empty there.
@@ -183,7 +181,7 @@ production bundles. It resolves tab ids against the live map on every call and
 holds no references, so terminal disposal and WebGL eviction are unaffected.
 
 The three names the app and this package share (`hookGlobal`, `runnerGlobal`,
-`markerPrefix`, plus `tabTitle`) live in `@pragma/constants` under `bench`. Never
+`markerPrefix`, plus `tabTitle`) live in `@pragma-sh/constants` under `bench`. Never
 spell any of them literally in a second place.
 
 ## Reading the output
@@ -249,10 +247,12 @@ you see a scenario reporting all drops, this is the list to check.
 - **The dev instance is scoped to the worktree it was compiled in.** That is what
   makes it findable: the channel, data directory, and socket all derive from the
   repo root, so `pragma-bench run` computes them rather than guessing at windows.
-- **`--pid` is not optional.** `tauri-agent-tools` auto-discovery picks a bridge
-  from a shared token directory, and a developer usually has more than one dev
-  build open. Every call this package makes pins the pid it launched, so a
-  benchmark's keystrokes can never land in somebody's real editor.
+- **Every call is pinned to a pid.** Bridges publish themselves in a shared
+  token directory, and a developer usually has more than one dev build open.
+  The driver reads the port and token of the pid it launched (re-read on every
+  call, so a restarted app is picked up), so a benchmark's keystrokes can never
+  land in somebody's real editor. No external CLI is involved: `driver.rs`
+  speaks HTTP to the bridge directly, as `packages/jev` does.
 - **The bridge caps one `eval` at five seconds.** That is why the scenario starts
   asynchronously and is polled, instead of being awaited in a single call.
 - **The payloads park instead of exiting.** A payload that returned would give the
@@ -262,8 +262,8 @@ you see a scenario reporting all drops, this is the list to check.
   reclaims them too when a run is interrupted. Ten orphaned TUIs repainting
   forever would otherwise poison the next run's numbers rather than the current
   one's.
-- **A failed `tauri-agent-tools` call is not a failed scenario.** The measurement
-  loop lives in the page and keeps going; the CLI's own HTTP timeout fires
+- **A failed bridge call is not a failed scenario.** The measurement
+  loop lives in the page and keeps going; the bridge's 5 s eval timeout fires
   routinely while the window is busy redrawing 5000 lines. Progress polls
   tolerate `MAX_POLL_FAILURES` in a row, and injection is retried.
 - **A synthetic `keydown` cannot deliver a space.** xterm takes the printable

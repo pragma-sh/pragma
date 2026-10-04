@@ -61,7 +61,7 @@ impl Summary {
 /// latency that actually occurred, which matters when a reader wants to go find
 /// the frame that produced it.
 fn percentile(sorted: &[f64], percent: f64) -> f64 {
-    debug_assert!(!sorted.is_empty());
+    debug_assert_ne!(sorted, [] as [f64; 0]);
     #[allow(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,

@@ -4,11 +4,35 @@ import { extname, isAbsolute, join } from "node:path";
 
 import type {
   AgentCatalog,
+  AgentLaunchArgs,
   AgentLaunchCommand,
   AgentModelEntry,
   CatalogAgent,
-} from "@pragma/constants";
-import type { AgentDefinition, PluginContext, PluginDefinition } from "@pragma/plugin";
+} from "@pragma-sh/constants";
+import type {
+  AgentDefinition,
+  PluginContext,
+  PluginDefinition,
+  ResolvedAgentOptions,
+} from "@pragma-sh/plugin";
+import { resolveAgentOptions, slashCommandInvocation } from "@pragma-sh/plugin/catalog";
+
+/**
+ * How long one agent's modes, permission modes, and slash commands may take to
+ * resolve before the catalog stops waiting for them. Discovery can start the
+ * tool itself (an ACP probe) and the server gives the whole catalog 30s, so a
+ * slow tool falls back to its last-good (or static) options instead of
+ * stalling every agent.
+ */
+const OPTIONS_BUDGET_MS = 10_000;
+
+/**
+ * Options that finished resolving after their budget, keyed by root + agent id.
+ * The work is not cancelled, so its result is kept for the next catalog load
+ * rather than thrown away — a tool that is slow under full-catalog contention
+ * still shows its commands after one reload.
+ */
+const lateOptions = new Map<string, ResolvedAgentOptions>();
 
 /** Maximum icon size the catalog will serve, in bytes. */
 export const ICON_MAX_BYTES = 256 * 1024;
@@ -16,7 +40,7 @@ export const ICON_MAX_BYTES = 256 * 1024;
 /** A loaded plugin definition plus the manifest facts the hosts need. */
 export interface ResolvedPlugin {
   pluginId: string;
-  scope: "bundled" | "global" | "project";
+  scope: "global" | "project";
   root: string;
   /** Absolute plugin directory (relative icon paths resolve against it). */
   dir: string;
@@ -59,6 +83,12 @@ export interface IconAsset {
 export interface CatalogResult {
   catalog: AgentCatalog;
   assets: Record<string, IconAsset>;
+  /**
+   * Present when some agent's options overran their budget and the catalog used
+   * a fallback; settles once that work finishes. A load run afterwards picks the
+   * finished options up, so the host can republish them.
+   */
+  pending?: Promise<void>;
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -114,6 +144,7 @@ export async function assembleCatalog(
   ctx: PluginContext | ((plugin: ResolvedPlugin) => PluginContext),
   onError: (pluginId: string, agentId: string, error: unknown) => void = () => {},
   previous?: CatalogResult,
+  optionsBudgetMs: number = OPTIONS_BUDGET_MS,
 ): Promise<CatalogResult> {
   // A project-scoped plugin's model provider must resolve against the project
   // it was contributed by, not against whichever root happens to be first in
@@ -121,6 +152,7 @@ export async function assembleCatalog(
   // override leaked into another's launcher.
   const contextFor = typeof ctx === "function" ? ctx : () => ctx;
   const assets: Record<string, IconAsset> = {};
+  const overdue: Promise<unknown>[] = [];
   const entries = plugins.flatMap((plugin) =>
     (plugin.definition.agents ?? []).map((agent) => ({ agent, plugin })),
   );
@@ -128,7 +160,11 @@ export async function assembleCatalog(
     entries.map(async ({ agent, plugin }) => {
       const fallback = lastGoodAgent(previous, qualifiedAgentId(plugin.pluginId, agent.id));
       try {
-        const resolved = await catalogAgent(agent, plugin, contextFor(plugin), assets);
+        const resolved = await catalogAgent(agent, plugin, contextFor(plugin), assets, {
+          budgetMs: optionsBudgetMs,
+          fallback,
+          overdue,
+        });
         if (resolved.models.length === 0 && fallback && fallback.models.length > 0) {
           onError(
             plugin.pluginId,
@@ -145,7 +181,9 @@ export async function assembleCatalog(
     }),
   );
   const agents = resolvedAgents.filter((agent): agent is CatalogAgent => agent !== null);
-  return { catalog: { agents }, assets };
+  const pending =
+    overdue.length > 0 ? Promise.allSettled(overdue).then(() => undefined) : undefined;
+  return { catalog: { agents }, assets, ...(pending ? { pending } : {}) };
 }
 
 /** The agent's entry in the last successfully assembled catalog, if any. */
@@ -170,7 +208,7 @@ function adoptFallback(
 /**
  * Flattens every plugin's watcher declarations into {@link WatcherEntry}s so
  * the server can start the matching `pragma-watch` sidecar for a headless
- * launch of any agent — bundled and user-configured plugins alike.
+ * launch of any agent contributed by a configured plugin.
  */
 export function assembleWatchers(plugins: ResolvedPlugin[]): WatcherEntry[] {
   return plugins.flatMap((plugin) =>
@@ -189,11 +227,15 @@ async function catalogAgent(
   plugin: ResolvedPlugin,
   ctx: PluginContext,
   assets: Record<string, IconAsset>,
+  budget: OptionsBudget,
 ): Promise<CatalogAgent> {
-  const models = await resolveModels(agent, ctx);
+  const [models, options] = await Promise.all([
+    resolveModels(agent, ctx),
+    resolveOptionsWithinBudget(agent, plugin, ctx, budget),
+  ]);
   const icon = catalogIcon(agent, plugin.dir, assets);
   const commands = launchCommands(agent, models);
-  const launch = catalogLaunch(agent, commands);
+  const launch = catalogLaunch(agent, commands, options);
   const runtimeAgentId = (plugin.definition.watchers ?? []).find(
     (watcher) => watcher.agent === agent.id,
   )?.agent;
@@ -205,13 +247,92 @@ async function catalogAgent(
     root: plugin.root,
     ...(runtimeAgentId ? { runtimeAgentId } : {}),
     models,
+    ...catalogOptions(agent, options),
     launch,
     ...(agent.excludeFeatures ? { excludeFeatures: agent.excludeFeatures } : {}),
     ...(icon ? { icon } : {}),
   };
 }
 
-function qualifiedAgentId(pluginId: string, agentId: string): string {
+/** How long an agent's options may take, and where to fall back and report overruns. */
+interface OptionsBudget {
+  budgetMs: number;
+  /** The agent's last-good catalog entry. */
+  fallback: CatalogAgent | undefined;
+  /** Collects option work that overran its budget. */
+  overdue: Promise<unknown>[];
+}
+
+/**
+ * The agent's options, or — when they take longer than the budget — a late
+ * result from an earlier load, its last-good catalog options, or its static
+ * lists, in that order.
+ */
+function resolveOptionsWithinBudget(
+  agent: AgentDefinition,
+  plugin: ResolvedPlugin,
+  ctx: PluginContext,
+  budget: OptionsBudget,
+): Promise<ResolvedAgentOptions> {
+  const key = `${plugin.root}\0${qualifiedAgentId(plugin.pluginId, agent.id)}`;
+  const work = resolveAgentOptions(agent, ctx).then((options) => {
+    lateOptions.set(key, options);
+    return options;
+  });
+  return withinBudget(work, budget.budgetMs, () => {
+    budget.overdue.push(work);
+    return lateOptions.get(key) ?? fallbackOptions(agent, budget.fallback);
+  });
+}
+
+/** Resolves `work`, or `fallback()` once `ms` pass first. */
+async function withinBudget<T>(work: Promise<T>, ms: number, fallback: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback()), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The agent's last-good catalog options, else the lists it declares statically. */
+function fallbackOptions(
+  agent: AgentDefinition,
+  previous: CatalogAgent | undefined,
+): ResolvedAgentOptions {
+  if (previous) {
+    return {
+      modes: (previous.modes ?? []).map(withoutNulls),
+      permissionModes: (previous.permissionModes ?? []).map(withoutNulls),
+      slashCommands: (previous.slashCommands ?? []).map(withoutNulls),
+    };
+  }
+  return {
+    modes: listed(agent.modes),
+    permissionModes: listed(agent.permissionModes),
+    slashCommands: listed(agent.slashCommands),
+  };
+}
+
+/** A static option list, or nothing for an async provider. */
+function listed<T>(source: unknown): T[] {
+  return Array.isArray(source) ? (source as T[]) : [];
+}
+
+type WithoutNulls<T> = { [K in keyof T]: Exclude<T[K], null> };
+
+/** Drops `null` fields: the wire types allow them where the plugin types use `undefined`. */
+function withoutNulls<T extends object>(item: T): WithoutNulls<T> {
+  return Object.fromEntries(
+    Object.entries(item).filter(([, value]) => value !== null),
+  ) as WithoutNulls<T>;
+}
+
+/** Catalog agent id for a plugin-local agent id (shared with the desktop's `pluginAgentId`). */
+export function qualifiedAgentId(pluginId: string, agentId: string): string {
   if (agentId.includes(".")) return agentId;
   return pluginId === `pragma.${agentId}` ? pluginId : `${pluginId}.${agentId}`;
 }
@@ -262,12 +383,46 @@ function reasoningCommand(
   return { modelId, reasoningId, command: [...agent.launch.command, ...args] };
 }
 
+/**
+ * The public option lists. Each slash command carries its resolved invocation
+ * so a host without the plugin's JS (the headless server) can apply it.
+ */
+function catalogOptions(
+  agent: AgentDefinition,
+  options: ResolvedAgentOptions,
+): Pick<CatalogAgent, "slashCommands" | "modes" | "permissionModes"> {
+  return {
+    ...(options.slashCommands.length > 0
+      ? {
+          slashCommands: options.slashCommands.map((command) => ({
+            ...command,
+            invocation: slashCommandInvocation(agent, command),
+          })),
+        }
+      : {}),
+    ...(options.modes.length > 0 ? { modes: options.modes } : {}),
+    ...(options.permissionModes.length > 0 ? { permissionModes: options.permissionModes } : {}),
+  };
+}
+
+function optionArgs(
+  items: { id: string }[],
+  build: ((id: string) => string[]) | undefined,
+): AgentLaunchArgs[] {
+  return build ? items.map((item) => ({ id: item.id, args: build(item.id) })) : [];
+}
+
 function catalogLaunch(
   agent: AgentDefinition,
   commands: AgentLaunchCommand[],
+  options: ResolvedAgentOptions,
 ): CatalogAgent["launch"] {
+  const modeArgs = optionArgs(options.modes, agent.args.mode);
+  const permissionModeArgs = optionArgs(options.permissionModes, agent.args.permissionMode);
   const launch = {
     commands,
+    ...(modeArgs.length > 0 ? { modeArgs } : {}),
+    ...(permissionModeArgs.length > 0 ? { permissionModeArgs } : {}),
     ...(agent.startupInput ? { startupInput: agent.startupInput } : {}),
     ...(agent.prefillDelayMs !== undefined ? { prefillDelayMs: agent.prefillDelayMs } : {}),
     ...(agent.prefillMode ? { prefillMode: agent.prefillMode } : {}),

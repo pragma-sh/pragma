@@ -1,4 +1,4 @@
-import type { ScratchpadFile } from "@pragma/sdk";
+import type { ScratchpadFile } from "@pragma-sh/sdk";
 import { router } from "expo-router";
 import { useMemo } from "react";
 import { Pressable, View } from "react-native";

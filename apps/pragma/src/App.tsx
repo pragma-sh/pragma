@@ -5,6 +5,7 @@ import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
 import { WorkspaceTour } from "@/components/onboarding/WorkspaceTour";
 import { ScriptMigrationDialog } from "@/components/dialogs/ScriptMigrationDialog";
 import { AgentPluginInstallPrompt } from "@/components/plugins/AgentPluginInstallPrompt";
+import { StorageReminderWatcher } from "@/components/settings/storage/StorageReminderWatcher";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { PluginProvider } from "@/plugins/PluginProvider";
 import { AiProvider } from "@/state/ai-context";
@@ -45,6 +46,7 @@ function App() {
                                 <WorkspaceTour />
                                 <AgentPluginInstallPrompt />
                                 <ScriptMigrationDialog />
+                                <StorageReminderWatcher />
                               </UpdatesProvider>
                             </FanoutsProvider>
                           </WorktreeCreationProvider>

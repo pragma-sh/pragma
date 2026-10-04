@@ -1,4 +1,4 @@
-import type { Fanout, FanoutMember, ScratchpadFile } from "@pragma/constants";
+import type { Fanout, FanoutMember, ScratchpadFile } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import {

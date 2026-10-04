@@ -1,8 +1,8 @@
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { PragmaClient } from "@pragma/sdk";
-import type { Tab, Worktree } from "@pragma/constants";
+import { PragmaClient } from "@pragma-sh/sdk";
+import type { Tab, Worktree } from "@pragma-sh/constants";
 
 import { PLUGIN_DEEP_LINK_EVENT, type PluginDeepLinkDetail } from "@/lib/deep-link";
 import { onAgentReport, readPluginManifests, gatewayConnectionInfo } from "@/lib/tauri";
@@ -30,8 +30,8 @@ const EMPTY_WORKTREES: Worktree[] = [];
 /**
  * Loads configured plugins and keeps the plugin runtime in sync with the app:
  *
- * - startup + project switch: reads `.pragma/config.json` entries (built-in
- *   seam first, then global, then active project) and loads them in order;
+ * - startup + project switch: reads global and active-project
+ *   `.pragma/config.json` entries and loads them in order;
  * - publishes the active project and the gateway SDK client to the hooks
  *   bridge;
  * - forwards agent reports onto the plugin event bus (`"agent.report"`);
@@ -277,7 +277,7 @@ function runDeclarativePluginEvent(
 
 interface ManifestEntryLike {
   specifier: string;
-  scope: "bundled" | "global" | "project";
+  scope: "global" | "project";
   error: string | null;
   config: Record<string, unknown> | null;
   manifest: { mainPath: string; version: string; modifiedMs: number | null } | null;
@@ -321,11 +321,6 @@ async function evaluatePlugins(
     projectIdByPath: (projectPath) => projects.find((project) => project.path === projectPath)?.id,
     onFailure: notifyPluginFailure,
   });
-  setPluginsForScope(
-    "bundled",
-    null,
-    records.filter((record) => record.scope === "bundled"),
-  );
   setPluginsForScope(
     "global",
     null,

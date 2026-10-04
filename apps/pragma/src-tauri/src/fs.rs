@@ -7,6 +7,8 @@
 //! escaping the worktree and performs the actual disk access, so the same
 //! command serves a local project and an SSH-bridged remote one.
 
+use std::path::{Path, PathBuf};
+
 use pragma_constants::{
     DirEntry, FileChunk, FileContents, PaletteSearchResponse, ProtocolRpcMethod,
 };
@@ -19,6 +21,14 @@ use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 use crate::ssh_host;
+
+/// Re-validates a worktree-relative path against escaping the worktree, returning
+/// the resolved absolute path. Used by callers that still touch the local disk
+/// directly (scratchpads); the core RPC path validates host-side.
+pub(crate) fn resolve_in_worktree(root: &Path, relative: &str) -> AppResult<PathBuf> {
+    pragma_core::fs::resolve_in_worktree(root, relative)
+        .map_err(|error| AppError::InvalidInput(error.to_string()))
+}
 
 /// Looks up a worktree's trusted absolute root path from the DB.
 fn worktree_root(db: &Db, worktree_id: &str) -> AppResult<String> {
@@ -172,6 +182,21 @@ pub async fn write_file_bytes(
             contents,
         },
     )
+}
+
+/// Copies a file dropped onto a terminal to the host that runs the worktree's
+/// PTYs and returns the absolute path the shell can open.
+#[tauri::command]
+pub async fn save_dropped_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    name: String,
+    contents: String,
+) -> AppResult<String> {
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
+    fs_rpc(&pty, &FsRequest::SaveDroppedFile { name, contents })
 }
 
 /// Renames (or moves) a worktree-relative entry.

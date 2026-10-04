@@ -7,7 +7,7 @@ import {
   scratchpadCommentsPath,
   serializeScratchpadComments,
   type ScratchpadComment,
-} from "@pragma/scratchpad-contract";
+} from "@pragma-sh/scratchpad-contract";
 
 import type { AgentsClient } from "./agents-client";
 import type { FsClient } from "./fs-client";
@@ -33,7 +33,7 @@ import type {
  * Everything past {@link ScratchpadsClient.getScratchpads} is composed from the
  * filesystem and agent namespaces rather than served by a route of its own, but
  * belongs here because the composition *is* the contract: the comment thread
- * lives in a sibling file whose name only `@pragma/scratchpad-contract` knows,
+ * lives in a sibling file whose name only `@pragma-sh/scratchpad-contract` knows,
  * the attachment lives in managed frontmatter, and a prompt has to be addressed
  * to the running agent's runtime id rather than its catalog id. Re-deriving any
  * of that per client is how the three drift apart.

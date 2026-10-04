@@ -4,14 +4,14 @@ import type {
   UsageLimitsResult,
   UsageLimitsUnavailable,
   UsageLimitsUnavailableReason,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import type { PluginIcon } from "./contributions";
 import type { PluginContext } from "./types";
 
 // The usage-limit result shapes are wire types: the host validates and caches
 // them, and desktop, mobile, and web all render the same JSON. They therefore
-// live in `@pragma/constants` and are only re-exported here, so plugin authors
+// live in `@pragma-sh/constants` and are only re-exported here, so plugin authors
 // import one name and no second definition can drift from it.
 export type {
   UsageLimit,
@@ -55,7 +55,11 @@ export async function runProviderCommand<TConfig>(
   return { kind: "ok", stdout: result.stdout };
 }
 
-/** A plugin-owned usage source rendered by Pragma's shared usage-limits UI. */
+/**
+ * A plugin-owned usage source rendered by Pragma's shared usage-limits UI.
+ * @deprecated Declare an account provider with `defineAccounts` and put these
+ * fields under its `usageLimits`.
+ */
 export interface UsageLimitProviderDefinition<TConfig = unknown> {
   id: string;
   title: string;
@@ -71,7 +75,11 @@ export interface UsageLimitProviderDefinition<TConfig = unknown> {
   load: (ctx: PluginContext<TConfig>) => Promise<UsageLimitsResult>;
 }
 
-/** Declares a provider for Pragma's shared usage-limits UI. */
+/**
+ * Declares a provider for Pragma's shared usage-limits UI.
+ * @deprecated Use `defineAccounts`. The host adapts legacy providers into a
+ * single-login account provider with no sign-in or switching.
+ */
 export function defineUsageLimitProvider<TConfig = unknown>(
   input: UsageLimitProviderDefinition<TConfig>,
 ): UsageLimitProviderDefinition<TConfig> {

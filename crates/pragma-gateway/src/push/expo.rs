@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn tolerates_a_response_without_tickets() {
         let outcome = read_tickets(&json!({}), &[message("token-a")]);
-        assert!(outcome.dead.is_empty());
-        assert!(outcome.errors.is_empty());
+        assert_eq!(outcome.dead, [] as [std::string::String; 0]);
+        assert_eq!(outcome.errors, [] as [std::string::String; 0]);
     }
 }

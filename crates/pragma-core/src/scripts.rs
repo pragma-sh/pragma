@@ -373,9 +373,9 @@ mod tests {
     fn a_missing_section_is_empty_rather_than_an_error() {
         let config = parse_config("{}", path()).expect("an empty object is a valid config");
 
-        assert!(config.setup.is_empty());
+        assert_eq!(config.setup, [] as [std::string::String; 0]);
         assert!(config.run_scripts.is_empty());
-        assert!(config.teardown.is_empty());
+        assert_eq!(config.teardown, [] as [std::string::String; 0]);
     }
 
     #[test]

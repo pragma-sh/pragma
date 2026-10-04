@@ -1,4 +1,4 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 /**
  * The label a tab carries before anything has named it. Same source of truth as

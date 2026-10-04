@@ -3,21 +3,25 @@ import * as ReactDomClient from "react-dom/client";
 import * as ReactJsxRuntime from "react/jsx-runtime";
 
 import { compile } from "@mdx-js/mdx";
-import * as Scratchpad from "@pragma/scratchpad";
-import * as ScratchpadPrimitives from "@pragma/scratchpad/ui/primitives";
-import * as ScratchpadUi from "@pragma/scratchpad/ui";
+import * as Scratchpad from "@pragma-sh/scratchpad";
+import * as ScratchpadPrimitives from "@pragma-sh/scratchpad/ui/primitives";
+import * as ScratchpadUi from "@pragma-sh/scratchpad/ui";
 import { build, initialize, type Loader, type Plugin } from "esbuild-wasm";
 import wasmUrl from "esbuild-wasm/esbuild.wasm?url";
 import { legacy, resolve, type Package } from "resolve.exports";
 import remarkGfm from "remark-gfm";
 
-import { dirname, extname, joinPath } from "@/lib/path";
+import { dirname, extname, joinPath, normalizeWorktreePath as normalizePath } from "@/lib/path";
+import { decodeBase64 } from "@/lib/base64";
+import { inlineScratchpadAssets, scratchpadAssetReader } from "@/lib/scratchpad-assets";
 import { pathExists, readFile } from "@/lib/tauri";
 
 interface PreviewBuildOptions {
   source: string;
   filePath: string;
   worktreeId: string;
+  /** Embed static media resources and imported assets for a standalone export. */
+  standalone?: boolean;
 }
 
 /** Browser bundle produced for one scratchpad preview. */
@@ -33,12 +37,21 @@ export async function buildScratchpadPreview(
   options: PreviewBuildOptions,
 ): Promise<ScratchpadPreviewBundle> {
   await initializeEsbuild();
+  const readAsset = scratchpadAssetReader(options.worktreeId, options.filePath);
   const compiled = String(
     await compile(options.source, {
       format: "mdx",
       outputFormat: "program",
       development: false,
-      remarkPlugins: [remarkGfm],
+      remarkPlugins: [
+        remarkGfm,
+        ...(options.standalone
+          ? [
+              () => async (tree: unknown) =>
+                inlineScratchpadAssets(tree, readAsset, options.worktreeId),
+            ]
+          : []),
+      ],
     }),
   );
   const result = await build({
@@ -47,9 +60,11 @@ export async function buildScratchpadPreview(
     format: "iife",
     outfile: "scratchpad.js",
     platform: "browser",
+    jsx: "automatic",
     target: "es2022",
     write: false,
-    sourcemap: "inline",
+    sourcemap: options.standalone ? false : "inline",
+    minify: options.standalone,
     plugins: [scratchpadModules(options, wrapImportedComponents(compiled))],
   });
   const code = result.outputFiles.find((file) => file.path.endsWith(".js"))?.text;
@@ -85,10 +100,10 @@ function scratchpadModules(options: PreviewBuildOptions, documentSource: string)
     ["react/jsx-runtime", globalModule("ReactJsxRuntime", ReactJsxRuntime)],
     ["react/jsx-dev-runtime", globalModule("ReactJsxRuntime", ReactJsxRuntime)],
     ["react-dom/client", globalModule("ReactDomClient", ReactDomClient)],
-    ["@pragma/scratchpad", globalModule("Scratchpad", Scratchpad)],
-    ["@pragma/scratchpad/ui", globalModule("ScratchpadUi", ScratchpadUi)],
+    ["@pragma-sh/scratchpad", globalModule("Scratchpad", Scratchpad)],
+    ["@pragma-sh/scratchpad/ui", globalModule("ScratchpadUi", ScratchpadUi)],
     [
-      "@pragma/scratchpad/ui/primitives",
+      "@pragma-sh/scratchpad/ui/primitives",
       globalModule("ScratchpadPrimitives", ScratchpadPrimitives),
     ],
     [
@@ -96,6 +111,7 @@ function scratchpadModules(options: PreviewBuildOptions, documentSource: string)
       "export const withScratchpadBoundary = globalThis.pragmaScratchpadFrame.withScratchpadBoundary;",
     ],
   ]);
+  if (options.standalone) builtins.set("@pragma-sh/sdk", globalModule("Sdk", Scratchpad));
 
   return {
     name: "pragma-scratchpad-modules",
@@ -125,13 +141,45 @@ function scratchpadModules(options: PreviewBuildOptions, documentSource: string)
         resolveDir: dirname(options.filePath),
       }));
       pluginBuild.onResolve({ filter: /.*/ }, (args) => {
-        if (!builtins.has(args.path)) return undefined;
-        return { path: args.path, namespace: "pragma-builtin" };
+        // CDN/version-qualified SDK imports must use the same offline stubs as
+        // the package root; fetching and bundling a second SDK would bypass them.
+        const path =
+          options.standalone &&
+          /^(?:https:\/\/[^/]+\/(?:[^/]+\/)*)?@pragma-sh\/sdk(?:@[^/?]+)?(?:[/?]|$)/.test(args.path)
+            ? "@pragma-sh/sdk"
+            : args.path;
+        if (!builtins.has(path)) return undefined;
+        return { path, namespace: "pragma-builtin" };
       });
       pluginBuild.onLoad({ filter: /.*/, namespace: "pragma-builtin" }, (args) => ({
         contents: builtins.get(args.path) ?? "",
         loader: "js",
       }));
+      if (options.standalone) {
+        pluginBuild.onResolve({ filter: /^data:/ }, (args) => ({
+          path: args.path,
+          external: true,
+        }));
+        pluginBuild.onResolve(
+          {
+            filter:
+              /\.(?:png|jpe?g|gif|webp|svg|ico|avif|woff2?|ttf|mp4|webm|mp3|wav)(?:[?#].*)?$/i,
+          },
+          (args) => {
+            const path = args.path.startsWith("https:")
+              ? args.path
+              : args.namespace === "pragma-https"
+                ? new URL(args.path, args.importer).href
+                : normalizePath(joinPath(args.resolveDir, args.path));
+            return { path, namespace: "pragma-asset" };
+          },
+        );
+        pluginBuild.onLoad({ filter: /.*/, namespace: "pragma-asset" }, async (args) => {
+          const read = scratchpadAssetReader(options.worktreeId, "export.mdx");
+          const data = await read(args.path);
+          return { contents: decodeBase64(data.slice(data.indexOf(",") + 1)), loader: "dataurl" };
+        });
+      }
       pluginBuild.onResolve({ filter: /^https:/ }, (args) => ({
         path: args.path,
         namespace: "pragma-https",
@@ -346,19 +394,6 @@ async function readText(
   if (file.truncated) throw new Error(`${path} is too large to import`);
   cache.set(path, file.text);
   return file.text;
-}
-
-function normalizePath(path: string): string {
-  const output: string[] = [];
-  for (const segment of path.split("/")) {
-    if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      if (!output.pop()) throw new Error(`Import escapes worktree: ${path}`);
-    } else {
-      output.push(segment);
-    }
-  }
-  return output.join("/");
 }
 
 function loaderFor(path: string): Loader {

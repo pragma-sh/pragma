@@ -1,5 +1,5 @@
-import type { AgentFileChange, AgentMessage } from "@pragma/constants";
-import type { AgentStreamEvent } from "@pragma/sdk";
+import type { AgentFileChange, AgentMessage } from "@pragma-sh/constants";
+import type { AgentStreamEvent } from "@pragma-sh/sdk";
 
 import {
   normalizeQuestionOptions,

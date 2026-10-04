@@ -1,0 +1,100 @@
+# fallow's code-intelligence audit (dead code + complexity + duplication),
+# scoped to what this change touches.
+#
+# This is the one Linux check that does NOT live in `.rwx/ci.yml`. It runs here
+# because it is the only check that writes back to GitHub: posting the sticky
+# report needs `pull_requests: write`, and the token RWX hands out
+# (`${{ github.token }}`, from the `rwx-integration` App) is scoped to reading
+# repository contents — every `gh` call against issues or pulls fails with
+# `Resource not accessible by integration (HTTP 403)`. Using GitHub's own
+# `GITHUB_TOKEN` here means the comment is authored by `github-actions[bot]`
+# rather than by whoever's personal access token happened to be in the vault,
+# and it removes that credential from the release path entirely.
+name: Fallow
+
+on:
+  pull_request:
+
+concurrency:
+  group: fallow-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# `pull-requests: write` covers commenting on a PR; `issues: write` is what the
+# `/issues/{n}/comments` endpoint is documented against. Grant both so the post
+# step cannot 403 on a technicality.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  audit:
+    # Release PR branches carry only release-please's generated output — version
+    # bumps and CHANGELOGs. There is no hand-written code to audit and no author
+    # to advise, so the audit is skipped rather than run to a guaranteed pass.
+    if: ${{ !startsWith(github.head_ref, 'release-please--branches--') }}
+    runs-on: ubuntu-latest
+    steps:
+      # fallow diffs against the base ref, so it needs real history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        env:
+          HUSKY: "0"
+        run: bun install --frozen-lockfile
+      # fallow resolves imports statically, so the gitignored `src/generated/**`
+      # modules must exist first or they all look unresolved.
+      - name: Generate shared constants
+        run: bun run generate
+      - name: Audit
+        id: audit
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # `--base` needs a resolvable ref. Forced, so an already-present
+          # remote-tracking ref can't fail the fetch on a non-fast-forward.
+          git fetch --quiet origin "+$BASE_REF:refs/remotes/origin/$BASE_REF"
+
+          # `run:` executes under `bash -e`, so every step between the audit and
+          # the status output has to be failure-tolerant — otherwise a missing
+          # report aborts the step before the gate below can read its status.
+          status=0
+          bunx fallow audit \
+            --base "origin/$BASE_REF" \
+            --gate new-only \
+            --fail-on-issues \
+            --format pr-comment-github \
+            --output-file fallow-comment.md || status=$?
+          [ -f fallow-comment.md ] && cat fallow-comment.md || true
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+      # Post (or update) the sticky report. fallow prefixes the body with
+      # `<!-- fallow-id: fallow-results -->`, so matching on that marker keeps
+      # one comment instead of one per run.
+      #
+      # Best-effort: the audit's own exit status is the real gate, so a failure
+      # to comment must not mask a clean audit.
+      - name: Post the sticky report
+        if: ${{ always() && steps.audit.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          test -s fallow-comment.md || exit 0
+          existing="$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
+            --jq 'map(select(.body | startswith("<!-- fallow-id: fallow-results -->"))) | .[0].id // empty')" || existing=""
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" \
+              -F body=@fallow-comment.md > /dev/null || true
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR/comments" \
+              -F body=@fallow-comment.md > /dev/null || true
+          fi
+      - name: Gate on the audit
+        env:
+          STATUS: ${{ steps.audit.outputs.status }}
+        run: exit "${STATUS:-1}"

@@ -9,7 +9,7 @@ const onInstall = () => {};
 const onPragmaLoad = () => {};
 
 describe("definePlugin", () => {
-  it("stamps the compiled-against @pragma/plugin version", () => {
+  it("stamps the compiled-against @pragma-sh/plugin version", () => {
     const plugin = definePlugin({ name: "Test Plugin" });
     expect(plugin.__apiVersion).toBe(PLUGIN_API_VERSION);
   });

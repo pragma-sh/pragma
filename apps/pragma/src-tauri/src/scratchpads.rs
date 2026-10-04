@@ -13,6 +13,40 @@ use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 use crate::workspace_mirror::WorkspacePublisher;
 
+/// Saves a standalone export on its owning host and opens the local exports folder.
+#[tauri::command(async)]
+pub fn export_scratchpad_html(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    title: String,
+    html: String,
+) -> AppResult<String> {
+    let worktree = db.worktree(&worktree_id)?;
+    let client = hosts.for_worktree(&db, &worktree_id)?;
+    let value = client.rpc(
+        ProtocolRpcMethod::Scratchpads,
+        serde_json::to_value(ScratchpadsRequest::ExportHtml {
+            root: worktree.path.clone(),
+            title,
+            html,
+        })?,
+    )?;
+    let path: String = serde_json::from_value(value)?;
+    if hosts.host_id_for_worktree(&db, &worktree_id)? == crate::hosts::LOCAL_HOST {
+        let directory = crate::fs::resolve_in_worktree(
+            std::path::Path::new(&worktree.path),
+            &pragma_constants::CONSTANTS.scratchpads.exports_directory,
+        )?;
+        opener::open(directory).map_err(|error| {
+            AppError::InvalidInput(format!(
+                "Export saved at {path}, but could not open its folder: {error}"
+            ))
+        })?;
+    }
+    Ok(path)
+}
+
 /// Resolves daemon-owned agent metadata for a terminal tab.
 pub fn registered_agent_id(client: &PtyClient, tab: &Tab) -> AppResult<String> {
     if let Some(agent_id) = &tab.agent_id {

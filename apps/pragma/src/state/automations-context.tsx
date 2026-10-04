@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { AutomationInfo, AutomationRootRegistration } from "@pragma/constants";
+import type { AutomationInfo, AutomationRootRegistration } from "@pragma-sh/constants";
 import { toast } from "sonner";
 
 import {

@@ -1,4 +1,5 @@
 import type {
+  AgentProgressEstimate,
   Fanout,
   ScratchpadFile,
   FanoutPickResult,
@@ -30,6 +31,7 @@ import type {
   WorktreeCommitList,
   Worktree,
   WorktreeStatus,
+  WorktreeStorage,
   AgentMessage,
   AgentReportPayload,
   AutomationInfo,
@@ -37,13 +39,18 @@ import type {
   OpenPort,
   ScratchpadSummary,
   ShellProfile,
+  ExcalidrawScene,
+  Whiteboard,
+  WhiteboardViewResult,
   WslDistroList,
-} from "@pragma/constants";
+  System1Status,
+} from "@pragma-sh/constants";
+import { AccountsApi, type AccountLaunchEnv, type AccountsRequest } from "@pragma-sh/sdk";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
-export type { OpenPort, ShellProfile, WslDistroList } from "@pragma/constants";
+export type { OpenPort, ShellProfile, WslDistroList } from "@pragma-sh/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -129,6 +136,8 @@ export interface AgentModel {
   id: string;
   name: string;
   reasoning: AgentReasoning[];
+  /** Provider-qualified id for benchmark matching when `id` is an alias (auto mode only). */
+  canonicalId?: string | null;
 }
 
 /** Optional reasoning effort for a model. */
@@ -142,6 +151,7 @@ export interface RawAgentModel {
   id: string;
   name: string;
   reasoning?: AgentReasoning[];
+  canonicalId?: string | null;
 }
 
 /** Selected model/reasoning for an agent launch; `modelId: null` means no model args. */
@@ -154,6 +164,12 @@ export interface AgentModelSelection {
    * `modelId`/`reasoningId` when set. Brokered launches only — the UI never sets it.
    */
   modelCmd?: string | null;
+  /** Mode id from the agent's `modes`; absent selects the first (default) mode. */
+  modeId?: string | null;
+  /** Permission mode id; absent selects the agent's first (default) permission mode. */
+  permissionModeId?: string | null;
+  /** Slash command name; the prefill becomes its invocation followed by the prompt. */
+  slashCommand?: string | null;
 }
 
 /** Subscribes to daemon-forwarded agent status reports. */
@@ -267,6 +283,9 @@ export interface AgentSessionLaunchRequest {
   reasoningId: string | null;
   /** Raw model command overriding catalog model args; see {@link AgentModelSelection.modelCmd}. */
   modelCmd?: string | null;
+  modeId?: string | null;
+  permissionModeId?: string | null;
+  slashCommand?: string | null;
   prompt: string | null;
 }
 
@@ -343,6 +362,7 @@ export function ptySpawn(
   rows: number,
   onEvent: PtyEventHandler,
   shell?: ShellProfile | null,
+  env?: LaunchEnv,
 ): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
   const generation = ++nextPtyStreamGeneration;
@@ -355,6 +375,7 @@ export function ptySpawn(
     cols,
     rows,
     shell,
+    env: env?.length ? env : null,
     streamGeneration: generation,
     onEvent: channel,
   }).then(() => ({ channel, generation }));
@@ -368,9 +389,21 @@ export function ptySpawnDetached(
   cols: number,
   rows: number,
   shell?: ShellProfile | null,
+  env?: LaunchEnv,
 ): Promise<void> {
-  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows, shell });
+  return invoke("pty_spawn_detached", {
+    sessionId,
+    worktreeId,
+    cwd,
+    cols,
+    rows,
+    shell,
+    env: env?.length ? env : null,
+  });
 }
+
+/** Extra `[name, value]` environment for a spawned shell (an agent's bound accounts). */
+export type LaunchEnv = Array<[string, string]>;
 
 /**
  * Attaches to an existing daemon PTY session and replays daemon scrollback.
@@ -436,14 +469,47 @@ export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
 }
 
-/** Persists an existing git checkout as a project. */
-export function addProject(path: string): Promise<Project> {
-  return invoke<Project>("add_project", { path });
+/**
+ * Persists a local folder as a project. A folder that is not a git repository
+ * is refused unless `allowNonGit` is set, which adds it as a plain project with
+ * a single root worktree and no git features.
+ */
+export function addProject(
+  path: string,
+  options?: { allowNonGit?: boolean; initializeGit?: boolean },
+): Promise<Project> {
+  return invoke<Project>("add_project", {
+    path,
+    allowNonGit: options?.allowNonGit ?? false,
+    initializeGit: options?.initializeGit ?? false,
+  });
+}
+
+/** Whether `path` can back a git project: a repository root with a commit. */
+export function projectDirectoryIsGit(path: string): Promise<boolean> {
+  return invoke<boolean>("project_directory_is_git", { path });
+}
+
+/**
+ * Initializes a git repository in a plain project's folder and promotes the
+ * project in place, keeping its tabs and agent sessions.
+ */
+export function initProjectGit(projectId: string): Promise<Project> {
+  return invoke<Project>("init_project_git", { projectId });
 }
 
 /** Removes a project from Pragma without deleting its checkout. */
 export function removeProject(projectId: string): Promise<void> {
   return invoke("remove_project", { projectId });
+}
+
+/**
+ * Sets the emoji shown for a project in the project switcher. `null` (or a
+ * blank string) clears the override, falling back to a favicon found in the
+ * checkout and then to the project name's initial.
+ */
+export function setProjectIcon(projectId: string, emoji: string | null): Promise<Project> {
+  return invoke<Project>("set_project_icon", { projectId, emoji });
 }
 
 /** Clones a remote repository and persists it as a project. */
@@ -483,6 +549,40 @@ export function getProjectsDirectory(): Promise<string> {
 /** Loads optional `.pragma/scripts.json` for a project from its persisted root path. */
 export function loadProjectScripts(projectId: string): Promise<ProjectScriptsConfig> {
   return invoke<ProjectScriptsConfig>("load_project_scripts", { projectId });
+}
+
+/** One headless command's captured result, from the host's `exec` RPC. */
+export interface WorktreeCommandResult {
+  command: string;
+  stdout: string;
+  stderr: string;
+  /** Exit code; null when killed by a signal, cancelled before it ran, or it failed to spawn. */
+  status: number | null;
+  durationMs: number;
+  /** The batch was cancelled before this command finished (or started). */
+  cancelled: boolean;
+}
+
+/**
+ * Runs `commands` one after another in a worktree on its host, without a tab,
+ * returning every result whatever its exit code. `runId` names the batch for
+ * {@link cancelWorktreeCommands}.
+ */
+export function runWorktreeCommands(
+  worktreeId: string,
+  commands: string[],
+  runId: string,
+): Promise<WorktreeCommandResult[]> {
+  return invoke<WorktreeCommandResult[]>("run_worktree_commands", {
+    worktreeId,
+    commands,
+    runId,
+  });
+}
+
+/** Kills a {@link runWorktreeCommands} batch's running command and skips the rest. */
+export function cancelWorktreeCommands(worktreeId: string, runId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_worktree_commands", { worktreeId, runId });
 }
 
 /**
@@ -840,6 +940,27 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
   return invoke("write_file", { worktreeId, path, contents });
 }
 
+/** Saves a bundled HTML scratchpad export and opens its local exports folder. */
+export function exportScratchpadHtml(
+  worktreeId: string,
+  title: string,
+  html: string,
+): Promise<string> {
+  return invoke("export_scratchpad_html", { worktreeId, title, html });
+}
+
+/**
+ * Copies one base64-encoded file dropped onto a terminal to the host that runs
+ * the worktree's shells, resolving to the absolute path to paste into the PTY.
+ */
+export function saveDroppedFile(
+  worktreeId: string,
+  name: string,
+  contents: string,
+): Promise<string> {
+  return invoke("save_dropped_file", { worktreeId, name, contents });
+}
+
 /** Writes one base64-encoded file dropped into a worktree directory. */
 export function writeFileBytes(worktreeId: string, path: string, contents: string): Promise<void> {
   return invoke("write_file_bytes", { worktreeId, path, contents });
@@ -866,6 +987,61 @@ export function openScratchpadTab(
   title: string,
 ): Promise<Tab> {
   return invoke<Tab>("open_scratchpad_tab", { worktreeId, filePath, title });
+}
+
+/** Creates a host-owned whiteboard. */
+export function createWhiteboard(
+  worktreeId: string,
+  title: string,
+  scene: ExcalidrawScene,
+): Promise<Whiteboard> {
+  return invoke<Whiteboard>("create_whiteboard", { worktreeId, title, scene });
+}
+
+/** Gets one host-owned whiteboard. */
+export function getWhiteboard(worktreeId: string, id: string): Promise<Whiteboard> {
+  return invoke<Whiteboard>("get_whiteboard", { worktreeId, id });
+}
+
+/** Lists or searches whiteboards in one worktree. */
+export function listWhiteboards(worktreeId: string, query?: string): Promise<Whiteboard[]> {
+  return invoke<Whiteboard[]>("list_whiteboards", { worktreeId, query });
+}
+
+/** Replaces a whiteboard after an optimistic version check. */
+export function editWhiteboard(
+  worktreeId: string,
+  id: string,
+  title: string,
+  scene: ExcalidrawScene,
+  expectedVersion: number,
+): Promise<Whiteboard> {
+  return invoke<Whiteboard>("edit_whiteboard", {
+    input: { worktreeId, id, title, scene, expectedVersion },
+  });
+}
+
+/** Deletes one host-owned whiteboard. */
+export function deleteWhiteboard(worktreeId: string, id: string): Promise<void> {
+  return invoke("delete_whiteboard", { worktreeId, id });
+}
+
+/** Renders one host-owned whiteboard as a base64 PNG. */
+export function viewWhiteboard(
+  worktreeId: string,
+  id: string,
+  dark = false,
+): Promise<WhiteboardViewResult> {
+  return invoke<WhiteboardViewResult>("view_whiteboard", { worktreeId, id, dark });
+}
+
+/** Opens one whiteboard in a deduplicated desktop tab. */
+export function openWhiteboardTab(
+  worktreeId: string,
+  whiteboardId: string,
+  title: string,
+): Promise<Tab> {
+  return invoke<Tab>("open_whiteboard_tab", { worktreeId, whiteboardId, title });
 }
 
 /**
@@ -901,6 +1077,21 @@ export function paletteSearch(
 /** Cancels an in-flight host palette search. */
 export function cancelPaletteSearch(projectId: string, searchId: string): Promise<void> {
   return invoke("cancel_palette_search", { projectId, searchId });
+}
+
+/** Measures one worktree's disk usage on its owning host. */
+export function scanWorktreeStorage(worktreeId: string, scanId: string): Promise<WorktreeStorage> {
+  return invoke<WorktreeStorage>("scan_worktree_storage", { worktreeId, scanId });
+}
+
+/** Stops an in-flight worktree storage scan. Safe after it has finished. */
+export function cancelWorktreeStorageScan(worktreeId: string, scanId: string): Promise<void> {
+  return invoke("cancel_worktree_storage_scan", { worktreeId, scanId });
+}
+
+/** Deletes one gitignored folder; the host refuses tracked or protected paths. */
+export function deleteIgnoredFolder(worktreeId: string, path: string): Promise<void> {
+  return invoke("delete_ignored_folder", { worktreeId, path });
 }
 
 /**
@@ -1127,6 +1318,11 @@ export function githubAbortMerge(worktreeId: string): Promise<void> {
 /** Returns whether Git has an active merge in the worktree. */
 export function githubMergeInProgress(worktreeId: string): Promise<boolean> {
   return invoke<boolean>("github_merge_in_progress", { worktreeId });
+}
+
+/** Lists the paths Git still marks as conflicted in this worktree. */
+export function githubUnmergedPaths(worktreeId: string): Promise<string[]> {
+  return invoke<string[]>("github_unmerged_paths", { worktreeId });
 }
 
 /** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */
@@ -1570,6 +1766,10 @@ export interface UpdateCheck {
 export interface UpdateApplyResult {
   mode: "reload" | "restart";
   url?: string;
+  /** Restart only: installing in place; the app quits and relaunches itself. */
+  relaunching: boolean;
+  /** Restart only: why the installer was opened instead of installed in place. */
+  fallbackReason?: string;
 }
 
 /** Runtime identity used to poll and display Settings → Updates. */
@@ -1582,7 +1782,7 @@ export function checkForUpdate(checkUrl?: string | null): Promise<UpdateCheck> {
   return invoke<UpdateCheck>("check_for_update", { checkUrl: checkUrl ?? null });
 }
 
-/** Downloads the offer and applies reload (overlay) or restart (OS installer). */
+/** Downloads the offer and applies reload (overlay) or restart (install in place + relaunch). */
 export function applyUpdate(request: {
   apply: "reload" | "restart";
   version: string;
@@ -1738,6 +1938,114 @@ export function aiLogout(provider: string): Promise<AiStatus> {
   return invoke<AiStatus>("ai_logout", { provider });
 }
 
+export type { System1Status } from "@pragma-sh/constants";
+
+/** Whether a System 1 key is stored, plus the effective base URL and model route. */
+export function system1Status(): Promise<System1Status> {
+  return invoke<System1Status>("system1_status");
+}
+
+/** Stores the System 1 API key in the owner-only credential file. */
+export function system1SetApiKey(apiKey: string): Promise<System1Status> {
+  return invoke<System1Status>("system1_set_api_key", { apiKey });
+}
+
+/** Removes the stored System 1 API key. */
+export function system1ClearApiKey(): Promise<System1Status> {
+  return invoke<System1Status>("system1_clear_api_key");
+}
+
+/**
+ * Sends the cheapest possible System 1 request and resolves with the model
+ * version that answered. Omitted arguments use the saved key and configured URL.
+ */
+export function system1Check(
+  options: { baseUrl?: string; apiKey?: string; model?: string } = {},
+): Promise<string> {
+  return invoke<string>("system1_check", {
+    baseUrl: options.baseUrl ?? null,
+    apiKey: options.apiKey ?? null,
+    model: options.model ?? null,
+  });
+}
+
+/** One launch candidate offered to auto mode. */
+export interface AutoSelectAgentInput {
+  id: string;
+  name: string;
+  models: AgentModel[];
+}
+
+/** An auto-mode request: pick among `agents` for `prompt`. */
+export interface AutoSelectInput {
+  /** Project whose `.pragma/automode.md` applies. */
+  projectId: string | null;
+  prompt: string;
+  context: { project?: string | null; worktree?: string | null; branch?: string | null };
+  agents: AutoSelectAgentInput[];
+}
+
+/** Auto mode's pick and the evidence behind it. */
+export interface AutoSelection {
+  agentId: string;
+  modelId: string | null;
+  reasoningId: string | null;
+  /** Confidence of the agent choice, 0-1. */
+  confidence: number;
+  lowConfidence: boolean;
+  /** Estimated task difficulty, 0 (trivial) to 1 (very hard). */
+  difficulty: number;
+  agentProbabilities: Record<string, number>;
+  modelProbabilities: Record<string, number>;
+  /** One-line explanation, e.g. `Codex 72% · GPT-6 Astra 64% · hard task → High`. */
+  reason: string;
+  /** Problems reading or parsing `automode.md`. */
+  warnings: string[];
+  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean };
+}
+
+/** Reads global or project `.pragma/automode.md`; a missing file has empty contents. */
+export function readAutoMode(
+  scope: ConfigScope,
+  projectId?: string | null,
+): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_automode", { scope, projectId: projectId ?? null });
+}
+
+/** Writes global or project `.pragma/automode.md`. */
+export function writeAutoMode(
+  scope: ConfigScope,
+  contents: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke("write_automode", { scope, projectId: projectId ?? null, contents });
+}
+
+/** Asks the configured System 1 model to pick an agent, model, and reasoning effort. */
+export function system1AutoSelect(input: AutoSelectInput): Promise<AutoSelection> {
+  return invoke<AutoSelection>("system1_auto_select", { input });
+}
+
+/** What one agent-progress estimate is computed from (see `system1_agent_progress`). */
+export interface AgentProgressInput {
+  /** Display name of the agent. */
+  agent: string;
+  status: string | null;
+  /** The first prompt the agent was given. */
+  prompt: string;
+  /** The user's latest follow-up, when it differs from `prompt`. */
+  followUp: string | null;
+  /** The newest message the agent wrote back. */
+  lastMessage: string;
+  /** Tools the agent called most recently, newest last. */
+  recentTools: string[];
+}
+
+/** Asks the configured System 1 model how far along an agent is and what it is doing. */
+export function system1AgentProgress(input: AgentProgressInput): Promise<AgentProgressEstimate> {
+  return invoke<AgentProgressEstimate>("system1_agent_progress", { input });
+}
+
 /** Whether the user has dismissed AI setup. */
 export function aiSetupDismissed(): Promise<boolean> {
   return invoke<boolean>("ai_setup_dismissed");
@@ -1837,6 +2145,76 @@ export function aiAsk(
   return invoke<void>("ai_ask", { id, worktreeId, question, onEvent: channel });
 }
 
+/** How one merge conflict was resolved (see `packages/ai-helpers/src/merge-conflicts.ts`). */
+export interface MergeConflictHunkDecision {
+  id: string;
+  startLine: number;
+  resolution: "ours" | "theirs" | "both_ours_first" | "both_theirs_first" | "custom";
+  source: "system1" | "verified";
+  /** System 1's pick: `confidence` a human would agree, `risk` of a wrong pick (0–1). */
+  system1: { choice: string; confidence: number; risk: number; combined: number } | null;
+  reason: string | null;
+}
+
+/** One conflicted file's outcome. */
+export type MergeConflictFileOutcome =
+  | {
+      path: string;
+      status: "resolved";
+      method: "system1" | "verified";
+      escalation: string | null;
+      hunks: MergeConflictHunkDecision[];
+    }
+  | { path: string; status: "skipped" | "failed"; reason: string };
+
+/** Every file's outcome, plus the paths still conflicted afterwards. */
+export interface MergeConflictResolution {
+  files: MergeConflictFileOutcome[];
+  remaining: string[];
+}
+
+/** Progress streamed while conflicts are resolved. */
+export type MergeConflictProgress =
+  | { type: "progress"; phase: "system1"; files: number }
+  | { type: "progress"; phase: "verifying"; path: string };
+
+/** The pull request whose merge is being resolved; its text is intent for the models. */
+export interface MergeConflictPullRequest {
+  title: string;
+  body: string;
+  headRef: string;
+  baseRef: string;
+}
+
+/**
+ * Resolves every conflicted file of the worktree's in-progress merge with
+ * System 1 (verifying low-scoring files with the built-in AI), writing and
+ * staging each resolution.
+ */
+export function aiResolveMergeConflicts(
+  worktreeId: string,
+  pullRequest: MergeConflictPullRequest,
+  onProgress: (event: MergeConflictProgress) => void,
+): Promise<MergeConflictResolution> {
+  const channel = new Channel<MergeConflictProgress>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+  channel.onmessage = onProgress;
+  return invoke<MergeConflictResolution>("ai_resolve_merge_conflicts", {
+    worktreeId,
+    pullRequest,
+    onEvent: channel,
+  });
+}
+
+/** Commits the resolved merge with an AI message that says it fixes merge conflicts. */
+export function aiCommitMergeResolution(
+  worktreeId: string,
+  baseRef: string,
+  headRef: string,
+): Promise<string> {
+  return invoke<string>("ai_commit_merge_resolution", { worktreeId, baseRef, headRef });
+}
+
 /** Aborts an in-flight palette Ask AI run and drops its sidecar. */
 export function aiAskCancel(id: string): Promise<void> {
   return invoke("ai_ask_cancel", { id });
@@ -1893,7 +2271,7 @@ export interface PluginEntryResult {
   /** The original `path` specifier from the config file. */
   specifier: string;
   /** Which config file declared this entry. */
-  scope: "bundled" | "global" | "project";
+  scope: "global" | "project";
   /** Project root path for `scope: "project"` entries. */
   projectPath: string | null;
   /** The entry's `config` object, validated by the plugin's zod schema. */
@@ -1977,6 +2355,14 @@ export function tunnelStatus(): Promise<TunnelStatus> {
   return invoke<TunnelStatus>("tunnel_status");
 }
 
+/**
+ * Tells the server to re-read `gateway.keepAwake`, taking or releasing its
+ * sleep inhibitor while remote access stays up.
+ */
+export function tunnelSyncKeepAwake(): Promise<void> {
+  return invoke<void>("tunnel_sync_keep_awake");
+}
+
 /** Reads one plugin-owned durable storage value as an opaque JSON string. */
 export function pluginStorageGet(pluginId: string, key: string): Promise<string | null> {
   return invoke<string | null>("plugin_storage_get", { pluginId, key });
@@ -1992,13 +2378,37 @@ export function pluginStorageDelete(pluginId: string, key: string): Promise<void
   return invoke("plugin_storage_delete", { pluginId, key });
 }
 
+// -------------------------------- accounts --------------------------------
+
+/**
+ * Sends one `accounts` RPC to the host that owns the project (this machine when
+ * `projectId` is null). The host fills `projectRoot` from the project.
+ */
+function accountsRpc<T>(projectId: string | null, request: AccountsRequest): Promise<T> {
+  return invoke<T>("accounts_rpc", { projectId, payload: request });
+}
+
+/** The typed accounts API for one project's host. */
+export function accountsApi(projectId: string | null): AccountsApi {
+  return new AccountsApi((request) => accountsRpc(projectId, request));
+}
+
+/** Env a launch of `agentId` into a worktree needs for its bound accounts. */
+export function accountsLaunchEnv(
+  worktreeId: string,
+  agentId: string,
+  tabId: string,
+): Promise<AccountLaunchEnv> {
+  return invoke<AccountLaunchEnv>("accounts_launch_env", { worktreeId, agentId, tabId });
+}
+
 // -------------------------------- fanouts ---------------------------------
 
 /**
  * Sends one `fanouts` RPC to the host that owns the project.
  *
  * `payload` is the shared discriminated request (`{ action, … }`) `pragma-cli`
- * and `@pragma/sdk` send, so the desktop stays one caller of one contract
+ * and `@pragma-sh/sdk` send, so the desktop stays one caller of one contract
  * rather than a second implementation of it.
  */
 export function fanoutRpc<T>(projectId: string, payload: Record<string, unknown>): Promise<T> {

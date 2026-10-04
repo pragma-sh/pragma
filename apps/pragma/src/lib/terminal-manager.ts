@@ -2,8 +2,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type IDisposable } from "@xterm/xterm";
+import { toast } from "sonner";
 
-import { constants, type Tab } from "@pragma/constants";
+import { constants, type Tab } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
@@ -12,7 +13,12 @@ import {
   isTextEditingContext,
   nativeEditingSequence,
 } from "@/lib/native-editing";
-import { isMacPlatform } from "@/lib/platform";
+import { isMacPlatform, isWindowsPlatform } from "@/lib/platform";
+import {
+  loadTerminalScopes,
+  nativeShellQuoteStyle,
+  resolveConfiguredShell,
+} from "@/lib/shell-profile";
 import {
   ptyAttach,
   ptyDetach,
@@ -20,9 +26,11 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  type LaunchEnv,
   type PtyMessage,
   type PtyStream,
 } from "@/lib/tauri";
+import { isTerminalDrop, resolveTerminalDrop, type ShellQuoteStyle } from "@/lib/terminal-drop";
 import { createFileLinkProvider, getTerminalLinkHandler } from "@/lib/terminal-links";
 import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 
@@ -68,8 +76,9 @@ const TERMINAL_PENDING_INPUT_MAX_MESSAGES = 1024;
 // arrive behind it and send them as one write once the redraw lands.
 //
 // Retaining only the latest report capped scrolling at one line per PTY round
-// trip (~30ms), which reads as a flick that barely moves. Retaining a bounded
-// batch keeps the gesture's distance: a TUI drains its whole input queue before
+// trip (~30ms), which reads as a flick that barely moves, and a batch of four
+// still dropped most of a fast trackpad swipe. Retaining a screen-sized batch
+// keeps the gesture's distance: a TUI drains its whole input queue before
 // rendering, so N queued reports usually still cost one redraw. The bound is what
 // stops macOS trackpad momentum from outrunning a TUI that does redraw per report
 // — worst case is TUI_WHEEL_PENDING_REPORTS redraws per gate opening, not
@@ -88,9 +97,18 @@ export const MOUSE_WHEEL_RENDER_TIMEOUT_MS = 100;
  * multi-line notch — so this is the ceiling on how far one PTY round trip can
  * move a mouse-tracking TUI.
  */
-export const TUI_WHEEL_PENDING_REPORTS = 4;
+export const TUI_WHEEL_PENDING_REPORTS = 32;
 const LOCAL_SCROLL_SENSITIVITY = 3;
-const TUI_SCROLL_SENSITIVITY = 1;
+/**
+ * xterm sensitivity while a TUI captures the wheel. xterm sends at most one
+ * report per wheel event however many lines the event covers, so it cannot be
+ * trusted with the distance: this makes every non-zero event emit a report, and
+ * {@link wheelEventLines} decides how many lines that report stands for.
+ */
+export const TUI_REPORT_SENSITIVITY = 1000;
+/** Pixel deltas below this are a trackpad, which xterm damps by the factor below. */
+const TRACKPAD_DELTA_PX = 50;
+const TRACKPAD_DAMPING = 0.3;
 /** Maximum warm WebGL contexts retained across terminal tab switches. */
 export const WEBGL_RENDERER_CACHE_SIZE = 8;
 export const WEBGL_RECOVERY_MAX_ATTEMPTS = 3;
@@ -117,22 +135,30 @@ function handleTerminalKeyEvent(
   tabId: string,
   event: KeyboardEvent,
 ): boolean {
-  // xterm runs custom key handlers for both keydown and legacy keypress events.
-  // WebKit can turn both Enter events into terminal input, yielding two CRs.
+  // xterm runs custom key handlers for keydown, legacy keypress (WebKit's
+  // printable-input path), and keyup (Kitty key-release reports). Two rules
+  // follow. First, only Enter keypress is suppressed: WebKit turns it into a
+  // second CR on top of keydown's, while every other keypress is valid
+  // printable input that must reach xterm. Second, side effects (find, soft
+  // newline, native editing) run only on the keydown that starts the gesture —
+  // rewriting Shift+Enter on keyup as well would emit a second ESC+CR, and
+  // keypress would fire the find request twice.
   if (event.type === "keypress" && event.key === "Enter") {
     return false;
   }
   const platform = currentTerminalPlatform();
-  if (isFindShortcut(event, platform)) {
-    event.preventDefault();
-    manager.requestFind(tabId);
-    return false;
-  }
-  if (handleSoftNewline(manager, tabId, event)) {
-    return false;
-  }
-  if (handleNativeEditingSequence(manager, tabId, event, platform)) {
-    return false;
+  if (event.type === "keydown") {
+    if (isFindShortcut(event, platform)) {
+      event.preventDefault();
+      manager.requestFind(tabId);
+      return false;
+    }
+    if (handleSoftNewline(manager, tabId, event)) {
+      return false;
+    }
+    if (handleNativeEditingSequence(manager, tabId, event, platform)) {
+      return false;
+    }
   }
   // Let configured Pragma/plugin shortcuts bubble to the window listener even
   // when xterm owns focus.
@@ -171,6 +197,41 @@ function applyLocalEcho(current: string, data: string): string {
   }
   const isPlainInsert = [...data].every((char) => char.charCodeAt(0) >= 0x20 && char !== "\x7f");
   return isPlainInsert ? current + data : current;
+}
+
+/**
+ * Lines of scroll one wheel event covers, computed the way xterm scrolls local
+ * scrollback (same sensitivity and trackpad damping) so a TUI moves as far as
+ * the shell's own history would for the same gesture.
+ */
+function wheelEventLines(event: WheelEvent, cellHeight: number, rows: number): number {
+  if (event.deltaY === 0 || event.shiftKey) {
+    return 0;
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * LOCAL_SCROLL_SENSITIVITY;
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * rows;
+  }
+  const damping = Math.abs(event.deltaY) < TRACKPAD_DELTA_PX ? TRACKPAD_DAMPING : 1;
+  return (event.deltaY / cellHeight) * LOCAL_SCROLL_SENSITIVITY * damping;
+}
+
+/** CSS pixel height of one terminal row, falling back to the font metrics before layout. */
+function terminalCellHeight(terminal: Terminal): number {
+  const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
+  const measured = screen && terminal.rows > 0 ? screen.clientHeight / terminal.rows : 0;
+  return measured > 0 ? measured : Math.ceil(TERMINAL_FONT_SIZE * 1.2 * TERMINAL_LINE_HEIGHT);
+}
+
+/**
+ * Whether a full-screen program owns the viewport: it is on the alternate
+ * screen, or it captures the mouse. xterm's scrollback is then stale history
+ * the program knows nothing about, so the scrollbar must not offer it.
+ */
+function tuiOwnsViewport(terminal: Terminal): boolean {
+  return terminal.buffer.active.type === "alternate" || terminal.modes.mouseTrackingMode !== "none";
 }
 
 function preservesLocalEchoConfidence(data: string): boolean {
@@ -228,6 +289,27 @@ function handleNativeEditingSequence(
   event.preventDefault();
   manager.writeWhenReady(tabId, sequence);
   return true;
+}
+
+/**
+ * Resolves how a click on a terminal link opens, by platform convention:
+ * Cmd+click on macOS / Ctrl+click elsewhere opens the URL in the system default
+ * browser (`external: true`), while Shift+click remains the deliberate in-app
+ * gesture that opens a browser split to the right. Alt/Option+Shift+click stays
+ * external as the legacy chord. A plain click returns `null` so xterm keeps
+ * selection / TUI mouse reporting.
+ */
+function resolveTerminalLinkActivation(
+  event: Pick<MouseEvent, "shiftKey" | "altKey" | "metaKey" | "ctrlKey">,
+  platform: TerminalPlatform,
+): { external: boolean } | null {
+  if (platform === "mac" ? event.metaKey : event.ctrlKey) {
+    return { external: true };
+  }
+  if (!event.shiftKey) {
+    return null;
+  }
+  return { external: event.altKey };
 }
 
 interface PendingInputQueue {
@@ -335,6 +417,8 @@ export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>();
   private webglLru = new Map<string, ManagedTerminal>();
   private pendingInput = new Map<string, PendingInputQueue>();
+  /** Per-tab env resolvers consumed by the tab's first spawn. */
+  private spawnEnv = new Map<string, (tab: Tab) => Promise<LaunchEnv>>();
   private nextHostGeneration = 0;
   // Title listeners are keyed by tab id and kept **independent of the terminal's
   // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
@@ -347,6 +431,8 @@ export class TerminalManager {
   // dispose() rather than lingering like title subscriptions do.
   private exitListeners = new Map<string, Set<ExitListener>>();
   private findRequestListeners = new Map<string, Set<() => void>>();
+  /** Resolvers waiting for a tab's first PTY stream; see {@link whenConnected}. */
+  private connectionWaiters = new Map<string, Set<() => void>>();
   /** Local mirror of each tab's not-yet-submitted shell input line; see {@link applyLocalEcho}. */
   private inputLineBuffers = new Map<string, string>();
   /** Whether the local input mirror still knows the shell cursor position. */
@@ -416,21 +502,26 @@ export class TerminalManager {
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     // Web links open through the workspace handler rather than the OS browser:
-    // Shift+click opens the URL in a browser split to the right; Alt/Option+
-    // Shift+click opens it in the system browser instead. A plain click is left
-    // to xterm (selection / TUI mouse reporting) — Shift is the deliberate
-    // "open this link" gesture, and also bypasses a TUI's mouse tracking.
+    // Cmd+click (mac) / Ctrl+click (elsewhere) opens the URL in the system
+    // browser, Shift+click opens it in a browser split to the right, and
+    // Alt/Option+Shift+click stays external as the legacy chord. A plain click
+    // is left to xterm (selection / TUI mouse reporting) — see
+    // resolveTerminalLinkActivation for the exact rules.
     terminal.loadAddon(
       new WebLinksAddon((event, uri) => {
         const handler = getTerminalLinkHandler();
-        if (!handler || !event.shiftKey) {
+        if (!handler) {
+          return;
+        }
+        const activation = resolveTerminalLinkActivation(event, currentTerminalPlatform());
+        if (!activation) {
           return;
         }
         handler.openUrl({
           tabId: tab.id,
           worktreeId: tab.worktreeId,
           url: uri,
-          external: event.altKey,
+          external: activation.external,
         });
       }),
     );
@@ -443,17 +534,31 @@ export class TerminalManager {
     let lastWheelEvent = -Infinity;
     let wheelEventMayReport = false;
     let wheelEventGeneration = 0;
-    terminal.attachCustomWheelEventHandler(() => {
+    // Fractional TUI scroll lines carried between wheel events, and how many
+    // whole lines the report xterm is about to emit for this event stands for.
+    let wheelPartialLines = 0;
+    let wheelReportLines = 0;
+    terminal.attachCustomWheelEventHandler((event) => {
       const mouseTracking = terminal.modes.mouseTrackingMode !== "none";
-      const scrollSensitivity = mouseTracking ? TUI_SCROLL_SENSITIVITY : LOCAL_SCROLL_SENSITIVITY;
+      const scrollSensitivity = mouseTracking ? TUI_REPORT_SENSITIVITY : LOCAL_SCROLL_SENSITIVITY;
       if (terminal.options.scrollSensitivity !== scrollSensitivity) {
-        // Sensitivity scales xterm's mouse-report frequency, not lines encoded
-        // in each report. Keep damping compensation only for local scrollback.
+        // While a TUI captures the wheel, xterm only decides *whether* to emit a
+        // report; the distance is counted below. Keep damping compensation for
+        // local scrollback.
         terminal.options.scrollSensitivity = scrollSensitivity;
       }
       if (!mouseTracking) {
+        wheelPartialLines = 0;
         return true;
       }
+      const lines = wheelEventLines(event, terminalCellHeight(terminal), terminal.rows);
+      if (lines !== 0 && Math.sign(lines) !== Math.sign(wheelPartialLines)) {
+        // Reversing direction must not first pay back the other way's remainder.
+        wheelPartialLines = 0;
+      }
+      wheelPartialLines += lines;
+      wheelReportLines = Math.trunc(Math.abs(wheelPartialLines));
+      wheelPartialLines -= Math.sign(wheelPartialLines) * wheelReportLines;
       const now = performance.now();
       const startsNewGesture = now - lastWheelEvent >= MOUSE_WHEEL_GESTURE_QUIET_MS;
       lastWheelEvent = now;
@@ -515,11 +620,14 @@ export class TerminalManager {
     );
     this.terminals.set(tab.id, managed);
     terminal.onData((data) => {
-      // xterm emits wheel reports synchronously after the custom wheel handler.
-      // Fractional events emit nothing and still reach its pixel accumulator.
+      // xterm emits wheel reports synchronously after the custom wheel handler,
+      // one per event; repeat it for every whole line the event covered. An
+      // event that has not yet crossed a whole line sends nothing.
       if (wheelEventMayReport && terminal.modes.mouseTrackingMode !== "none") {
         wheelEventMayReport = false;
-        this.enqueueWheelInput(tab.id, managed, data);
+        if (wheelReportLines > 0) {
+          this.enqueueWheelInput(tab.id, managed, data, wheelReportLines);
+        }
         return;
       }
       const pendingLine = this.inputLineBuffers.get(tab.id) ?? "";
@@ -554,6 +662,8 @@ export class TerminalManager {
       managed.wheelResponseParsedRenderGeneration = null;
       this.flushPendingWheelInput(tab.id, managed);
     });
+    this.installTuiScrollbarSync(managed);
+    this.installDropTarget(managed);
     this.connect(tab, cwd, managed);
     this.fit(tab.id);
     return hostGeneration;
@@ -599,6 +709,13 @@ export class TerminalManager {
     if (!managed) {
       return;
     }
+    if (tuiOwnsViewport(managed.terminal)) {
+      // xterm's clear() keeps only the cursor row and blanks the rest, which
+      // wrecks a program that redraws in place. Drop just the scrollback (ED3)
+      // and leave the program's screen alone.
+      managed.terminal.write("\x1b[3J");
+      return;
+    }
     managed.terminal.clear();
   }
 
@@ -627,6 +744,27 @@ export class TerminalManager {
     pending.bytes += bytes;
     this.pendingInput.set(tabId, pending);
     return true;
+  }
+
+  /**
+   * Resolves once the tab's PTY stream is connected (immediately if it already
+   * is). Callers that pace writes with timers — agent launches — must start
+   * their clocks here: input written before connect is queued and flushed as a
+   * single write, which collapses a paste and its separate submit key into one
+   * PTY read that paste-aware TUIs swallow.
+   */
+  whenConnected(tabId: string): Promise<void> {
+    if (this.terminals.get(tabId)?.stream) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      let waiters = this.connectionWaiters.get(tabId);
+      if (!waiters) {
+        waiters = new Set();
+        this.connectionWaiters.set(tabId, waiters);
+      }
+      waiters.add(resolve);
+    });
   }
 
   /** Parks an unmounted view without touching its xterm parser or PTY stream. */
@@ -694,6 +832,7 @@ export class TerminalManager {
     managed.container.remove();
     this.terminals.delete(tabId);
     this.pendingInput.delete(tabId);
+    this.connectionWaiters.delete(tabId);
     this.exitListeners.delete(tabId);
     this.findRequestListeners.delete(tabId);
     this.inputLineBuffers.delete(tabId);
@@ -915,15 +1054,108 @@ export class TerminalManager {
     return true;
   }
 
-  private enqueueWheelInput(tabId: string, managed: ManagedTerminal, data: string): void {
+  private enqueueWheelInput(
+    tabId: string,
+    managed: ManagedTerminal,
+    data: string,
+    count: number,
+  ): void {
     if (!managed.awaitingWheelResponse) {
-      this.sendWheelInput(tabId, managed, data);
+      this.sendWheelInput(tabId, managed, data.repeat(count));
       return;
     }
-    if (managed.pendingWheelInput.length === TUI_WHEEL_PENDING_REPORTS) {
-      managed.pendingWheelInput.shift();
+    for (let index = 0; index < count; index += 1) {
+      managed.pendingWheelInput.push(data);
     }
-    managed.pendingWheelInput.push(data);
+    const excess = managed.pendingWheelInput.length - TUI_WHEEL_PENDING_REPORTS;
+    if (excess > 0) {
+      managed.pendingWheelInput.splice(0, excess);
+    }
+  }
+
+  /**
+   * Hides the scrollbar while a full-screen program owns the viewport. The
+   * wheel already goes to the program then, so the scrollbar was the only way
+   * into xterm's stale pre-TUI history — dragging it scrolled old shell output
+   * under a program redrawing in place, which rendered as garbage. Checked
+   * after every parsed write because xterm has no mode-change event.
+   */
+  private installTuiScrollbarSync(managed: ManagedTerminal): void {
+    const { terminal } = managed;
+    let hidden = false;
+    terminal.onWriteParsed(() => {
+      const ownsViewport = tuiOwnsViewport(terminal);
+      if (ownsViewport === hidden) {
+        return;
+      }
+      hidden = ownsViewport;
+      terminal.options.scrollbar = { ...terminal.options.scrollbar, showScrollbar: !hidden };
+      if (hidden) {
+        terminal.scrollToBottom();
+      }
+    });
+  }
+
+  /**
+   * Accepts files, file-tree entries, and text dropped onto the terminal and
+   * pastes them the way a native terminal does. Registered in the capture
+   * phase so WebKit's default drop into xterm's hidden textarea (which inserts
+   * a file name, or nothing, instead of a usable path) never runs.
+   */
+  private installDropTarget(managed: ManagedTerminal): void {
+    const { container, tab } = managed;
+    container.addEventListener(
+      "dragover",
+      (event) => {
+        if (!isTerminalDrop(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "copy";
+        }
+      },
+      true,
+    );
+    container.addEventListener(
+      "drop",
+      (event) => {
+        if (!isTerminalDrop(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        // `tab.shell` only ever names the backend (native vs. WSL), never the
+        // actual program, so the shell a native Windows profile launches has
+        // to be resolved from Settings — it may be `cmd.exe`, which cannot
+        // parse PowerShell's single-quote escaping. Kicked off here so it
+        // resolves in parallel with copying any dropped files below.
+        const quoteStyle: Promise<ShellQuoteStyle> =
+          isWindowsPlatform() && (tab.shell?.backend ?? "native") === "native"
+            ? loadTerminalScopes(tab.projectId).then((scopes) =>
+                nativeShellQuoteStyle(resolveConfiguredShell(scopes)),
+              )
+            : Promise.resolve("posix");
+        resolveTerminalDrop(event.dataTransfer, {
+          worktreeId: managed.tab.worktreeId,
+          root: managed.cwd,
+          quoteStyle,
+        })
+          .then((text) => {
+            const live = this.terminals.get(tab.id);
+            if (text === null || live !== managed) {
+              return undefined;
+            }
+            live.terminal.paste(text);
+            live.terminal.focus();
+            return undefined;
+          })
+          .catch((error: unknown) => {
+            toast.error(error instanceof Error ? error.message : String(error));
+          });
+      },
+      true,
+    );
   }
 
   private sendWheelInput(tabId: string, managed: ManagedTerminal, data: string): void {
@@ -1197,6 +1429,21 @@ export class TerminalManager {
     };
   }
 
+  /**
+   * Registers extra environment for this tab's shell, resolved when the shell
+   * is actually spawned (an agent launch's bound accounts). A tab whose shell
+   * already exists ignores it.
+   */
+  setSpawnEnv(tabId: string, resolve: (tab: Tab) => Promise<LaunchEnv>): void {
+    this.spawnEnv.set(tabId, resolve);
+  }
+
+  private takeSpawnEnv(tab: Tab): Promise<LaunchEnv> {
+    const resolve = this.spawnEnv.get(tab.id);
+    this.spawnEnv.delete(tab.id);
+    return resolve ? resolve(tab) : Promise.resolve([]);
+  }
+
   private connect(tab: Tab, cwd: string, managed: ManagedTerminal): void {
     const tabId = tab.id;
     const connectionGeneration = ++managed.connectionGeneration;
@@ -1230,8 +1477,11 @@ export class TerminalManager {
         // The tab's own shell profile, so a session respawned after a server
         // restart returns to the shell it was opened with rather than the
         // current default.
-        return ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null).catch(
-          (spawnError) => {
+        return this.takeSpawnEnv(tab)
+          .then((env) =>
+            ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null, env),
+          )
+          .catch((spawnError) => {
             if (!isCurrentConnection()) {
               return null;
             }
@@ -1240,8 +1490,7 @@ export class TerminalManager {
             return ptyAttach(tabId, cols, rows, null, onEvent).catch(() =>
               Promise.reject(spawnError),
             );
-          },
-        );
+          });
       })
       .then((stream) => {
         if (!stream) {
@@ -1259,6 +1508,11 @@ export class TerminalManager {
         if (pending) {
           this.pendingInput.delete(tabId);
           invokePtyInput(tabId, pending.messages.join(""));
+        }
+        const waiters = this.connectionWaiters.get(tabId);
+        if (waiters) {
+          this.connectionWaiters.delete(tabId);
+          for (const resolve of waiters) resolve();
         }
         // The remote session is brand new — either a fresh spawn, or an attach
         // that fell back to spawn after a daemon reset — and was created with the
@@ -1416,7 +1670,7 @@ export class TerminalManager {
   /**
    * Installs the dev-only benchmark hook and returns whether it was installed.
    *
-   * `@pragma/bench` measures the terminal from inside the webview, and the
+   * `@pragma-sh/bench` measures the terminal from inside the webview, and the
    * WebGL renderer leaves nothing in the DOM to read — no `.xterm-rows`, and a
    * canvas whose pixels are not retrievable. So the benchmark needs the xterm
    * instance itself, which lives only in this registry.
@@ -1443,7 +1697,7 @@ export class TerminalManager {
 
 /**
  * Read-only view of the live terminals, exposed on `window` in dev builds only.
- * The property name is shared with the benchmark through `@pragma/constants`.
+ * The property name is shared with the benchmark through `@pragma-sh/constants`.
  */
 interface TerminalBenchHook {
   version: 1;

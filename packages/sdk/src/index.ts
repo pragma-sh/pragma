@@ -1,3 +1,11 @@
+export {
+  AccountsApi,
+  AccountsClient,
+  type AccountLaunchEnv,
+  type AccountLoginStart,
+  type AccountsRequest,
+  type AccountsSend,
+} from "./accounts-client";
 export { PragmaClient } from "./client";
 export { AssetsClient, type FetchedAsset } from "./assets-client";
 export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
@@ -9,6 +17,16 @@ export {
   type FanoutSubscriptionEvent,
 } from "./fanouts-client";
 export type {
+  AccountBindingScope,
+  AccountEffectiveBinding,
+  AccountIdentity,
+  AccountLogin,
+  AccountLoginSession,
+  AccountProviderInfo,
+  AccountSessionUse,
+  AccountUsageEntry,
+  AccountsListResult,
+  AccountsState,
   BoardDraftCreatePayload,
   Fanout,
   FanoutCreateRequest,
@@ -35,6 +53,7 @@ export type {
   FanoutSendTarget,
   FanoutStatus,
   FanoutSubscriptionPayload,
+  ExcalidrawScene,
   KanbanPromptCard,
   OpenPort,
   PortForwardRequest,
@@ -45,14 +64,18 @@ export type {
   Tab,
   TabKind,
   UsageLimit,
-  UsageLimitsProvider,
   UsageLimitsReady,
   UsageLimitsResult,
-  UsageLimitsSnapshot,
   UsageLimitsUnavailable,
   UsageLimitsUnavailableReason,
   ViewportLease,
-} from "@pragma/constants";
+  Whiteboard,
+  WhiteboardCreateInput,
+  WhiteboardEditInput,
+  WhiteboardIdInput,
+  WhiteboardListInput,
+  WhiteboardViewResult,
+} from "@pragma-sh/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
 export {
@@ -76,10 +99,15 @@ export {
   type ScriptRun,
 } from "./scripts-client";
 export { TabsClient, type ManagedTabs, type OpenTerminalOptions } from "./tabs-client";
-export { UsageLimitsClient, type GetUsageLimitsOptions } from "./usage-limits-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
 export { PortsClient, type ForwardPortOptions, type ListOpenPortsOptions } from "./ports-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
+export {
+  WhiteboardsClient,
+  type WhiteboardSearchInput,
+  type WhiteboardViewBytes,
+  type WhiteboardViewInput,
+} from "./whiteboards-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 export { PragmaGatewayError, PragmaTransportError } from "./errors";
@@ -108,10 +136,14 @@ export type {
   AgentInterrupt,
   AgentInterruptEvent,
   AgentCatalog,
+  AgentLaunchOptions,
+  AgentMode,
   AgentModelEntry,
+  AgentPermissionMode,
   AgentReasoning,
+  AgentSlashCommand,
   CatalogAgent,
-  PluginIconRef,
+  AgentIcon,
   AgentMessage,
   AgentMessageEvent,
   AgentQuestion,

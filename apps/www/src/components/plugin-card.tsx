@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { Button } from "@/components/ui/button";
 import { pluginDetailUrl, pluginInstallUrl } from "@/lib/plugins";

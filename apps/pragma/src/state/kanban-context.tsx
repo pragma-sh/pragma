@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { projectIsGit } from "@/lib/non-git-project";
 import { useRequiredContext } from "@/lib/context";
 
 import { toast } from "sonner";
@@ -17,7 +18,7 @@ import type {
   KanbanCompletedAction,
   KanbanPromptCard,
   Worktree,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { startBackgroundAgentSession } from "@/lib/agent-launch";
@@ -44,6 +45,7 @@ import {
   updateKanbanCard,
 } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 
 /** Which surface the workspace is showing: normal shell, agent board, or settings. */
 type WorkspaceMode = "normal" | "kanban" | "settings";
@@ -147,20 +149,26 @@ async function applyCompletionAction(
   card: KanbanPromptCard,
 ): Promise<{ pullRequestUrl: string | null; pullRequestNumber: number | null }> {
   if (action === "commitMerge" && worktreeId) {
-    await stageAll(worktreeId);
-    const message = await aiGenerateCommitMessage(worktreeId);
-    await commitStaged(worktreeId, message);
-    await mergeWorktreeToParent(worktreeId);
+    await trackWorktreeActivity(worktreeId, "commit", async () => {
+      await stageAll(worktreeId);
+      const message = await aiGenerateCommitMessage(worktreeId);
+      await commitStaged(worktreeId, message);
+    });
+    await trackWorktreeActivity(worktreeId, "merge", () => mergeWorktreeToParent(worktreeId));
     return { pullRequestUrl: null, pullRequestNumber: null };
   }
   if (action === "commitPr" && worktreeId) {
-    const draft = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
+    const draft = await trackWorktreeActivity(worktreeId, "commit-and-draft", () =>
+      aiCommitAllAndGeneratePullRequestDraft(worktreeId),
+    );
     const repo = await githubRepoRef(worktreeId);
-    await githubPushBranch(worktreeId);
-    const pr = await createPullRequest(
-      repo,
-      { owner: repo.owner, repo: repo.repo, branch: repo.parentBranch ?? repo.defaultBranch },
-      { title: draft.title, body: draft.body, draft: false, worktreeId },
+    await trackWorktreeActivity(worktreeId, "push", () => githubPushBranch(worktreeId));
+    const pr = await trackWorktreeActivity(worktreeId, "create-pr", () =>
+      createPullRequest(
+        repo,
+        { owner: repo.owner, repo: repo.repo, branch: repo.parentBranch ?? repo.defaultBranch },
+        { title: draft.title, body: draft.body, draft: false, worktreeId },
+      ),
     );
     return { pullRequestUrl: pr.htmlUrl, pullRequestNumber: pr.number };
   }
@@ -404,6 +412,11 @@ async function launchCard(
 ): Promise<void> {
   const target = card.projectId;
   const projectWorktrees = workspace.worktrees[target] ?? [];
+  if (!projectIsGit(workspace.projects.find((project) => project.id === target))) {
+    throw new Error(
+      "This project is not a git repository. Initialize one to run cards in their own worktree.",
+    );
+  }
   if (syncMainWorktreeId) {
     await githubPullBranch(syncMainWorktreeId);
   }

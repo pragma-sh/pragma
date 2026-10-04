@@ -4,15 +4,20 @@ import {
   ArrowLeft,
   BellRing,
   Blocks,
+  ChevronRight,
   Clock,
+  HardDrive,
   Keyboard,
   LogOut,
   Palette,
+  PanelLeft,
   RefreshCw,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
   SquareTerminal,
   Trash2,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,18 +28,24 @@ import {
   type GitHubSettings,
   type TerminalSettings,
   type OtherSettings,
-} from "@pragma/constants";
+  type StorageSettings,
+  type System1Settings,
+} from "@pragma-sh/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { PragmaGoSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
+import { AccountsSection } from "@/components/settings/AccountsSection";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { OtherSection } from "@/components/settings/OtherSection";
+import { SidebarSection } from "@/components/settings/SidebarSection";
+import { StorageSection } from "@/components/settings/storage/StorageSection";
+import { System1Section } from "@/components/settings/System1Section";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -44,12 +55,14 @@ import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import { resetPrSignatureCache, validateGitHubSettings } from "@/lib/pr-signature";
+import { applySystem1Patch, sanitizeSystem1Settings } from "@/lib/system1-settings";
 import {
   aiAuthMethods,
   aiLogout,
   gatewayDevices,
   readConfig,
   readPluginManifests,
+  tunnelSyncKeepAwake,
   writeConfig,
   type AiAuthMethod,
   type ConfigScope,
@@ -69,10 +82,13 @@ type BuiltinSection =
   | "theme"
   | "terminal"
   | "agentStatus"
+  | "accounts"
+  | "storage"
   | "github"
   | "ai"
   | "mobile"
   | "automations"
+  | "sidebar"
   | "other";
 
 type Section = BuiltinSection | `plugin:${string}`;
@@ -84,6 +100,9 @@ const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "accounts",
+  "storage",
+  "ai",
 ]);
 
 const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
@@ -92,10 +111,13 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "theme",
   "terminal",
   "agentStatus",
+  "accounts",
+  "storage",
   "github",
   "ai",
   "mobile",
   "automations",
+  "sidebar",
   "other",
 ]);
 
@@ -127,6 +149,7 @@ interface PragmaConfig {
   };
   gateway?: {
     webEnabled?: boolean;
+    keepAwake?: boolean;
     [key: string]: unknown;
   };
   agentStatus?: AgentStatusSettings;
@@ -134,11 +157,16 @@ interface PragmaConfig {
   other?: OtherSettings;
   updates?: { checkUrl?: string; autoDownload?: boolean };
   terminal?: TerminalSettings;
+  storage?: StorageSettings;
+  system1?: System1Settings;
   [key: string]: unknown;
 }
 
 interface LoadedConfig {
   value: PragmaConfig;
+  /** The scope and project this document was read for. */
+  scope: ConfigScope;
+  projectId: string | null;
 }
 
 type PersistConfig = (update: (current: PragmaConfig) => PragmaConfig) => Promise<void>;
@@ -156,6 +184,10 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateAgentStatusSettings(config.agentStatus);
   validateGitHubSettings(config.github);
   validateOtherSettings(config.other);
+  validateStorageSettings(config.storage);
+  // System 1 is optional and Auto treats a malformed block as defaults, so a
+  // typo there must not clear the whole document and lock every Settings section.
+  config.system1 = sanitizeSystem1Settings(config.system1);
   return config;
 }
 
@@ -163,6 +195,7 @@ function validateGateway(gateway: PragmaConfig["gateway"]): void {
   if (gateway === undefined) return;
   validateConfigObject(gateway, "gateway");
   validateOptionalField(gateway.webEnabled, "gateway.webEnabled", "boolean");
+  validateOptionalField(gateway.keepAwake, "gateway.keepAwake", "boolean");
 }
 
 function validateTerminal(terminal: PragmaConfig["terminal"]): void {
@@ -217,6 +250,23 @@ function validateOtherSettings(other: PragmaConfig["other"]): void {
   validateConfigObject(other, "other");
   validateOptionalField(other.serverUrl, "other.serverUrl", "string");
   validateOptionalField(other.autoDownload, "other.autoDownload", "boolean");
+  validateOptionalField(other.nonGitProjectWarning, "other.nonGitProjectWarning", "boolean");
+}
+
+function validateStorageSettings(storage: PragmaConfig["storage"]): void {
+  if (storage === undefined) return;
+  validateConfigObject(storage, "storage");
+  const reminder = storage.reminder;
+  if (reminder === undefined) return;
+  validateConfigObject(reminder, "storage.reminder");
+  validateOptionalField(reminder.enabled, "storage.reminder.enabled", "boolean");
+  validateOptionalField(reminder.startDate, "storage.reminder.startDate", "string");
+  if (
+    reminder.intervalDays !== undefined &&
+    (!Number.isInteger(reminder.intervalDays) || reminder.intervalDays < 1)
+  ) {
+    throw new Error("storage.reminder.intervalDays must be a positive integer");
+  }
 }
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
@@ -292,9 +342,11 @@ export function SettingsWorkspace() {
   const latestConfig = useRef<PragmaConfig | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const worktreeId = workspace.selectedWorktree?.id ?? null;
+  // Plugin pages are nested under the Plugins list, which lists this scope's
+  // configured plugins — so only this scope's pages belong there.
   const settingsPages = usePluginSettingsPages(
     scope === "project" ? workspace.selectedProjectId : null,
-  );
+  ).filter((page) => page.record.scope === scope);
   // Project settings describe the machine that project's terminals run on,
   // which for an SSH project is not this one.
   const wslAvailable = useWslAvailable(scope === "project" ? worktreeId : null);
@@ -318,7 +370,7 @@ export function SettingsWorkspace() {
       if (generation !== loadGeneration.current) return;
       const value = parsePragmaConfig(document.contents);
       latestConfig.current = value;
-      setLoaded({ value });
+      setLoaded({ value, scope, projectId: workspace.selectedProjectId });
     } catch (cause) {
       if (generation !== loadGeneration.current) return;
       latestConfig.current = null;
@@ -355,13 +407,7 @@ export function SettingsWorkspace() {
       const contents = `${JSON.stringify(value, null, 2)}\n`;
       const targetScope = scope;
       const targetProjectId = workspace.selectedProjectId;
-      setLoaded((loadedConfig) =>
-        loadedConfig
-          ? {
-              value,
-            }
-          : loadedConfig,
-      );
+      setLoaded((loadedConfig) => (loadedConfig ? { ...loadedConfig, value } : loadedConfig));
       const write = saveQueue.current.then(() =>
         writeConfig(targetScope, contents, targetProjectId),
       );
@@ -414,7 +460,6 @@ export function SettingsWorkspace() {
           scope={scope}
           section={section}
           setSection={setSection}
-          settingsPages={settingsPages}
           wslAvailable={wslAvailable}
         />
         <SettingsContent
@@ -423,12 +468,15 @@ export function SettingsWorkspace() {
           loading={loading}
           persist={persist}
           projectId={workspace.selectedProjectId}
+          projectName={workspace.activeProject?.name ?? null}
           projectPath={workspace.activeProject?.path ?? null}
           reload={load}
           scope={scope}
           section={section}
+          setSection={setSection}
           settingsPages={settingsPages}
           worktreeId={worktreeId}
+          isRemote={worktreeId ? workspace.remoteWorktrees[worktreeId] === true : false}
         />
       </div>
     </section>
@@ -439,13 +487,11 @@ function SettingsNavigation({
   scope,
   section,
   setSection,
-  settingsPages,
   wslAvailable,
 }: {
   scope: ConfigScope;
   section: Section;
   setSection: (section: Section) => void;
-  settingsPages: ReturnType<typeof usePluginSettingsPages>;
   wslAvailable: boolean;
 }) {
   return (
@@ -487,19 +533,27 @@ function SettingsNavigation({
       >
         Agent Status
       </SettingsNavItem>
-      {settingsPages.map((page) => {
-        const PageIcon = page.contribution.icon;
-        return (
-          <SettingsNavItem
-            key={page.key}
-            active={section === pluginSection(page.key)}
-            icon={PageIcon ? <PageIcon /> : <Blocks />}
-            onClick={() => setSection(pluginSection(page.key))}
-          >
-            {page.contribution.title}
-          </SettingsNavItem>
-        );
-      })}
+      <SettingsNavItem
+        active={section === "accounts"}
+        icon={<UserRound />}
+        onClick={() => setSection("accounts")}
+      >
+        Account Providers
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "storage"}
+        icon={<HardDrive />}
+        onClick={() => setSection("storage")}
+      >
+        Storage
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "ai"}
+        icon={<Sparkles />}
+        onClick={() => setSection("ai")}
+      >
+        AI
+      </SettingsNavItem>
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
       ) : null}
@@ -524,13 +578,6 @@ function GlobalSettingsNavigation({
         GitHub
       </SettingsNavItem>
       <SettingsNavItem
-        active={section === "ai"}
-        icon={<Sparkles />}
-        onClick={() => setSection("ai")}
-      >
-        AI Providers
-      </SettingsNavItem>
-      <SettingsNavItem
         active={section === "mobile"}
         icon={<Smartphone />}
         onClick={() => setSection("mobile")}
@@ -545,6 +592,13 @@ function GlobalSettingsNavigation({
         Automations
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "sidebar"}
+        icon={<PanelLeft />}
+        onClick={() => setSection("sidebar")}
+      >
+        Sidebar
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "other"}
         icon={<RefreshCw />}
         onClick={() => setSection("other")}
@@ -557,15 +611,18 @@ function GlobalSettingsNavigation({
 
 // fallow-ignore-next-line complexity -- selects one mutually exclusive settings panel from state.
 function SettingsContent({
+  isRemote,
   error,
   loaded,
   loading,
   persist,
   projectId,
+  projectName,
   projectPath,
   reload,
   scope,
   section,
+  setSection,
   settingsPages,
   worktreeId,
 }: {
@@ -574,18 +631,30 @@ function SettingsContent({
   loading: boolean;
   persist: PersistConfig;
   projectId: string | null;
+  projectName: string | null;
   projectPath: string | null;
   reload: () => Promise<void>;
   scope: ConfigScope;
   section: Section;
+  setSection: (section: Section) => void;
   settingsPages: ReturnType<typeof usePluginSettingsPages>;
   worktreeId: string | null;
+  isRemote: boolean;
 }) {
   const settingsPage = settingsPages.find((page) => pluginSection(page.key) === section);
   if (settingsPage) {
     return (
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
+          <Button
+            aria-label="Back to plugins"
+            className="-ml-2 mb-4"
+            size="sm"
+            variant="ghost"
+            onClick={() => setSection("plugins")}
+          >
+            <ArrowLeft /> Plugins
+          </Button>
           <RenderPluginContribution
             pluginId={settingsPage.pluginId}
             config={settingsPage.record.config}
@@ -603,6 +672,56 @@ function SettingsContent({
       <main className="min-w-0 flex-1 overflow-auto p-8">
         <div className="mx-auto max-w-3xl">
           <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
+  // Accounts live on the project's host, not in `config.json`, so the page
+  // renders past the config load state.
+  if (section === "accounts") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <AccountsSection isRemote={isRemote} projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
+  // Sidebar layout is a per-device localStorage preference, not config.json.
+  if (section === "sidebar" && scope === "global") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <SidebarSection />
+        </div>
+      </main>
+    );
+  }
+  // Storage measures disk on its own; only its global reminder reads the
+  // config document, so the scan starts without waiting for that load.
+  if (section === "storage") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <StorageSection
+            persistReminder={(patch) =>
+              persist((current) => ({
+                ...current,
+                storage: {
+                  ...current.storage,
+                  reminder: { ...current.storage?.reminder, ...patch },
+                },
+              }))
+            }
+            projectId={projectId}
+            projectName={projectName}
+            reminder={
+              scope === "global" && loaded?.scope === "global"
+                ? (loaded.value.storage?.reminder ?? {})
+                : null
+            }
+            scope={scope}
+          />
         </div>
       </main>
     );
@@ -627,6 +746,8 @@ function SettingsContent({
             persist={persist}
             projectPath={projectPath}
             scope={scope}
+            settingsPages={settingsPages}
+            onOpenPage={(key) => setSection(pluginSection(key))}
           />
         ) : null}
         {section === "keybindings" ? (
@@ -670,7 +791,19 @@ function SettingsContent({
             settings={loaded.value.github ?? {}}
           />
         ) : null}
-        {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
+        {section === "ai" ? (
+          <div className="space-y-5">
+            {scope === "global" ? <AiProvidersSection /> : null}
+            {loaded ? (
+              <System1Section
+                projectId={projectId}
+                projectName={projectName}
+                saveSettings={(patch) => persist((current) => applySystem1Patch(current, patch))}
+                scope={scope}
+              />
+            ) : null}
+          </div>
+        ) : null}
         {loaded && section === "mobile" && scope === "global" ? (
           <MobileSection config={loaded.value} persist={persist} />
         ) : null}
@@ -766,19 +899,73 @@ function SettingsNavItem({
   );
 }
 
+type PluginSettingsPages = ReturnType<typeof usePluginSettingsPages>;
+
+/** One row of the Plugins list: a plugin plus the Settings pages it contributes. */
+interface PluginListEntry {
+  key: string;
+  name: string;
+  /** The configured specifier, or `null` for a plugin this scope does not list. */
+  path: string | null;
+  /** Index into `plugins`, or `null` when the row has no config entry to delete. */
+  index: number | null;
+  pages: PluginSettingsPages;
+}
+
+/**
+ * Pairs every configured plugin with the Settings pages its loaded definition
+ * contributes, so the pages render nested under their plugin instead of as
+ * their own top-level Settings sections. A record resolves to its
+ * `package.json` name, falling back to the specifier when resolution failed —
+ * match on both. Pages left over (no matching row in this scope's config) keep
+ * a row of their own so their settings stay reachable.
+ */
+function pluginListEntries(
+  plugins: PluginConfig[],
+  names: Map<string, string>,
+  settingsPages: PluginSettingsPages,
+): PluginListEntry[] {
+  const byPlugin = new Map<string, PluginSettingsPages>();
+  for (const page of settingsPages) {
+    byPlugin.set(page.pluginId, [...(byPlugin.get(page.pluginId) ?? []), page]);
+  }
+  const entries: PluginListEntry[] = plugins.map((plugin, index) => {
+    const name = names.get(plugin.path);
+    const pages = byPlugin.get(name ?? plugin.path) ?? byPlugin.get(plugin.path) ?? [];
+    if (name !== undefined) byPlugin.delete(name);
+    byPlugin.delete(plugin.path);
+    return {
+      key: pluginKey(plugins, index),
+      name: name ?? pluginNameFromPath(plugin.path),
+      path: plugin.path,
+      index,
+      pages,
+    };
+  });
+  for (const [pluginId, pages] of byPlugin) {
+    entries.push({ key: `plugin:${pluginId}`, name: pluginId, path: null, index: null, pages });
+  }
+  return entries;
+}
+
 function PluginsSection({
   config,
   persist,
   projectPath,
   scope,
+  settingsPages,
+  onOpenPage,
 }: {
   config: PragmaConfig;
   persist: PersistConfig;
   projectPath: string | null;
   scope: ConfigScope;
+  settingsPages: PluginSettingsPages;
+  onOpenPage: (key: string) => void;
 }) {
   const plugins = config.plugins ?? [];
   const names = usePluginNames(projectPath, scope);
+  const entries = pluginListEntries(plugins, names, settingsPages);
 
   async function remove(index: number): Promise<void> {
     await persist((current) => ({
@@ -790,34 +977,80 @@ function PluginsSection({
   return (
     <SettingsCard title="Loaded plugins" description={`Plugins loaded from ${scope} settings.`}>
       <div className="divide-y">
-        {plugins.length === 0 ? (
+        {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">No plugins loaded from this scope.</p>
         ) : null}
-        {plugins.map((plugin, index) => {
-          const name = names.get(plugin.path) ?? pluginNameFromPath(plugin.path);
-          return (
-            <div
-              className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
-              key={pluginKey(plugins, index)}
-            >
-              <p className="min-w-0 truncate text-sm" title={plugin.path}>
-                {name}
-              </p>
-              <IconButton
-                aria-label={`Delete plugin ${name}`}
-                className="shrink-0"
-                label="Delete plugin"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => void remove(index)}
-              >
-                <Trash2 />
-              </IconButton>
-            </div>
-          );
-        })}
+        {entries.map((entry) => (
+          <PluginListRow key={entry.key} entry={entry} onOpenPage={onOpenPage} onRemove={remove} />
+        ))}
       </div>
     </SettingsCard>
+  );
+}
+
+function PluginListRow({
+  entry,
+  onOpenPage,
+  onRemove,
+}: {
+  entry: PluginListEntry;
+  onOpenPage: (key: string) => void;
+  onRemove: (index: number) => Promise<void>;
+}) {
+  const { index, name } = entry;
+  return (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <div className="flex items-center justify-between gap-4">
+        <p className="min-w-0 truncate text-sm" title={entry.path ?? name}>
+          {name}
+        </p>
+        {index === null ? null : (
+          <IconButton
+            aria-label={`Delete plugin ${name}`}
+            className="shrink-0"
+            label="Delete plugin"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => void onRemove(index)}
+          >
+            <Trash2 />
+          </IconButton>
+        )}
+      </div>
+      {entry.pages.length === 0 ? null : (
+        <div className="mt-2 ml-1 flex flex-col gap-0.5 border-l pl-3">
+          {entry.pages.map((page) => (
+            <PluginSettingsPageItem
+              key={page.key}
+              page={page}
+              onClick={() => onOpenPage(page.key)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A plugin's Settings page, nested under its plugin in the Plugins list. */
+function PluginSettingsPageItem({
+  page,
+  onClick,
+}: {
+  page: PluginSettingsPages[number];
+  onClick: () => void;
+}) {
+  const PageIcon = page.contribution.icon;
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground [&_svg]:size-4"
+      type="button"
+      onClick={onClick}
+    >
+      {PageIcon ? <PageIcon /> : <SlidersHorizontal />}
+      <span className="min-w-0 truncate">{page.contribution.title}</span>
+      <ChevronRight className="ml-auto shrink-0 opacity-60" />
+    </button>
   );
 }
 
@@ -1133,6 +1366,20 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
             ...current,
             gateway: { ...current.gateway, webEnabled },
           })).catch(() => undefined);
+        }}
+        keepAwake={config.gateway?.keepAwake ?? constants.gateway.keepAwake}
+        onKeepAwakeChange={(keepAwake) => {
+          void persist((current) => ({
+            ...current,
+            gateway: { ...current.gateway, keepAwake },
+          })).then(
+            () =>
+              tunnelSyncKeepAwake().catch((cause: unknown) => {
+                toast.error(`Could not apply keep awake: ${errorMessage(cause)}`);
+              }),
+            // `persist` already reported the failed write.
+            () => undefined,
+          );
         }}
       />
       <GatewayDevices />

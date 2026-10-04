@@ -4,7 +4,7 @@ import {
   terminalCommandScript,
   terminalThemeCss,
   type TerminalViewerCommand,
-} from "@pragma/terminal-viewer";
+} from "@pragma-sh/terminal-viewer";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { ChangedFile, WorktreeCommit } from "@pragma/constants";
+import type { ChangedFile, WorktreeCommit } from "@pragma-sh/constants";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { ChangeFileList } from "@/components/right-sidebar/ChangeGroup";

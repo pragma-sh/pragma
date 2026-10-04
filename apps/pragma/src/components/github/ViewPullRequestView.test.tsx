@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -9,6 +9,7 @@ const {
   githubDeleteRemoteBranch,
   githubMergeBaseBranch,
   githubMergeInProgress,
+  githubUnmergedPaths,
   toast,
   workspace,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
   githubDeleteRemoteBranch: vi.fn(),
   githubMergeBaseBranch: vi.fn(),
   githubMergeInProgress: vi.fn(),
+  githubUnmergedPaths: vi.fn(async () => ["src/a.ts"]),
   toast: {
     error: vi.fn(),
     success: vi.fn(),
@@ -36,6 +38,7 @@ const {
   workspace: {
     deleteWorktree: vi.fn(),
     openReviewTab: vi.fn(),
+    remoteWorktrees: {},
     worktrees: {
       project: [
         {
@@ -85,7 +88,11 @@ vi.mock("@/lib/tauri", () => ({
   githubDeleteRemoteBranch,
   githubMergeBaseBranch,
   githubMergeInProgress,
+  githubUnmergedPaths,
 }));
+// AI resolution has its own tests (MergeConflictControls.test.tsx); keep it off here.
+vi.mock("@/state/ai-context", () => ({ useAi: () => ({ available: false }) }));
+vi.mock("@/state/system1", () => ({ useSystem1Status: () => null }));
 vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
 
 import { ChecksSummary, ViewPullRequestView } from "./ViewPullRequestView";

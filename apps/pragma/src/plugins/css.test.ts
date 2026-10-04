@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
+import type { PluginDefinition } from "@pragma-sh/plugin";
 
 import { syncPluginCss } from "./css";
 import type { PluginRecord } from "./registry";

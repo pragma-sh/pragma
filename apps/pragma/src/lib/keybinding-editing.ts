@@ -1,4 +1,4 @@
-import type { KeybindingChord, KeybindingsConfig, PlatformChord } from "@pragma/constants";
+import type { KeybindingChord, KeybindingsConfig, PlatformChord } from "@pragma-sh/constants";
 
 import {
   chordForPlatform,
@@ -12,6 +12,7 @@ import {
 const ACTION_LABELS: Record<KeybindingAction, string> = {
   newTerminalTab: "New terminal tab",
   newBrowserTab: "New browser tab",
+  newWhiteboard: "New whiteboard",
   closeTopTab: "Close tab",
   nextTab: "Next tab",
   previousTab: "Previous tab",
@@ -25,6 +26,7 @@ const ACTION_LABELS: Record<KeybindingAction, string> = {
   deleteFile: "Delete selected file",
   openCommandPalette: "Open command palette",
   openCommandMode: "Open command mode",
+  openSettings: "Open settings",
   switchToWorkspace1: "Switch to project 1",
   switchToWorkspace2: "Switch to project 2",
   switchToWorkspace3: "Switch to project 3",

@@ -1,4 +1,4 @@
-import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma/constants";
+import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,6 +13,7 @@ const project: Project = {
   id: "p1",
   name: "pragma",
   path: "/x",
+  iconEmoji: null,
   orderIndex: 0,
   createdAt: "t",
 };
@@ -41,6 +42,7 @@ function tab(over: Partial<Tab> = {}): Tab {
     title: "Claude",
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

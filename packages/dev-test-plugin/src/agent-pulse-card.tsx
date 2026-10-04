@@ -1,7 +1,7 @@
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentReportPayload } from "@pragma-sh/constants";
 import { useEffect, useState } from "react";
 
-import { useEvent, useProject, useSdk } from "@pragma/plugin";
+import { useEvent, useProject, useSdk } from "@pragma-sh/plugin";
 
 /** Snapshot of a single agent's live status, surfaced by the SDK event stream. */
 interface AgentPulseEntry {

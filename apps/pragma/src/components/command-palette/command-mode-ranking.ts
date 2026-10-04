@@ -1,4 +1,4 @@
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 
 function worktreeLabel(worktree: Worktree): string {
   return worktree.title || worktree.branch;

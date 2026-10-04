@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { mergeAgentStatusSettings, validateAgentStatusSettings } from "@/lib/agent-status-settings";
 

@@ -1,6 +1,7 @@
 import {
   type ReactNode,
   type Ref,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -16,6 +17,7 @@ import {
   RangeSetBuilder,
   StateEffect,
   StateField,
+  type Text,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -29,6 +31,7 @@ import {
 import { loadLanguageExtension } from "@/components/editor/codemirror-language";
 import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 import { PortalWidget } from "@/components/editor/portal-widget";
+import { cn } from "@/lib/utils";
 
 /**
  * An inline review comment anchored to a 1-based line in the new (right-hand)
@@ -45,24 +48,29 @@ export interface DiffComment {
   content: ReactNode;
 }
 
-/** Imperative handle exposed via `ref` for scrolling a comment into view. */
+/** Imperative handle exposed via `ref` for navigating to comments. */
 export interface MergeDiffHandle {
   /**
-   * Scroll the comment with {@link key} into the editor's viewport. The diff
-   * virtualizes its lines, so a comment anchored below the fold has no DOM node
-   * until its line is revealed — call this first, then scroll the resulting node
-   * into the outer container.
+   * Scroll the diff's own viewport (never an ancestor's) so the anchor line of
+   * the comment with {@link key} sits at its vertical center. The diff
+   * virtualizes its lines, so a comment below the fold has no DOM node until its
+   * line is rendered; the position is estimated from CodeMirror's height map
+   * and is exact once the line has been measured. Returns false when the
+   * comment has no anchor line in this diff.
    */
-  scrollCommentIntoView(key: string): void;
+  revealComment(key: string): boolean;
+  /** The element that scrolls both sides of the diff vertically. */
+  scroller(): HTMLElement | null;
+  /** The rendered diff's natural height (both editors, every line), or null if not laid out. */
+  contentHeight(): number | null;
 }
 
 function commentDecorations(
-  newText: string,
+  doc: Text,
   comments: DiffComment[],
   onMount: (key: string, el: HTMLElement) => void,
   onUnmount: (key: string) => void,
 ): DecorationSet {
-  const { doc } = EditorState.create({ doc: newText });
   const builder = new RangeSetBuilder<Decoration>();
   const sorted = comments
     .filter((comment) => comment.line >= 1 && comment.line <= doc.lines)
@@ -141,6 +149,24 @@ const gutterWidthSync = ViewPlugin.fromClass(
 const NO_COMMENTS: DiffComment[] = [];
 
 /**
+ * Asks both editors to re-measure when the scroll container is resized (e.g. a
+ * review pane dragged taller). The editors themselves are content-height, so
+ * their own resize observers never fire — without this, lines revealed by a
+ * taller pane would stay unrendered until the next scroll.
+ */
+function observeContainerResize(container: HTMLElement, view: MergeView): () => void {
+  if (typeof ResizeObserver === "undefined") {
+    return () => undefined;
+  }
+  const observer = new ResizeObserver(() => {
+    view.a.requestMeasure();
+    view.b.requestMeasure();
+  });
+  observer.observe(container);
+  return () => observer.disconnect();
+}
+
+/**
  * Read-only side-by-side diff rendered with `@codemirror/merge`. Presentational:
  * the caller supplies the old/new text (from a worktree `file_diff` or a PR's
  * local `base...HEAD` diff). The single place a `MergeView` is constructed, so
@@ -150,18 +176,24 @@ const NO_COMMENTS: DiffComment[] = [];
  * grammar detection (loaded lazily and swapped in via a compartment). Optional
  * {@link comments} are mounted as block widgets beneath their anchor lines on the
  * new (right) side, aligning review threads with the code they reference.
+ *
+ * Memoized: a review tab renders many diffs, and none of them should redraw
+ * because a sibling (or the pane's height) changed. `className` extends the
+ * scroll container's classes.
  */
-export function MergeDiff({
+export const MergeDiff = memo(function MergeDiff({
   oldText,
   newText,
   fileName,
   comments = NO_COMMENTS,
+  className,
   ref,
 }: {
   oldText: string;
   newText: string;
   fileName?: string;
   comments?: DiffComment[];
+  className?: string;
   ref?: Ref<MergeDiffHandle>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -180,20 +212,31 @@ export function MergeDiff({
   useImperativeHandle(
     ref,
     () => ({
-      scrollCommentIntoView(key: string) {
+      revealComment(key: string) {
         const view = viewRef.current?.b;
-        if (!view) {
-          return;
+        const scroller = containerRef.current;
+        if (!view || !scroller) {
+          return false;
         }
         const comment = commentsRef.current.find((candidate) => candidate.key === key);
         const { doc } = view.state;
         if (!comment || comment.line < 1 || comment.line > doc.lines) {
-          return;
+          return false;
         }
-        // Anchor on the comment's line so CodeMirror renders that span of the
-        // (virtualized) document, mounting the comment's block widget.
-        const pos = doc.line(comment.line).to;
-        view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+        // Not `EditorView.scrollIntoView`: that scrolls every scrollable ancestor
+        // too, yanking the whole review page to a still-estimated position.
+        // Scrolling only this container lets CodeMirror render (and measure) the
+        // line, which mounts the comment's block widget beneath it.
+        const block = view.lineBlockAt(doc.line(comment.line).to);
+        const rect = scroller.getBoundingClientRect();
+        scroller.scrollTop += view.documentTop + block.bottom - (rect.top + rect.height / 2);
+        return true;
+      },
+      scroller: () => containerRef.current,
+      contentHeight() {
+        // Zero means "not laid out" (hidden tab, test DOM), not an empty diff.
+        const height = viewRef.current?.dom.offsetHeight ?? 0;
+        return height > 0 ? height : null;
       },
     }),
     [],
@@ -245,20 +288,19 @@ export function MergeDiff({
       parent: container,
     });
     viewRef.current = view;
-    if (view.b) {
-      view.b.dispatch({
-        effects: setCommentDecorations.of(
-          commentDecorations(newText, commentsRef.current, onMount, onUnmount),
-        ),
-      });
-    }
+    view.b.dispatch({
+      effects: setCommentDecorations.of(
+        commentDecorations(view.b.state.doc, commentsRef.current, onMount, onUnmount),
+      ),
+    });
+    const stopObserving = observeContainerResize(container, view);
 
     let cancelled = false;
     // A missing/failed grammar must not break the diff; plain text still gets
     // the shared syntax palette for token styles a grammar can emit later.
     void (async () => {
       const languageExtension = fileName ? await loadLanguageExtension(fileName) : null;
-      if (!cancelled && languageExtension && view.a && view.b) {
+      if (!cancelled && languageExtension) {
         view.a.dispatch({ effects: languageA.reconfigure(languageExtension) });
         view.b.dispatch({ effects: languageB.reconfigure(languageExtension) });
       }
@@ -266,6 +308,7 @@ export function MergeDiff({
 
     return () => {
       cancelled = true;
+      stopObserving();
       viewRef.current = null;
       view.destroy();
     };
@@ -273,23 +316,27 @@ export function MergeDiff({
 
   // Push comment changes into the live view. CodeMirror reuses widgets whose key
   // is unchanged, so persisting threads keep their DOM (and their React state).
+  // A new doc rebuilds the view (above), which dispatches the latest comments
+  // itself, so `newText` is deliberately not a dependency here.
   useEffect(() => {
     const view = viewRef.current;
-    if (!view?.b) {
+    if (!view) {
       return;
     }
     view.b.dispatch({
-      effects: setCommentDecorations.of(commentDecorations(newText, comments, onMount, onUnmount)),
+      effects: setCommentDecorations.of(
+        commentDecorations(view.b.state.doc, comments, onMount, onUnmount),
+      ),
     });
-  }, [comments, newText, onMount, onUnmount]);
+  }, [comments, onMount, onUnmount]);
 
   return (
     <>
-      <div className="h-full min-h-0 overflow-auto bg-canvas" ref={containerRef} />
+      <div className={cn("h-full min-h-0 overflow-auto bg-canvas", className)} ref={containerRef} />
       {comments.map((comment) => {
         const el = portalsRef.current.get(comment.key);
         return el ? createPortal(comment.content, el, comment.key) : null;
       })}
     </>
   );
-}
+});

@@ -1,6 +1,7 @@
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentReportPayload } from "@pragma-sh/constants";
 import type { ZodType, ZodTypeAny } from "zod";
 import type { AgentDefinition } from "./agent";
+import type { ContextProviderDefinition } from "./context";
 import type {
   CommandDefinition,
   PluginIcon,
@@ -14,6 +15,7 @@ import { PLUGIN_API_VERSION } from "./generated/version";
 import type { PluginContext } from "./types";
 import type { PluginDeepLinkEvent } from "./types";
 import type { WatcherDefinition } from "./watcher";
+import type { AccountProviderDefinition } from "./accounts";
 import type { UsageLimitProviderDefinition } from "./usage-limits";
 import type { ThemeDefinition } from "./theme";
 
@@ -61,9 +63,14 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   agents?: AgentDefinition<InferConfig<TConfigSchema>>[];
   watchers?: WatcherDefinition<InferConfig<TConfigSchema>>[];
   commands?: CommandDefinition<InferConfig<TConfigSchema>>[];
+  /** Sources of `@` context for the desktop's agent prompt fields. */
+  contextProviders?: ContextProviderDefinition<InferConfig<TConfigSchema>>[];
   settings?: PluginSettingsContributions;
   keybindings?: PluginKeybindingsContributions;
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
+  /** Account providers this plugin's harnesses can sign in to (see `defineAccounts`). */
+  accounts?: AccountProviderDefinition<InferConfig<TConfigSchema>>[];
+  /** @deprecated Declare `accounts` with `defineAccounts`; the host adapts these into single-login account providers. */
   usageLimits?: UsageLimitProviderDefinition<InferConfig<TConfigSchema>>[];
   themes?: ThemeDefinition[];
   css?: string;
@@ -83,13 +90,13 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
 export interface PluginDefinition<
   TConfigSchema extends ZodTypeAny = ZodTypeAny,
 > extends PluginDefinitionInput<TConfigSchema> {
-  /** @internal The `@pragma/plugin` version this plugin was compiled against. */
+  /** @internal The `@pragma-sh/plugin` version this plugin was compiled against. */
   readonly __apiVersion: string;
 }
 
 /**
  * Declares a Pragma plugin. This is the single entry point a plugin's bundle
- * must default-export. Stamps the compiled-against `@pragma/plugin` version
+ * must default-export. Stamps the compiled-against `@pragma-sh/plugin` version
  * onto the result so the host can check compatibility before loading it.
  */
 export function definePlugin<TConfigSchema extends ZodTypeAny = ZodTypeAny>(

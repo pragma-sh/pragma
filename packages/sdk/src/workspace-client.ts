@@ -1,4 +1,4 @@
-import type { ProtocolEventKind, WorkspaceSnapshot } from "@pragma/constants";
+import type { ProtocolEventKind, WorkspaceSnapshot } from "@pragma-sh/constants";
 
 import { EventsClient, type ProtocolSubscriptionEvent } from "./events-client";
 

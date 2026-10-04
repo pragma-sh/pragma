@@ -4,6 +4,16 @@
     "**/src-tauri/gen/**",
     "**/.next/**",
     "**/.source/**",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "**/CHANGELOG.md",
+    "packages/constants/values.json",
+    "apps/pragma/src-tauri/tauri.conf.json",
+    "packages/claude-code-plugin/.claude-plugin/plugin.json",
+    "packages/codex-plugin/.codex-plugin/plugin.json",
+    "packages/grok-plugin/.grok-plugin/plugin.json",
+    "packages/kimi-plugin/kimi.plugin.json",
+    "packages/junie-plugin/.junie-plugin/plugin.json",
+    "packages/github-copilot-cli-plugin/plugin.json",
+    "apps/pragma/src-tauri/src/testdata/**"
   ]
 }

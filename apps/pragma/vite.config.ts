@@ -13,7 +13,7 @@ const localDevOrigin = /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\
 export default defineConfig({
   plugins: [
     react({
-      exclude: [/scratchpad-frame-runtime\.tsx/, /packages\/scratchpad\/dist\//],
+      exclude: [/scratchpad-frame-runtime\.tsx/, /packages\/scratchpad(?:-viewer)?\/dist\//],
     }),
     tailwindcss(),
   ],

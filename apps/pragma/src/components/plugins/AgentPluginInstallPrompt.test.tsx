@@ -2,8 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
-import type { LockedPlugin } from "@pragma/plugin-registry";
+import type { LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { AGENT_COMMAND_SUBMITTED_EVENT } from "@/lib/agent-plugin-prompt";
 
@@ -17,9 +16,11 @@ const officialPlugin = {
   version: "1.0.0",
   manifest: { name: "OpenCode", agentBinary: "opencode" },
 } as LockedPlugin;
+const loadLockMock = vi.fn();
 
 vi.mock("@/lib/plugin-registry", () => ({
   bundledOfficialPluginLock: () => [officialPlugin],
+  loadOfficialPluginLock: () => loadLockMock(),
   installLockedPlugin: (...args: unknown[]) => installMock(...args),
 }));
 
@@ -33,17 +34,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@/plugins/registry", () => ({
-  useActivePlugins: () => [
-    {
-      pluginId: "pragma.opencode",
-      scope: "bundled",
-      status: "loaded",
-      config: {},
-      definition: {
-        agents: [{ launch: { command: ["opencode"] } }],
-      } as PluginDefinition,
-    },
-  ],
+  useActivePlugins: () => [],
 }));
 
 vi.mock("@/state/workspace-context", () => ({
@@ -65,6 +56,20 @@ describe("AgentPluginInstallPrompt", () => {
     installMock.mockReset().mockResolvedValue(undefined);
     setDismissedMock.mockReset().mockResolvedValue(undefined);
     toastErrorMock.mockReset();
+    loadLockMock.mockReset().mockResolvedValue([officialPlugin]);
+  });
+
+  it("installs the published release instead of the one bundled with this build", async () => {
+    const user = userEvent.setup();
+    const published = { ...officialPlugin, version: "1.0.1" } as LockedPlugin;
+    loadLockMock.mockResolvedValue([published]);
+    render(<AgentPluginInstallPrompt />);
+    await waitFor(() => expect(loadLockMock).toHaveBeenCalled());
+    await runOpenCode();
+
+    await user.click(screen.getByRole("button", { name: "Install plugin" }));
+
+    expect(installMock).toHaveBeenCalledWith(published);
   });
 
   it("installs matching plugin while allowing current command to continue", async () => {

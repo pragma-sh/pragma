@@ -1,14 +1,17 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  type AccountIdentity,
+  commandAndSkillDirs,
+  slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
   type UsageLimit,
   type UsageLimitsResult,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 /** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
@@ -23,6 +26,15 @@ const baseWatcher = createTuiWatcher({
 });
 const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits";
 
+/** Cursor Agent built-ins that take a prompt; project/user commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "plan", description: "Create a plan", argumentHint: "[prompt]" },
+  { name: "ask", description: "Ask a read-only question", argumentHint: "[prompt]" },
+  { name: "debug", description: "Debug mode", argumentHint: "[prompt]" },
+  { name: "goal", description: "Start a durable goal that continues while idle" },
+];
+const SLASH_COMMAND_SOURCES = commandAndSkillDirs([".cursor", "~/.cursor"]);
+
 /**
  * Pragma plugin for Cursor Agent, bundled to `dist/pragma-plugin.mjs` and
  * loaded by the pragma-plugins sidecar, the desktop webview, and the
@@ -32,17 +44,31 @@ const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usag
 export const cursorAgentPlugin: PluginDefinition = definePlugin({
   name: "Cursor Agent",
   description: "Launch Cursor Agent from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "cursor",
-      title: "Cursor",
+  accounts: defineAccounts([
+    {
+      provider: "cursor",
+      agent: "cursor",
       dashboardUrl: "https://cursor.com/dashboard/spending",
       iconPath: "assets/cursor.svg",
-      primaryLimitId: "api",
-      refreshIntervalMs: 5 * 60_000,
-      load: loadCursorUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["cursor-agent", "login"],
+        instructions: "Finish signing in to Cursor in the browser tab that opens.",
+      },
+      // No `env`: on macOS Cursor keeps its token under one fixed Keychain
+      // entry, so a second config dir would overwrite the first login rather
+      // than sit beside it. Signing in again replaces the one login.
+      credentialPath: () =>
+        globalThis.process?.platform === "darwin"
+          ? "macOS Keychain (cursor-access-token)"
+          : "~/.cursor/auth.json",
+      identify: identifyCursorAccount,
+      usageLimits: {
+        primaryLimitId: "api",
+        refreshIntervalMs: 5 * 60_000,
+        load: loadCursorUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "cursor",
@@ -71,7 +97,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       name: "Cursor Agent",
       icon: () => null,
       iconPath: "assets/cursor.svg",
-      launch: { command: ["cursor-agent", "--force", "--approve-mcps"] },
+      launch: { command: ["cursor-agent", "--approve-mcps"] },
       excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -83,15 +109,24 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
         parseCursorModels(
           await execFirst(ctx, "cursor-agent models 2>/dev/null || agent models 2>/dev/null"),
         ),
-      permissionModes: [],
+      // First entry is the default: `--force` runs commands unattended, which
+      // is what the excluded `commandApproval` feature above relies on.
+      permissionModes: [
+        { id: "force", name: "Run everything" },
+        { id: "default", name: "Ask for approval" },
+      ],
+      modes: [
+        { id: "agent", name: "Agent" },
+        { id: "plan", name: "Plan", description: "Read-only planning" },
+        { id: "ask", name: "Ask", description: "Q&A, read-only" },
+      ],
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES),
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: () => [],
-        modelReasoning: (modelId: string, reasoningId: string) => [
-          "--model",
-          `${modelId}[effort=${reasoningId}]`,
-        ],
-        permissionMode: () => [],
+        permissionMode: (permissionModeId: string) =>
+          permissionModeId === "force" ? ["--force"] : [],
+        mode: (modeId: string) => (modeId === "agent" ? [] : ["--mode", modeId]),
       },
     }),
   ],
@@ -217,6 +252,18 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const cwd = ctx.project?.path ?? "/tmp";
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
   return result?.stdout ?? "";
+}
+
+/** Reports the signed-in Cursor account from `cursor-agent status`. */
+export async function identifyCursorAccount(ctx: PluginContext): Promise<AccountIdentity | null> {
+  return parseCursorStatus(await execFirst(ctx, "cursor-agent status 2>/dev/null"));
+}
+
+/** Parses `cursor-agent status` ("Logged in as <email>"); signed out yields null. */
+export function parseCursorStatus(output: string): AccountIdentity | null {
+  const text = output.replace(CURSOR_CONTROL_SEQUENCE, "");
+  const email = /Logged in as\s+(\S+@\S+)/i.exec(text)?.[1]?.replace(/[.,]$/, "");
+  return email ? { id: email, email } : null;
 }
 
 /** Loads Cursor account usage using credentials created by `cursor-agent login`. */
@@ -382,32 +429,28 @@ function isUnavailableResult(
   );
 }
 
-/** Parses Cursor Agent's `models` output into model entries with effort levels. */
+/**
+ * Parses Cursor Agent's `models` output into model entries.
+ *
+ * Every id is kept exactly as `cursor-agent` prints it. Cursor has no separate
+ * reasoning-effort flag: the effort is baked into the model id itself
+ * (`cursor-grok-4.6-high`), and the effort-stripped base (`cursor-grok-4.6`)
+ * usually is not a model at all. Grouping the list by that base and rebuilding
+ * a `--model <base>[effort=<id>]` argument produced ids the CLI rejects with
+ * `Cannot use this model: ...`, so the list stays flat.
+ */
 export function parseCursorModels(output: string): AgentModelEntry[] {
   const byId = new Map<string, AgentModelEntry>();
   for (const line of output.split("\n")) {
     const model = parseCursorModelLine(line);
-    if (!model) {
-      continue;
+    if (model && !byId.has(model.id)) {
+      byId.set(model.id, model);
     }
-    const entry = byId.get(model.baseId) ?? {
-      id: model.baseId,
-      name: cleanCursorName(model.name, model.effort),
-      reasoning: [],
-    };
-    if (model.effort && entry.reasoning?.every((item) => item.id !== model.effort)) {
-      entry.reasoning.push({ id: model.effort, name: effortName(model.effort) });
-    }
-    byId.set(model.baseId, entry);
   }
-  return [...byId.values()].map((model) =>
-    model.reasoning?.length ? model : { id: model.id, name: model.name },
-  );
+  return [...byId.values()];
 }
 
-function parseCursorModelLine(
-  line: string,
-): { baseId: string; name: string; effort: string | null } | null {
+function parseCursorModelLine(line: string): AgentModelEntry | null {
   if (!line.includes(" - ")) {
     return null;
   }
@@ -417,29 +460,5 @@ function parseCursorModelLine(
   if (!id || !name || /\s/.test(id)) {
     return null;
   }
-  return { ...splitCursorEffort(id), name };
-}
-
-function splitCursorEffort(id: string): { baseId: string; effort: string | null } {
-  const fast = id.endsWith("-fast");
-  const withoutFast = fast ? id.slice(0, -5) : id;
-  for (const effort of ["extra-high", "xhigh", "medium", "high", "low", "max", "none"]) {
-    if (withoutFast.endsWith(`-${effort}`)) {
-      const base = withoutFast.slice(0, -effort.length - 1);
-      return { baseId: fast ? `${base}-fast` : base, effort };
-    }
-  }
-  return { baseId: id, effort: null };
-}
-
-function cleanCursorName(name: string, effort: string | null): string {
-  return effort
-    ? name.replace(new RegExp(`\\s+${effortName(effort)}(?=\\s|$)`, "i"), "").trim()
-    : name;
-}
-
-function effortName(effort: string): string {
-  return effort === "xhigh" || effort === "extra-high"
-    ? "Extra High"
-    : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`;
+  return { id, name };
 }

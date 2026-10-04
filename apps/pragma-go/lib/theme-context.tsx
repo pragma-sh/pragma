@@ -1,4 +1,4 @@
-import type { HostTheme, PragmaClient } from "@pragma/sdk";
+import type { HostTheme, PragmaClient } from "@pragma-sh/sdk";
 import {
   createContext,
   useContext,

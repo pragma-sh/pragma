@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   ChevronDown,
@@ -7,6 +7,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Settings,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,21 +18,28 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
+import { InitGitDialog } from "@/components/dialogs/InitGitDialog";
 import { InstallUpdateButton } from "@/components/sidebar/InstallUpdateButton";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { OpenPortsCard } from "@/components/sidebar/OpenPortsCard";
 import { ScratchpadsCard } from "@/components/sidebar/ScratchpadsCard";
+import { WhiteboardsCard } from "@/components/sidebar/WhiteboardsCard";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
+import { CREATE_PROJECT_EVENT, mainWorktreeLabel, projectIsGit } from "@/lib/non-git-project";
 import { startWindowDrag } from "@/lib/window-drag";
 import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
+import { useAgentProgressTracking } from "@/state/agent-progress-store";
+import { useKanban } from "@/state/kanban-context";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 import { cn } from "@/lib/utils";
 import { instantTransition, motionTransition, useMotionTransition } from "@/lib/motion";
 
@@ -39,13 +47,14 @@ import { instantTransition, motionTransition, useMotionTransition } from "@/lib/
 const COLLAPSED_WIDTH = 36;
 
 export function ProjectSidebar() {
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
-  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
+  const dialogs = useSidebarDialogs();
   const cycle = useProjectCycle();
   const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
+  // Mounted here because the sidebar is always rendered (collapsed or not), so
+  // progress keeps up even while the worktree rows are out of view.
+  useAgentProgressTracking();
   // Dragging the handle must track the pointer exactly, so the spring is
   // suppressed for the duration of the drag rather than chasing it a frame behind.
   const panelTransition = useMotionTransition(
@@ -56,14 +65,6 @@ export function ProjectSidebar() {
   const mainWorktreeId = projectId
     ? ((workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain)?.id ?? null)
     : null;
-
-  useEffect(() => {
-    function openDialog() {
-      setProjectDialogOpen(true);
-    }
-    window.addEventListener("pragma:create-project", openDialog);
-    return () => window.removeEventListener("pragma:create-project", openDialog);
-  }, []);
 
   return (
     // One element whose width animates, rather than two components swapped at
@@ -84,37 +85,122 @@ export function ProjectSidebar() {
       ) : (
         <ExpandedProjectSidebar
           mainWorktreeId={mainWorktreeId}
-          onAddProject={() => setProjectDialogOpen(true)}
-          onCreateChild={(parentId) => {
-            setWorktreeParentId(parentId);
-            setWorktreeDialogOpen(true);
-          }}
-          onNewWorktree={() => {
-            setWorktreeParentId(mainWorktreeId);
-            setWorktreeDialogOpen(true);
-          }}
+          newWorktreeLabel={`New worktree off ${mainWorktreeLabel(workspace.activeProject)}`}
+          onAddProject={dialogs.openProjectDialog}
+          onCreateChild={dialogs.openWorktreeDialog}
+          onNewWorktree={() => dialogs.openWorktreeDialog(mainWorktreeId)}
           onResize={setWidth}
           onResizeEnd={() => setResizing(false)}
           onResizeStart={() => setResizing(true)}
           onToggleCollapsed={toggleCollapsed}
         />
       )}
-      <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
+      <CreateProjectDialog
+        open={dialogs.projectDialogOpen}
+        onOpenChange={dialogs.setProjectDialogOpen}
+      />
       <CreateWorktreeDialog
-        open={worktreeDialogOpen}
-        onOpenChange={(open) => {
-          setWorktreeDialogOpen(open);
-          if (!open) setWorktreeParentId(null);
-        }}
-        parentWorktreeId={worktreeParentId ?? mainWorktreeId ?? undefined}
+        open={dialogs.worktreeDialogOpen}
+        onOpenChange={dialogs.setWorktreeDialogOpen}
+        parentWorktreeId={dialogs.worktreeParentId ?? mainWorktreeId ?? undefined}
+      />
+      <InitGitDialog
+        projectId={dialogs.initGitProjectId}
+        onInitialized={dialogs.continueAfterInit}
+        onOpenChange={(open) => !open && dialogs.cancelInit()}
       />
     </motion.aside>
   );
 }
 
+/**
+ * The sidebar's two creation dialogs: which is open, and which worktree a new
+ * one branches from.
+ *
+ * Both are opened from more than one place — the titlebar, the plus menu, a
+ * worktree row, the `pragma:create-project` event the welcome screen fires, and
+ * the draft a failed creation republishes — so the wiring lives here rather
+ * than in the component's body.
+ */
+function useSidebarDialogs(): {
+  projectDialogOpen: boolean;
+  setProjectDialogOpen: (open: boolean) => void;
+  openProjectDialog: () => void;
+  worktreeDialogOpen: boolean;
+  worktreeParentId: string | null;
+  /** Opens the create dialog branching from `parentWorktreeId`, or — on a
+   *  project that is not a git repository — offers to initialize one first. */
+  openWorktreeDialog: (parentWorktreeId: string | null) => void;
+  setWorktreeDialogOpen: (open: boolean) => void;
+  /** The plain project the init-git prompt is asking about. */
+  initGitProjectId: string | null;
+  /** Opens the create dialog the prompt interrupted, now that git exists. */
+  continueAfterInit: () => void;
+  cancelInit: () => void;
+} {
+  const workspace = useWorkspace();
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
+  const [initGitProjectId, setInitGitProjectId] = useState<string | null>(null);
+  const { draft } = useWorktreeCreation();
+  const activeProject = workspace.activeProject;
+
+  const openWorktreeDialog = useCallback(
+    (parentWorktreeId: string | null) => {
+      setWorktreeParentId(parentWorktreeId);
+      if (activeProject && !projectIsGit(activeProject)) {
+        setInitGitProjectId(activeProject.id);
+        return;
+      }
+      setWorktreeDialogOpen(true);
+    },
+    [activeProject],
+  );
+
+  useEffect(() => {
+    function openDialog() {
+      setProjectDialogOpen(true);
+    }
+    window.addEventListener(CREATE_PROJECT_EVENT, openDialog);
+    return () => window.removeEventListener(CREATE_PROJECT_EVENT, openDialog);
+  }, []);
+
+  // "Try again" on a failed creation republishes its request as a draft: reopen
+  // the dialog on the same parent so the user can fix the input and resubmit.
+  // The dialog itself consumes the draft to seed its fields.
+  useEffect(() => {
+    if (!draft) return;
+    openWorktreeDialog(draft.parentWorktreeId);
+  }, [draft, openWorktreeDialog]);
+
+  return {
+    projectDialogOpen,
+    setProjectDialogOpen,
+    openProjectDialog: () => setProjectDialogOpen(true),
+    worktreeDialogOpen,
+    worktreeParentId,
+    openWorktreeDialog,
+    setWorktreeDialogOpen: (open: boolean) => {
+      setWorktreeDialogOpen(open);
+      if (!open) setWorktreeParentId(null);
+    },
+    initGitProjectId,
+    continueAfterInit: () => {
+      setInitGitProjectId(null);
+      setWorktreeDialogOpen(true);
+    },
+    cancelInit: () => {
+      setInitGitProjectId(null);
+      setWorktreeParentId(null);
+    },
+  };
+}
+
 /** The expanded sidebar body: resize handle, titlebar, worktree tree, and cards. */
 function ExpandedProjectSidebar({
   mainWorktreeId,
+  newWorktreeLabel,
   onAddProject,
   onCreateChild,
   onNewWorktree,
@@ -124,6 +210,7 @@ function ExpandedProjectSidebar({
   onToggleCollapsed,
 }: {
   mainWorktreeId: string | null;
+  newWorktreeLabel: string;
   onAddProject: () => void;
   onCreateChild: (parentWorktreeId: string) => void;
   onNewWorktree: () => void;
@@ -153,11 +240,11 @@ function ExpandedProjectSidebar({
         </h2>
         <div className="flex shrink-0 items-center">
           <Button
-            aria-label="New worktree off main"
+            aria-label={newWorktreeLabel}
             data-tour={TOUR_ANCHOR.newWorktree}
             disabled={!mainWorktreeId}
             size="icon-sm"
-            title="New worktree off main"
+            title={newWorktreeLabel}
             variant="ghost"
             onClick={onNewWorktree}
           >
@@ -178,6 +265,7 @@ function ExpandedProjectSidebar({
       </div>
       <div className="p-3">
         <OpenPortsCard />
+        <WhiteboardsCard />
         <ScratchpadsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />
@@ -186,7 +274,9 @@ function ExpandedProjectSidebar({
           <div className="min-w-0 flex-1">
             <ProjectSwitcher />
           </div>
+          <SettingsButton />
           <AddMenu
+            newWorktreeLabel={newWorktreeLabel}
             worktreeDisabled={!mainWorktreeId}
             onAddProject={onAddProject}
             onNewWorktree={onNewWorktree}
@@ -197,12 +287,33 @@ function ExpandedProjectSidebar({
   );
 }
 
+/**
+ * Opens the full-frame Settings view. The native menu also offers this, but on
+ * Linux the in-window menu bar is hidden on several desktops, so Settings needs
+ * an affordance that does not depend on it.
+ */
+function SettingsButton() {
+  const kanban = useKanban();
+  return (
+    <IconButton
+      label="Settings"
+      size="icon-sm"
+      variant="ghost"
+      onClick={() => kanban.openSettings()}
+    >
+      <Settings />
+    </IconButton>
+  );
+}
+
 /** The "+" menu beside the project switcher: new worktree off main, or add a project. */
 function AddMenu({
+  newWorktreeLabel,
   worktreeDisabled,
   onAddProject,
   onNewWorktree,
 }: {
+  newWorktreeLabel: string;
   worktreeDisabled: boolean;
   onAddProject: () => void;
   onNewWorktree: () => void;
@@ -223,7 +334,7 @@ function AddMenu({
       <DropdownMenuContent align="end" side="top">
         <DropdownMenuItem disabled={worktreeDisabled} onSelect={onNewWorktree}>
           <GitBranchPlus />
-          New worktree off main
+          {newWorktreeLabel}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onAddProject}>
           <FolderPlus />

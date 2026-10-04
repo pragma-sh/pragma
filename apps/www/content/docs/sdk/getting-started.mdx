@@ -1,24 +1,24 @@
 ---
 title: Getting started
-description: Install @pragma/sdk, construct a client, configure the gateway, and handle errors.
+description: Install @pragma-sh/sdk, construct a client, configure the gateway, and handle errors.
 ---
 
 ## Installation
 
-`@pragma/sdk` ships as part of the Pragma workspace. Reference it as a workspace
+`@pragma-sh/sdk` ships as part of the Pragma workspace. Reference it as a workspace
 dependency in a monorepo that vendors Pragma, or install a published release:
 
 ```sh
-bun add @pragma/sdk
+bun add @pragma-sh/sdk
 ```
 
-The package is dual ESM/CJS with TypeScript definitions; `@pragma/scratchpad-contract` is
+The package is dual ESM/CJS with TypeScript definitions; `@pragma-sh/scratchpad-contract` is
 bundled in.
 
 ## Constructing the client
 
 ```ts
-import { PragmaClient } from "@pragma/sdk";
+import { PragmaClient } from "@pragma-sh/sdk";
 
 const client = new PragmaClient({
   baseUrl: "http://127.0.0.1:54321",
@@ -70,7 +70,7 @@ Plus two one-off methods on the client itself:
 ## Environment helpers
 
 ```ts
-import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "@pragma/sdk";
+import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "@pragma-sh/sdk";
 ```
 
 `hasPragmaEnvironment()` is true when **all four** keys are present:
@@ -81,7 +81,7 @@ import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "@pragma/sdk";
 ## Errors
 
 ```ts
-import { PragmaGatewayError, PragmaTransportError } from "@pragma/sdk";
+import { PragmaGatewayError, PragmaTransportError } from "@pragma-sh/sdk";
 ```
 
 - **`PragmaGatewayError`** — the gateway answered. Fields: `code`, `httpStatus`,

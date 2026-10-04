@@ -3,6 +3,7 @@ import { AnimatePresence } from "motion/react";
 
 import { errorMessage } from "@/lib/errors";
 
+import { NonGitFolderWarning } from "@/components/dialogs/NonGitFolderWarning";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -17,8 +18,10 @@ import {
   connectRemoteProject,
   getProjectsDirectory,
   pickDirectory,
+  projectDirectoryIsGit,
   type RemoteAuthChoice,
 } from "@/lib/tauri";
+import { disableNonGitWarning, nonGitWarningEnabled } from "@/lib/non-git-project";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface CreateProjectDialogProps {
@@ -29,28 +32,56 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjectDialogProps) {
   const [remoteUrl, setRemoteUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A picked folder that is not a git repository, awaiting the user's choice.
+  const [plainFolder, setPlainFolder] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const workspace = useWorkspace();
-  useEscapeToClose(isOpen, () => onOpenChange(false));
+  const close = (open: boolean) => {
+    if (!open) setPlainFolder(null);
+    onOpenChange(open);
+  };
+  useEscapeToClose(isOpen, () => close(false));
 
   async function adopt(load: () => Promise<{ id: string } | null>) {
     try {
       setError(null);
+      setBusy(true);
       const project = await load();
       if (project === null) {
         return;
       }
       await workspace.reload();
       await workspace.selectProject(project.id);
-      onOpenChange(false);
+      close(false);
     } catch (cause) {
       setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function openExisting() {
+    setPlainFolder(null);
     await adopt(async () => {
       const selected = await pickDirectory(await getProjectsDirectory());
-      return selected === null ? null : addProject(selected);
+      if (selected === null) return null;
+      if (!(await projectDirectoryIsGit(selected)) && (await nonGitWarningEnabled())) {
+        setPlainFolder(selected);
+        return null;
+      }
+      return addProject(selected, { allowNonGit: true });
+    });
+  }
+
+  async function addPlainFolder(options: { initialize?: boolean; dontShowAgain?: boolean }) {
+    const folder = plainFolder;
+    if (folder === null) return;
+    await adopt(async () => {
+      if (options.dontShowAgain) await disableNonGitWarning();
+      // Initializing happens inside the add, before the project is saved: a
+      // failed `git init` then leaves nothing behind, and a retry is not
+      // refused as a duplicate path.
+      return addProject(folder, { allowNonGit: true, initializeGit: options.initialize });
     });
   }
 
@@ -68,7 +99,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">Add project</h2>
             <p className="text-sm text-muted-foreground">
-              Open a local checkout, clone a repo, or connect to one over SSH.
+              Open a local folder, clone a repo, or connect to one over SSH.
             </p>
           </div>
           <Tabs defaultValue="local" className="mt-5">
@@ -82,9 +113,20 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
             </TabsList>
 
             <TabsContent value="local" className="mt-4 space-y-4">
-              <Button className="w-full" onClick={() => void openExisting()}>
-                Open existing git checkout
-              </Button>
+              {plainFolder === null ? (
+                <Button className="w-full" disabled={busy} onClick={() => void openExisting()}>
+                  Add project
+                </Button>
+              ) : (
+                <NonGitFolderWarning
+                  busy={busy}
+                  folderName={folderName(plainFolder)}
+                  onChooseAnother={() => void openExisting()}
+                  onContinue={() => void addPlainFolder({})}
+                  onDontShowAgain={() => void addPlainFolder({ dontShowAgain: true })}
+                  onInitialize={() => void addPlainFolder({ initialize: true })}
+                />
+              )}
               <div className="space-y-2">
                 <Label htmlFor="remote-url">Remote URL</Label>
                 <Input
@@ -115,7 +157,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
 
           {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
           <div className="mt-5 flex justify-end">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button variant="ghost" onClick={() => close(false)}>
               Cancel
             </Button>
           </div>
@@ -123,6 +165,11 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
       ) : null}
     </AnimatePresence>
   );
+}
+
+/** Last path segment of a picked folder, for the warning's headline. */
+function folderName(path: string): string {
+  return path.split(/[\\/]/).findLast((segment) => segment !== "") ?? path;
 }
 
 interface RemoteConnectionFields {

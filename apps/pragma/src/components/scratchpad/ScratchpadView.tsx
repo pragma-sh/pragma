@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { EditorContent } from "@tiptap/react";
 import { MessageSquarePlus, MessagesSquare, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import {
   setScratchpadPickerActive,
 } from "@/components/scratchpad/scratchpad-comments";
 import { useScratchpadAgent } from "@/components/scratchpad/use-scratchpad-agent";
+import { ScratchpadExportButton } from "@/components/scratchpad/ScratchpadExportButton";
 import { useScratchpadComments } from "@/components/scratchpad/use-scratchpad-comments";
 import {
   useScratchpadEditor,
@@ -319,14 +320,21 @@ export function ScratchpadView({ tab }: { tab: Tab }) {
   }
 
   const modeToggle = (
-    <ScratchpadModeToggle
-      externalChange={file.externalChange}
-      mode={mode}
-      onModeChange={setMode}
-      onReload={file.reloadFromDisk}
-      onResolveComments={() => void resolveComments()}
-      unresolvedCount={unresolved.length}
-    />
+    <div className="flex items-center gap-2">
+      <ScratchpadExportButton
+        source={() => file.currentDocRef.current}
+        filePath={filePath ?? "scratchpad.mdx"}
+        worktreeId={worktreeId}
+      />
+      <ScratchpadModeToggle
+        externalChange={file.externalChange}
+        mode={mode}
+        onModeChange={setMode}
+        onReload={file.reloadFromDisk}
+        onResolveComments={() => void resolveComments()}
+        unresolvedCount={unresolved.length}
+      />
+    </div>
   );
   const editorOptions: ScratchpadEditorOptions = {
     body: file.document.body,

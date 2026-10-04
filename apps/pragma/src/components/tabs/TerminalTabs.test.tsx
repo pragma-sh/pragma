@@ -1,4 +1,4 @@
-import type { ShellProfile, Tab } from "@pragma/constants";
+import type { ShellProfile, Tab } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     title: id,
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,
@@ -94,6 +95,7 @@ const mockWorkspace: WorkspaceContextValue = {
   selectWorktree: vi.fn(),
   createTerminalTab: vi.fn(),
   createBrowserTab: vi.fn(),
+  createWhiteboard: vi.fn(),
   startSession: vi.fn(),
   createTabInPane: vi.fn(),
   openFileTab: vi.fn(),
@@ -102,6 +104,7 @@ const mockWorkspace: WorkspaceContextValue = {
   openDaemonLogTab: vi.fn(),
   openPluginWebView: vi.fn(),
   openScratchpadFile: vi.fn(),
+  openWhiteboard: vi.fn(),
   closeTab: vi.fn(),
   renameTerminalTab: vi.fn(),
   markTabAgent: vi.fn(),
@@ -229,6 +232,22 @@ describe("TerminalTabs", () => {
     expect(screen.getByTitle("Split: one")).toBeInTheDocument();
     expect(screen.queryByText("two")).not.toBeInTheDocument();
     expect(screen.queryByText("three")).not.toBeInTheDocument();
+  });
+
+  /// The split parent tab carries the split accent so it never reads as an
+  /// ordinary tab — and ordinary tabs never pick the accent up.
+  it("marks the split parent tab with the split accent, unlike ordinary tabs", () => {
+    render(<TerminalTabs />);
+    const plain = screen.getByText("two").closest("div.group");
+    expect(plain).not.toBeNull();
+    expect(plain!.className).not.toContain("split-accent");
+    cleanup();
+
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+    const parent = screen.getByTitle("Split: one");
+    expect(parent.className).toContain("border-split-accent/45");
+    expect(parent.className).toContain("bg-split-accent/10");
   });
 
   /// Regression: the strip was one `AnimatePresence` shared by every worktree,

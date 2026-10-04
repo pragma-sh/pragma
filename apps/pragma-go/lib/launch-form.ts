@@ -1,4 +1,4 @@
-import type { AgentSessionLaunchPayload } from "@pragma/sdk";
+import type { AgentSessionLaunchPayload } from "@pragma-sh/sdk";
 
 import type { AgentModelSelection } from "./data/agents";
 

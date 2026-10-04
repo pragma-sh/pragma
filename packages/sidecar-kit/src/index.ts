@@ -47,3 +47,16 @@ export async function readStdin(): Promise<string> {
   }
   return buffer;
 }
+
+/**
+ * An `import()` specifier that loads `path` afresh whenever `version` changes,
+ * for long-lived sidecars that re-import rebuilt plugin or automation files.
+ *
+ * Bun keys its module cache on the file of a `file:` URL and ignores the URL's
+ * query, so `pathToFileURL(path)` plus `?v=…` keeps serving the first import
+ * forever; a query on the plain absolute path is honoured (verified on Bun
+ * 1.3.11). That silently kept rebuilt plugin bundles out of the catalog.
+ */
+export function freshImportSpecifier(path: string, version: string | number): string {
+  return `${path}?v=${encodeURIComponent(String(version))}`;
+}

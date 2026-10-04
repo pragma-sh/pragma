@@ -1,10 +1,12 @@
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
-import { modelLaunchArgs } from "@/lib/agent-model-selection";
+import { launchPrompt, modelLaunchArgs } from "@/lib/agent-model-selection";
 import {
+  accountsLaunchEnv,
   type AgentConfig,
   type AgentModelSelection,
+  type LaunchEnv,
   ptySpawn,
   ptySpawnDetached,
   ptyWrite,
@@ -42,6 +44,41 @@ const DEFAULT_PREFILL_SUBMIT_DELAY_MS = 200;
 const BRACKETED_PASTE_START = "[200~";
 const BRACKETED_PASTE_END = "[201~";
 const ALT_SCREEN_SEQUENCES = ["[?1049h", "[?1047h", "[?47h"];
+/**
+ * How long a launch waits for its account env. A cold plugins sidecar can be
+ * slow to answer, and a launch must never hang on it: past this the harness
+ * starts with its own default login.
+ */
+const LAUNCH_ENV_TIMEOUT_MS = 5000;
+
+/**
+ * Resolves the env for the accounts `agentId` is bound to in the worktree's
+ * project. Never rejects: any failure launches with the default login.
+ */
+async function resolveAgentLaunchEnv(
+  worktreeId: string,
+  agentId: string,
+  tabId: string,
+): Promise<LaunchEnv> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<LaunchEnv>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`account env for ${agentId} timed out; launching with its default login`);
+      resolve([]);
+    }, LAUNCH_ENV_TIMEOUT_MS);
+  });
+  const lookup = accountsLaunchEnv(worktreeId, agentId, tabId)
+    .then((result) => result.env)
+    .catch((cause: unknown) => {
+      console.warn(`account env for ${agentId} unavailable`, cause);
+      return [];
+    });
+  try {
+    return await Promise.race([lookup, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Builds the shell command that launches an agent from its `start` argv. */
 export function agentStartCommand(start: string[]): string {
@@ -74,15 +111,27 @@ export function startAgentInTab(
   selection?: AgentModelSelection,
 ): void {
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
-  window.setTimeout(() => {
-    runAgentCommand(command, write);
-    scheduleStartupInput(agent, write);
-    if (message) {
-      schedulePrefill(agent, message, write);
-    }
-  }, AGENT_START_DELAY_MS);
+  // The tab's shell is spawned when its terminal mounts; hand the mount the
+  // env of the accounts this harness is bound to.
+  terminalManager.setSpawnEnv(tabId, (tab) =>
+    resolveAgentLaunchEnv(tab.worktreeId, agent.id, tabId),
+  );
+  // Start the clocks only once the PTY is connected. A slow connect (e.g. a
+  // freshly created worktree) would otherwise queue the command, paste, and
+  // submit key and flush them as one write, so the TUI swallows the Enter.
+  void terminalManager.whenConnected(tabId).then(() => {
+    window.setTimeout(() => {
+      runAgentCommand(command, write);
+      scheduleStartupInput(agent, write);
+      if (message) {
+        schedulePrefill(agent, message, write);
+      }
+    }, AGENT_START_DELAY_MS);
+    return undefined;
+  });
 }
 
 function runAgentCommand(command: string, write: (data: string) => void): void {
@@ -219,7 +268,8 @@ export async function startBackgroundAgentSession(
   const cols = Math.min(BACKGROUND_TERMINAL_COLS, MAX_TERMINAL_COLS);
   const rows = Math.min(BACKGROUND_TERMINAL_ROWS, MAX_TERMINAL_ROWS);
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
-  const message = prefill?.trim() ? prefill : null;
+  const prompt = launchPrompt(agent, prefill, selection);
+  const message = prompt?.trim() ? prompt : null;
 
   const write = (data: string) => {
     void ptyWrite(tabId, data).catch((error: unknown) => {
@@ -234,10 +284,11 @@ export async function startBackgroundAgentSession(
   // A racing terminal mount may have already spawned this session (mobile
   // `tabOpened` used to select the tab). Treat "already exists" as success so
   // the start command + prefill still land in the live PTY.
+  const env = await resolveAgentLaunchEnv(worktreeId, agent.id, tabId);
   try {
     await (alternateScreen
-      ? ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle)
-      : ptySpawnDetached(tabId, worktreeId, cwd, cols, rows));
+      ? ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle, null, env)
+      : ptySpawnDetached(tabId, worktreeId, cwd, cols, rows, null, env));
   } catch (cause) {
     if (!isSessionAlreadyExists(cause)) {
       throw cause;

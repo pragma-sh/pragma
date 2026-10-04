@@ -1,5 +1,5 @@
-import { useProject } from "@pragma/plugin";
-import { Button, Kbd } from "@pragma/plugin/ui";
+import { useProject } from "@pragma-sh/plugin";
+import { Button, Kbd } from "@pragma-sh/plugin/ui";
 
 import { openReportWebView } from "./report-webview";
 

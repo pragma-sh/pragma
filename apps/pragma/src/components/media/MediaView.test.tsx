@@ -1,4 +1,4 @@
-import type { FileChange, FileChunk, Tab } from "@pragma/constants";
+import type { FileChange, FileChunk, Tab } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

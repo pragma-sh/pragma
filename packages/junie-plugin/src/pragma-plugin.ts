@@ -1,12 +1,14 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  commandAndSkillDirs,
+  slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { asRecord, asText, readJunieAcp } from "./acp";
 import { loadJunieUsageLimits, PRIMARY_LIMIT_ID } from "./usage-limits";
@@ -34,6 +36,15 @@ const baseWatcher = createTuiWatcher({
   questionFinalizeKeys: "\r",
 });
 
+/** Junie built-ins worth starting a session with; custom commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "review", description: "Local code review of your changes" },
+  { name: "plan", description: "Plan mode", argumentHint: "[prompt]" },
+  { name: "usage", description: "Show the session cost breakdown" },
+];
+/** Fallback when the ACP list is unavailable. */
+const SLASH_COMMAND_SOURCES = commandAndSkillDirs([".junie", "~/.junie"]);
+
 /**
  * Pragma plugin for the JetBrains Junie CLI, bundled to `dist/pragma-plugin.mjs`.
  *
@@ -47,17 +58,21 @@ const baseWatcher = createTuiWatcher({
 export const junieAgentPlugin: PluginDefinition = definePlugin({
   name: "Junie",
   description: "Launch the JetBrains Junie CLI from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "junie",
-      title: "Junie",
+  accounts: defineAccounts([
+    {
+      provider: "jetbrains",
+      agent: "junie",
       dashboardUrl: "https://junie.jetbrains.com/cli",
       iconPath: "assets/junie.svg",
-      primaryLimitId: PRIMARY_LIMIT_ID,
-      refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
-      load: loadJunieUsageLimits,
-    }),
-  ],
+      // Junie signs in from its own welcome screen and has no config-dir
+      // override, so it has exactly one login: the one the harness owns.
+      usageLimits: {
+        primaryLimitId: PRIMARY_LIMIT_ID,
+        refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
+        load: loadJunieUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "junie",
@@ -98,8 +113,12 @@ export const junieAgentPlugin: PluginDefinition = definePlugin({
       // off keeps whatever the user configured, which defaults to `auto`.
       permissionModes: [
         { id: "default", name: "Ask for approval" },
+        { id: "plan", name: "Plan mode" },
         { id: "brave", name: "Brave mode (no approvals)" },
       ],
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["junie", "--acp=true", "--skip-update-check", "--cache-dir={tmp}"] },
+      }),
       // `subagents`: Junie runs subagents inside the same process and fires no
       // per-agent hook (`PreToolUse` carries no agent or session id), so their
       // start and finish are not observable from a hook bridge.
@@ -107,8 +126,10 @@ export const junieAgentPlugin: PluginDefinition = definePlugin({
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: (reasoningId: string) => ["--effort", reasoningId],
-        permissionMode: (permissionModeId: string) =>
-          permissionModeId === "brave" ? ["--brave"] : [],
+        permissionMode: (permissionModeId: string) => {
+          if (permissionModeId === "brave") return ["--brave"];
+          return permissionModeId === "plan" ? ["--plan"] : [];
+        },
       },
     }),
   ],

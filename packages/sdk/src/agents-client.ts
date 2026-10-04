@@ -8,7 +8,7 @@ import type {
   AgentMessage,
   AgentReportPayload,
   AgentSessionLaunchPayload,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 import { routes } from "./routes";
@@ -16,6 +16,7 @@ import { ndjsonStream } from "./streaming";
 import { Transport } from "./transport";
 import type {
   AgentConnection,
+  AgentLaunchOptions,
   AgentSessionLaunchResult,
   AgentStreamEvent,
   ConnectOptions,
@@ -111,6 +112,28 @@ export class AgentsClient {
       method: "GET",
       signal: options.signal,
     });
+  }
+
+  /**
+   * Returns what one catalog agent can start with: its slash commands, modes
+   * (primary agents), and permission modes. Pass the chosen `slashCommand`,
+   * `modeId`, and `permissionModeId` to {@link launch}; omitted ids select the
+   * agent's first (default) mode and permission mode.
+   */
+  async launchOptions(
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AgentLaunchOptions> {
+    const catalog = await this.catalog(options);
+    const agent = catalog.agents.find((candidate) => candidate.id === agentId);
+    if (!agent) {
+      throw new Error(`agent not found in catalog: ${agentId}`);
+    }
+    return {
+      slashCommands: agent.slashCommands ?? [],
+      modes: agent.modes ?? [],
+      permissionModes: agent.permissionModes ?? [],
+    };
   }
 
   /**

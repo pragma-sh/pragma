@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +25,7 @@ function logTab(): Tab {
     title: "Server Logs",
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

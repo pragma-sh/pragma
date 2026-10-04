@@ -1,4 +1,4 @@
-import { base64ToBytes } from "@pragma/sdk";
+import { base64ToBytes } from "@pragma-sh/sdk";
 import { useCallback, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Linking, Platform, View } from "react-native";
 

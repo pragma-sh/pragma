@@ -1,4 +1,4 @@
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { GitHubRepoRef } from "@pragma-sh/constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { octokit, githubToken, readConfig } = vi.hoisted(() => ({

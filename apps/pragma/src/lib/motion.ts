@@ -4,7 +4,7 @@ import { useReducedMotion, type Transition, type Variants } from "motion/react";
  * Shared motion vocabulary for the desktop UI. Every animated component pulls
  * its timing from here so the app moves as one system rather than as a pile of
  * one-off durations — the same reason colors live in `index.css` and
- * cross-boundary values live in `@pragma/constants`.
+ * cross-boundary values live in `@pragma-sh/constants`.
  *
  * OS-level "reduce motion" is honoured in two places, and both are required:
  * `<MotionConfig reducedMotion="user">` in `App.tsx` strips transform and layout
@@ -37,6 +37,8 @@ export const motionTransition = {
   fast: { duration: motionDuration.fast, ease: motionEase.standard },
   base: { duration: motionDuration.base, ease: motionEase.standard },
   exit: { duration: motionDuration.fast, ease: motionEase.exit },
+  /** Treemap zoom: a box grows into the whole view, or the view shrinks back into it. */
+  zoom: { duration: motionDuration.slow, ease: motionEase.standard },
   /** Sidebars and other resizable panels: settles quickly, never overshoots visibly. */
   panel: { type: "spring", stiffness: 520, damping: 44, mass: 0.9 },
   /** The sliding active-tab indicator: snappier than a panel, still springy. */

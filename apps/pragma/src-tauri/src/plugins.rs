@@ -45,8 +45,6 @@ struct PragmaConfigFile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PluginScope {
-    /// Shipped inside the app resource directory.
-    Bundled,
     /// Declared in `~/.pragma/config.json`.
     Global,
     /// Declared in `<project>/.pragma/config.json`.
@@ -116,10 +114,9 @@ pub fn config_path(root: impl AsRef<Path>) -> PathBuf {
 pub fn read_manifests(
     home_dir: impl AsRef<Path>,
     project_path: Option<&Path>,
-    resource_dir: Option<&Path>,
 ) -> Vec<PluginEntryResult> {
     let home = home_dir.as_ref();
-    let mut results = resource_dir.map_or_else(Vec::new, read_bundled_scope);
+    let mut results = Vec::new();
     results.extend(read_scope(home, home, PluginScope::Global, None));
     if let Some(project) = project_path {
         results.extend(read_scope(
@@ -130,40 +127,6 @@ pub fn read_manifests(
         ));
     }
     results
-}
-
-fn read_bundled_scope(resource_dir: &Path) -> Vec<PluginEntryResult> {
-    let relative = Path::new(CONSTANTS.plugins.bundled_dir_name.as_str());
-    let dir = [
-        resource_dir.join(relative),
-        resource_dir.join("resources").join(relative),
-    ]
-    .into_iter()
-    .find(|candidate| candidate.is_dir())
-    .unwrap_or_else(|| resource_dir.join(relative));
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut plugin_dirs: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    plugin_dirs.sort();
-    plugin_dirs
-        .into_iter()
-        .map(|plugin_dir| {
-            let resolved = read_manifest(&plugin_dir);
-            PluginEntryResult {
-                specifier: plugin_dir.display().to_string(),
-                scope: PluginScope::Bundled,
-                project_path: None,
-                config: None,
-                manifest: resolved.as_ref().ok().cloned(),
-                error: resolved.err(),
-            }
-        })
-        .collect()
 }
 
 /// Reads the bundle source for a resolved plugin `main` file.
@@ -416,7 +379,7 @@ mod tests {
     #[test]
     fn missing_config_yields_no_entries() {
         let temp = tempfile::tempdir().unwrap();
-        let results = read_manifests(temp.path(), None, None);
+        let results = read_manifests(temp.path(), None);
         assert!(results.is_empty());
     }
 
@@ -426,7 +389,7 @@ mod tests {
         let path = config_path(temp.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{ not json").unwrap();
-        let results = read_manifests(temp.path(), None, None);
+        let results = read_manifests(temp.path(), None);
         assert_eq!(results.len(), 1);
         assert!(results[0]
             .error
@@ -451,7 +414,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../my-plugin" }] }),
         );
 
-        let results = read_manifests(home, None, None);
+        let results = read_manifests(home, None);
         assert_eq!(results.len(), 1);
         let manifest = results[0].manifest.as_ref().expect("manifest resolved");
         assert_eq!(manifest.name, "my-plugin");
@@ -474,7 +437,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": plugin_dir.display().to_string() }] }),
         );
 
-        let results = read_manifests(home, None, None);
+        let results = read_manifests(home, None);
         assert_eq!(results[0].manifest.as_ref().unwrap().name, "abs-plugin");
     }
 
@@ -485,7 +448,7 @@ mod tests {
             temp.path(),
             &serde_json::json!({ "plugins": [{ "path": "@pragma/some-plugin" }] }),
         );
-        let results = read_manifests(temp.path(), None, None);
+        let results = read_manifests(temp.path(), None);
         assert!(results[0]
             .error
             .as_deref()
@@ -510,7 +473,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../broken" }] }),
         );
 
-        let results = read_manifests(home, None, None);
+        let results = read_manifests(home, None);
         assert!(results[0]
             .error
             .as_deref()
@@ -535,7 +498,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../ghost" }] }),
         );
 
-        let results = read_manifests(home, None, None);
+        let results = read_manifests(home, None);
         assert!(results[0]
             .error
             .as_deref()
@@ -571,7 +534,7 @@ mod tests {
             }),
         );
 
-        let results = read_manifests(&home, Some(&project), None);
+        let results = read_manifests(&home, Some(&project));
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].scope, PluginScope::Global);
         assert_eq!(results[0].manifest.as_ref().unwrap().name, "global-plugin");
@@ -610,7 +573,7 @@ mod tests {
             // returns a `\\?\C:\…` verbatim path on Windows (see AGENTS.md).
             &serde_json::json!({ "plugins": [{ "path": pragma_platform::path::canonicalize(&fixture).unwrap().display().to_string() }] }),
         );
-        let results = read_manifests(temp.path(), None, None);
+        let results = read_manifests(temp.path(), None);
         let manifest = results[0].manifest.as_ref().expect("fixture resolves");
         assert_eq!(manifest.name, "sample-pragma-plugin");
         assert!(read_bundle(Path::new(&manifest.main_path))

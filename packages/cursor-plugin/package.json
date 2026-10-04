@@ -1,8 +1,13 @@
 {
   "name": "@pragma-sh/cursor-plugin",
-  "version": "0.1.0-alpha.0",
+  "version": "1.1.0",
   "description": "Cursor Agent CLI plugin that reports agent status to Pragma via shell hooks.",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/cursor-plugin"
+  },
   "files": [
     "assets",
     "dist",
@@ -28,8 +33,8 @@
     "lint": "oxlint ."
   },
   "devDependencies": {
-    "@pragma/plugin": "workspace:*",
-    "@pragma/watcher-kit": "workspace:*",
+    "@pragma-sh/plugin": "workspace:*",
+    "@pragma-sh/watcher-kit": "workspace:*",
     "@types/node": "^24.12.3",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",

@@ -1,12 +1,16 @@
-# packages/scratchpad - @pragma/scratchpad
+# packages/scratchpad - @pragma-sh/scratchpad
 
 Browser-safe API bundled into agent-authored MDX scratchpads. Root re-exports
-`@pragma/sdk` and adds scratchpad-host interaction. `ui` contains composed interactive
+`@pragma-sh/sdk` and adds scratchpad-host interaction. `ui` contains composed interactive
 components; `ui/primitives` contains their small shadcn-compatible building blocks.
 
 ## Rules
 
 - Runtime host access goes through `globalThis.pragmaScratchpad`; never import desktop internals.
+- Standalone exports set `agentFeedbackEnabled: false` on that bridge. `promptAgent`
+  must refuse delivery and built-in send/decision buttons use the shared `useAgentAction`
+  enabled state. Keep question inputs, choices, and other local interactions active;
+  never disable a whole form or fieldset merely because it is an export.
 - **Styling is one stylesheet, not inline styles.** `src/styles.ts` holds every `pragma-*`
   rule and `ensureScratchpadStyles()` injects it once per document; components only set
   class names. Inline styles cannot express hover/focus/disabled states or media queries,
@@ -30,6 +34,11 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   `cm-mergeSpacer` equivalent), and a replaced line pair gets word-level segments (the
   `cm-changedText` equivalent). Its LCS table is capped at `MAX_DP_CELLS`; past that a
   differing region degrades to a wholesale replacement rather than stalling the frame.
+- **`Whiteboard` is host-rendered, with editing delegated to the host.** It requests a
+  theme-matched PNG through `globalThis.pragmaScratchpad`, passes its last seen version so
+  unchanged polls do not rerender, and never imports Excalidraw or desktop internals into the
+  sandbox. Desktop frames expose `openWhiteboard`, so clicking the preview opens the durable
+  board in its native interactive tab; hosts without an editor keep the preview read-only.
 - Keep components browser-safe and sandbox-safe. No Node APIs, Tauri APIs, storage, or direct parent access.
 - `promptAgent` must preserve default missing-agent attachment behavior while allowing a per-call callback.
 - Public functions, types, and components require JSDoc.
@@ -39,23 +48,23 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   process with startup `NODE_ENV=production` in `scripts/build.ts` until Bun honors
   `jsx.development: false` after startup.
 - **Never bundle dependencies into this package (`--packages bundle`).** Inlining
-  `@pragma/sdk` resolves it through `node_modules`, a path outside the entry root, and
+  `@pragma-sh/sdk` resolves it through `node_modules`, a path outside the entry root, and
   Bun's Windows bundler panics on it with
   `Expected pretty file path to have only forward slashes` for that backslashed
   `node_modules` path. macOS and Linux build fine, so it only shows up in the Windows CI
-  build job. `@pragma/sdk` stays `--external`
+  build job. `@pragma-sh/sdk` stays `--external`
   and the consuming Vite build resolves the workspace package.
 - **`exports` subpaths beyond one segment are invisible to fallow.** It resolves
-  `@pragma/scratchpad/ui` but not `@pragma/scratchpad/ui/primitives`, which is why that
+  `@pragma-sh/scratchpad/ui` but not `@pragma-sh/scratchpad/ui/primitives`, which is why that
   specifier is listed in `.fallowrc.jsonc`'s `ignoreUnresolvedImports`. Add any new nested
   subpath there too, or the Fallow gate fails on an import that is actually valid.
 
 ## Commands
 
 ```bash
-bun run --filter @pragma/scratchpad build
-bun run --filter @pragma/scratchpad typecheck
-bun run --filter @pragma/scratchpad test
+bun run --filter @pragma-sh/scratchpad build
+bun run --filter @pragma-sh/scratchpad typecheck
+bun run --filter @pragma-sh/scratchpad test
 ```
 
 `test`/`typecheck`/`lint` depend on `^build` (dependency builds only, never this
@@ -64,6 +73,6 @@ inside its own `build` script cannot clobber `dist/*.d.ts` while dependents
 typecheck. Do not reintroduce a `pretest` that runs the full `build` — a
 concurrent turbo `build` + `pretest` races bunup on `dist/` (ENOENT on
 `primitives.cjs`). A `pretest` that only emits a gitignored `src/generated/**`
-file without touching `dist/` is fine: `@pragma/scratchpad-viewer` generates its
+file without touching `dist/` is fine: `@pragma-sh/scratchpad-viewer` generates its
 runtime string this way (`build.ts --runtime-only`, mirroring its
 `pretypecheck`).

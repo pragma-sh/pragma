@@ -1,6 +1,6 @@
 import { useRef } from "react";
 
-import type { FileChange, Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma-sh/constants";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +32,7 @@ function tab(): Tab {
     title: "Pad",
     url: null,
     filePath: ".pragma/scratchpads/pad.mdx",
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

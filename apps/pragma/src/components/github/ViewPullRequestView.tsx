@@ -1,22 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma/constants";
+import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
-import {
-  Check,
-  CheckCircle2,
-  ChevronUp,
-  CircleDot,
-  Loader2,
-  TriangleAlert,
-  X,
-  XCircle,
-} from "lucide-react";
+import { Check, CheckCircle2, ChevronUp, CircleDot, Loader2, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
+import {
+  MergeConflictControls,
+  type PullRequestChanged,
+} from "@/components/github/MergeConflictControls";
 import { ChangeGroup } from "@/components/right-sidebar/ChangeGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -67,13 +62,7 @@ import {
   mergePullRequest,
   mergePullRequestStack,
 } from "@/lib/github";
-import {
-  browserOpenExternal,
-  githubAbortMerge,
-  githubDeleteRemoteBranch,
-  githubMergeBaseBranch,
-  githubMergeInProgress,
-} from "@/lib/tauri";
+import { browserOpenExternal, githubDeleteRemoteBranch } from "@/lib/tauri";
 import { requestReviewFocus } from "@/state/review-focus-store";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -309,7 +298,7 @@ function MergeOrStatus({
   worktreeId,
 }: {
   checks: ChecksStatus | null;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   onMergingChange?: (merging: boolean) => void;
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
@@ -351,7 +340,7 @@ export function ViewPullRequestView({
   repo: GitHubRepoRef;
   pr: PullRequestSummary;
   worktreeId: string;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   /** True while a merge mutation is in flight (shows the "merging" badge). */
   merging?: boolean;
 }) {
@@ -688,7 +677,7 @@ function MergeCard({
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
   worktreeId: string;
-  onChanged: () => void;
+  onChanged: PullRequestChanged;
   onMergingChange?: (merging: boolean) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -860,130 +849,6 @@ function stackCleanupTargets(
       ? [{ prNumber: entry.number, headRef: entry.headRef, worktreeId: matches[0]!.id }]
       : [];
   });
-}
-
-function MergeConflictControls({
-  onChanged,
-  pr,
-  repo,
-  worktreeId,
-}: {
-  onChanged: () => void;
-  pr: PullRequestSummary;
-  repo: GitHubRepoRef;
-  worktreeId: string;
-}) {
-  const [merging, setMerging] = useState(false);
-  const [mergeInProgress, setMergeInProgress] = useState<boolean | null>(null);
-  const [confirmingAbort, setConfirmingAbort] = useState(false);
-  const mergeStatusRequest = useRef(0);
-
-  const refreshMergeStatus = useCallback(async () => {
-    const request = ++mergeStatusRequest.current;
-    try {
-      const status = await githubMergeInProgress(worktreeId);
-      if (request === mergeStatusRequest.current) {
-        setMergeInProgress(status);
-      }
-    } catch (cause) {
-      if (request === mergeStatusRequest.current) {
-        toast.error(errorMessage(cause));
-      }
-    }
-  }, [worktreeId]);
-
-  useEffect(() => {
-    void refreshMergeStatus();
-  }, [refreshMergeStatus]);
-
-  const resolveConflicts = useCallback(async () => {
-    setMerging(true);
-    try {
-      const baseRemote =
-        pr.baseRepo && (pr.baseRepo.owner !== repo.owner || pr.baseRepo.repo !== repo.repo)
-          ? pr.baseRepo.cloneUrl
-          : null;
-      const hasConflicts = await githubMergeBaseBranch(worktreeId, pr.baseRef, baseRemote);
-      await refreshMergeStatus();
-      if (hasConflicts) {
-        toast.warning(`Merged ${pr.baseRef}. Resolve conflicting files in this worktree.`);
-      } else {
-        toast.success(`Merged latest ${pr.baseRef} and pushed ${pr.headRef}`);
-        onChanged();
-      }
-    } catch (cause) {
-      toast.error(errorMessage(cause));
-    } finally {
-      setMerging(false);
-    }
-  }, [
-    onChanged,
-    pr.baseRef,
-    pr.baseRepo,
-    pr.headRef,
-    refreshMergeStatus,
-    repo.owner,
-    repo.repo,
-    worktreeId,
-  ]);
-
-  const abortMerge = useCallback(async () => {
-    setConfirmingAbort(false);
-    setMerging(true);
-    try {
-      await githubAbortMerge(worktreeId);
-      await refreshMergeStatus();
-      toast.success("Merge aborted and conflict-resolution changes discarded");
-    } catch (cause) {
-      toast.error(errorMessage(cause));
-    } finally {
-      setMerging(false);
-    }
-  }, [refreshMergeStatus, worktreeId]);
-
-  return (
-    <>
-      <div className="flex items-start gap-2 text-destructive">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium">Merge conflict</p>
-          <p className="text-xs text-muted-foreground">
-            This pull request conflicts with {pr.baseRef}. Resolve it by merging latest {pr.baseRef}{" "}
-            into {pr.headRef} locally.
-          </p>
-        </div>
-      </div>
-      {mergeInProgress ? (
-        <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
-      ) : null}
-      <Button
-        className="w-full"
-        disabled={merging || mergeInProgress === null}
-        onClick={() => (mergeInProgress ? setConfirmingAbort(true) : void resolveConflicts())}
-        size="sm"
-        variant="destructive"
-      >
-        {merging || mergeInProgress === null ? <Loader2 className="animate-spin" /> : null}
-        {mergeInProgress ? "Abort Merge" : "Sync with Base Branch"}
-      </Button>
-
-      <AlertDialog onOpenChange={setConfirmingAbort} open={confirmingAbort}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Abort merge?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will discard all conflict-resolution changes and restore this worktree to its
-              state before merging {pr.baseRef}. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void abortMerge()}>Abort merge</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
 }
 
 function CheckStateIcon({ state }: { state: CheckStatusItem["state"] }) {

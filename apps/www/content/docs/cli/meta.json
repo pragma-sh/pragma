@@ -3,5 +3,5 @@
   "description": "pragma-cli — the terminal control surface for Pragma.",
   "icon": "Terminal",
   "root": true,
-  "pages": ["index", "worktrees", "tabs", "agents", "fanout", "scratchpad"]
+  "pages": ["index", "worktrees", "tabs", "agents", "fanout", "scratchpad", "whiteboard"]
 }

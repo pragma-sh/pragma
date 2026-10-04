@@ -11,12 +11,13 @@ import {
   RefreshCw,
   RotateCw,
   Server,
+  Settings,
   Sparkles,
   Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants, type Worktree } from "@pragma/constants";
+import { constants, type Worktree } from "@pragma-sh/constants";
 
 import { paletteItemLabel, paletteItemMeta } from "@/components/command-palette/palette-item";
 import { CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
@@ -320,6 +321,16 @@ export function CommandMode({
       disabled: !workspace.selectedProjectId,
       run: () => {
         kanban.openBoard();
+        close();
+      },
+    },
+    {
+      id: "settings",
+      label: "Open settings",
+      keywords: "preferences plugins keybindings themes",
+      icon: Settings,
+      run: () => {
+        kanban.openSettings();
         close();
       },
     },

@@ -22,8 +22,11 @@ import {
   createFolder,
   createPluginWebViewTab,
   createTab,
+  createWhiteboard,
   deleteFile,
   deleteWorktree,
+  editWhiteboard,
+  exportScratchpadHtml,
   fileDiff,
   githubAbortMerge,
   githubMergeBaseBranch,
@@ -64,9 +67,21 @@ import {
   watchWorktreeFiles,
   writeAutomationSource,
   writeFile,
+  viewWhiteboard,
 } from "./tauri";
 
 describe("stream IPC wrappers", () => {
+  it("passes standalone exports through the typed host adapter", async () => {
+    invokeMock.mockResolvedValue(".pragma/scratchpads/exports/plan.html");
+    expect(await exportScratchpadHtml("wt-1", "Plan", "<!doctype html>")).toBe(
+      ".pragma/scratchpads/exports/plan.html",
+    );
+    expect(invokeMock).toHaveBeenCalledWith("export_scratchpad_html", {
+      worktreeId: "wt-1",
+      title: "Plan",
+      html: "<!doctype html>",
+    });
+  });
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
@@ -102,7 +117,16 @@ describe("stream IPC wrappers", () => {
       cwd: "/repo",
       cols: 80,
       rows: 24,
+      env: null,
     });
+  });
+
+  it("passes an agent launch's account env to the spawn", () => {
+    void ptySpawnDetached("session", "worktree", "/repo", 80, 24, null, [["CODEX_HOME", "/h"]]);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "pty_spawn_detached",
+      expect.objectContaining({ env: [["CODEX_HOME", "/h"]] }),
+    );
   });
 
   it("tracks and stops exact filesystem subscriptions", async () => {
@@ -254,6 +278,48 @@ describe("browser IPC wrappers", () => {
     void worktreesAreRemote(["wt-1", "wt-2"]);
     expect(invokeMock).toHaveBeenCalledWith("worktrees_are_remote", {
       worktreeIds: ["wt-1", "wt-2"],
+    });
+  });
+});
+
+describe("whiteboard IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("forwards lossless scenes and render requests", () => {
+    const scene = {
+      type: "excalidraw" as const,
+      version: 2,
+      source: "test",
+      elements: [],
+      appState: {},
+      files: {},
+    };
+    void createWhiteboard("worktree", "Architecture", scene);
+    expect(invokeMock).toHaveBeenCalledWith("create_whiteboard", {
+      worktreeId: "worktree",
+      title: "Architecture",
+      scene,
+    });
+
+    void editWhiteboard("worktree", "board", "Updated", scene, 3);
+    expect(invokeMock).toHaveBeenCalledWith("edit_whiteboard", {
+      input: {
+        worktreeId: "worktree",
+        id: "board",
+        title: "Updated",
+        scene,
+        expectedVersion: 3,
+      },
+    });
+
+    void viewWhiteboard("worktree", "board");
+    expect(invokeMock).toHaveBeenCalledWith("view_whiteboard", {
+      worktreeId: "worktree",
+      id: "board",
+      dark: false,
     });
   });
 });

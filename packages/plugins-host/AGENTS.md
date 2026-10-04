@@ -1,4 +1,4 @@
-# packages/plugins-host — @pragma/plugins-host
+# packages/plugins-host — @pragma-sh/plugins-host
 
 Bun-compiled `pragma-plugins` host sidecar: resolves the agent catalog from plugin
 contributions and serves icon assets to `pragma-server`. Mirrors the `pragma-automations`
@@ -10,20 +10,33 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId) and correlated
-  `usageLimits` (`requestId` + optional `pluginId`). There is no separate `reload`
+- **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId), correlated
+  `usageLimits` (`requestId` + optional `pluginId`; each account provider's default login, for
+  `agent verify`), and correlated `accounts` (`requestId` + `op`: `providers`, `launch`, `identify`,
+  `usage`). `accounts` ops run **beside** the serial command queue: they shell out to harness
+  CLIs that take seconds, and one slow usage load must not stall a launch's env lookup. There is no separate `reload`
   command — host re-sends full `load` with fresh gateway credentials.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
-  correlated `usageLimits`, `error`, `log`.
+  correlated `usageLimits` and `accountsResult`, `error`, `log`.
+
+**Re-importing rebuilt bundles.** Each `load` re-imports every bundle through
+`freshImportSpecifier(mainPath, mtime)` (`@pragma-sh/sidecar-kit`). Do not go back to a
+`file:` URL with a `?mtime=` query: Bun ignores the query on `file:` URLs, so the sidecar kept
+serving the first-imported bundle and a `reload` silently returned stale definitions.
+
+**Launch options have a time budget.** An agent's modes, permission modes, and slash
+commands may start the tool itself (an ACP probe), so `assembleCatalog` waits at most
+`OPTIONS_BUDGET_MS` for them and otherwise uses, in order, a late result from an earlier
+load (the work is not cancelled), the agent's last-good catalog options, or its static lists.
+The ACP probes themselves are cached per project for `ACP_COMMANDS_TTL_MS` and limited to two
+at a time in `@pragma-sh/plugin`, so only the first load after a sidecar start waits on them.
 
 Supervisor stdin is the ownership boundary: EOF must terminate the Bun process so imported plugin timers cannot outlive `pragma-server`.
 
-On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
-resource directory, global `~/.pragma/config.json`, plus
+On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust
 `plugins.rs` `resolve_local_dir` semantics — accepted duplication, flagged as debt until
-resolution moves into `pragma-core`). It imports the built-in agent plugins
-(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-agent`) and any local-path plugins
+resolution moves into `pragma-core`). It imports those user-configured local-path plugins
 via Bun `import()` (the `pragma-watch` precedent), resolves async model providers through a
 `PragmaClient` pointed at the local gateway, hashes icon files (`sha256`, 256 KB cap), and
 assembles the `AgentCatalog`. A flaky model provider (exec throwing, or returning no
@@ -45,7 +58,8 @@ packages/plugins-host/
 │   ├── cli.ts        # Sidecar entry: stdin loop, resolves + assembles catalog, emits events
 │   ├── catalog.ts    # assembleCatalog, resolveModels, hashIcon, mimeForIcon, ICON_MAX_BYTES
 │   ├── manifest.ts   # resolveManifests: global + project .pragma/config.json plugins
-│   ├── usage-limits.ts # Loads plugin usage-limit providers with plugin-specific context
+│   ├── accounts.ts     # Account ops: provider metadata, login env, identify, usage (env applied to sdk.exec)
+│   ├── usage-limits.ts # Default-login usage per account provider (the `usageLimits` command)
 │   ├── lifecycle.ts # Executes onInstall/onPragmaLoad with durable dedupe markers
 │   ├── index.ts      # Re-exports for tests/consumers
 │   ├── catalog.test.ts
@@ -53,35 +67,22 @@ packages/plugins-host/
 └── package.json      # bin: pragma-plugins -> src/cli.ts; build:sidecar compiles dist/pragma-plugins
 ```
 
-## Shipped agents live in plugin packages
+## Agent integrations live in plugin packages
 
-The four bundled agent definitions (`claude-code`, `opencode`, `cursor`,
-`github-copilot`) live in their plugin packages' `src/pragma-plugin.ts`. Staging copies each
-package's `package.json`,
-`dist/`, and `assets/`; desktop and catalog sidecar discover and import those same bundles.
-When plugin ids collide, project overrides global and global overrides bundled; only the winner
-contributes agents, watchers, and usage providers. Do not statically import shipped packages or
-duplicate agent metadata here.
+Official agent definitions live in each integration package's `src/pragma-plugin.ts`.
+Pragma does not bundle or activate them. Onboarding installs only integrations selected by
+the user, globally registers their package paths, then desktop and catalog sidecar discover
+those configured bundles. When plugin ids collide, project overrides global; only the winner
+contributes agents, watchers, and account providers. Do not statically import agent packages or
+duplicate their metadata here.
 
 ## Catalog wire types
 
-`AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `PluginIconRef`
-(the by-hash icon reference, used by agents _and_ usage providers) and the
-`UsageLimit*` shapes are promoted into `@pragma/constants` (`schema.json`) so the wire
-type has one source of truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()`,
-`AssetsClient`, and `UsageLimitsClient`. Catalog
+`AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `AgentIcon` are
+promoted into `@pragma-sh/constants` (`schema.json`) so the wire type has one source of
+truth, shared with `@pragma-sh/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
 agents include resolved launch commands for each model/reasoning selection plus terminal
 input timing, allowing `pragma-server` to launch agents without desktop webview.
-
-## Usage limits
-
-`usage-limits.ts` owns the whole provider path: `assembleUsageProviders` collects each
-provider's static metadata at catalog time (hashing its icon into the same asset map as
-agent icons), and `loadUsageLimits` invokes the providers and validates what they return.
-Validation lives here, not in a client — desktop, mobile, and web all render the host's
-one checked cache (`pragma-server`'s `plugins_host.rs`), so a provider is invoked once
-however many clients are looking. A project-scoped plugin's providers answer only for the
-project that contributed them.
 
 ## Assets
 

@@ -1,5 +1,5 @@
-import type { AgentReportPayload, Tab } from "@pragma/constants";
-import { PragmaGatewayError } from "@pragma/sdk";
+import type { AgentReportPayload, Tab } from "@pragma-sh/constants";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import {
   createContext,
   useCallback,

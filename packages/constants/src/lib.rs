@@ -14,14 +14,27 @@ mod generated {
     // objects that both languages compare: a shell profile, a tab, a worktree
     // status. Without it each comparison has to be spelled out field by field,
     // which drifts the moment the schema gains a field.
-    typify::import_types!(schema = "schema.json", derives = [PartialEq]);
+    typify::import_types!(
+        schema = "schema.json",
+        derives = [PartialEq],
+        replace = {
+            ExcalidrawScene = serde_json::Value,
+        }
+    );
 }
 
+/// Lossless Excalidraw scene JSON. Validation happens at whiteboard boundaries.
+pub type ExcalidrawScene = serde_json::Value;
+
 pub use generated::{
+    AccountBindingScope, AccountBindingState, AccountBindings, AccountEffectiveBinding,
+    AccountIdentity, AccountLogin, AccountLoginSession, AccountProviderInfo, AccountSessionUse,
+    AccountUsageEntry, AccountsDefaults, AccountsListResult, AccountsState, AgentActivityOption,
     AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
-    AgentFileChangeKind, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
-    AgentMessageRole, AgentModelEntry, AgentQuestion, AgentReasoning, AgentReportKind,
-    AgentReportPayload, AgentSessionLaunchPayload, AgentSound, AgentSoundList, AgentStatus,
+    AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentLaunchArgs, AgentMessage,
+    AgentMessageKind, AgentMessageRole, AgentMode, AgentModelEntry, AgentPermissionMode,
+    AgentProgressEstimate, AgentQuestion, AgentReasoning, AgentReportKind, AgentReportPayload,
+    AgentSessionLaunchPayload, AgentSlashCommand, AgentSound, AgentSoundList, AgentStatus,
     AgentStatusDefaults, AgentStatusSettings, AgentToolCall, AgentToolCallStatus, Agents, AppInfo,
     AutomationInfo, AutomationPendingPayload, AutomationRootRegistration, AutomationScope,
     AutomationStatus, AutomationTriggerKind, AutomationTrust, AutomationWorktreeRoot,
@@ -38,20 +51,23 @@ pub use generated::{
     GitHubAuthStatus, GitHubPublishRequest, GitHubPullRequest, GitHubPullRequestState,
     GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus,
     KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
-    KeybindingsConfig, KeybindingsFiles, Links, NewWorktreeSpec, OpenPort, OtherSettings,
-    PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, Platform,
-    PlatformChord, PluginIconRef, PortForwardRequest, PortForwardResult, Project, ProjectIcon,
-    ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
-    QuestionOption, RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
-    RunScriptSplit, RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads,
-    ScriptMigrationSource, ScriptRunStatus, Scripts, SessionInfo, SettingsScope, ShellProfile,
-    SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind,
-    TerminalBackend, TerminalDefaults, TerminalSettings, TerminalViewportPolicy, Tunnel,
-    UpdateApplyMode, UpdatePlatform, Updates, UsageLimit, UsageLimitsPolicy, UsageLimitsProvider,
-    UsageLimitsReady, UsageLimitsResult, UsageLimitsSnapshot, UsageLimitsUnavailable,
-    UsageLimitsUnavailableReason, ViewportLease, Welcome, WindowDefaults, WorkspaceSnapshot,
-    Worktree, WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro,
-    WslDistroList,
+    KeybindingsConfig, KeybindingsFiles, NewWorktreeSpec, OpenPort, OtherSettings, PairingPayload,
+    PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, Platform, PlatformChord,
+    PortForwardRequest, PortForwardResult, Project, ProjectIcon, ProjectScriptsConfig, Protocol,
+    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption, RunScriptDefinition,
+    RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
+    RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource,
+    ScriptRunStatus, Scripts, SessionInfo, SettingsScope, ShellProfile, SplitHorizontal, SplitNode,
+    SplitSplit, SplitTabLeaf, SplitVertical, StorageDefaults, StorageFile, StorageFolder,
+    StorageReminderSettings, StorageSettings, StorageTreeEntry, StorageTreeEntryKind, System1,
+    System1AgentProgress, System1Settings, System1Status, Tab, TabKind, TerminalBackend,
+    TerminalDefaults, TerminalSettings, TerminalViewportPolicy, Tunnel, UpdateApplyMode,
+    UpdatePlatform, Updates, UsageLimit, UsageLimitsReady, UsageLimitsResult,
+    UsageLimitsUnavailable, UsageLimitsUnavailableReason, ViewportLease, Welcome, Whiteboard,
+    WhiteboardCreateInput, WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput,
+    WhiteboardListInput, WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree,
+    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, WorktreeStorage, Wsl,
+    WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.
@@ -69,7 +85,7 @@ mod tests {
 
     #[test]
     fn app_name_is_present() {
-        assert!(!CONSTANTS.app.name.is_empty());
+        assert_ne!(CONSTANTS.app.name, "");
     }
 
     #[test]
@@ -85,9 +101,18 @@ mod tests {
 
     #[test]
     fn protocol_contract_names_are_present() {
-        assert!(!CONSTANTS.protocol.rpc_methods.is_empty());
-        assert!(!CONSTANTS.protocol.events.is_empty());
-        assert!(!CONSTANTS.protocol.errors.is_empty());
+        assert_ne!(
+            CONSTANTS.protocol.rpc_methods,
+            [] as [super::generated::ProtocolRpcMethod; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.events,
+            [] as [super::generated::ProtocolEventKind; 0]
+        );
+        assert_ne!(
+            CONSTANTS.protocol.errors,
+            [] as [super::generated::ProtocolErrorCode; 0]
+        );
     }
 
     #[test]
@@ -106,9 +131,17 @@ mod tests {
     }
 
     #[test]
+    fn gateway_api_version_is_a_semver_string() {
+        assert!(
+            CONSTANTS.gateway.api_version.contains('.'),
+            "gateway.apiVersion must be a hand-owned SemVer string"
+        );
+    }
+
+    #[test]
     fn updates_defaults_are_present() {
-        assert!(!CONSTANTS.updates.check_url.is_empty());
-        assert!(!CONSTANTS.updates.dev_check_url.is_empty());
+        assert_ne!(CONSTANTS.updates.check_url, "");
+        assert_ne!(CONSTANTS.updates.dev_check_url, "");
         assert!(CONSTANTS.updates.poll_interval_ms >= 1000);
     }
 }

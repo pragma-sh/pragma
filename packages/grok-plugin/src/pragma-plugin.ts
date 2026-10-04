@@ -1,12 +1,13 @@
 import {
+  defineAccounts,
   defineAgent,
   definePlugin,
-  defineUsageLimitProvider,
+  slashCommandProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { asRecord, asText, readGrokAcp } from "./acp";
 import { loadGrokUsageLimits, PRIMARY_LIMIT_ID } from "./usage-limits";
@@ -32,6 +33,25 @@ const baseWatcher = createTuiWatcher({
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 
+/** Grok built-ins worth starting a session with; skills and commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "compact", description: "Compress conversation history", argumentHint: "[context]" },
+  { name: "context", description: "Show the context window breakdown" },
+  { name: "session-info", description: "Show session details" },
+];
+/** Grok reads its own, `.agents/`, and Claude Code's skill and command roots. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: ".grok/skills", layout: "skills" as const },
+  { dir: ".grok/commands", layout: "files" as const, recursive: false },
+  { dir: ".agents/skills", layout: "skills" as const },
+  { dir: ".claude/skills", layout: "skills" as const },
+  { dir: ".claude/commands", layout: "files" as const, recursive: false },
+  { dir: "~/.grok/skills", layout: "skills" as const },
+  { dir: "~/.grok/commands", layout: "files" as const, recursive: false },
+  { dir: "~/.claude/skills", layout: "skills" as const },
+  { dir: "~/.claude/commands", layout: "files" as const, recursive: false },
+];
+
 /**
  * Pragma plugin for the Grok Build CLI, bundled to `dist/pragma-plugin.mjs`.
  *
@@ -44,17 +64,26 @@ const baseWatcher = createTuiWatcher({
 export const grokAgentPlugin: PluginDefinition = definePlugin({
   name: "Grok",
   description: "Launch Grok Build from Pragma.",
-  usageLimits: [
-    defineUsageLimitProvider({
-      id: "grok",
-      title: "Grok",
+  accounts: defineAccounts([
+    {
+      provider: "xai",
+      agent: "grok",
       dashboardUrl: "https://grok.com/?_s=usage",
       iconPath: "assets/grok.svg",
-      primaryLimitId: PRIMARY_LIMIT_ID,
-      refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
-      load: loadGrokUsageLimits,
-    }),
-  ],
+      login: {
+        command: ["grok", "login", "--oauth"],
+        instructions: "Finish signing in to Grok in the browser tab that opens.",
+      },
+      // `GROK_HOME` moves `~/.grok` (config and cached credentials) wholesale.
+      env: (home) => ({ GROK_HOME: home }),
+      credentialPath: (home) => `${home ?? "~/.grok"}/auth.json`,
+      usageLimits: {
+        primaryLimitId: PRIMARY_LIMIT_ID,
+        refreshIntervalMs: USAGE_REFRESH_INTERVAL_MS,
+        load: loadGrokUsageLimits,
+      },
+    },
+  ]),
   watchers: [
     {
       agent: "grok",
@@ -90,24 +119,25 @@ export const grokAgentPlugin: PluginDefinition = definePlugin({
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: loadGrokModels,
-      // Grok exposes no `--permission-mode`; these are the real launch flags
-      // that change how much it asks for.
+      // First entry is the default: no flag, so Grok's own config decides.
       permissionModes: [
-        { id: "default", name: "Ask for approval" },
-        { id: "no-plan", name: "Skip plan mode" },
-        { id: "always-approve", name: "Auto-approve tools" },
+        { id: "default", name: "Use Grok config" },
+        { id: "acceptEdits", name: "Accept edits" },
+        { id: "auto", name: "Auto" },
+        { id: "plan", name: "Plan mode" },
+        { id: "dontAsk", name: "Don't ask" },
+        { id: "bypassPermissions", name: "Bypass permissions" },
       ],
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["grok", "agent", "stdio"] },
+      }),
       // `commandApproval`: grok has no permission-request hook to block on.
       excludeFeatures: ["commandApproval"],
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: (reasoningId: string) => ["--reasoning-effort", reasoningId],
-        permissionMode: (permissionModeId: string) => {
-          if (permissionModeId === "always-approve") {
-            return ["--always-approve"];
-          }
-          return permissionModeId === "no-plan" ? ["--no-plan"] : [];
-        },
+        permissionMode: (permissionModeId: string) =>
+          permissionModeId === "default" ? [] : ["--permission-mode", permissionModeId],
       },
     }),
   ],

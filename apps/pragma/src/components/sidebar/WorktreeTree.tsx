@@ -1,9 +1,11 @@
 import {
+  createContext,
   forwardRef,
   Fragment,
   type ComponentPropsWithoutRef,
   type RefObject,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -11,11 +13,12 @@ import {
 } from "react";
 
 import { Icon } from "@iconify/react";
-import type { Fanout, Worktree } from "@pragma/constants";
+import type { Fanout, Worktree } from "@pragma-sh/constants";
 import {
   ChevronRight,
   Copy,
   EyeOff,
+  Folder,
   GitBranch,
   GitBranchPlus,
   GitMerge,
@@ -48,24 +51,33 @@ import {
 } from "@/lib/github";
 import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { githubRepoRef, worktreesMergedStatus } from "@/lib/tauri";
-import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
+import { buildWorktreeTree, pendingWorktreeIndex, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
+import { projectIsGit, worktreeDisplayLabel } from "@/lib/non-git-project";
 import { cn } from "@/lib/utils";
 import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
+import { useCompactWorktreeRows } from "@/state/sidebar-preferences";
 import { toggleWorktreeCollapsed, useCollapsedWorktreeIds } from "@/state/worktree-collapsed";
 import {
   FanoutIndicator,
   FanoutMembersSlot,
   useFanoutForParent,
 } from "@/components/sidebar/FanoutGroup";
+import { PendingWorktreeSlot } from "@/components/sidebar/PendingWorktreeSlot";
+import {
+  hasWorktreeRowDetails,
+  useWorktreeRowDetails,
+  WorktreeRowDetails,
+} from "@/components/sidebar/WorktreeRowDetails";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 import {
   setWorktreeShortcutOrder,
   useShortcutHint,
@@ -120,15 +132,30 @@ function applyMergedStatusFailure(
   return sameMergedStatus(previous, next) ? previous : next;
 }
 
-/** True when both maps hold the same worktree-id → PR lifecycle entries. */
-function samePrLifecycle(
-  a: Record<string, GitHubPrLifecycle>,
-  b: Record<string, GitHubPrLifecycle>,
-): boolean {
+/** A worktree's pull request as the sidebar shows it: lifecycle plus number. */
+interface WorktreePr {
+  lifecycle: GitHubPrLifecycle;
+  number: number | null;
+}
+
+/** True when both maps hold the same worktree-id → PR entries. */
+function samePrs(a: Record<string, WorktreePr>, b: Record<string, WorktreePr>): boolean {
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
-  return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every(
+      (key) => a[key]?.lifecycle === b[key]?.lifecycle && a[key]?.number === b[key]?.number,
+    )
+  );
 }
+
+/** Lifecycles whose PR is still open, so its number is worth showing on the row. */
+const OPEN_PR_LIFECYCLES: ReadonlySet<GitHubPrLifecycle> = new Set(["open", "draft", "merging"]);
+
+/** PR numbers by worktree id, for the detailed row layout. Provided by the tree
+ *  so the number is not threaded through every row like the lifecycle is. */
+const WorktreePrNumbersContext = createContext<Readonly<Record<string, number>>>({});
 
 /**
  * Icon color for the worktree merge glyph from PR lifecycle:
@@ -161,23 +188,23 @@ function worktreeGlyph(
 }
 
 /**
- * Poll GitHub PR lifecycle per child worktree (cached; background revalidate).
- * Green = open PR, purple = merged, red = closed. Same cadence as the PR tab.
+ * Poll GitHub PR lifecycle (and number) per child worktree (cached; background
+ * revalidate). Green = open PR, purple = merged, red = closed. Same cadence as
+ * the PR tab.
  */
 function useWorktreePrLifecycles(
   worktrees: Worktree[],
   authenticated: boolean,
-): Record<string, GitHubPrLifecycle> {
-  const [prLifecycleByWorktreeId, setPrLifecycleByWorktreeId] = useState<
-    Record<string, GitHubPrLifecycle>
-  >({});
+): {
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  prNumberByWorktreeId: Record<string, number>;
+} {
+  const [prByWorktreeId, setPrByWorktreeId] = useState<Record<string, WorktreePr>>({});
 
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
     if (!authenticated || childWorktrees.length === 0) {
-      setPrLifecycleByWorktreeId((previous) =>
-        Object.keys(previous).length === 0 ? previous : {},
-      );
+      setPrByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
       return;
     }
     let cancelled = false;
@@ -192,7 +219,10 @@ function useWorktreePrLifecycles(
             try {
               const repo = await githubRepoRef(worktree.id);
               const pr = await findPullRequestForBranch(repo, { includeClosed: true });
-              return [worktree.id, pullRequestLifecycle(pr)] as const;
+              return [
+                worktree.id,
+                { lifecycle: pullRequestLifecycle(pr), number: pr?.number ?? null },
+              ] as const;
             } catch {
               // Failed lookup: report no lifecycle at all rather than "none",
               // so a transient GitHub error can't sort the row into the no-PR
@@ -202,14 +232,14 @@ function useWorktreePrLifecycles(
           }),
         );
         if (cancelled) return;
-        setPrLifecycleByWorktreeId((previous) => {
-          const next: Record<string, GitHubPrLifecycle> = {};
-          for (const [id, lifecycle] of entries) {
+        setPrByWorktreeId((previous) => {
+          const next: Record<string, WorktreePr> = {};
+          for (const [id, pr] of entries) {
             // Carry the last known lifecycle forward across a failed refresh.
-            const resolved = lifecycle ?? previous[id];
+            const resolved = pr ?? previous[id];
             if (resolved !== undefined) next[id] = resolved;
           }
-          return samePrLifecycle(previous, next) ? previous : next;
+          return samePrs(previous, next) ? previous : next;
         });
       } finally {
         refreshInFlight = false;
@@ -226,7 +256,15 @@ function useWorktreePrLifecycles(
     };
   }, [worktrees, authenticated]);
 
-  return prLifecycleByWorktreeId;
+  return useMemo(() => {
+    const prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle> = {};
+    const prNumberByWorktreeId: Record<string, number> = {};
+    for (const [id, pr] of Object.entries(prByWorktreeId)) {
+      prLifecycleByWorktreeId[id] = pr.lifecycle;
+      if (pr.number !== null) prNumberByWorktreeId[id] = pr.number;
+    }
+    return { prLifecycleByWorktreeId, prNumberByWorktreeId };
+  }, [prByWorktreeId]);
 }
 
 /** Tracks local merged-into-parent status for child worktrees.
@@ -477,6 +515,68 @@ function HiddenWorktreesSection({
   );
 }
 
+/**
+ * Sorted insertion index for the optimistic pending-worktree row among
+ * `siblings`, or -1 when no creation targets `parentWorktreeId` right now.
+ * Shared by the root and nested row lists so the pending row lands where the
+ * real worktree will once creation finishes, instead of jumping to it.
+ */
+function usePendingRowIndex(
+  siblings: WorktreeNode[],
+  parentWorktreeId: string | undefined,
+  pinTimes: ReadonlyMap<string, number>,
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
+): number {
+  const workspace = useWorkspace();
+  const { creation } = useWorktreeCreation();
+  const pendingForParent =
+    parentWorktreeId &&
+    creation &&
+    creation.projectId === workspace.selectedProjectId &&
+    creation.parentWorktreeId === parentWorktreeId;
+  return pendingForParent
+    ? pendingWorktreeIndex(siblings, creation.label, pinTimes, prLifecycleByWorktreeId)
+    : -1;
+}
+
+/** One root row, with the optimistic pending row spliced in before it when
+ *  `pendingIndex` points here. */
+function RootRow({
+  node,
+  index,
+  separatorIndex,
+  pendingIndex,
+  mainWorktreeId,
+  mergedByWorktreeId,
+  prLifecycleByWorktreeId,
+  onCreateChild,
+}: {
+  node: WorktreeNode;
+  index: number;
+  separatorIndex: number;
+  pendingIndex: number;
+  mainWorktreeId: string | undefined;
+  mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  onCreateChild: (parentWorktreeId: string) => void;
+}) {
+  return (
+    <Fragment>
+      {index === separatorIndex ? <Separator className="my-2" /> : null}
+      {index === pendingIndex && mainWorktreeId ? (
+        <PendingWorktreeSlot depth={0} parentWorktreeId={mainWorktreeId} />
+      ) : null}
+      <WorktreeRow
+        depth={0}
+        mergedByWorktreeId={mergedByWorktreeId}
+        node={node}
+        onCreateChild={onCreateChild}
+        prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+      />
+    </Fragment>
+  );
+}
+
 function WorktreeTreeContent({
   tree,
   hidden,
@@ -497,23 +597,31 @@ function WorktreeTreeContent({
   onUnhide: (worktreeId: string) => void;
 }) {
   const pinnedRootCount = tree.filter((node) => pinTimes.has(node.worktree.id)).length;
+  // `buildWorktreeTree` promotes main's children to roots, so a worktree being
+  // created from main gets a root-level pending row rather than a nested one.
+  const mainWorktreeId = tree.find((node) => node.worktree.isMain)?.worktree.id;
   const separatorIndex =
     pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
+  const pendingIndex = usePendingRowIndex(tree, mainWorktreeId, pinTimes, prLifecycleByWorktreeId);
   return (
     <WorktreeShortcutOrderProvider worktreeIds={shortcutOrder}>
       <div className="space-y-1">
         {tree.map((node, index) => (
-          <Fragment key={node.worktree.id}>
-            {index === separatorIndex ? <Separator className="my-2" /> : null}
-            <WorktreeRow
-              depth={0}
-              mergedByWorktreeId={mergedByWorktreeId}
-              node={node}
-              onCreateChild={onCreateChild}
-              prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-            />
-          </Fragment>
+          <RootRow
+            key={node.worktree.id}
+            index={index}
+            mainWorktreeId={mainWorktreeId}
+            mergedByWorktreeId={mergedByWorktreeId}
+            node={node}
+            onCreateChild={onCreateChild}
+            pendingIndex={pendingIndex}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+            separatorIndex={separatorIndex}
+          />
         ))}
+        {pendingIndex === tree.length && mainWorktreeId ? (
+          <PendingWorktreeSlot depth={0} parentWorktreeId={mainWorktreeId} />
+        ) : null}
         {hidden.length > 0 ? (
           <HiddenWorktreesSection
             hidden={hidden}
@@ -538,7 +646,10 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   );
   const hidden = worktrees.filter((w) => w.hidden);
   const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
-  const prLifecycleByWorktreeId = useWorktreePrLifecycles(worktrees, authenticated);
+  const { prLifecycleByWorktreeId, prNumberByWorktreeId } = useWorktreePrLifecycles(
+    worktrees,
+    authenticated,
+  );
   const { fanouts } = useFanouts();
   // Attempts are rendered under their fanout group, not as ordinary children:
   // a nested worktree and an attempt look identical from `parentId` alone.
@@ -567,16 +678,18 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   }
 
   return (
-    <WorktreeTreeContent
-      hidden={hidden}
-      mergedByWorktreeId={mergedByWorktreeId}
-      onCreateChild={onCreateChild}
-      onUnhide={(id) => void workspace.hideWorktree(id, false)}
-      pinTimes={pinTimes}
-      prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-      shortcutOrder={shortcutOrder}
-      tree={tree}
-    />
+    <WorktreePrNumbersContext.Provider value={prNumberByWorktreeId}>
+      <WorktreeTreeContent
+        hidden={hidden}
+        mergedByWorktreeId={mergedByWorktreeId}
+        onCreateChild={onCreateChild}
+        onUnhide={(id) => void workspace.hideWorktree(id, false)}
+        pinTimes={pinTimes}
+        prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+        shortcutOrder={shortcutOrder}
+        tree={tree}
+      />
+    </WorktreePrNumbersContext.Provider>
   );
 }
 
@@ -634,11 +747,6 @@ function useWorktreeRename(worktree: Worktree): {
 }
 
 type RenameApi = ReturnType<typeof useWorktreeRename>;
-
-/** Resolve a worktree's display label (`main` for the main worktree). */
-function worktreeLabel(worktree: Worktree): string {
-  return worktree.isMain ? "main" : (worktree.title ?? worktree.branch);
-}
 
 interface WorktreeRowLabelState {
   depth: number;
@@ -796,6 +904,25 @@ function WorktreeRowActions({
   );
 }
 
+/**
+ * The detailed layout's extra lines for a row — open PR number, git action or
+ * "Ready for PR", agents — or undefined in the compact layout or when there is
+ * nothing to add.
+ */
+function useWorktreeRowDetailsSlot(worktreeId: string, prLifecycle: GitHubPrLifecycle | undefined) {
+  const compact = useCompactWorktreeRows();
+  const prNumbers = useContext(WorktreePrNumbersContext);
+  const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
+  // Only a live PR suppresses "Ready for PR"; a closed or merged one is history.
+  const data = useWorktreeRowDetails(
+    worktreeId,
+    prOpen ? (prNumbers[worktreeId] ?? null) : null,
+    prOpen,
+  );
+  if (compact || !hasWorktreeRowDetails(data)) return undefined;
+  return <WorktreeRowDetails data={data} worktreeId={worktreeId} />;
+}
+
 /** The row's visible label: expand caret, branch icon, name/rename input, actions. */
 const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
   function WorktreeRowLabel({ row, actions, rename, className, style, ...props }, ref) {
@@ -823,8 +950,10 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       openDelete,
     } = actions;
     const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
+    const details = useWorktreeRowDetailsSlot(worktreeId, prLifecycle);
     return (
       <WorktreeRowFrame
+        details={details}
         ref={ref}
         className={className}
         style={style}
@@ -1070,7 +1199,10 @@ function useWorktreeRow(
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
 ) {
   const controls = useWorktreeRowControls(node, onCreateChild);
-  const label = worktreeLabel(node.worktree);
+  const { activeProject } = useWorkspace();
+  // A project that is not a git repository has one root folder, not a branch.
+  const plainRoot = node.worktree.isMain && !projectIsGit(activeProject);
+  const label = worktreeDisplayLabel(node.worktree, activeProject);
   // Fanout attempts hang under the row like children do, so the caret has to
   // account for them — otherwise a parent with only attempts can't be collapsed.
   const fanout = useFanoutForParent(node.worktree.id);
@@ -1079,7 +1211,8 @@ function useWorktreeRow(
   const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
-  const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
+  const { Icon: glyph } = worktreeGlyph(merged, prLifecycle);
+  const WorktreeIcon = plainRoot ? Folder : glyph;
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
   const shortcutIndex = useWorktreeShortcutIndex(node.worktree.id);
   const shortcutHint = useShortcutHint("worktree", shortcutIndex);
@@ -1109,16 +1242,22 @@ function useWorktreeRowControls(
 ) {
   const workspace = useWorkspace();
   const kanban = useKanban();
+  const { leaveCreation } = useWorktreeCreation();
   const rename = useWorktreeRename(node.worktree);
   const collapsedIds = useCollapsedWorktreeIds();
   const expanded = !collapsedIds.has(node.worktree.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const handleSelect = useCallback(() => {
+    // Clicking any row is an explicit "back to work": leave the full-frame
+    // creation screen explicitly, so clicking the row that is already
+    // selected — where the selection identity does not change — still returns
+    // to the terminal instead of leaving the user stuck on the screen.
+    leaveCreation();
     workspace.selectWorktree(node.worktree.id);
     // Selecting a worktree always returns to the terminal view, even when the
     // agent board is the visible surface.
     kanban.exitBoard();
-  }, [workspace, kanban, node.worktree.id]);
+  }, [leaveCreation, workspace, kanban, node.worktree.id]);
   const handleCreateChild = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
     onCreateChild(node.worktree.id);
@@ -1159,19 +1298,35 @@ function WorktreeChildren({
   mergedByWorktreeId: Record<string, boolean>;
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {
+  const pinTimes = useWorktreePins();
+  // Main is never a parent in the tree, so a worktree created from it gets its
+  // pending row as a root instead (see WorktreeTreeContent).
+  const pendingIndex = usePendingRowIndex(
+    node.children,
+    node.worktree.isMain ? undefined : node.worktree.id,
+    pinTimes,
+    prLifecycleByWorktreeId,
+  );
   return (
     <>
       <FanoutMembersSlot depth={depth + 1} worktreeId={node.worktree.id} />
-      {node.children.map((child) => (
-        <WorktreeRow
-          key={child.worktree.id}
-          depth={depth + 1}
-          node={child}
-          onCreateChild={onCreateChild}
-          mergedByWorktreeId={mergedByWorktreeId}
-          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-        />
+      {node.children.map((child, index) => (
+        <Fragment key={child.worktree.id}>
+          {index === pendingIndex ? (
+            <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
+          ) : null}
+          <WorktreeRow
+            depth={depth + 1}
+            node={child}
+            onCreateChild={onCreateChild}
+            mergedByWorktreeId={mergedByWorktreeId}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+          />
+        </Fragment>
       ))}
+      {pendingIndex === node.children.length ? (
+        <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
+      ) : null}
     </>
   );
 }

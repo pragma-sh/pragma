@@ -12,7 +12,7 @@ import type {
   FanoutSendResult,
   FanoutSubscriptionPayload,
   ProtocolEventKind,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { base64ToBytes } from "./encoding";
 import type { EventsClient, ProtocolSubscriptionEvent } from "./events-client";

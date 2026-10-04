@@ -1,4 +1,4 @@
-import type { PragmaClientConfig } from "@pragma/sdk";
+import type { PragmaClientConfig } from "@pragma-sh/sdk";
 import { fetch as expoFetch } from "expo/fetch";
 
 /**

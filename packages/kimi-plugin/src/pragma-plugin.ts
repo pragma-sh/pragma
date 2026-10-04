@@ -1,12 +1,45 @@
-import { defineAgent, definePlugin, type PluginDefinition } from "@pragma/plugin/catalog";
-import { createTuiWatcher } from "@pragma/watcher-kit";
+import {
+  defineAccounts,
+  defineAgent,
+  definePlugin,
+  modeProvider,
+  slashCommandProvider,
+  type PluginDefinition,
+} from "@pragma-sh/plugin/catalog";
+import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
+import { kimiApiKeyProviders } from "./accounts";
 import { loadKimiModels } from "./models";
 
 /** Lets Kimi's paste-aware composer commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
 /** Kimi paints its TUI within a couple of seconds of launch; type after it. */
 const PREFILL_DELAY_MS = 2500;
+
+/** Kimi built-ins worth starting a session with; skills and commands are discovered. */
+const BUILTIN_SLASH_COMMANDS = [
+  { name: "init", description: "Analyze the project and write AGENTS.md" },
+  { name: "compact", description: "Compact the conversation context" },
+];
+/** Kimi invokes skills as `/skill:<name>`; Claude Code commands keep their name. */
+const SLASH_COMMAND_SOURCES = [
+  { dir: ".kimi-code/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: ".agents/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: ".claude/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: ".claude/commands", layout: "files" as const },
+  { dir: "~/.kimi-code/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: "~/.agents/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: "~/.claude/skills", layout: "skills" as const, prefix: "skill:" },
+  { dir: "~/.claude/commands", layout: "files" as const },
+];
+/** Agent profiles selected with `--agent <name>`. */
+const AGENT_SOURCES = [
+  { dir: ".kimi-code/agents", layout: "files" as const, nameFromFrontmatter: true },
+  { dir: ".agents/agents", layout: "files" as const, nameFromFrontmatter: true },
+  { dir: "~/.kimi-code/agents", layout: "files" as const, nameFromFrontmatter: true },
+  { dir: "~/.agents/agents", layout: "files" as const, nameFromFrontmatter: true },
+];
+const DEFAULT_MODE = "default";
 
 const baseWatcher = createTuiWatcher({
   agent: "kimi",
@@ -30,6 +63,22 @@ const baseWatcher = createTuiWatcher({
 export const kimiAgentPlugin: PluginDefinition = definePlugin({
   name: "Kimi Code",
   description: "Launch Kimi Code from Pragma.",
+  accounts: defineAccounts([
+    {
+      provider: "moonshot",
+      agent: "kimi",
+      iconPath: "assets/kimi.png",
+      login: {
+        command: ["kimi", "login"],
+        instructions: "Open the link, sign in to Kimi, and enter the code shown here.",
+      },
+      // `KIMI_CODE_HOME` is Kimi Code's whole data root: config, sessions,
+      // and OAuth tokens.
+      env: (home) => ({ KIMI_CODE_HOME: home }),
+      credentialPath: (home) => home ?? "~/.kimi-code",
+    },
+    ...kimiApiKeyProviders(),
+  ]),
   watchers: [
     {
       agent: "kimi",
@@ -60,35 +109,36 @@ export const kimiAgentPlugin: PluginDefinition = definePlugin({
       name: "Kimi Code",
       icon: () => null,
       iconPath: "assets/kimi.png",
-      // `-y` (yolo) is the default launch: Kimi's manual mode gates Bash behind
-      // a TUI approval prompt, so a plain `kimi` never completes a safe shell
-      // command headlessly (`pragma-cli agent verify` `command-no-permission`).
-      // Baking `-y` into the base command mirrors Claude Code's
-      // `--permission-mode auto`; the mode selector below is declared for when
-      // the host wires it up (then this base and the per-mode args must be
-      // reconciled).
-      launch: { command: ["kimi", "-y"] },
+      launch: { command: ["kimi"] },
       prefillDelayMs: PREFILL_DELAY_MS,
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: loadKimiModels,
-      // First entry is the default; it matches the `-y` baked into `launch`.
-      // These are the real launch flags that change how much Kimi asks for.
+      // First entry is the default: `-y` (yolo), because Kimi's manual mode
+      // gates Bash behind a TUI approval prompt, so a plain `kimi` never
+      // completes a safe shell command headlessly (`pragma-cli agent verify`
+      // `command-no-permission`). These are the real launch flags that change
+      // how much Kimi asks for.
       permissionModes: [
         { id: "yolo", name: "Auto-approve tools" },
         { id: "default", name: "Ask for approval" },
         { id: "auto", name: "Fully autonomous" },
         { id: "plan", name: "Plan mode" },
       ],
+      modes: modeProvider([{ id: DEFAULT_MODE, name: "Default" }], AGENT_SOURCES),
+      slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
+        acp: { command: ["kimi", "acp"] },
+      }),
       // `commandApproval`: Kimi's permission-request hook is fire-and-forget,
       // so Pragma cannot approve on the agent's behalf.
       excludeFeatures: ["commandApproval"],
       args: {
         model: (modelId: string) => ["-m", modelId],
         reasoning: () => [],
+        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
         permissionMode: (permissionModeId: string) => {
           if (permissionModeId === "yolo") {
-            return [];
+            return ["-y"];
           }
           if (permissionModeId === "auto") {
             return ["--auto"];

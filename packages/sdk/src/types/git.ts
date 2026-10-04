@@ -1,4 +1,4 @@
-import type { BranchSyncStatus, FileDiff, WorktreeChanges } from "@pragma/constants";
+import type { BranchSyncStatus, FileDiff, WorktreeChanges } from "@pragma-sh/constants";
 
 export type { BranchSyncStatus, FileDiff, WorktreeChanges };
 

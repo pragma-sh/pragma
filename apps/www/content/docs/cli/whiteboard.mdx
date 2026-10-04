@@ -1,0 +1,53 @@
+---
+title: Whiteboard
+description: pragma-cli whiteboard — create, search, read, edit, render, and delete worktree-scoped Excalidraw boards.
+---
+
+```sh
+pragma-cli whiteboard create [--title <TITLE>] <SCENE|->
+pragma-cli whiteboard list
+pragma-cli whiteboard search <QUERY>
+pragma-cli whiteboard get <ID>
+pragma-cli whiteboard edit <ID> --title <TITLE> <SCENE|->
+pragma-cli whiteboard view <ID> <PNG_PATH>
+pragma-cli whiteboard delete <ID> [--yes]
+```
+
+Whiteboards are durable Excalidraw scenes the host owns, scoped to one worktree — see
+[Whiteboards](/docs/user-guide/whiteboards) for the user-facing tour. Every command talks
+directly to `pragma-server`, so it works whether or not the desktop window is open. The
+worktree defaults to `$PRAGMA_WORKTREE_ID`; pass `--worktree <id>` to act elsewhere.
+
+| Command  | Notes                                                                             |
+| -------- | --------------------------------------------------------------------------------- |
+| `create` | Reads scene JSON from a file or stdin (`-`). Prints the durable id and version.   |
+| `list`   | Every board in the worktree.                                                      |
+| `search` | Case-insensitive match against titles **and** the scene's text elements.          |
+| `get`    | One board, including its full scene JSON.                                         |
+| `edit`   | Replaces title and scene; the stored version must still be the one you read.      |
+| `view`   | Writes a natively rendered PNG to the given path — no browser or canvas involved. |
+| `delete` | Prompts for confirmation unless `--yes` is passed.                                |
+
+## Scenes
+
+A scene is complete Excalidraw JSON: `type: "excalidraw"`, a `version`, `elements`,
+`appState`, and `files`. It is stored losslessly, so **preserve unknown fields** when you
+revise a board — read it with `get`, change what you mean to change, and write it back:
+
+```sh
+pragma-cli --json whiteboard get wb_123 > scene.json
+# edit scene.json
+pragma-cli --json whiteboard edit wb_123 --title "Request flow v2" scene.json
+```
+
+`edit` supplies the version it just read, so a concurrent writer makes the write fail
+rather than clobbering their work. On a conflict, re-read, reconcile, and retry.
+
+<Callout title="Embedding in a scratchpad">
+  Create the board first, then put its id in the MDX as `<Whiteboard id="…" />` — the component
+  keeps the live board on screen. Don't paste scene JSON into a scratchpad and don't substitute a
+  rendered PNG. See [Scratchpad](/docs/cli/scratchpad).
+</Callout>
+
+For long-lived code, use the SDK's [`client.whiteboards`](/docs/sdk/whiteboards) instead
+of shelling out.

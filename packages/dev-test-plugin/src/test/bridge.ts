@@ -2,8 +2,8 @@ import * as React from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 
-import type { PragmaClient } from "@pragma/sdk";
-import type { PragmaBridge, PragmaHooksBridge } from "@pragma/plugin";
+import type { PragmaClient } from "@pragma-sh/sdk";
+import type { PragmaBridge, PragmaHooksBridge } from "@pragma-sh/plugin";
 
 type EventHandler = (payload: unknown) => void;
 type StoredSetter<T> = (value: T | ((prev: T) => T)) => void;
@@ -28,7 +28,7 @@ const EMPTY_SDK = {
   events: { subscribe: async function* (): AsyncGenerator<TestSubscriptionEvent> {} },
 } as unknown as PragmaClient;
 
-/** UI primitives captured once by `@pragma/plugin/ui` at module load. */
+/** UI primitives captured once by `@pragma-sh/plugin/ui` at module load. */
 const Button = ({ variant: _variant, size: _size, ...rest }: Record<string, unknown>) =>
   React.createElement("button", rest);
 const Kbd = (props: Record<string, unknown>) => React.createElement("kbd", props);
@@ -52,11 +52,20 @@ export function createBridge(hooks: Partial<PragmaHooksBridge> = {}): BridgeHand
     useWebViewPayload: () => undefined,
     useNotify: () => () => undefined,
     useStoredState: <T>(key: string, initialValue: T) => {
-      const value = (stored.has(key) ? stored.get(key) : initialValue) as T;
-      const setter: StoredSetter<T> = (next) => {
-        stored.set(key, next);
-      };
-      return [value, setter];
+      const [value, setValue] = React.useState<T>(() =>
+        stored.has(key) ? (stored.get(key) as T) : initialValue,
+      );
+      const setter: StoredSetter<T> = React.useCallback(
+        (next) => {
+          setValue((previous) => {
+            const resolved = typeof next === "function" ? (next as (prev: T) => T)(previous) : next;
+            stored.set(key, resolved);
+            return resolved;
+          });
+        },
+        [key],
+      );
+      return [value, setter] as [T, StoredSetter<T>];
     },
     useSdkQuery: () => ({ data: undefined, error: null, loading: true, refetch: () => undefined }),
     useEvent: <TPayload>(name: string, handler: (payload: TPayload) => void): void => {

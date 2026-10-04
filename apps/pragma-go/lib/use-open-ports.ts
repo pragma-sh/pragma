@@ -1,5 +1,5 @@
-import type { OpenPort } from "@pragma/sdk";
-import { PragmaGatewayError } from "@pragma/sdk";
+import type { OpenPort } from "@pragma-sh/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { AppState } from "react-native";

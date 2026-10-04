@@ -1,5 +1,5 @@
 {
-  "name": "@pragma/brand",
+  "name": "@pragma-sh/brand",
   "version": "0.1.0",
   "private": true,
   "description": "The Pragma mark as vector geometry plus its colour treatments. Source of truth for every rendered Pragma icon.",

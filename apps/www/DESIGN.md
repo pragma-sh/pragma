@@ -23,6 +23,18 @@ colors:
   gradient-coral: "#ff5577"
   semantic-success: "#22c55e"
 
+colors-light:
+  # The light appearance of the surface/ink tokens above. Primary flips too —
+  # in light mode the primary CTA is ink-on-canvas, not a restated white pill.
+  # accent-blue, semantic-success, and the gradient family are unchanged.
+  ink: "#0b0b0c"
+  ink-muted: "#63636b"
+  canvas: "#ffffff"
+  surface-1: "#f4f4f5"
+  surface-2: "#e9e9ec"
+  hairline: "#e4e4e7"
+  hairline-soft: "#ececef"
+
 typography:
   display-xxl:
     fontFamily: Geist
@@ -236,9 +248,11 @@ otherwise monochrome page — a small living poster inside the dark canvas.
 
 Body type is **Inter Variable**, leaning into Inter's character variants (`cv01`, `cv05`,
 `cv09`, `cv11`, `ss03`, `ss07`, `dlig`) — the result is a body voice that feels
-custom-tuned, with a single-storey "a" and a straight-leg "l". **There is no light mode on
-the marketing page; the brand IS dark.** `/docs` is a different surface and keeps the
-Fumadocs light/dark toggle.
+custom-tuned, with a single-storey "a" and a straight-leg "l". **Dark is the primary
+identity, but the marketing page also ships a light appearance** (`{colors-light.*}`) —
+same geometry, spacing, gradient family, and accent, only the surface/ink tokens flip.
+`/docs` is a different surface and keeps its own Fumadocs neutral ramp, toggled by the same
+control.
 
 **Key Characteristics:**
 
@@ -482,6 +496,23 @@ manifest images sit in `{rounded.xl}` hairline-ruled tiles. Deep-link forwarder 
 (`/open`, `/install-plugin`) are single centered cards on canvas with the same two-pill
 row — they exist to hand a query to the `pragma://` scheme, not to be read.
 
+### Blog
+
+`/blog` is a quiet editorial extension of the marketing artboard. The newest article
+occupies a wide, image-led feature: cover art in a `{colors.surface-1}` frame on one
+side, title and summary in display/body type on the other. The image is a real article
+cover, not another gradient spotlight. Remaining articles form a dated, hairline-ruled
+list below. A single post still stands alone as the feature without an empty list.
+Each cover and title share one link to the article. A post can feature a muted launch
+video in the index (the card remains one link) and a controlled player in the article;
+its optional cover then supplies the social preview. Posts are Fumadocs-compiled files
+in `content/blog/`, with publication date and optional media in frontmatter.
+
+An article narrows to a readable text column, with a back link, date, title, lead,
+optional full-width cover, and sectioned body. Cover illustrations may use their own
+palette as editorial content; surrounding chrome uses the existing canvas, ink, muted
+ink, and hairline tokens. At mobile widths the feature stacks image above copy.
+
 ### Comparison
 
 **`comparison-row`** — a row of the feature matrix. `{colors.canvas}` ground,
@@ -492,11 +523,52 @@ never a coloured fill.
 ### Navigation
 
 **`top-nav`** — A centered floating capsule on `{colors.surface-1}`, offset 12px from the
-viewport top. It carries the favicon treatment of the Pragma mark, the product links, docs
-search, and explicit GitHub and Download actions. Height 56px, max width 1024px, rounded
-`{rounded.full}`, type `{typography.body-sm}`, with the standard floating shadow. It is
-sticky in the marketing flow and fixed over the Fumadocs grid so both surfaces keep the
-same position; docs also exposes its sidebar trigger on mobile.
+viewport top. It carries the desktop app icon treatment of the Pragma mark, the product
+links, docs search, a light/dark theme switch, and explicit GitHub and Download actions.
+Height 56px, max width 1024px, rounded `{rounded.full}`, type `{typography.body-sm}`, with
+the standard floating shadow. It is sticky in the marketing flow and fixed over the
+Fumadocs grid so both surfaces keep the same position; docs also exposes its sidebar
+trigger on mobile.
+The site links (including Blog) collapse into a menu below 768px, leaving the
+search and primary actions reachable in the capsule.
+
+**`download-cta`** — Every Download action (nav, hero, closing CTA, compare pages) is one
+`.pill-cta` whose leading 16px glyph is the visitor's platform mark — Apple for macOS, the
+four-pane mark for Windows, Tux for Linux — drawn in `currentColor` like the GitHub mark.
+Before the OS is known, and for phones and tablets, it falls back to the generic download
+arrow. The hero label names the platform ("Download for macOS"); the nav keeps the single
+word and collapses to the glyph on small screens.
+
+**`app-store-cta`** — A secondary `.pill-cta` carrying the Apple mark and "App Store".
+It sits centred under the points of the Pragma Go feature section (`#go`), beside a
+matching Android-mark pill linking to the Obtainium install guide in the docs, and beside
+the Download pill in the closing CTA — never in the hero, which keeps one desktop download
+action. It opens a dialog, never navigates: a 192px QR code of the listing on a white tile
+(so it scans in dark mode), and a primary pill linking straight to the App Store for a
+visitor already on an iPhone.
+
+### Forms
+
+**`form-panel`** — the one form on the artboard, on `/support`. It sits in a
+`{colors.surface-1}` card with the standard hairline and `{rounded.xl}` corners, inside a
+two-column band: the commitments we make (response time, language, cost, where it
+lands) on the left, the fields on the right. Below `lg` the columns stack, panel last.
+
+**`form-field`** — label `{typography.body-sm}` in `{colors.ink}`, an optional hint and
+any error in `{typography.caption}` beneath it — hint in `{colors.ink-muted}`, error in
+`{colors.destructive}`. Controls are the stock shadcn `Input`, `Textarea`, and `Select`;
+they inherit the artboard palette and are not restyled per page. Fields pair into two
+columns from `sm` up and are full width below it.
+
+Rules that hold for any form we add later:
+
+- **Every control has a visible `<label>`.** A placeholder is not a label — it disappears
+  the moment someone types, which is the moment they most need it.
+- **Errors are shown per field and repeated once in a live region**, so a screen reader
+  hears the failure without hunting for it. Never colour alone: the message is words.
+- **Optional is stated on the label**, not implied by the absence of an asterisk.
+- **Success replaces the form.** A submitted form is not re-rendered with a banner above
+  it; the panel becomes a confirmation with a plain way back to a second request.
 
 ### Footer
 
@@ -526,8 +598,9 @@ and columns of caption-sized links right. Text `{colors.ink-muted}`, padding 64p
 
 ### Don't
 
-- Don't ship a light-mode marketing page. The landing identity is dark. (`/docs` is a
-  separate surface and keeps its toggle.)
+- Don't let the light appearance drift from the dark one stylistically — same
+  geometry, spacing, and gradient family, only `{colors-light.*}` swapped in for
+  `{colors.*}`. Dark stays the primary identity.
 - Don't introduce mid-tone gray text outside `{colors.ink-muted}`. The hierarchy is binary:
   `ink` or `ink-muted`.
 - Don't use `{colors.accent-blue}` as a brand fill (e.g. a blue CTA pill). It is a signal
@@ -571,9 +644,13 @@ and columns of caption-sized links right. Text `{colors.ink-muted}`, padding 64p
 
 The tokens above are implemented once, in `src/app/global.css`:
 
-- The absolute brand constants live as `--ds-*` custom properties on `:root`.
-- `.artboard` (applied with `dark` on the `(home)` route group) remaps the shadcn/ui
-  variables onto them, so every primitive follows without restating a colour.
+- The absolute brand constants live as `--ds-*` custom properties on `:root`, dark and
+  light (`--ds-light-*`) alike; `accent-blue`, `success`, and the gradient family are
+  shared and unprefixed.
+- `.artboard` (applied on the `(home)` route group) remaps the shadcn/ui variables onto
+  the light constants by default, with `.dark .artboard` overriding onto the dark ones
+  under the `dark` class `next-themes` toggles on `<html>` — so every primitive follows
+  without restating a colour, in either theme.
 - Display tiers ship as `.type-display-*` component classes using `clamp()` + `em`
   tracking; the gradient panel ships as the single `.spotlight` class, and CTAs as
   `.pill-cta`.
@@ -590,7 +667,12 @@ the source of truth, not a snapshot.
   documented `{colors.gradient-*}` hexes; treat those hexes as anchors, not exact stops.
 - Form-field validation / error styling is not specified — the landing page has no forms
   yet.
-- The `/docs` surface still runs the Fumadocs light/dark ramp; only the marketing route
-  group is pinned to the artboard palette.
+- The `/docs` surface still runs its own Fumadocs neutral ramp rather than the artboard
+  palette; only the marketing route group (including `/compare`) uses `{colors.*}` /
+  `{colors-light.*}`. Both surfaces share the one toggle in `SiteNavbar`.
+- A few decorative surfaces stay dark regardless of page theme by design — the
+  gradient spotlight card, the fanout branch graph, and the 3D agent-chip hero visual —
+  the same way a dark terminal card would on an otherwise light page. They are not yet
+  re-audited for how well they read against a light canvas specifically.
 - `{colors.gradient-orange}` and `{colors.gradient-coral}` are specified but unused — they
   exist as the warm alternates for a future panel, and no CSS ships for them.

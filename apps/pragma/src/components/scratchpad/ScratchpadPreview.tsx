@@ -118,6 +118,8 @@ function bridgeBootstrap(token: string): string {
     globalThis.pragmaScratchpad = {
       promptAgent: (text) => request("promptAgent", { text }),
       requestAgentAttachment: () => request("requestAgentAttachment"),
+      getWhiteboardSnapshot: (whiteboardId, knownVersion, dark) => request("getWhiteboardSnapshot", { whiteboardId, knownVersion, dark }),
+      openWhiteboard: (whiteboardId) => request("openWhiteboard", { whiteboardId }),
       subscribeAgentProgress: (tabIds, listener) => {
         const id = crypto.randomUUID();
         progress.set(id, listener);

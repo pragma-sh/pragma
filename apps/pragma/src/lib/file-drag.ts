@@ -43,10 +43,22 @@ function parsePaths(value: string): string[] | null {
 }
 
 /** Reads the dragged paths from a drop, falling back through text/plain to module state. */
-export function readDraggedPaths(event: DragEvent<HTMLElement>): string[] | null {
+export function readDraggedPaths(event: { dataTransfer: DataTransfer | null }): string[] | null {
+  const transfer = event.dataTransfer;
   return (
-    parsePaths(event.dataTransfer.getData(PRAGMA_PATHS_MIME)) ??
-    parsePaths(event.dataTransfer.getData("text/plain")) ??
+    parsePaths(transfer?.getData(PRAGMA_PATHS_MIME) ?? "") ??
+    parsePaths(transfer?.getData("text/plain") ?? "") ??
     draggedPaths
   );
+}
+
+/** Encodes a dropped file as base64 for IPC, in slices so large images do not blow the call stack. */
+export async function fileBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const slice = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += slice) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + slice));
+  }
+  return btoa(binary);
 }

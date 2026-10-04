@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 import { Toaster } from "@/components/ui/sonner";
 import { primeNotificationPermission } from "@/lib/agent-alert";
 import { startGatewayPresenceReporting } from "@/lib/gateway-presence";

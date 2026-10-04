@@ -1,4 +1,4 @@
-import type { DirEntry, FileContents } from "@pragma/constants";
+import type { DirEntry, FileContents } from "@pragma-sh/constants";
 
 export type { DirEntry, FileContents };
 

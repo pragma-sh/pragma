@@ -1,4 +1,4 @@
-export * from "@pragma/sdk";
+export * from "@pragma-sh/sdk";
 
 /** Status rendered by scratchpad progress components. */
 export type ScratchpadAgentStatus = "running" | "attention" | "done" | "cleared";
@@ -11,8 +11,18 @@ export interface ScratchpadAgentProgress {
   status: ScratchpadAgentStatus;
 }
 
+/** Read-only host rendering of one worktree-scoped whiteboard. */
+export interface ScratchpadWhiteboardSnapshot {
+  id: string;
+  title: string;
+  version: number;
+  dataUrl: string;
+}
+
 /** Host bridge installed only inside a rendered Pragma scratchpad. */
 export interface ScratchpadBridge {
+  /** False in standalone exports, which cannot send feedback to agents. */
+  agentFeedbackEnabled?: boolean;
   /** Delivers text, or reports a missing attachment or reader cancellation. */
   promptAgent(text: string): Promise<"sent" | "missing-agent" | "cancelled">;
   requestAgentAttachment(): Promise<boolean>;
@@ -20,6 +30,14 @@ export interface ScratchpadBridge {
     tabIds: readonly string[],
     listener: (progress: readonly ScratchpadAgentProgress[]) => void,
   ): () => void;
+  /** Returns a fresh PNG only when the board changed since `knownVersion`. */
+  getWhiteboardSnapshot(
+    id: string,
+    knownVersion?: number,
+    dark?: boolean,
+  ): Promise<ScratchpadWhiteboardSnapshot | null>;
+  /** Opens the board in the host's interactive editor when available. */
+  openWhiteboard?(id: string): Promise<void>;
 }
 
 /** Context passed when a scratchpad action has no attached agent tab. */
@@ -40,7 +58,7 @@ declare global {
 function bridge(): ScratchpadBridge {
   const value = globalThis.pragmaScratchpad;
   if (!value) {
-    throw new Error("@pragma/scratchpad can only prompt agents inside a Pragma scratchpad");
+    throw new Error("@pragma-sh/scratchpad can only prompt agents inside a Pragma scratchpad");
   }
   return value;
 }
@@ -62,6 +80,7 @@ export async function promptAgent(
   const value = text.trim();
   if (!value) return false;
   const host = bridge();
+  if (host.agentFeedbackEnabled === false) return false;
   const firstResult = await host.promptAgent(value);
   if (firstResult === "sent") return true;
   if (firstResult === "cancelled") return false;

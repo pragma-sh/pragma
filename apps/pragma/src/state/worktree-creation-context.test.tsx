@@ -1,5 +1,6 @@
-import type { Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma-sh/constants";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createWorktreeMock = vi.fn();
@@ -8,12 +9,15 @@ const startSessionMock = vi.fn();
 const refreshProjectMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const createTerminalTabMock = vi.fn();
+const runWorktreeCommandsMock = vi.fn();
 let emitStage: ((stage: { projectId: string; worktreeId: string; stage: string }) => void) | null =
   null;
 
 vi.mock("@/lib/tauri", () => ({
   createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
   githubPullBranch: (...args: unknown[]) => githubPullBranchMock(...args),
+  runWorktreeCommands: (...args: unknown[]) => runWorktreeCommandsMock(...args),
+  cancelWorktreeCommands: vi.fn(),
   onWorktreeCreateStage: (handler: (stage: never) => void) => {
     emitStage = handler as typeof emitStage;
     return Promise.resolve(() => {
@@ -22,13 +26,49 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+/** Minimal selection store so a change re-renders the provider itself, the way
+ *  the real workspace context does. */
+const selectionListeners = new Set<() => void>();
+const workspaceSelection = {
+  selectedProjectId: "p" as string | null,
+  selectedWorktreeId: "main" as string | null,
+  activeTabId: null as string | null,
+  select(worktreeId: string | null) {
+    workspaceSelection.selectedWorktreeId = worktreeId;
+    for (const listener of selectionListeners) listener();
+  },
+  selectProject(projectId: string | null) {
+    workspaceSelection.selectedProjectId = projectId;
+    for (const listener of selectionListeners) listener();
+  },
+};
+
 vi.mock("@/state/workspace-context", () => ({
-  useWorkspace: () => ({
-    refreshProject: refreshProjectMock,
-    startSession: startSessionMock,
-    selectWorktree: selectWorktreeMock,
-    createTerminalTab: createTerminalTabMock,
-  }),
+  useWorkspace: () => {
+    const selectedProjectId = useSyncExternalStore(
+      (listener: () => void) => {
+        selectionListeners.add(listener);
+        return () => selectionListeners.delete(listener);
+      },
+      () => workspaceSelection.selectedProjectId,
+    );
+    const selectedWorktreeId = useSyncExternalStore(
+      (listener: () => void) => {
+        selectionListeners.add(listener);
+        return () => selectionListeners.delete(listener);
+      },
+      () => workspaceSelection.selectedWorktreeId,
+    );
+    return {
+      refreshProject: refreshProjectMock,
+      startSession: startSessionMock,
+      selectWorktree: selectWorktreeMock,
+      createTerminalTab: createTerminalTabMock,
+      selectedProjectId,
+      selectedWorktreeId,
+      activeTabId: workspaceSelection.activeTabId,
+    };
+  },
 }));
 
 import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
@@ -72,7 +112,7 @@ function Harness({
   prompt?: string;
   agent?: AgentConfig | null;
 }) {
-  const { startCreation, creation } = useWorktreeCreation();
+  const { startCreation, creation, viewCreation, leaveCreation, draft } = useWorktreeCreation();
   return (
     <>
       <button
@@ -90,8 +130,22 @@ function Harness({
       >
         start
       </button>
+      <button type="button" onClick={() => workspaceSelection.select("other")}>
+        select other
+      </button>
+      <button type="button" onClick={() => workspaceSelection.selectProject("other-project")}>
+        select other project
+      </button>
+      <button type="button" onClick={viewCreation}>
+        view
+      </button>
+      <button type="button" onClick={leaveCreation}>
+        leave
+      </button>
+      <span data-testid="draft">{draft ? `${draft.branch}|${draft.prompt ?? ""}` : "none"}</span>
       <span data-testid="idle">{creation ? "busy" : "idle"}</span>
-      <WorktreeCreationScreen />
+      <span data-testid="viewing">{creation?.viewing ? "viewing" : "background"}</span>
+      {creation?.viewing ? <WorktreeCreationScreen /> : null}
     </>
   );
 }
@@ -129,6 +183,8 @@ describe("WorktreeCreationProvider", () => {
     cleanup();
     vi.clearAllMocks();
     emitStage = null;
+    workspaceSelection.select("main");
+    workspaceSelection.selectProject("p");
   });
 
   it("shows only the creating step and clears once the worktree opens", async () => {
@@ -141,10 +197,28 @@ describe("WorktreeCreationProvider", () => {
     expect(screen.queryByText("Syncing base")).not.toBeInTheDocument();
     resolve(newWorktree);
     await waitFor(() =>
-      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p" }),
+      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+        projectId: "p",
+        focus: true,
+        worktreePath: newWorktree.path,
+      }),
     );
     expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new", "p");
-    expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p" });
+    await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("leaves the screen when the selection changes and reopens on demand", async () => {
+    const { resolve } = deferCreate();
+    renderHarness();
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    screen.getByRole("button", { name: "select other" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    // The creation keeps running while the screen is gone.
+    expect(screen.getByTestId("idle")).toHaveTextContent("busy");
+    screen.getByRole("button", { name: "view" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    resolve(newWorktree);
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
   });
 
@@ -181,12 +255,132 @@ describe("WorktreeCreationProvider", () => {
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
   });
 
+  it("republishes the failed request as a draft when the user tries again", async () => {
+    createWorktreeMock.mockRejectedValue(new Error("branch already exists"));
+    renderHarness(null, "Fix the bug", testAgent);
+
+    expect(await screen.findByText("branch already exists")).toBeInTheDocument();
+    // Nothing was created, so the only way forward is editing the input.
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Try again" }).click();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("draft")).toHaveTextContent("feature|Fix the bug"),
+    );
+    // The screen goes away with it: the dialog owns the flow from here.
+    expect(screen.getByTestId("idle")).toHaveTextContent("idle");
+  });
+
+  it("offers only Retry when the worktree exists but opening it failed", async () => {
+    refreshProjectMock.mockRejectedValueOnce(new Error("refresh failed"));
+    renderHarness();
+
+    expect(await screen.findByText("refresh failed")).toBeInTheDocument();
+    // Re-running the dialog here would create a second worktree.
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("keeps the owner project when the selected project changes during creation", async () => {
     renderHarness();
 
     await waitFor(() => expect(refreshProjectMock).toHaveBeenCalledWith("p"));
     expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new", "p");
-    expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p" });
+    expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+      projectId: "p",
+      focus: true,
+      worktreePath: newWorktree.path,
+    });
+  });
+
+  it("leaves the screen when only the selected project changes", async () => {
+    const { resolve } = deferCreate();
+    renderHarness();
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    // Same worktree/tab identifiers as the owning project, so this only
+    // exercises the selectedProjectId leg of the selection identity.
+    screen.getByRole("button", { name: "select other project" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    resolve(newWorktree);
+    await waitFor(() =>
+      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+        projectId: "p",
+        focus: false,
+        worktreePath: newWorktree.path,
+      }),
+    );
+    // Left before completion, so opening the new worktree must not steal focus.
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+  });
+
+  it("opens the new worktree without stealing focus when the user has left", async () => {
+    const { resolve } = deferCreate();
+    renderHarness();
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    screen.getByRole("button", { name: "select other" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    resolve(newWorktree);
+    await waitFor(() =>
+      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+        projectId: "p",
+        focus: false,
+        worktreePath: newWorktree.path,
+      }),
+    );
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("leaves on an explicit signal even though the selection is unchanged", async () => {
+    const { resolve } = deferCreate();
+    renderHarness(null, "Fix the bug", testAgent);
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    // What a click on the already-selected worktree row does: the selection
+    // identity never changes, so only the explicit call can leave the screen.
+    screen.getByRole("button", { name: "leave" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    resolve(newWorktree);
+    await waitFor(() =>
+      expect(startSessionMock).toHaveBeenCalledWith("wt-new", testAgent, "Fix the bug", undefined, {
+        projectId: "p",
+        focus: false,
+        worktreePath: newWorktree.path,
+      }),
+    );
+    // Left before completion, so opening the new worktree must not steal focus.
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("runs the prompt's !! commands in the new worktree before starting the agent", async () => {
+    runWorktreeCommandsMock.mockResolvedValue([
+      {
+        command: "git log -1",
+        stdout: "abc\n",
+        stderr: "",
+        status: 0,
+        durationMs: 5,
+        cancelled: false,
+      },
+    ]);
+    renderHarness(null, "Fix the bug in !!`git log -1`", testAgent);
+
+    await waitFor(() => expect(startSessionMock).toHaveBeenCalled());
+    expect(runWorktreeCommandsMock).toHaveBeenCalledWith(
+      "wt-new",
+      ["git log -1"],
+      expect.any(String),
+    );
+    const [worktreeId, agent, prompt, , options] = startSessionMock.mock.calls[0]!;
+    expect(worktreeId).toBe("wt-new");
+    expect(agent).toBe(testAgent);
+    expect(prompt).toMatch(/^Fix the bug in `git log -1`\n\nBefore this session started/);
+    expect(prompt).toContain('<command-output command="git log -1" exit-code="0"');
+    expect(prompt).not.toContain("!!");
+    expect(options).toMatchObject({ projectId: "p", focus: true });
   });
 
   it("keeps the screen and retries when refreshing the created worktree fails", async () => {
@@ -197,7 +391,11 @@ describe("WorktreeCreationProvider", () => {
     expect(createTerminalTabMock).not.toHaveBeenCalled();
     screen.getByRole("button", { name: "Retry" }).click();
     await waitFor(() =>
-      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p" }),
+      expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", {
+        projectId: "p",
+        focus: true,
+        worktreePath: newWorktree.path,
+      }),
     );
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
   });
@@ -223,6 +421,8 @@ describe("WorktreeCreationProvider", () => {
     ).toBeInTheDocument();
     expect(startSessionMock).toHaveBeenCalledWith("wt-new", testAgent, "Fix the bug", undefined, {
       projectId: "p",
+      focus: true,
+      worktreePath: newWorktree.path,
     });
     screen.getByRole("button", { name: "Retry" }).click();
     await waitFor(() => expect(startSessionMock).toHaveBeenCalledTimes(2));

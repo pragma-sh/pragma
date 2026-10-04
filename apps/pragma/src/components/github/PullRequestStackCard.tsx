@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { GitHubRepoRef, Worktree } from "@pragma/constants";
+import type { GitHubRepoRef, Worktree } from "@pragma-sh/constants";
 import { GitBranch, Layers3, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 

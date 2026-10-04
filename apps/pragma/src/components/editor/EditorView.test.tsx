@@ -1,4 +1,4 @@
-import type { FileChange, Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,6 +49,7 @@ function editorTab(): Tab {
     title: "app.ts",
     url: null,
     filePath: "src/app.ts",
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

@@ -7,14 +7,14 @@ import type { AgentModel } from "@/lib/tauri";
 export interface AgentModelsState {
   /** Resolved models per agent id; `undefined` means a load is in flight. */
   modelsByAgent: Record<string, AgentModel[] | undefined>;
-  /** Lazily loads (and caches) an agent's models, e.g. when its submenu is hovered. */
+  /** Lazily loads (and caches) an agent's models when its submenu is hovered. */
   loadModels: (agentId: string) => void;
   /** Seeds state from the session cache for any of the given agents already resolved. */
   primeFromCache: (agentIds: string[]) => void;
 }
 
 /**
- * Owns the `modelsByAgent` map and its loaders. Hovering a model submenu calls
+ * Owns the `modelsByAgent` map and its loaders. Hovering an agent submenu calls
  * `loadModels` repeatedly, so this avoids redundant state churn: once an agent's
  * models are cached it reuses the same array reference and skips the lookup
  * instead of re-running it (and re-rendering) on every hover.

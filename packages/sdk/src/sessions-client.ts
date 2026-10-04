@@ -1,5 +1,5 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
-import type { SessionInfo, ViewportLease } from "@pragma/constants";
+import type { SessionInfo, ViewportLease } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
 import { ndjsonStream } from "./streaming";

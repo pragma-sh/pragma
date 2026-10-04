@@ -1,4 +1,4 @@
-import type { FileDiff } from "@pragma/constants";
+import type { FileDiff } from "@pragma-sh/constants";
 
 import { cachedFetch } from "@/lib/github-cache";
 import { githubPrFileDiff } from "@/lib/tauri";

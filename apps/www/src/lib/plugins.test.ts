@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { officialPluginLock } from "@pragma/plugin-registry";
+import { officialPluginLock } from "@pragma-sh/plugin-registry";
 
 import { loadOfficialPlugins, pluginDetailUrl, pluginInstallUrl, pluginNpmUrl } from "./plugins";
 

@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Tab } from "@pragma/constants";
-import { Bot, Globe, Pencil, Plus, SquareTerminal, X } from "lucide-react";
+import type { Tab } from "@pragma-sh/constants";
+import { Bot, Globe, Pencil, PencilRuler, Plus, SquareTerminal, X } from "lucide-react";
 
 import { BrowserView } from "@/components/browser/BrowserView";
 import { DiffView } from "@/components/editor/DiffView";
@@ -60,6 +60,11 @@ import { type SplitLayoutNode, type SplitPaneNode, useWorkspace } from "@/state/
 const ScratchpadView = lazy(() =>
   import("@/components/scratchpad/ScratchpadView").then((module) => ({
     default: module.ScratchpadView,
+  })),
+);
+const WhiteboardView = lazy(() =>
+  import("@/components/whiteboard/WhiteboardView").then((module) => ({
+    default: module.WhiteboardView,
   })),
 );
 
@@ -278,6 +283,18 @@ const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string
   log: (tab) => <LogView key={tab.id} tab={tab} />,
   "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,
   "plugin-webview": (tab) => <PluginWebViewTab key={tab.id} tab={tab} />,
+  whiteboard: (tab) => (
+    <Suspense
+      fallback={
+        <div className="grid h-full place-items-center text-sm text-muted-foreground">
+          Loading whiteboard...
+        </div>
+      }
+      key={tab.id}
+    >
+      <WhiteboardView tab={tab} />
+    </Suspense>
+  ),
 };
 
 /** Render a pane's active non-terminal tab. */
@@ -320,7 +337,9 @@ function resolvePaneCwd(
 /** Border class for a pane: highlighted when focused within a split. */
 function paneBorderClass(showBar: boolean, focused: boolean): string {
   if (!showBar) return "border-transparent";
-  return focused ? "border-primary/35" : "border-border";
+  // The same split accent as the parent/pane tabs, so one hue marks all split
+  // chrome — the focused pane and its tabs — in every theme.
+  return focused ? "border-split-accent/35" : "border-border";
 }
 
 // fallow-ignore-next-line complexity -- pane focus, drag drop zones, and terminal retention share one React surface; extracting would reintroduce prop drilling across the split tree.
@@ -511,8 +530,10 @@ function PaneTab({
         <div
           className={cn(
             "group flex h-6 min-w-24 max-w-44 items-center gap-1 rounded-md border px-1.5 text-xs",
+            // The active tab is tinted with the split accent rather than the
+            // bar's own elevated background, which it would otherwise melt into.
             active
-              ? "border-border bg-elevated text-foreground"
+              ? "border-split-accent/50 bg-split-accent/15 text-foreground"
               : "text-muted-foreground border-transparent hover:bg-muted",
           )}
           // A renaming tab must not be draggable: the drag gesture otherwise wins
@@ -577,7 +598,7 @@ function PaneTab({
 }
 
 /**
- * The pane's "+" menu: a new terminal or browser tab in this pane, plus the
+ * The pane's "+" menu: a new terminal, browser, or whiteboard in this pane, plus the
  * configured agents, each launched into a terminal tab of this pane.
  */
 function PaneNewTabMenu({ paneId }: { paneId: string }) {
@@ -617,6 +638,10 @@ function PaneNewTabMenu({ paneId }: { paneId: string }) {
         <DropdownMenuItem onSelect={() => void workspace.createTabInPane(paneId, "browser")}>
           <Globe />
           Browser
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void workspace.createWhiteboard(paneId)}>
+          <PencilRuler />
+          Whiteboard
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>

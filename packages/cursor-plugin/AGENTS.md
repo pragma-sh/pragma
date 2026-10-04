@@ -11,7 +11,7 @@ Static Cursor Agent CLI integration that reports agent status into Pragma. Curso
 packages/cursor-plugin/
 ├── src/pragma-plugin.ts       # Agent, watcher, and usage-limit declarations
 ├── assets/
-│   ├── cursor.svg            # Cursor brand asset used by the built-in launcher
+│   ├── cursor.svg            # Cursor brand asset used by plugin launcher
 │   └── usage-limits-cli.ts   # CLI-authenticated Cursor usage-summary fetcher source
 ├── hooks/
 │   ├── report.sh              # Event → pragma-cli translator
@@ -43,12 +43,19 @@ not a permission gate Cursor exposes only via keystrokes — it is skipped when
 The Pragma launcher starts Cursor's unambiguous binary name:
 
 ```json
-"start": ["cursor-agent", "--force", "--approve-mcps"]
+"start": ["cursor-agent", "--approve-mcps"]
 ```
 
+plus the selected permission mode, whose first entry (the default) adds:
+
 - **`--force`** (`--yolo`) — Run Everything: auto-approve commands unless explicitly
-  denied (matches intro option **`u`** / `approvalMode: "unrestricted"`).
+  denied (matches intro option **`u`** / `approvalMode: "unrestricted"`). The `default`
+  permission mode drops it.
 - **`--approve-mcps`** — skips the MCP approval prompt at session start.
+
+Modes (Shift+Tab in the launcher) are `agent` (no flag), `plan`, and `ask` (`--mode <id>`).
+Slash commands are the prompt-taking built-ins (`/plan`, `/ask`, `/debug`, `/goal`) plus
+`.cursor/commands` and `.cursor/skills` in the project and home directory.
 
 Do not shorten this to `agent`: unrelated tools install that generic binary name. Model
 discovery and launch must both target `cursor-agent`, or Pragma can catalog Cursor models
@@ -126,7 +133,7 @@ Cursor exposes no reliable native session title in hook payloads. `report.sh` de
 from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it once per
 session, and resets that state on `sessionStart` / `sessionEnd`.
 
-The built-in launcher cannot expose question contents/answers, prompt-only command approval,
+Plugin launcher cannot expose question contents/answers, prompt-only command approval,
 subagent lifecycle, abort detection, or interrupt handling, so the latter four are declared in
 `excludeFeatures`. `agent verify` skips those unsupported scenario groups instead of
 treating known host limitations as failures.
@@ -151,7 +158,7 @@ not nest `/bin/sh`, which is absent on Windows.
 If install fails with "cannot write" inside a sandboxed agent, run the same command
 in a normal terminal (writes go to `~/.pragma` and `~/.cursor`).
 
-Launch from Pragma's agent menu via the built-in Cursor agent, or run
+After installing this integration, launch from Pragma's agent menu, or run
 `cursor-agent --force --approve-mcps` in a Pragma terminal.
 
 ## Guard + non-Pragma sessions
@@ -161,14 +168,11 @@ Launch from Pragma's agent menu via the built-in Cursor agent, or run
 `PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; `report.sh` uses that absolute path before
 falling back to `pragma-cli` from `PATH`.
 
-## Built-in launcher
+## Plugin launcher
 
-The launchable Cursor entry is defined **here** in `src/pragma-plugin.ts`. This is now
-the single source of truth: the `pragma-plugins` catalog sidecar
-(`@pragma/plugins-host`) imports it directly to assemble the agent catalog, and
-`apps/pragma/src/plugins/builtin-agents.ts` re-exports it (overriding `iconPath` with a
-browser URL and attaching the built-in watcher) so the webview path shares the same
-definition.
+The launchable Cursor entry is defined **here** in `src/pragma-plugin.ts`. This is single
+source of truth. After user installs this integration, desktop and `pragma-plugins` load
+same configured bundle.
 
 Its icon asset stays in this package under `assets/`, not in Pragma core.
 
@@ -188,7 +192,7 @@ Its icon asset stays in this package under `assets/`, not in Pragma core.
 
 These are agent-owned keystrokes/timing, not Pragma core Cursor branches. User-defined
 agents can use the same fields for their own pre-TUI gates. Model discovery runs
-`agent models` from the built-in plugin model provider and parses Cursor-specific output
+`agent models` from plugin model provider and parses Cursor-specific output
 there, not in Rust/Tauri IPC.
 
 ## Known gotchas
@@ -199,3 +203,7 @@ there, not in Rust/Tauri IPC.
    worktrees may inherit trust from the main checkout (see Cursor CLI changelog). Use
    `--force` only if you intentionally want headless-style trust + run-everything
    behavior in interactive sessions.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `cursor` with **no `env`**: on macOS Cursor keeps its token under the fixed Keychain entry `cursor-access-token`, so a second `CURSOR_CONFIG_DIR` would overwrite the first login instead of sitting beside it. Signing in again (`cursor-agent login`) replaces the one login. `identify` parses `cursor-agent status`.

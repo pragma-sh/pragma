@@ -5,7 +5,7 @@ import {
   pickWelcomeHeading,
   welcomeHeadingText,
   welcomeLocation,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 import { Globe, Pin, PinOff, TerminalSquare } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";

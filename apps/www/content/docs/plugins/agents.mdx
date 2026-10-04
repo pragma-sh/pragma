@@ -9,7 +9,7 @@ board, fanouts, and phones — with your icon, your models, and status reporting
 ## defineAgent
 
 ```tsx
-import { definePlugin, defineAgent } from "@pragma/plugin";
+import { definePlugin, defineAgent } from "@pragma-sh/plugin";
 
 const myAgent = defineAgent({
   id: "my-agent",
@@ -18,11 +18,22 @@ const myAgent = defineAgent({
   iconPath: "./assets/agent.svg", // optional: browser URL, absolute path, or plugin-relative
   launch: { command: ["my-agent", "chat"] },
   models: async (ctx) => [{ id: "m-1", name: "Model 1" }],
-  permissionModes: [{ id: "default", name: "Default" }],
+  // The first entry is the default every launch applies.
+  permissionModes: [
+    { id: "auto", name: "Auto" },
+    { id: "ask", name: "Ask before actions" },
+  ],
+  modes: [
+    { id: "build", name: "Build" },
+    { id: "plan", name: "Plan" },
+  ],
+  slashCommands: [{ name: "review", description: "Review changes", argumentHint: "[pr]" }],
   args: {
     model: (id) => ["--model", id],
     reasoning: (id) => ["--reasoning", id],
-    permissionMode: (id) => ["--permission", id],
+    permissionMode: (id) => (id === "auto" ? ["--yolo"] : []),
+    mode: (id) => ["--agent", id],
+    slashCommand: (name) => `/${name}`, // optional; this is the default
   },
   startupInput: [{ delayMs: 500, data: "/init\r" }],
   prefillMode: "bracketed", // or "plain"
@@ -32,11 +43,63 @@ const myAgent = defineAgent({
 });
 ```
 
-The `args` builders translate the user's selections (model, reasoning, permission mode)
-into launch arguments. `startupInput` writes keystrokes after the TUI starts;
+The `args` builders translate the user's selections (model, reasoning, mode, permission
+mode) into launch arguments, appended in that order. `startupInput` writes keystrokes after the TUI starts;
 prompt **prefill** sends the user's typed prompt and its submit key as two PTY writes
 (bracketed mode waits for the terminal's alt screen, bounded by a generous timeout, so
 agents that redraw themselves don't eat the prompt).
+
+## Modes, permission modes, and slash commands
+
+These three work like `models`: each is a static list or an async `(ctx) => …` provider,
+and each has an `args` function that applies the selection.
+
+| Field             | Launcher UI                 | Applied by                                         |
+| ----------------- | --------------------------- | -------------------------------------------------- |
+| `modes`           | **Shift+Tab** cycles them   | `args.mode(id)` — e.g. opencode's `--agent plan`   |
+| `permissionModes` | Dropdown beside the mode    | `args.permissionMode(id)`                          |
+| `slashCommands`   | Typing **/** opens a picker | Prefixes the prompt with `args.slashCommand(name)` |
+
+The **first** mode and permission mode are the defaults: a launch that picks none (the
+board, a phone, the SDK) still applies them. So a flag your agent always needs for
+unattended runs — Claude Code's `--permission-mode auto`, Kimi's `-y` — belongs in the first
+permission mode, not in `launch.command`, where no other selection could remove it.
+
+Most agents read commands, skills, and agent profiles from markdown directories. The
+discovery helpers scan them on the host that owns the project (so remote projects work
+too), put your built-ins first, and fall back to the built-ins if the scan fails:
+
+```tsx
+import { modeProvider, slashCommandProvider } from "@pragma-sh/plugin/catalog";
+
+slashCommands: slashCommandProvider(
+  [{ name: "init", description: "Write AGENTS.md" }],
+  [
+    { dir: ".my-agent/commands", layout: "files" },           // project, `a/b.md` → /a:b
+    { dir: "~/.my-agent/skills", layout: "skills", prefix: "skill:" }, // <name>/SKILL.md
+  ],
+),
+modes: modeProvider(
+  [{ id: "default", name: "Default" }],
+  [{ dir: ".my-agent/agents", layout: "files", nameFromFrontmatter: true }],
+),
+```
+
+Frontmatter `description` and `argument-hint` feed the picker; a skill with
+`user-invocable: false` is skipped.
+
+If your tool speaks the [Agent Client Protocol](https://agentclientprotocol.com), prefer its
+own list — it already includes skills and custom commands. Pass how to start its ACP server
+and Pragma reads the `available_commands_update` it sends after `session/new`:
+
+```tsx
+slashCommands: slashCommandProvider(builtins, fallbackDirs, {
+  acp: { command: ["my-agent", "acp"] },
+}),
+```
+
+A command whose TUI syntax is not `/<name>` sets `invocation` (Codex skills use
+`{ name: "imagegen", invocation: "$imagegen" }`).
 
 ## Watchers — status and round trips
 
@@ -44,7 +107,7 @@ A watcher attaches to a launched session, reads its output, and reports status t
 the [SDK](/docs/sdk/agents):
 
 ```tsx
-import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma/plugin";
+import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma-sh/plugin";
 
 watchers: [
   defineWatcher({
@@ -92,6 +155,8 @@ the watcher, because submit keys and timing are TUI-specific.
 ## Verifying
 
 `pragma-cli agent verify --agent <your-id>` runs the conformance suite — status
-transitions, session naming, question forms, approvals, aborts, and stream integrity.
+transitions, session naming, question forms, approvals, aborts, stream integrity, and a
+well-formed slash-command list (`--scenario slash-commands` checks just that, without
+launching anything).
 Catalog `excludeFeatures` entries skip the scenario groups your agent genuinely lacks.
 See [CLI → Agents](/docs/cli/agents#verify).

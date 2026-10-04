@@ -1,5 +1,5 @@
-import type { AgentCatalog, CatalogAgent } from "@pragma/sdk";
-import { PragmaGatewayError } from "@pragma/sdk";
+import type { AgentCatalog, CatalogAgent } from "@pragma-sh/sdk";
+import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { useEffect, useState } from "react";
 
 import { useConnection } from "./connection-context";

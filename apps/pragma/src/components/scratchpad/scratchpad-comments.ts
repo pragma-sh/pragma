@@ -1,10 +1,10 @@
-import { parseScratchpadComments, type ScratchpadComment } from "@pragma/scratchpad-viewer";
+import { parseScratchpadComments, type ScratchpadComment } from "@pragma-sh/scratchpad-viewer";
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
 // The comment-thread file is shared with the mobile client, so its shape and
-// parser live in `@pragma/scratchpad-viewer`; this module owns only the TipTap
+// parser live in `@pragma-sh/scratchpad-viewer`; this module owns only the TipTap
 // decorations and picker that are specific to the desktop editor.
 export { parseScratchpadComments, type ScratchpadComment };
 

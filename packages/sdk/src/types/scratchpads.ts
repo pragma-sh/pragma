@@ -1,5 +1,5 @@
-import type { ScratchpadFile } from "@pragma/constants";
-import type { ScratchpadBlock, ScratchpadComment } from "@pragma/scratchpad-contract";
+import type { ScratchpadFile } from "@pragma-sh/constants";
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma-sh/scratchpad-contract";
 
 export type { ScratchpadFile };
 

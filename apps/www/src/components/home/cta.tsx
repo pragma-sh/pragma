@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { BookOpen, Download } from "lucide-react";
+import { BookOpen } from "lucide-react";
 
+import { AppStoreButton } from "@/components/app-store-button";
+import { DownloadButton } from "@/components/download-button";
 import { GithubMark } from "@/components/github-mark";
 import { Button } from "@/components/ui/button";
 import { docsRoute, repoUrl } from "@/lib/shared";
@@ -26,10 +28,8 @@ export function CallToAction() {
             Open a project, fan a prompt across your agents, and come back to pull requests.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-            <Button className="pill-cta gap-2">
-              <Download className="size-4" />
-              Download Pragma
-            </Button>
+            <DownloadButton />
+            <AppStoreButton />
             <Button asChild variant="secondary" className="pill-cta gap-2">
               <Link href={docsRoute}>
                 <BookOpen className="size-4" />

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
+import type { PluginDefinition } from "@pragma-sh/plugin";
 
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
@@ -12,6 +12,7 @@ import {
   listWslDistros,
   readConfig,
   readPluginManifests,
+  tunnelSyncKeepAwake,
   writeConfig,
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
@@ -25,13 +26,22 @@ vi.mock("@/components/dialogs/PairDeviceDialog", () => ({
   PragmaGoSettings: ({
     webEnabled,
     onWebEnabledChange,
+    keepAwake,
+    onKeepAwakeChange,
   }: {
     webEnabled: boolean;
     onWebEnabledChange: (enabled: boolean) => void;
+    keepAwake: boolean;
+    onKeepAwakeChange: (enabled: boolean) => void;
   }) => (
-    <button type="button" onClick={() => onWebEnabledChange(!webEnabled)}>
-      Web access {webEnabled ? "enabled" : "disabled"}
-    </button>
+    <>
+      <button type="button" onClick={() => onWebEnabledChange(!webEnabled)}>
+        Web access {webEnabled ? "enabled" : "disabled"}
+      </button>
+      <button type="button" onClick={() => onKeepAwakeChange(!keepAwake)}>
+        Keep awake {keepAwake ? "enabled" : "disabled"}
+      </button>
+    </>
   ),
 }));
 
@@ -41,6 +51,10 @@ vi.mock("@/components/github/GitHubAuthOptions", () => ({
 
 vi.mock("@/components/ai/AiAuthOptions", () => ({
   AiAuthOptions: () => <div>AI auth options</div>,
+}));
+
+vi.mock("@/components/settings/System1Section", () => ({
+  System1Section: ({ scope }: { scope: string }) => <div>System 1 settings ({scope})</div>,
 }));
 
 vi.mock("@/state/kanban-context", () => ({
@@ -96,6 +110,7 @@ vi.mock("@/lib/tauri", () => ({
   listWslDistros: vi.fn(),
   readConfig: vi.fn(),
   readPluginManifests: vi.fn(),
+  tunnelSyncKeepAwake: vi.fn(),
   writeConfig: vi.fn(),
 }));
 
@@ -116,6 +131,29 @@ function gitHubValue(overrides: Partial<ReturnType<typeof useGitHub>> = {}) {
   };
 }
 
+/** Registers a loaded global plugin that contributes one Settings page. */
+function loadSettingsPlugin(pluginId: string): void {
+  const definition = {
+    name: "Plugin Settings",
+    ui: {
+      settingsPages: [
+        { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
+      ],
+    },
+    __apiVersion: "0.4.0",
+  } as PluginDefinition;
+  setPluginsForScope("global", null, [
+    {
+      pluginId,
+      version: "1.0.0",
+      scope: "global",
+      status: "loaded",
+      config: undefined,
+      definition,
+    },
+  ]);
+}
+
 describe("SettingsWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -129,6 +167,7 @@ describe("SettingsWorkspace", () => {
       }),
     });
     vi.mocked(writeConfig).mockResolvedValue();
+    vi.mocked(tunnelSyncKeepAwake).mockResolvedValue();
     vi.mocked(gatewayDevices).mockResolvedValue([]);
     vi.mocked(listWslDistros).mockResolvedValue({ isWindows: false, distros: [] });
     vi.mocked(aiAuthMethods).mockResolvedValue([
@@ -141,7 +180,7 @@ describe("SettingsWorkspace", () => {
         projectPath: null,
         config: null,
         manifest: {
-          name: "@pragma/plugin-one",
+          name: "@pragma-sh/plugin-one",
           version: "1.0.0",
           dir: "/plugins/one",
           mainPath: "/plugins/one/index.js",
@@ -161,16 +200,31 @@ describe("SettingsWorkspace", () => {
     });
   });
 
+  it("keeps other settings reachable when the optional system1 block is malformed", async () => {
+    vi.mocked(readConfig).mockResolvedValue({
+      exists: true,
+      path: "/home/user/.pragma/config.json",
+      contents: JSON.stringify({
+        plugins: [{ path: "./plugins/two" }],
+        system1: { baseUrl: 42 },
+      }),
+    });
+    render(<SettingsWorkspace />);
+
+    expect(await screen.findByText("Loaded plugins")).toBeInTheDocument();
+    expect(screen.queryByText("config.json needs attention")).not.toBeInTheDocument();
+  });
+
   it("shows loaded plugins by name with delete controls only", async () => {
     render(<SettingsWorkspace />);
 
-    expect(await screen.findByText("@pragma/plugin-one")).toBeInTheDocument();
+    expect(await screen.findByText("@pragma-sh/plugin-one")).toBeInTheDocument();
     // Unresolvable entries fall back to the last path segment.
     expect(screen.getByText("two")).toBeInTheDocument();
     expect(screen.queryByText("./plugins/one")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete plugin @pragma/plugin-one" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete plugin @pragma-sh/plugin-one" }));
 
     await waitFor(() =>
       expect(writeConfig).toHaveBeenCalledWith(
@@ -186,29 +240,28 @@ describe("SettingsWorkspace", () => {
         "project-1",
       ),
     );
-    expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
+    expect(screen.queryByText("@pragma-sh/plugin-one")).not.toBeInTheDocument();
   });
 
-  it("renders plugin settings pages from the Settings navigation", async () => {
-    const definition = {
-      name: "Plugin Settings",
-      ui: {
-        settingsPages: [
-          { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
-        ],
-      },
-      __apiVersion: "0.4.0",
-    } as PluginDefinition;
-    setPluginsForScope("global", null, [
-      {
-        pluginId: "plugin-settings",
-        version: "1.0.0",
-        scope: "global",
-        status: "loaded",
-        config: undefined,
-        definition,
-      },
-    ]);
+  it("nests plugin settings pages under their plugin in the Plugins list", async () => {
+    loadSettingsPlugin("@pragma-sh/plugin-one");
+
+    render(<SettingsWorkspace />);
+    await screen.findByText("@pragma-sh/plugin-one");
+    // The pages are options inside Plugins, not their own navigation section.
+    expect(screen.queryByRole("button", { name: "Keybindings" })).toBeInTheDocument();
+    const nested = screen.getByRole("button", { name: "Plugin Account" });
+    expect(nested.closest("aside")).toBeNull();
+
+    fireEvent.click(nested);
+    expect(screen.getByText("Account settings")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to plugins" }));
+    expect(screen.queryByText("Account settings")).not.toBeInTheDocument();
+  });
+
+  it("keeps a settings page reachable when its plugin has no row in this scope", async () => {
+    loadSettingsPlugin("plugin-settings");
 
     render(<SettingsWorkspace />);
     fireEvent.click(await screen.findByRole("button", { name: "Plugin Account" }));
@@ -297,6 +350,34 @@ describe("SettingsWorkspace", () => {
     );
   });
 
+  it("reports a failed keep-awake sync instead of swallowing it", async () => {
+    vi.mocked(tunnelSyncKeepAwake).mockRejectedValue(new Error("server unreachable"));
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep awake enabled" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("server unreachable")),
+    );
+  });
+
+  it("defaults keep awake on and resyncs the server after turning it off", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep awake enabled" }));
+
+    await waitFor(() => expect(tunnelSyncKeepAwake).toHaveBeenCalled());
+    expect(writeConfig).toHaveBeenCalledWith(
+      "global",
+      expect.stringContaining('"keepAwake": false'),
+      "project-1",
+    );
+  });
+
   it("resyncs tunnel inputs after a failed save reloads config", async () => {
     vi.mocked(readConfig)
       .mockResolvedValueOnce({
@@ -373,10 +454,11 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     expect(await screen.findByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("AI auth options")).toBeInTheDocument();
+    expect(screen.getByText("System 1 settings (global)")).toBeInTheDocument();
   });
 
   it("signs out one AI provider and re-reads status", async () => {
@@ -393,7 +475,7 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     // Providers with no auth-method entry still render (and sign out) by id.
     fireEvent.click(await screen.findByRole("button", { name: "Sign out of openai-codex" }));
@@ -408,7 +490,7 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
 
     const button = await screen.findByRole("button", { name: "Sign out of Anthropic" });
     fireEvent.click(button);

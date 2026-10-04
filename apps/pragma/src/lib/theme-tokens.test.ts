@@ -12,6 +12,9 @@ describe("theme token catalog", () => {
     expect(THEME_DEFAULTS.dark.background).toBe("oklch(0.2 0.006 256)");
     expect(THEME_DEFAULTS.light.background).toBe("oklch(1 0 0)");
     expect(THEME_DEFAULTS.dark.sidebar).toBe("oklch(0.15 0.006 256)");
+    // The split accent ships in both modes: teal, distinct from primary blue.
+    expect(THEME_DEFAULTS.light["split-accent"]).toBe("oklch(0.6 0.1 195)");
+    expect(THEME_DEFAULTS.dark["split-accent"]).toBe("oklch(0.74 0.1 195)");
   });
 
   it("ignores non-color variables and the vibrancy overrides", () => {

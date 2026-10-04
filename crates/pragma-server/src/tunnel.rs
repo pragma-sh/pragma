@@ -16,9 +16,11 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 use pragma_constants::CONSTANTS;
+use pragma_platform::power::SleepInhibitor;
 
 const PORT_PLACEHOLDER: &str = "{port}";
 const FORWARD_START_TIMEOUT: Duration = Duration::from_secs(20);
+const KEEP_AWAKE_REASON: &str = "Pragma remote access is on; sleep would interrupt pairing";
 
 #[derive(Debug, Error)]
 pub enum TunnelError {
@@ -54,6 +56,8 @@ pub struct TunnelRegistry {
     status: Arc<Mutex<TunnelStatus>>,
     child: Mutex<Option<Child>>,
     forwarded: Mutex<HashMap<String, Child>>,
+    /// Held while remote access is on and `gateway.keepAwake` allows it.
+    keep_awake: Arc<Mutex<Option<SleepInhibitor>>>,
     generation: Arc<AtomicU64>,
 }
 
@@ -64,6 +68,7 @@ impl TunnelRegistry {
             status: Arc::new(Mutex::new(TunnelStatus::Idle)),
             child: Mutex::new(None),
             forwarded: Mutex::new(HashMap::new()),
+            keep_awake: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
         });
         if Self::read_config().is_ok_and(|config| config.enabled) {
@@ -109,6 +114,10 @@ impl TunnelRegistry {
                     .ok_or_else(|| TunnelError::Message("forward port is invalid".to_string()))?;
                 Ok(json!({ "url": self.start_forward(id, port)? }))
             }
+            Some("syncKeepAwake") => {
+                self.sync_keep_awake();
+                self.status_json()
+            }
             _ => Err(TunnelError::Message("unknown tunnel action".to_string())),
         }
     }
@@ -144,6 +153,7 @@ impl TunnelRegistry {
             .child
             .lock()
             .map_err(|error| TunnelError::Message(error.to_string()))? = Some(child);
+        self.sync_keep_awake();
         Ok(())
     }
 
@@ -219,6 +229,27 @@ impl TunnelRegistry {
         Ok((child, pattern))
     }
 
+    /// Takes or releases the sleep inhibitor to match the running tunnel and
+    /// the current `gateway.keepAwake` setting.
+    fn sync_keep_awake(&self) {
+        let alive = self.status.lock().is_ok_and(|status| {
+            matches!(*status, TunnelStatus::Starting | TunnelStatus::Active(_))
+        });
+        let running = alive && self.child.lock().is_ok_and(|child| child.is_some());
+        let wanted = running && read_keep_awake(&config_path());
+        let Ok(mut held) = self.keep_awake.lock() else {
+            return;
+        };
+        if !wanted {
+            *held = None;
+        } else if held.is_none() {
+            match SleepInhibitor::acquire(KEEP_AWAKE_REASON) {
+                Ok(inhibitor) => *held = Some(inhibitor),
+                Err(error) => eprintln!("keep awake unavailable: {error}"),
+            }
+        }
+    }
+
     fn stop(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut child) = self.child.lock() {
@@ -227,12 +258,16 @@ impl TunnelRegistry {
                 let _ = running.wait();
             }
         }
+        if let Ok(mut held) = self.keep_awake.lock() {
+            *held = None;
+        }
         self.set_status(TunnelStatus::Idle);
     }
 
     fn spawn_scanner<R: Read + Send + 'static>(&self, reader: R, pattern: Regex, generation: u64) {
         let status = Arc::clone(&self.status);
         let live_generation = Arc::clone(&self.generation);
+        let keep_awake = Arc::clone(&self.keep_awake);
         thread::spawn(move || {
             let mut last_line = String::new();
             for line in BufReader::new(reader).lines().map_while(Result::ok) {
@@ -257,6 +292,10 @@ impl TunnelRegistry {
                             &last_line
                         }
                     ));
+                }
+                // A tunnel that died on its own no longer needs the host awake.
+                if let Ok(mut held) = keep_awake.lock() {
+                    *held = None;
                 }
             }
         });
@@ -314,8 +353,9 @@ fn spawn_forward_scanner<R: Read + Send + 'static>(
 }
 
 fn config_path() -> PathBuf {
-    std::env::var_os("HOME")
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+    // `HOME` is unset on Windows; Settings writes under the user profile.
+    pragma_platform::path::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
         .join(".pragma/config.json")
 }
 
@@ -325,6 +365,15 @@ fn read_config_value(path: &Path) -> Result<Value, TunnelError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
         Err(error) => Err(error.into()),
     }
+}
+
+/// Reads `gateway.keepAwake`, falling back to the shipped default when the
+/// config or the field is missing.
+fn read_keep_awake(path: &Path) -> bool {
+    read_config_value(path)
+        .ok()
+        .and_then(|value| value.pointer("/gateway/keepAwake").and_then(Value::as_bool))
+        .unwrap_or(CONSTANTS.gateway.keep_awake)
 }
 
 fn set_enabled_value(value: &mut Value, enabled: bool) -> Result<(), TunnelError> {
@@ -357,6 +406,17 @@ mod tests {
             extract_url(&pattern, r#"{"url":"https://abc.ngrok-free.app"}"#).as_deref(),
             Some("https://abc.ngrok-free.app")
         );
+    }
+
+    #[test]
+    fn keep_awake_defaults_on_and_honours_override() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.json");
+        assert!(read_keep_awake(&path));
+        std::fs::write(&path, r#"{"gateway":{"webEnabled":true}}"#).expect("write");
+        assert!(read_keep_awake(&path));
+        std::fs::write(&path, r#"{"gateway":{"keepAwake":false}}"#).expect("write");
+        assert!(!read_keep_awake(&path));
     }
 
     #[test]

@@ -15,8 +15,8 @@ set -euo pipefail
 #
 # Runs on macOS, Linux, and Windows (under Git Bash, which is what the
 # `windows-latest` CI runner provides). On Windows every produced binary carries
-# a `.exe` suffix, and Tauri expects the staged name to carry it too —
-# `pragma-server-x86_64-pc-windows-msvc.exe`.
+# a `.exe` suffix, and Tauri expects the staged name to carry it too, for example
+# `pragma-server-aarch64-pc-windows-msvc.exe` on a Windows ARM64 runner.
 
 profile="debug"
 if [[ "${1:-}" == "--release" ]]; then
@@ -58,21 +58,21 @@ done
 # A debug app runs several of these from source via `bun`, but the binary must
 # still exist so the Tauri CLI's externalBin copy step succeeds.
 bun_sidecars=(
-  "@pragma/ai-helpers:ai-helpers:pragma-ai"
-  "@pragma/github-helpers:github-helpers:pragma-github"
-  "@pragma/watcher:watcher:pragma-watch"
-  "@pragma/automations:automations:pragma-automations"
-  # The plugin catalog sidecar statically bundles the built-in agent
-  # definitions from the claude-code/opencode/cursor plugin packages.
-  "@pragma/plugins-host:plugins-host:pragma-plugins"
+  "@pragma-sh/ai-helpers:ai-helpers:pragma-ai"
+  "@pragma-sh/github-helpers:github-helpers:pragma-github"
+  "@pragma-sh/watcher:watcher:pragma-watch"
+  "@pragma-sh/automations:automations:pragma-automations"
+  "@pragma-sh/plugins-host:plugins-host:pragma-plugins"
 )
 
-bun --filter @pragma/ai-helpers build:sidecar
-bun --filter @pragma/github-helpers build:sidecar
-bun --filter @pragma/watcher build:sidecar
-bash "$script_dir/stage-bundled-plugins.sh"
-bun --filter @pragma/automations build:sidecar
-bun --filter @pragma/plugins-host build:sidecar
+bun --filter @pragma-sh/ai-helpers build:sidecar
+bun --filter @pragma-sh/github-helpers build:sidecar
+bun --filter @pragma-sh/watcher build:sidecar
+bun --filter @pragma-sh/automations build:sidecar
+# The plugin catalog sidecar bundles `@pragma-sh/sdk` and `@pragma-sh/plugin`, which
+# resolve to their built `dist/`; build its workspace dependencies first.
+bunx turbo run build --filter=@pragma-sh/plugins-host^...
+bun --filter @pragma-sh/plugins-host build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
 

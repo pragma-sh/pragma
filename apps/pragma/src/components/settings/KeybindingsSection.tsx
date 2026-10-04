@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleStop, Radio, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import type { KeybindingChord, KeybindingsConfig } from "@pragma/constants";
+import type { KeybindingChord, KeybindingsConfig } from "@pragma-sh/constants";
 
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";

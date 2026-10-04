@@ -7,6 +7,8 @@ import { runPromptWithFallback } from "./session.ts";
 export interface GenerateCommitMessageOptions {
   /** The staged diff (`git diff --cached`). */
   stagedDiff: string;
+  /** What the change is, when the diff cannot say (e.g. a merge-conflict resolution). */
+  note?: string;
   /** Worktree root — used for AGENTS.md/skill context. */
   cwd: string;
   authStorage: AuthStorage;
@@ -38,7 +40,7 @@ export function generateCommitMessage(options: GenerateCommitMessageOptions): Pr
       authStorage: options.authStorage,
       registry: options.registry,
     },
-    buildCommitMessagePrompt(options.stagedDiff),
+    buildCommitMessagePrompt(options.stagedDiff, options.note),
     cleanCommitMessage,
   );
 }

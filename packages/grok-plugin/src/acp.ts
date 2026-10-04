@@ -4,8 +4,8 @@
 // documented programmatic entry point — so neither the launcher nor the usage
 // provider ever touches `~/.grok/auth.json`. Grok owns its credentials and
 // refresh; Pragma never reads or prints a token.
-import { runProviderCommand } from "@pragma/plugin/catalog";
-import type { PluginContext } from "@pragma/plugin/catalog";
+import { runProviderCommand } from "@pragma-sh/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 
 /** Exit status the wrapper uses to say `grok` is not installed. */
 const MISSING_STATUS = 20;

@@ -4,10 +4,10 @@
  * to one end fails to typecheck at the other.
  *
  * The shapes that also exist on disk (a block anchor, a comment) come from
- * `@pragma/scratchpad-contract` and are re-exported here so a host importing
+ * `@pragma-sh/scratchpad-contract` and are re-exported here so a host importing
  * the viewer still gets the whole vocabulary from one place.
  */
-import type { ScratchpadBlock, ScratchpadComment } from "@pragma/scratchpad-contract";
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma-sh/scratchpad-contract";
 
 export type { ScratchpadBlock, ScratchpadComment };
 
@@ -27,6 +27,14 @@ export type ScratchpadViewerMessage =
   | { type: "promptAgent"; requestId: string; text: string }
   /** A rendered component asked the host to attach an agent tab. */
   | { type: "requestAgentAttachment"; requestId: string }
+  /** A rendered component requested a fresh whiteboard PNG when its version changed. */
+  | {
+      type: "getWhiteboardSnapshot";
+      requestId: string;
+      whiteboardId: string;
+      knownVersion?: number;
+      dark?: boolean;
+    }
   /** A rendered component subscribed to attached-agent progress. */
   | { type: "subscribeAgentProgress"; requestId: string; tabIds: string[] }
   /** The component's progress subscription was torn down. */

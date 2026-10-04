@@ -1,6 +1,6 @@
 {
-  "name": "@pragma/github-helpers",
-  "version": "0.0.0",
+  "name": "@pragma-sh/github-helpers",
+  "version": "1.2.0",
   "private": true,
   "description": "Host-side GitHub helpers for Pragma, compiled as the pragma-github sidecar.",
   "license": "AGPL-3.0-only",
@@ -22,8 +22,8 @@
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-github"
   },
   "dependencies": {
-    "@pragma/constants": "workspace:*",
-    "@pragma/sidecar-kit": "workspace:*",
+    "@pragma-sh/constants": "workspace:*",
+    "@pragma-sh/sidecar-kit": "workspace:*",
     "octokit": "^5.0.5"
   },
   "devDependencies": {

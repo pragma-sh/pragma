@@ -4,15 +4,12 @@ import {
   cursorAgentPlugin,
   loadCursorUsageLimits,
   parseCursorModels,
+  parseCursorStatus,
   parseCursorUsageSummary,
 } from "./pragma-plugin";
 
 it("launches Cursor's unambiguous binary", () => {
-  expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual([
-    "cursor-agent",
-    "--force",
-    "--approve-mcps",
-  ]);
+  expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual(["cursor-agent", "--approve-mcps"]);
   expect(cursorAgentPlugin.agents?.[0]?.excludeFeatures).toEqual([
     "commandApproval",
     "subagents",
@@ -106,10 +103,50 @@ it("includes Cursor's auto model", () => {
   ]);
 });
 
-it("links to Cursor's usage dashboard", () => {
-  expect(cursorAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
-    "https://cursor.com/dashboard/spending",
-  );
+it("keeps effort-suffixed model ids exactly as the CLI prints them", () => {
+  expect(
+    parseCursorModels(
+      [
+        "Available models",
+        "",
+        "cursor-grok-4.6-high - Cursor Grok 4.6",
+        "cursor-grok-4.6-xhigh - Cursor Grok 4.6 Extra High",
+        "gpt-5.3-codex - Codex 5.3",
+        "gpt-5.3-codex-high-fast - Codex 5.3 High Fast",
+        "",
+      ].join("\n"),
+    ),
+  ).toEqual([
+    { id: "cursor-grok-4.6-high", name: "Cursor Grok 4.6" },
+    { id: "cursor-grok-4.6-xhigh", name: "Cursor Grok 4.6 Extra High" },
+    { id: "gpt-5.3-codex", name: "Codex 5.3" },
+    { id: "gpt-5.3-codex-high-fast", name: "Codex 5.3 High Fast" },
+  ]);
+});
+
+it("passes a model straight to --model without a synthetic effort suffix", () => {
+  const agent = cursorAgentPlugin.agents?.[0];
+  expect(agent?.args.model("cursor-grok-4.6-high")).toEqual(["--model", "cursor-grok-4.6-high"]);
+  expect(agent?.args.modelReasoning).toBeUndefined();
+});
+
+it("declares a single-login Cursor account provider", () => {
+  const provider = cursorAgentPlugin.accounts?.[0];
+  expect(provider).toMatchObject({
+    provider: "cursor",
+    agent: "cursor",
+    dashboardUrl: "https://cursor.com/dashboard/spending",
+    login: { command: ["cursor-agent", "login"] },
+  });
+  expect(provider?.env).toBeUndefined();
+});
+
+it("identifies a login from cursor-agent status", () => {
+  expect(parseCursorStatus("\u001b[32m✓\u001b[0m Logged in as a@b.c\n")).toEqual({
+    id: "a@b.c",
+    email: "a@b.c",
+  });
+  expect(parseCursorStatus("Not logged in")).toBeNull();
 });
 
 it("submits interjections in a separate PTY write", async () => {

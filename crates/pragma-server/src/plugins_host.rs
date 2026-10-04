@@ -5,18 +5,21 @@
 //! Mirrors the `automations` sidecar supervisor: a lazily (re)spawned child with
 //! a stdout reader thread. The sidecar resolves plugin agent contributions in
 //! TypeScript (it can `import()` plugin bundles) and reports a `catalog` event;
-//! the last catalog is cached so a sidecar crash never blanks the catalog — a
-//! respawn re-runs `load` and the cache holds until a fresh publish arrives.
+//! the last catalog is cached so a sidecar crash never blanks the catalog — the
+//! next request re-sends `load` to the respawned child, and the cache holds until
+//! its fresh publish arrives.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(not(test))]
 use std::time::Instant;
 
 use crate::sidecar::{sidecar_executable, workspace_root};
@@ -39,12 +42,15 @@ const ASSET_MAX_BYTES: u64 = 256 * 1024;
 // request timeout on a cold start. Timing out too early leaves load state at
 // `NotStarted`, causing every catalog caller to enqueue another full reload.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
-const USAGE_LIMITS_LOG_FIELD_MAX_CHARS: usize = 2_000;
+const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
+/// Account callbacks shell out to harness CLIs (`claude -p`, `codex app-server`)
+/// that can take tens of seconds on a cold start; usage shares the same bound.
+const ACCOUNTS_REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 #[cfg(not(test))]
 const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
 
-type UsageLimitsSender = SyncSender<Result<Value, String>>;
-type PendingUsageLimits = Arc<Mutex<HashMap<String, UsageLimitsSender>>>;
+type PendingSender = SyncSender<Result<Value, String>>;
+type PendingRequests = Arc<Mutex<HashMap<String, PendingSender>>>;
 
 #[derive(Debug, Error)]
 pub enum PluginsError {
@@ -132,6 +138,13 @@ enum SidecarEvent {
         #[serde(default)]
         error: Option<String>,
     },
+    AccountsResult {
+        request_id: String,
+        #[serde(default)]
+        value: Option<Value>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 }
 
 /// Owns the supervised sidecar plus the cached catalog + asset map.
@@ -142,13 +155,12 @@ pub struct PluginsRegistry {
     assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
     watchers: Arc<Mutex<Vec<WatcherSpec>>>,
     publish_revision: Arc<(Mutex<u64>, Condvar)>,
-    pending_usage_limits: PendingUsageLimits,
-    /// Last readings per scope root (`""` for the global scope).
-    usage_cache: Mutex<HashMap<String, UsageScopeCache>>,
-    /// One refresh at a time per scope, so concurrent clients coalesce.
-    usage_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    pending: PendingRequests,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
+    /// The sidecar generation `load_state` describes; a respawned child has
+    /// loaded nothing, whatever the previous one had.
+    loaded_generation: AtomicU64,
     reload_lock: Mutex<()>,
     server_boot_id: String,
 }
@@ -160,7 +172,7 @@ impl PluginsRegistry {
         let assets = Arc::new(Mutex::new(HashMap::new()));
         let watchers = Arc::new(Mutex::new(Vec::new()));
         let publish_revision = Arc::new((Mutex::new(0), Condvar::new()));
-        let pending_usage_limits = Arc::new(Mutex::new(HashMap::new()));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
         let roots = load_persisted_roots(&server_dir);
         let registry = Arc::new(Self {
             server_dir,
@@ -169,11 +181,10 @@ impl PluginsRegistry {
             assets: Arc::clone(&assets),
             watchers: Arc::clone(&watchers),
             publish_revision: Arc::clone(&publish_revision),
-            pending_usage_limits: Arc::clone(&pending_usage_limits),
-            usage_cache: Mutex::new(HashMap::new()),
-            usage_locks: Mutex::new(HashMap::new()),
+            pending: Arc::clone(&pending),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
+            loaded_generation: AtomicU64::new(0),
             reload_lock: Mutex::new(()),
             server_boot_id: uuid::Uuid::new_v4().to_string(),
         });
@@ -216,15 +227,17 @@ impl PluginsRegistry {
                         providers,
                         error,
                     } => {
-                        let sender = pending_usage_limits
-                            .lock()
-                            .ok()
-                            .and_then(|mut pending| pending.remove(&request_id));
-                        if let Some(sender) = sender {
-                            let result = error
-                                .map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
-                            let _ = sender.send(result);
-                        }
+                        let result =
+                            error.map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
+                        complete_pending(&pending, &request_id, result);
+                    }
+                    SidecarEvent::AccountsResult {
+                        request_id,
+                        value,
+                        error,
+                    } => {
+                        let result = error.map_or_else(|| Ok(value.unwrap_or(Value::Null)), Err);
+                        complete_pending(&pending, &request_id, result);
                     }
                     SidecarEvent::Ready => {}
                 }
@@ -271,7 +284,6 @@ impl PluginsRegistry {
             }
             "readAsset" => self.read_asset(payload),
             "usageLimits" => self.usage_limits(payload),
-            "logUsageLimitsError" => Self::log_usage_limits_error(payload),
             "reload" => {
                 self.reload()?;
                 Ok(json!({ "ok": true }))
@@ -374,6 +386,8 @@ impl PluginsRegistry {
         let (revision, changed) = &*self.publish_revision;
         let previous = *revision.lock().map_err(|_| PluginsError::LockPoisoned)?;
         let state = self.send_load(&roots)?;
+        self.loaded_generation
+            .store(self.sidecar.generation(), Ordering::SeqCst);
         let (revision, timeout) = changed
             .wait_timeout_while(
                 revision.lock().map_err(|_| PluginsError::LockPoisoned)?,
@@ -401,15 +415,24 @@ impl PluginsRegistry {
             .reload_lock
             .lock()
             .map_err(|_| PluginsError::LockPoisoned)?;
-        let state = *self
-            .load_state
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?;
-        match state {
+        // Respawn a crashed child now, so its generation is current below.
+        self.sidecar.ensure_running()?;
+        match self.current_load_state()? {
             LoadState::StartedWithGateway => Ok(()),
             LoadState::StartedWithoutGateway if self.gateway_credentials().is_none() => Ok(()),
             LoadState::NotStarted | LoadState::StartedWithoutGateway => self.reload_locked(),
         }
+    }
+
+    /// `load_state`, or `NotStarted` when the sidecar has respawned since.
+    fn current_load_state(&self) -> Result<LoadState, PluginsError> {
+        if self.loaded_generation.load(Ordering::SeqCst) != self.sidecar.generation() {
+            return Ok(LoadState::NotStarted);
+        }
+        Ok(*self
+            .load_state
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?)
     }
 
     fn send_load(&self, roots: &[String]) -> Result<LoadState, PluginsError> {
@@ -423,7 +446,6 @@ impl PluginsRegistry {
         self.sidecar.send(&json!({
             "type": "load",
             "roots": roots,
-            "bundledDir": bundled_plugins_dir(),
             "gatewayUrl": gateway_url,
             "gatewayToken": gateway_token,
             "stateDir": self.server_dir,
@@ -486,258 +508,58 @@ impl PluginsRegistry {
         Ok(json!({ "base64": base64, "mime": entry.mime }))
     }
 
-    /// Serves the `usageLimits` action from the host's single cache.
-    ///
-    /// Every client reads the same readings: the host owns the refresh cadence,
-    /// so a phone and a desktop asking at the same moment cost each provider one
-    /// invocation, not two. Concurrent callers for one scope serialize on that
-    /// scope's lock and the loser returns the winner's fresh cache.
     fn usage_limits(&self, payload: &Value) -> Result<Value, PluginsError> {
+        let mut command = json!({ "type": "usageLimits" });
+        if let Some(plugin_id) = payload.get("pluginId").and_then(Value::as_str) {
+            command["pluginId"] = Value::String(plugin_id.to_string());
+        }
+        self.request(command, USAGE_LIMITS_TIMEOUT)
+            .map(|providers| json!({ "providers": providers }))
+    }
+
+    /// Runs one account op (`providers`, `launch`, `identify`, `usage`) in the
+    /// sidecar, which owns the plugin callbacks. `op` carries the op's fields.
+    pub fn accounts_request(&self, mut op: Value) -> Result<Value, PluginsError> {
+        op["type"] = Value::String("accounts".to_string());
+        self.request(op, ACCOUNTS_REQUEST_TIMEOUT)
+    }
+
+    /// Sends one correlated command and waits for the sidecar's matching reply.
+    fn request(&self, mut command: Value, timeout: Duration) -> Result<Value, PluginsError> {
         self.ensure_catalog_fresh()?;
-        let scope = payload
-            .get("root")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let plugin_id = payload
-            .get("pluginId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        if let Some(cached) = self.fresh_usage_limits(&scope, plugin_id.as_deref())? {
-            return Ok(json!({ "providers": cached }));
-        }
-        let scope_lock = self.usage_scope_lock(&scope)?;
-        let _guard = scope_lock.lock().map_err(|_| PluginsError::LockPoisoned)?;
-        // Re-check under the scope lock: a caller that queued behind a refresh
-        // wants that refresh's result, not a second one.
-        if let Some(cached) = self.fresh_usage_limits(&scope, plugin_id.as_deref())? {
-            return Ok(json!({ "providers": cached }));
-        }
-        let loaded = self.request_usage_limits(&scope, plugin_id.as_deref())?;
-        let merged = self.merge_usage_limits(&scope, loaded)?;
-        Ok(json!({ "providers": filter_by_plugin(merged, plugin_id.as_deref()) }))
-    }
-
-    /// The cached providers for a scope, when none of them is due a refresh.
-    fn fresh_usage_limits(
-        &self,
-        scope: &str,
-        plugin_id: Option<&str>,
-    ) -> Result<Option<Vec<Value>>, PluginsError> {
-        let cache = self
-            .usage_cache
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?;
-        let Some(entry) = cache.get(scope) else {
-            return Ok(None);
-        };
-        let now = Instant::now();
-        let due =
-            entry.states.values().any(|state| state.next_due <= now) || entry.providers.is_empty();
-        if due {
-            return Ok(None);
-        }
-        Ok(Some(filter_by_plugin(entry.providers.clone(), plugin_id)))
-    }
-
-    /// Per-scope refresh lock, created on first use.
-    fn usage_scope_lock(&self, scope: &str) -> Result<Arc<Mutex<()>>, PluginsError> {
-        let mut locks = self
-            .usage_locks
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?;
-        Ok(Arc::clone(
-            locks
-                .entry(scope.to_string())
-                .or_insert_with(|| Arc::new(Mutex::new(()))),
-        ))
-    }
-
-    /// Asks the sidecar for one scope's readings and waits for its answer.
-    fn request_usage_limits(
-        &self,
-        scope: &str,
-        plugin_id: Option<&str>,
-    ) -> Result<Vec<Value>, PluginsError> {
         let request_id = uuid::Uuid::new_v4().to_string();
         let (sender, receiver) = mpsc::sync_channel(1);
-        self.pending_usage_limits
+        self.pending
             .lock()
             .map_err(|_| PluginsError::LockPoisoned)?
             .insert(request_id.clone(), sender);
-        let mut command = json!({
-            "type": "usageLimits",
-            "requestId": request_id,
-        });
-        if let Some(plugin_id) = plugin_id {
-            command["pluginId"] = Value::String(plugin_id.to_string());
-        }
-        if !scope.is_empty() {
-            command["root"] = Value::String(scope.to_string());
-        }
-        if let Err(error) = self.sidecar.send(&command) {
-            if let Ok(mut pending) = self.pending_usage_limits.lock() {
+        command["requestId"] = Value::String(request_id.clone());
+        let forget = || {
+            if let Ok(mut pending) = self.pending.lock() {
                 pending.remove(&request_id);
             }
+        };
+        if let Err(error) = self.sidecar.send(&command) {
+            forget();
             return Err(error);
         }
-        let result = receiver
-            .recv_timeout(usage_limits_timeout())
-            .map_err(|error| {
-                if let Ok(mut pending) = self.pending_usage_limits.lock() {
-                    pending.remove(&request_id);
-                }
-                PluginsError::Operation(format!("wait for usage limits: {error}"))
-            })?;
-        let providers = result.map_err(PluginsError::Operation)?;
-        Ok(providers.as_array().cloned().unwrap_or_default())
-    }
-
-    /// Folds fresh readings into the scope cache and returns what clients see.
-    ///
-    /// A provider that just failed keeps its last good reading — with the
-    /// original `observedAt`, so the client labels it stale rather than showing
-    /// a zero — and earns exponential backoff before the next attempt.
-    fn merge_usage_limits(
-        &self,
-        scope: &str,
-        loaded: Vec<Value>,
-    ) -> Result<Vec<Value>, PluginsError> {
-        let now = Instant::now();
-        let observed_at = unix_millis_now();
-        let mut cache = self
-            .usage_cache
-            .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?;
-        let entry = cache.entry(scope.to_string()).or_default();
-        let previous: HashMap<String, Value> = entry
-            .providers
-            .iter()
-            .filter_map(|provider| Some((provider_key(provider)?, provider.clone())))
-            .collect();
-        let mut merged = Vec::with_capacity(loaded.len());
-        for mut provider in loaded {
-            let Some(key) = provider_key(&provider) else {
-                continue;
-            };
-            let failed = provider_failed(&provider);
-            if failed {
-                if let Some(last_good) = previous.get(&key).filter(|prior| !provider_failed(prior))
-                {
-                    provider = last_good.clone();
-                }
-            }
-            if !failed || provider_failed(&provider) {
-                provider["observedAt"] = json!(observed_at);
-            }
-            let state = entry.states.entry(key).or_default();
-            state.failures = if failed { state.failures + 1 } else { 0 };
-            state.next_due = now + provider_refresh_delay(&provider, state.failures);
-            merged.push(provider);
-        }
-        // A provider that vanished from the catalog must not linger in the cache.
-        let live: Vec<String> = merged.iter().filter_map(provider_key).collect();
-        entry.states.retain(|key, _| live.contains(key));
-        entry.providers.clone_from(&merged);
-        Ok(merged)
-    }
-
-    fn log_usage_limits_error(payload: &Value) -> Result<Value, PluginsError> {
-        let plugin_id = required_log_field(payload, "pluginId")?;
-        let provider_id = required_log_field(payload, "providerId")?;
-        let message = required_log_field(payload, "message")?;
-        eprintln!("usage limits update failed for {plugin_id}/{provider_id}: {message}");
-        Ok(json!({ "ok": true }))
+        let result = receiver.recv_timeout(timeout).map_err(|error| {
+            forget();
+            PluginsError::Operation(format!("wait for plugins sidecar: {error}"))
+        })?;
+        result.map_err(PluginsError::Operation)
     }
 }
 
-/// Cached readings for one scope plus each provider's refresh bookkeeping.
-#[derive(Default)]
-struct UsageScopeCache {
-    providers: Vec<Value>,
-    states: HashMap<String, UsageProviderState>,
-}
-
-/// How a single provider is faring: consecutive failures and when it is next due.
-struct UsageProviderState {
-    failures: u32,
-    next_due: Instant,
-}
-
-impl Default for UsageProviderState {
-    fn default() -> Self {
-        Self {
-            failures: 0,
-            next_due: Instant::now(),
-        }
+/// Hands a sidecar reply to the request waiting on it, if it is still waiting.
+fn complete_pending(pending: &PendingRequests, request_id: &str, result: Result<Value, String>) {
+    let sender = pending
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.remove(request_id));
+    if let Some(sender) = sender {
+        let _ = sender.send(result);
     }
-}
-
-/// How long the host waits for the sidecar to answer one usage-limits request.
-fn usage_limits_timeout() -> Duration {
-    Duration::from_millis(millis(CONSTANTS.usage_limits.load_timeout_ms))
-}
-
-/// Stable identity of one provider within a scope.
-fn provider_key(provider: &Value) -> Option<String> {
-    let plugin_id = provider.get("pluginId").and_then(Value::as_str)?;
-    let provider_id = provider.get("providerId").and_then(Value::as_str)?;
-    Some(format!("{plugin_id}\u{0}{provider_id}"))
-}
-
-/// True when a reading is the host's own "the loader threw" placeholder.
-///
-/// A provider that reports `not-configured` or `authentication-required` is
-/// answering correctly — that state is the reading, not a failure — so only
-/// `error` earns backoff and last-good substitution.
-fn provider_failed(provider: &Value) -> bool {
-    let Some(result) = provider.get("result") else {
-        return true;
-    };
-    result.get("status").and_then(Value::as_str) == Some("unavailable")
-        && result.get("reason").and_then(Value::as_str) == Some("error")
-}
-
-/// The delay before a provider is asked again: its own requested cadence,
-/// clamped to the shared floor, then backed off once per consecutive failure.
-fn provider_refresh_delay(provider: &Value, failures: u32) -> Duration {
-    let policy = &CONSTANTS.usage_limits;
-    let floor = millis(policy.min_refresh_interval_ms);
-    let requested = provider
-        .get("refreshIntervalMs")
-        .and_then(Value::as_u64)
-        .unwrap_or(floor)
-        .max(floor);
-    if failures == 0 {
-        return Duration::from_millis(requested);
-    }
-    let backoff = requested.saturating_mul(2u64.saturating_pow(failures.min(16)));
-    Duration::from_millis(backoff.min(millis(policy.max_retry_interval_ms)))
-}
-
-/// Narrows a scope's providers to one plugin, for a client that asked for one.
-fn filter_by_plugin(providers: Vec<Value>, plugin_id: Option<&str>) -> Vec<Value> {
-    let Some(plugin_id) = plugin_id else {
-        return providers;
-    };
-    providers
-        .into_iter()
-        .filter(|provider| provider.get("pluginId").and_then(Value::as_str) == Some(plugin_id))
-        .collect()
-}
-
-/// A schema-guaranteed-positive millisecond constant as an unsigned duration.
-fn millis(value: i64) -> u64 {
-    u64::try_from(value).unwrap_or(0)
-}
-
-/// Unix milliseconds, or 0 if the clock is before the epoch.
-fn unix_millis_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 fn resolve_watcher(
@@ -763,28 +585,8 @@ fn resolve_watcher(
     matches.next().is_none().then_some(watcher)
 }
 
-fn required_log_field(payload: &Value, field: &str) -> Result<String, PluginsError> {
-    let value = payload
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| PluginsError::InvalidRequest(format!("missing {field}")))?;
-    Ok(value
-        .chars()
-        .take(USAGE_LIMITS_LOG_FIELD_MAX_CHARS)
-        .map(|character| {
-            if character == '\n' || character == '\r' {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect())
-}
-
 /// Reads the persisted plugin roots, or an empty list before the first
-/// `registerRoots` (or when the file is unreadable/corrupt — bundled agents
-/// still resolve without roots).
+/// `registerRoots` or when the file is unreadable or corrupt.
 fn load_persisted_roots(server_dir: &Path) -> Vec<String> {
     fs::read_to_string(server_dir.join(PLUGIN_ROOTS_FILE))
         .ok()
@@ -817,6 +619,8 @@ struct PluginsSidecar {
     tx: Sender<SidecarEvent>,
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<ChildStdin>>,
+    /// Bumped on every spawn, so callers can tell a respawned child apart.
+    generation: AtomicU64,
 }
 
 impl PluginsSidecar {
@@ -825,7 +629,12 @@ impl PluginsSidecar {
             tx,
             child: Mutex::new(None),
             stdin: Mutex::new(None),
+            generation: AtomicU64::new(0),
         }
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
     }
 
     fn send(&self, command: &Value) -> Result<(), PluginsError> {
@@ -933,6 +742,7 @@ impl PluginsSidecar {
         }
         *self.stdin.lock().map_err(|_| PluginsError::LockPoisoned)? = Some(stdin);
         *self.child.lock().map_err(|_| PluginsError::LockPoisoned)? = Some(child);
+        self.generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -949,36 +759,16 @@ fn sidecar_command() -> Command {
     }
 }
 
-/// Resolves the directory of plugin bundles shipped with the app. Dev reads
-/// the staged copies under the workspace `src-tauri/resources`; a release
-/// build reads them from the app resource dir the desktop forwarded via
-/// `PRAGMA_RESOURCE_DIR` when it spawned this server. `None` (no watcher /
-/// bundled agents, non-fatal) when neither location exists.
-pub fn bundled_plugins_dir() -> Option<PathBuf> {
-    let rel = Path::new(CONSTANTS.plugins.bundled_dir_name.as_str());
-    if cfg!(debug_assertions) {
-        let dir = workspace_root()
-            .join("apps/pragma/src-tauri/resources")
-            .join(rel);
-        return dir.is_dir().then_some(dir);
-    }
-    std::env::var_os("PRAGMA_RESOURCE_DIR")
-        .map(PathBuf::from)
-        .into_iter()
-        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
-        .find(|candidate| candidate.is_dir())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use serde_json::json;
 
     use super::{
-        filter_by_plugin, is_lowercase_hex_sha256, provider_failed, provider_refresh_delay,
-        resolve_watcher, AssetEntry, PluginsError, PluginsRegistry, SidecarEvent, WatcherSpec,
-        PLUGIN_ROOTS_FILE,
+        is_lowercase_hex_sha256, resolve_watcher, AssetEntry, PluginsRegistry, SidecarEvent,
+        WatcherSpec, PLUGIN_ROOTS_FILE,
     };
-    use pragma_constants::CONSTANTS;
 
     fn watcher(plugin_id: &str, agent_id: &str, watcher_agent: &str) -> WatcherSpec {
         WatcherSpec {
@@ -1082,28 +872,6 @@ mod tests {
     }
 
     #[test]
-    fn usage_limits_error_log_requires_identifying_fields() {
-        let result = PluginsRegistry::log_usage_limits_error(&json!({
-            "pluginId": "pragma.cursor",
-            "providerId": "cursor",
-        }));
-
-        assert!(matches!(result, Err(PluginsError::InvalidRequest(_))));
-    }
-
-    #[test]
-    fn usage_limits_error_log_accepts_complete_event() {
-        let result = PluginsRegistry::log_usage_limits_error(&json!({
-            "pluginId": "pragma.cursor",
-            "providerId": "cursor",
-            "message": "not logged in\nretry later",
-        }))
-        .expect("complete log event");
-
-        assert_eq!(result, json!({ "ok": true }));
-    }
-
-    #[test]
     fn gateway_credentials_require_a_real_port_and_token() {
         let dir =
             std::env::temp_dir().join(format!("pragma-plugins-creds-test-{}", std::process::id()));
@@ -1155,6 +923,27 @@ mod tests {
     }
 
     #[test]
+    fn respawned_sidecar_needs_a_fresh_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = PluginsRegistry::new(dir.path().to_path_buf());
+        *registry.load_state.lock().expect("load state") = super::LoadState::StartedWithGateway;
+        registry.loaded_generation.store(1, Ordering::SeqCst);
+        registry.sidecar.generation.store(1, Ordering::SeqCst);
+        assert_eq!(
+            registry.current_load_state().expect("state"),
+            super::LoadState::StartedWithGateway
+        );
+
+        registry.sidecar.generation.store(2, Ordering::SeqCst);
+
+        assert_eq!(
+            registry.current_load_state().expect("state"),
+            super::LoadState::NotStarted,
+            "a respawned child has loaded no plugins"
+        );
+    }
+
+    #[test]
     fn read_asset_rejects_a_bad_hash() {
         let dir = std::env::temp_dir().join(format!("pragma-plugins-test-{}", std::process::id()));
         let registry = PluginsRegistry::new(dir);
@@ -1163,153 +952,5 @@ mod tests {
             "hash": "../../etc/passwd",
         }));
         assert!(result.is_err());
-    }
-
-    fn provider(plugin_id: &str, result: &serde_json::Value) -> serde_json::Value {
-        json!({
-            "pluginId": plugin_id,
-            "providerId": "usage",
-            "title": "Usage",
-            "dashboardUrl": "https://example.com",
-            "primaryLimitId": "daily",
-            "result": result,
-        })
-    }
-
-    fn ready(observed_at: u64) -> serde_json::Value {
-        json!({
-            "status": "ready",
-            "observedAt": observed_at,
-            "limits": [{ "id": "daily", "title": "Daily", "used": 1, "limit": 10 }],
-        })
-    }
-
-    fn load_error() -> serde_json::Value {
-        json!({ "status": "unavailable", "reason": "error", "message": "boom" })
-    }
-
-    fn usage_registry(name: &str) -> std::sync::Arc<PluginsRegistry> {
-        let dir = std::env::temp_dir().join(format!("pragma-usage-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("create test dir");
-        PluginsRegistry::new(dir)
-    }
-
-    #[test]
-    fn treats_only_a_load_error_as_a_provider_failure() {
-        assert!(provider_failed(&provider("p", &load_error())));
-        assert!(!provider_failed(&provider("p", &ready(1))));
-        assert!(!provider_failed(&provider(
-            "p",
-            &json!({ "status": "unavailable", "reason": "not-configured", "message": "Sign in" })
-        )));
-        // A provider that has never produced a reading is not a cached success.
-        assert!(provider_failed(
-            &json!({ "pluginId": "p", "providerId": "usage" })
-        ));
-    }
-
-    #[test]
-    fn clamps_a_provider_cadence_to_the_shared_floor_and_backs_off_on_failure() {
-        let floor = u64::try_from(CONSTANTS.usage_limits.min_refresh_interval_ms).expect("floor");
-        let eager = json!({ "refreshIntervalMs": 1 });
-        assert_eq!(
-            provider_refresh_delay(&eager, 0),
-            std::time::Duration::from_millis(floor)
-        );
-        let patient = json!({ "refreshIntervalMs": floor * 4 });
-        assert_eq!(
-            provider_refresh_delay(&patient, 0),
-            std::time::Duration::from_millis(floor * 4)
-        );
-        assert_eq!(
-            provider_refresh_delay(&eager, 2),
-            std::time::Duration::from_millis(floor * 4)
-        );
-        let ceiling = u64::try_from(CONSTANTS.usage_limits.max_retry_interval_ms).expect("ceiling");
-        assert_eq!(
-            provider_refresh_delay(&eager, 20),
-            std::time::Duration::from_millis(ceiling)
-        );
-    }
-
-    #[test]
-    fn serves_a_cached_reading_until_a_provider_is_due() {
-        let registry = usage_registry("fresh");
-        registry
-            .merge_usage_limits("", vec![provider("a", &ready(5))])
-            .expect("merge");
-
-        let cached = registry
-            .fresh_usage_limits("", None)
-            .expect("cache lock")
-            .expect("a just-loaded provider is not due again");
-
-        assert_eq!(cached.len(), 1);
-        assert!(cached[0].get("observedAt").is_some());
-    }
-
-    #[test]
-    fn keeps_the_last_good_reading_when_a_provider_starts_failing() {
-        let registry = usage_registry("laststood");
-        registry
-            .merge_usage_limits("", vec![provider("a", &ready(5))])
-            .expect("first merge");
-        let first = registry
-            .fresh_usage_limits("", None)
-            .expect("cache lock")
-            .expect("cached");
-        let first_observed = first[0].get("observedAt").cloned().expect("observedAt");
-
-        let merged = registry
-            .merge_usage_limits("", vec![provider("a", &load_error())])
-            .expect("second merge");
-
-        // The card still shows real numbers; the untouched `observedAt` is what
-        // lets the client label them stale instead of rendering a zero.
-        assert_eq!(
-            merged[0].get("result").and_then(|r| r.get("status")),
-            Some(&json!("ready"))
-        );
-        assert_eq!(merged[0].get("observedAt"), Some(&first_observed));
-    }
-
-    #[test]
-    fn drops_a_provider_that_left_the_catalog() {
-        let registry = usage_registry("dropped");
-        registry
-            .merge_usage_limits("", vec![provider("a", &ready(1)), provider("b", &ready(1))])
-            .expect("first merge");
-
-        let merged = registry
-            .merge_usage_limits("", vec![provider("a", &ready(2))])
-            .expect("second merge");
-
-        assert_eq!(merged.len(), 1);
-        let cache = registry.usage_cache.lock().expect("cache lock");
-        assert_eq!(cache.get("").expect("scope").states.len(), 1);
-    }
-
-    #[test]
-    fn scopes_the_cache_by_project_root() {
-        let registry = usage_registry("scoped");
-        registry
-            .merge_usage_limits("/repo", vec![provider("a", &ready(1))])
-            .expect("merge");
-
-        assert!(registry
-            .fresh_usage_limits("/other", None)
-            .expect("cache lock")
-            .is_none());
-    }
-
-    #[test]
-    fn narrows_a_response_to_the_requested_plugin() {
-        let providers = vec![provider("a", &ready(1)), provider("b", &ready(1))];
-
-        let filtered = filter_by_plugin(providers.clone(), Some("b"));
-
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].get("pluginId"), Some(&json!("b")));
-        assert_eq!(filter_by_plugin(providers, None).len(), 2);
     }
 }

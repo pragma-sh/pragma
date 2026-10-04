@@ -23,6 +23,13 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   retrying an `agentSessionLaunch` after a 5s socket timeout can duplicate a launch that
   already succeeded server-side.
 - Local managed-server bootstrap for development and packaged native clients.
+  `connect_compatible` keeps a running server only when `hello_is_current`: the
+  protocol matches **and**, for a bundled release, the hello `buildId` equals the hash
+  of the `pragma-server` beside this binary (hashed once per process). A desktop
+  update can ship a new server without a protocol change, and without the build check
+  the relaunched app would keep talking to the old one. Debug builds (`cargo run`) and
+  socket endpoints stay on the protocol check alone; a server too old to send a
+  `buildId` counts as stale. Anything else goes through `kill_stale_server`.
 - Remote SSH bridge using `russh` and `channel_open_direct_streamlocal`, with
   agent (default), key-file, and password auth (`RemoteAuth`). `ssh_exec` runs
   one-shot remote commands (path/git/version probing) over a fresh session,

@@ -1,4 +1,4 @@
-import type { Project } from "@pragma/constants";
+import type { Project } from "@pragma-sh/constants";
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,7 @@ import { useProjectCycle } from "./use-project-cycle";
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
 
 function project(id: string): Project {
-  return { id, name: id, path: `/tmp/${id}`, orderIndex: 0, createdAt: "now" };
+  return { id, name: id, path: `/tmp/${id}`, iconEmoji: null, orderIndex: 0, createdAt: "now" };
 }
 
 function wheelEvent(deltaX: number): React.WheelEvent {
@@ -54,6 +54,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     selectWorktree: vi.fn(),
     createTerminalTab: vi.fn(),
     createBrowserTab: vi.fn(),
+    createWhiteboard: vi.fn(),
     startSession: vi.fn(),
     createTabInPane: vi.fn(),
     openFileTab: vi.fn(),
@@ -62,6 +63,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     openDaemonLogTab: vi.fn(),
     openPluginWebView: vi.fn(),
     openScratchpadFile: vi.fn(),
+    openWhiteboard: vi.fn(),
     closeTab: vi.fn(),
     renameTerminalTab: vi.fn(),
     markTabAgent: vi.fn(),

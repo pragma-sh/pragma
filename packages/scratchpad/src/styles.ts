@@ -247,6 +247,39 @@ const SCRATCHPAD_STYLES = `
 .pragma-badge--warning { color: var(--warning, #eab308); }
 .pragma-badge--danger { color: var(--destructive, #ef4444); }
 
+.pragma-whiteboard__open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  cursor: pointer;
+}
+.pragma-whiteboard__open:focus-visible {
+  outline: 2px solid var(--ring, #22d3ee);
+  outline-offset: 2px;
+}
+.pragma-whiteboard__open:hover .pragma-whiteboard__image {
+  border-color: var(--primary, #22d3ee);
+}
+.pragma-whiteboard__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 36rem;
+  object-fit: contain;
+  border: 1px solid var(--border, #3f3f46);
+  border-radius: var(--radius-md, 8px);
+  background: var(--background, #09090b);
+  transition: border-color 0.15s ease;
+}
+.pragma-whiteboard__error {
+  margin: 0;
+  color: var(--destructive, #ef4444);
+  font-size: 0.75rem;
+}
+
 /*
  * Side-by-side diff modelled on the desktop's \`@codemirror/merge\` view: one
  * scroll container so both panes stay row-aligned, a line-number gutter per

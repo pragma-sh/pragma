@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,7 @@ function browserTab(url = "https://example.com"): Tab {
     title: "Browser",
     url,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

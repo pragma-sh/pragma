@@ -15,7 +15,9 @@ Thanks for wanting to help. Please read this page before you write code — it w
 - [Where things go](#where-things-go)
 - [Style guidelines](#style-guidelines)
 - [Testing](#testing)
+- [Verifying in the running app (jev)](#verifying-in-the-running-app-jev)
 - [Quality gates](#quality-gates)
+- [Release secrets](#release-secrets)
 - [Working with coding agents](#working-with-coding-agents)
 - [Commit style](#commit-style)
 - [Opening a pull request](#opening-a-pull-request)
@@ -31,7 +33,9 @@ Thanks for wanting to help. Please read this page before you write code — it w
 
 Rules of thumb: one concern per pull request.
 
-Everything starts in the [issue tracker](https://github.com/pragma-sh/pragma/issues).
+Everything starts in the [issue tracker](https://github.com/pragma-sh/pragma/issues) —
+except a security vulnerability, which goes through [`SECURITY.md`](./SECURITY.md)
+privately, never a public issue.
 
 ## Prerequisites
 
@@ -73,9 +77,8 @@ Useful variations:
 ```bash
 bun run --filter pragma tauri:build       # full desktop bundle for your platform
 bun run --filter pragma sidecar:server    # restage the server sidecar only
-bun run --filter pragma plugins:refresh   # restage the bundled plugins
 PRAGMA_SKIP_WEB=1 bun run dev             # skip the Expo web export
-bun run dev:command -- <dev-id> "<cmd>"   # open a command in a new tab of a running dev build
+bun run jev -- run "<goal>"               # Jev drives the running dev app toward a goal (see .agents/skills/jev)
 bun run benchmark                         # terminal lag benchmark (drives its own dev window)
 ```
 
@@ -98,7 +101,7 @@ bun run dev:go           # Metro dev server, once the dev client is installed
 bun run --filter pragma-go web   # Metro dev server for the browser build
 ```
 
-The app is useless until it is **paired** with a running desktop: it talks to the host's local HTTP gateway through `@pragma/sdk`, and without a verified connection `app/pair.tsx`replaces the whole app. Pair by QR from the desktop's pairing panel, or set `EXPO_PUBLIC_PRAGMA_GATEWAY_URL` and `EXPO_PUBLIC_PRAGMA_GATEWAY_TOKEN` for development.
+The app is useless until it is **paired** with a running desktop: it talks to the host's local HTTP gateway through `@pragma-sh/sdk`, and without a verified connection `app/pair.tsx`replaces the whole app. Pair by QR from the desktop's pairing panel, or set `EXPO_PUBLIC_PRAGMA_GATEWAY_URL` and `EXPO_PUBLIC_PRAGMA_GATEWAY_TOKEN` for development.
 
 For the browser build the desktop serves a staged export, not a dev server:
 
@@ -117,6 +120,43 @@ bun run dev:www      # Next.js + Fumadocs on http://localhost:3000
 ```
 
 Docs content is MDX under `apps/www/content/docs/`. See `apps/www/AGENTS.md`.
+
+### When the website goes live
+
+Every pull request gets a Vercel preview. **Production deploys only when a release is
+cut**, because the site documents whatever desktop build is current — merging a docs
+change to `main` does not publish it on its own.
+
+For a change that can go live on its own — a blog post, landing-page copy, a fix to docs
+for a feature that has already shipped — add the **`deploy:www`** label to the pull
+request **before** merging it, and the merge deploys production right away. Adding the
+label after the merge does nothing; redeploy from the Vercel dashboard instead. Never use
+it on docs for an unreleased feature.
+
+### Environment for the contact form
+
+The `/support` page — the contact form submitted to App Store Connect as the Support URL —
+posts through a server action that needs one variable. Everything else on the site runs
+without configuration.
+
+| Variable                 | Required for                   | Where to get it                                              |
+| ------------------------ | ------------------------------ | ------------------------------------------------------------ |
+| `SPLIT_FORMS_ACCESS_KEY` | Submitting the `/support` form | The [splitforms dashboard](https://splitforms.com/dashboard) |
+
+```bash
+cp apps/www/.env.example apps/www/.env    # then fill in the key
+```
+
+- **The key is server-side only.** It is read inside `submitSupportRequest` at request
+  time and never reaches the bundle, which is why the variable has no `NEXT_PUBLIC_`
+  prefix. Do not add one.
+- **The site builds and runs without it.** Only submission fails, and it fails with a
+  message telling the user to open a GitHub issue rather than silently — so you can work
+  on the page's layout and validation with no key at all. `validateSupportRequest` is pure
+  and unit-tested, so field rules need no network either.
+- **Never commit a real key.** `apps/www/.gitignore` keeps `.env` out and `.env.example`
+  in; do not "fix" that negated pattern. In deployments the variable is set on the Vercel
+  project, in all three environments.
 
 ## Built-in Pragma scripts
 
@@ -163,9 +203,9 @@ crates/
   pragma-cli/       `pragma-cli` — agent status reporting and scripting
 packages/
   constants/        Dual TS + Rust shared constants (schema.json + values.json)
-  sdk/              `@pragma/sdk` — typed Node/Bun wrapper over the gateway
-  plugin/           `@pragma/plugin` — public plugin API
-  automations/      `@pragma/automations` — authoring API + host sidecar
+  sdk/              `@pragma-sh/sdk` — typed Node/Bun wrapper over the gateway
+  plugin/           `@pragma-sh/plugin` — public plugin API
+  automations/      `@pragma-sh/automations` — authoring API + host sidecar
   scratchpad*/      Scratchpad runtime, file contract, and read-only viewer
   *-plugin/         Agent integrations: claude-code, codex, cursor, opencode, pi, grok, …
   …                 brand, bench, sidecar-kit, github-helpers, ai-helpers, plugins-host
@@ -206,7 +246,7 @@ Formatting is automated and non-negotiable — **oxfmt** for TypeScript, **rustf
 
 - **Strictness is on everywhere.** TS runs `strict` with `noUncheckedIndexedAccess` and `noUnusedLocals`/`noUnusedParameters`; Rust runs clippy `all` + `pedantic` as `-D warnings` with `unsafe_code = "forbid"`. Never silence a lint without a comment saying why.
 - **Errors are values, surfaced explicitly.** TS: throw or return typed errors, narrow with `instanceof`, never swallow. Rust: return `Result` and use `?`; reserve `expect`/`panic!` for genuinely unrecoverable startup invariants.
-- **No magic values.** Cross-boundary values live in `@pragma/constants`.
+- **No magic values.** Cross-boundary values live in `@pragma-sh/constants`.
 - **One responsibility per file/module.** Imports are grouped: external deps, then workspace packages, then relative.
 - **Public items are documented** — a JSDoc line on exported TS, a `///` comment on public Rust.
 - **Keep the IPC surface typed and centralized.** Every Tauri command has a matching wrapper in `src/lib/tauri.ts` and a `#[tauri::command]` of the same name.
@@ -226,6 +266,52 @@ A test must pass on macOS, Linux, **and** Windows. Recurring traps: `git init` i
 
 Never add a `pretest` hook that builds the package — `test` already depends on `build` in `turbo.json`, and the two bundlers race for the same `dist/`.
 
+## Verifying in the running app (jev)
+
+Tests prove the logic; they do not prove the app works. For anything a user sees, check the change in the real dev window too. `bun run jev` (`packages/jev`) drives a running `bun run dev` instance the way a person would: it clicks at real coordinates, types into fields and the terminal, presses shortcuts, and screenshots the window. A Jev-powered agent can take a plain-English goal and work through it for you.
+
+**Setup**
+
+1. Start the app with `bun run dev` and leave its window open. jev never launches the app and never runs headless. `bun run jev -- instances` lists running dev builds; jev picks the one built from your checkout, or the one you pass with `--pid <n>`.
+2. For goal-driven runs, give jev an [OpenRouter](https://openrouter.ai) key: export `JEV_API_KEY` (or `OPENROUTER_API_KEY`), or put `JEV_API_KEY=sk-or-…` in `~/.pragma/jev.env`. The direct commands below need no key.
+3. macOS or Linux only: the dev bridge jev talks to writes its token to `/tmp`.
+
+**Give it a goal**
+
+```bash
+bun run jev -- run "Open Settings → Keybindings and report the shortcut for a new terminal tab"
+bun run jev -- run "Create a worktree named the given name and report the sidebar entry" --input name=feature-x
+```
+
+jev prints each step as it goes, then a report, the path of a final screenshot, and its run folder (a step-by-step log of what it saw and did). Exit codes: `0` done, `1` failed, `2` it asked a question, `3` it ran out of steps (default 25, `--steps N`). Answer a question or continue a run with:
+
+```bash
+bun run jev -- run --resume <run-id> --answer "<text>"
+```
+
+Write goals as checks ("… and report X") so jev verifies rather than just clicks, and open the final screenshot yourself before trusting the report.
+
+**Drive it step by step**
+
+```bash
+bun run jev -- snapshot                      # every clickable/typeable element with an [index], plus terminal text
+bun run jev -- click 12                      # by index, or a CSS selector; --right, --double, --at x,y
+bun run jev -- type "hello" --into 7 --enter
+bun run jev -- key "Meta+t"                  # app shortcuts work, including native-menu ones (⌘T, ⌘W, ⌘P)
+bun run jev -- terminal run "git status"     # click into the terminal, type, Enter, print the screen
+bun run jev -- terminal read --full          # terminal text including scrollback
+bun run jev -- screenshot -o shot.png        # PNG of the app window
+bun run jev -- look "Is anything clipped?"   # screenshot + screen text, analysed by Jev
+bun run jev -- eval "document.title"         # raw JavaScript in the webview
+```
+
+Two things worth knowing:
+
+- **The terminal is a canvas.** Terminal panes are drawn on a WebGL `<canvas>`, so their text is not in the DOM. jev reads it from a dev-only hook instead. Click the terminal (or use `terminal run`) and typing goes to the shell, just as when you click into it yourself.
+- **It acts on your real dev data.** jev clicks and types for real. Use a throwaway project, and close the tabs it opens.
+
+`jev` replaces the old `tauri-agent-tools` CLI and the `bun run dev:command` script; the internals are documented in [`packages/jev/AGENTS.md`](packages/jev/AGENTS.md).
+
 ## Quality gates
 
 Run before you push:
@@ -244,7 +330,146 @@ Git hooks do some of this for you:
 - **commit-msg** — commitlint validates the message.
 - **pre-push** — typecheck, `cargo fmt --check`, sidecar staging, `cargo check`, and `fallow:check`.
 
-CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.**
+CI re-verifies everything in check mode and never auto-fixes. It is split by platform: [RWX](https://www.rwx.com) runs everything Linux can run (`.rwx/ci.yml`), and GitHub Actions runs the macOS and Windows builds plus the Windows Rust suite (`.github/workflows/ci.yml`). **Adding or removing a check means editing both files.** The exceptions are the checks that post a PR comment — the fallow audit (`.github/workflows/fallow.yml`) and the Pragma Go ship plan on release PRs (`.github/workflows/pragma-go-ship-plan.yml`) — because only GitHub Actions can hand them a token allowed to write one.
+
+## Release secrets
+
+You need none of this to contribute — it applies only to maintainers cutting a release.
+`.github/workflows/release.yml` reads every one of these as a **repository** secret, by the
+exact names below.
+
+| Secret                               | Required for                                           | Where it comes from                                    |
+| ------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------ |
+| `RELEASE_PLEASE_TOKEN`               | Release PRs that trigger ordinary CI                   | A PAT with contents + pull-request write               |
+| `TAURI_SIGNING_PRIVATE_KEY`          | The update signature on every installer and UI overlay | `bunx tauri signer generate`                           |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Unlocking that key                                     | Chosen when generating it                              |
+| `TAURI_SIGNING_PUBLIC_KEY`           | The key clients verify against                         | Printed beside the private key                         |
+| `APPLE_CERTIFICATE`                  | Code-signing the macOS app                             | Base64 of an exported `.p12`                           |
+| `APPLE_CERTIFICATE_PASSWORD`         | Opening that `.p12`                                    | Chosen during the Keychain Access export               |
+| `APPLE_SIGNING_IDENTITY`             | Selecting which identity to sign with                  | `security find-identity -v -p codesigning`             |
+| `APPLE_ID`                           | Notarization                                           | Apple account on the signing team                      |
+| `APPLE_PASSWORD`                     | Notarization                                           | An **app-specific** password, not the account password |
+| `APPLE_TEAM_ID`                      | Notarization                                           | The parenthetical in the Developer ID certificate name |
+| `EXPO_TOKEN`                         | Pragma Go's build or OTA update on each release        | An Expo robot access token for the project's account   |
+
+**The updater signature and Apple code signing are unrelated.** `TAURI_SIGNING_*` is what
+makes a client accept an update; the `APPLE_*` set is what makes macOS let the app launch.
+Neither substitutes for the other.
+
+### Apple signing
+
+Sign with a **Developer ID Application** certificate. An _Apple Development_ certificate
+also shows up in `security find-identity` and is the one most people already have, but it
+cannot sign for distribution and notarization rejects it. Creating one needs a paid
+membership and the Account Holder role: Xcode → Settings → Accounts → Manage
+Certificates → **+** → Developer ID Application.
+
+Export it from Keychain Access (**login** keychain, **My Certificates** category,
+right-click the certificate → Export) as a `.p12`, then upload it flattened to one line:
+
+```bash
+base64 -i Certificates.p12 | tr -d '\n' | gh secret set APPLE_CERTIFICATE --repo pragma-sh/pragma
+```
+
+- **`tr -d '\n'` is not optional.** A base64 blob with embedded newlines fails at
+  `security import` with `SecKeychainItemImport: One or more parameters passed to a
+function were not valid` — the same error a wrong `APPLE_CERTIFICATE_PASSWORD` gives.
+- **`APPLE_SIGNING_IDENTITY` must match the identity string exactly**, including the
+  parenthesized Team ID: `Developer ID Application: Name (TEAMID)`.
+- **`APPLE_ID` must belong to the team that owns the certificate.** Notarization
+  authenticates separately from signing, so a mismatch signs fine and then fails upload.
+- **`APPLE_PASSWORD` is an app-specific password** from
+  [account.apple.com](https://account.apple.com) → Sign-In and Security. Apple's notary
+  service rejects real account passwords.
+
+**All six or none.** A missing secret is not absent at runtime — GitHub defines the
+variable as an empty string, and the bundler gates on `var_os`, which returns `Some("")`
+for a set-but-empty variable. Half a configuration therefore attempts to sign with a
+zero-byte certificate and fails the build eight minutes in, rather than producing an
+unsigned one.
+
+### Expo token
+
+Every Pragma Go job — the ship plan, the APK, and TestFlight — authenticates to EAS with
+`EXPO_TOKEN`. Without it they fail at the `expo/expo-github-action` step before anything
+builds. Use a **robot** token, not a
+personal one: it belongs to no human account and can be revoked without logging anyone
+out. On [expo.dev](https://expo.dev), open the `ekrich` account → **Settings → Access
+tokens** → **Add robot**, give it the **Developer** role (building, submitting, and
+publishing updates need nothing more), create a token for it, and store it:
+
+```bash
+gh secret set EXPO_TOKEN --repo pragma-sh/pragma   # paste the token when prompted
+```
+
+### Pragma Go: OTA update or new binary
+
+Nobody chooses this per release. The `pragma-go-plan` job fingerprints the release tag per
+platform and asks EAS for a finished build of that platform's release profile with the
+same hash. A match means the release is JavaScript-only, so it ships as an `eas update` on
+that profile's channel and no build runs; no match means a native input moved, so a new
+binary is built. The release PR gets a sticky comment from
+`.github/workflows/pragma-go-ship-plan.yml` previewing which way each platform will go.
+Nothing publishes on an ordinary merge to `main`. For the details and limits, see
+_Releases: update or new binary_ in `apps/pragma-go/AGENTS.md`.
+
+### Android APK
+
+The `android-apk` job attaches `Pragma-Go-<version>-android.apk` to the `pragma-go-v*`
+release, which is what Obtainium users track: a fresh `preview` build, or, on an
+update-only release, the existing build whose fingerprint matches. EAS holds the Android keystore, so the job runs `--non-interactive` and
+fails if the project has no Android credentials yet — create them once with
+`eas credentials --platform android`. Losing that keystore means no installed APK can
+upgrade in place again.
+
+### iOS TestFlight
+
+When a release needs a new binary, the `ios-testflight` job builds the `production` EAS
+profile and submits it to App Store Connect, where it lands in TestFlight after Apple finishes processing it. Nothing about
+Apple reaches GitHub: both credentials it needs live on EAS, and `--non-interactive`
+fails rather than prompting when one is missing. Set them up once with
+`eas credentials --platform ios` (production profile):
+
+- **Build credentials:** the distribution certificate and the App Store provisioning
+  profile. They already exist if you have ever run `eas build --profile production`
+  for iOS.
+- **App Store Connect API key:** choose _App Store Connect: Manage your API Key_ → _Set up
+  your project to use an API Key for EAS Submit_ and let EAS generate one, which needs
+  your Apple ID once. Without it `eas submit` falls back to an Apple ID sign-in, which is
+  interactive and cannot run in CI. The `appleId`/`ascAppId`/`appleTeamId` fields in
+  `eas.json` only identify the app. They are not a credential.
+
+EAS numbers the build itself (`autoIncrement`), but the marketing version is
+`expo.version` in `app.json`. Once a version is approved on the App Store, Apple rejects
+further uploads under it, so bump `expo.version` by hand before the next release after
+that. See _App Store / Play Store builds_ in `apps/pragma-go/AGENTS.md` for why Release
+Please must not.
+
+### npm
+
+**There is no npm token.** The `publish-packages` job authenticates by OIDC: each of the
+nine packages names `pragma-sh/pragma` + `release.yml` as a trusted publisher, and the
+job's `id-token` is both the credential and what signs provenance. Nothing expires and
+there is nothing to rotate.
+
+Inspect or change a package's trust config with the CLI (npm 11.15+), not the website:
+
+```bash
+npx -y npm@latest trust list @pragma-sh/sdk
+npx -y npm@latest trust github @pragma-sh/<name> \
+  --file release.yml --repo pragma-sh/pragma --allow-publish --yes
+```
+
+- **`--allow-publish` is not optional.** Trust configs created after 2026-09-03 default to
+  stage-only, which parks every release awaiting a human 2FA approval.
+- **A new package has to be published once by hand first.** npm will not accept a trusted
+  publisher for a name that does not exist, so a brand-new package is bootstrapped with an
+  interactive `npm publish ./packages/<name> --access public` and trusted afterwards.
+- **`npm trust` requires account 2FA and an interactive session.** It is a sensitive
+  operation: bypass-2FA tokens are refused, and the command answers with a browser
+  challenge, so it cannot run from CI.
+- **Renaming `release.yml` breaks publishing** for all nine at once, because the workflow
+  filename is part of what npm verifies. Re-run `npm trust github` for each package.
 
 ## Working with coding agents
 
@@ -252,9 +477,9 @@ Pragma is built with coding agents, and the repo is set up for them:
 
 - `AGENTS.md` **is the contract.** The root file holds repo-wide rules; every app, crate, and package has its own with the specifics. `CLAUDE.md` is a symlink to the root one, so both audiences stay in sync. Point your agent at the `AGENTS.md` closest to the code it is touching.
 - **The guide is living — fix it in the same change.** If your change makes an `AGENTS.md`stale (you added a package, moved a file, changed a command, adopted a pattern), update it in the same commit. That is expected, not optional. When you learn a gotcha the hard way, write it down there so nobody rediscovers it.
-- **Mirror workflow changes into the skills.** User-facing skills live in `skills/` and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes); internal contributor skills live directly in `.agents/skills/`. Relevant ones: `pragma-architecture` (where code goes), `shared-constants`, `tauri-command`, `code-quality`, `pragma-go`, and `pragma`.
+- **Mirror workflow changes into the skills.** User-facing skills live in `skills/` and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes); internal contributor skills live directly in `.agents/skills/`. Relevant ones: `pragma-architecture` (where code goes), `shared-constants`, `tauri-command`, `code-quality`, `jev` (verifying in the running app), `pragma-go`, and `pragma`.
 - **Run agents in worktrees.** That is what Pragma is for — one agent per worktree, no collisions. Note that a Pragma worktree can be a partial checkout; if `cargo` or Vitest fails on a missing root `Cargo.toml` or `tsconfig.base.json`, that is why.
-- **Manually test changes.** Always make sure you test your changes. You do not have to read every line of code just make sure the changes work.
+- **Manually test changes.** Always make sure you test your changes. You do not have to read every line of code just make sure the changes work. Agents can do this themselves with [`bun run jev`](#verifying-in-the-running-app-jev): give it a goal, then check the screenshot it leaves behind.
 - **Do not let an agent widen the scope.** The [contribution policy ](#contribution-policy)applies to agent-written code exactly as it does to hand-written code — an agent that helpfully refactors four extra packages has just made your pull request unmergeable.
 - **Do not commit generated files or agent scratch output** (`src/generated/**`, scratchpads, transcripts).
 

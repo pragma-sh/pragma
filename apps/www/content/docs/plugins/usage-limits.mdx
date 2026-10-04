@@ -1,81 +1,44 @@
 ---
-title: Usage limits
-description: defineUsageLimitProvider — surface your agent's plan or API usage in the app.
+title: Usage limits (deprecated)
+description: defineUsageLimitProvider is deprecated — declare an account provider with defineAccounts instead.
 ---
 
-The toolbar's [usage-limits popover](/docs/user-guide/usage-limits) is fed by plugin
-providers. A provider polls a source — typically your agent CLI's usage command — and
-reports structured limits.
+<Callout title="Deprecated" type="warn">
+  `defineUsageLimitProvider` and the `usageLimits` plugin field are deprecated. Use
+  [`defineAccounts`](/docs/plugins/accounts), which adds sign-in, per-account usage, and account
+  switching.
+</Callout>
 
-```tsx
-import {
-  definePlugin,
-  defineUsageLimitProvider,
-  runProviderCommand,
-  CLI_MISSING_STATUS,
-} from "@pragma/plugin";
+Plugins that still declare `usageLimits` keep working. Pragma adapts each provider into a
+single-login [account provider](/docs/plugins/accounts):
 
+- its `id` becomes the provider key (it will not merge with other plugins' rows),
+- `title`, `iconPath`, `dashboardUrl`, `primaryLimitId`, `refreshIntervalMs` and `load` carry
+  over unchanged,
+- it has one account — the harness's own login — shown with a **legacy** badge, with no
+  sign-in and no switching.
+
+To migrate, move the provider's fields under `usageLimits` of an account provider:
+
+```ts
+// Before
 usageLimits: [
   defineUsageLimitProvider({
     id: "my-agent",
     title: "My Agent",
-    iconPath: "./assets/agent.svg",
-    dashboardUrl: "https://my-agent.dev/dashboard",
+    dashboardUrl: "https://my-agent.dev/usage",
     primaryLimitId: "messages",
-    refreshIntervalMs: 30_000, // minimum 15s; backoff on failure up to 15min
-    load: async (ctx) => {
-      const outcome = await runProviderCommand(ctx, ["my-agent", "usage", "--json"]);
-      if (outcome.kind === "missing") {
-        return {
-          status: "unavailable",
-          reason: "not-configured",
-          message: "Install the my-agent CLI to see usage.",
-        };
-      }
-      if (outcome.kind === "failed") {
-        return { status: "unavailable", reason: "error", message: outcome.stderr };
-      }
-      const data = JSON.parse(outcome.stdout);
-      return {
-        status: "ready",
-        observedAt: Date.now(),
-        summary: data.messages,           // the collapsed-row limit
-        limits: [data.messages, data.tokens],
-      };
-    },
+    load: loadUsage,
   }),
 ],
+
+// After
+accounts: defineAccounts([
+  {
+    provider: "anthropic",
+    agent: "my-agent",
+    dashboardUrl: "https://my-agent.dev/usage",
+    usageLimits: { primaryLimitId: "messages", load: loadUsage },
+  },
+]),
 ```
-
-## Shapes
-
-```ts
-interface UsageLimit {
-  id: string;
-  title: string;
-  used: number; // percent 0–100
-  limit: number | null; // null = unlimited → "Unlimited"
-  resetsInMs?: number; // drives the "Resets in" countdown
-}
-
-type UsageLimitsResult =
-  | { status: "ready"; observedAt: number; summary?: UsageLimit; limits: UsageLimit[] }
-  | {
-      status: "unavailable";
-      reason: "not-configured" | "authentication-required" | "unsupported" | "error";
-      message: string;
-    };
-```
-
-`runProviderCommand` executes a command and classifies the result:
-`{ kind: "missing" }` when the binary is absent (exit status `CLI_MISSING_STATUS` = 20),
-`{ kind: "failed"; stderr }`, or `{ kind: "ok"; stdout }`. Report unavailable states
-honestly — the popover renders them instead of fake numbers.
-
-The app renders the summary when collapsed, every limit when expanded, colours the
-progress bar (warning from 50%, destructive from 75%), and links `dashboardUrl`.
-
-<Callout title="Not for UI work">
-  A provider is data-only and runs host-side. UI goes in `ui` contributions; this API exists so the
-  same popover covers every agent, including the ones you ship.
-</Callout>

@@ -1,3 +1,5 @@
+mod accounts;
+mod agent_options;
 mod ai;
 mod automations;
 mod fanout_host;
@@ -18,7 +20,7 @@ use std::net::Shutdown;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -61,6 +63,13 @@ const EVENT_STREAM_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// ten seconds of zero progress means the peer is gone. Applies to the shared
 /// socket fd, so response, event, and brokered-control writes are all covered.
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often the dropped-files sweep runs after its initial startup pass.
+/// Files dropped onto a terminal accumulate under the host's temp directory
+/// (see `pragma_core::fs::save_dropped_file`) with nothing else to remove
+/// them, so an hourly sweep against `terminalDefaults.droppedFilesMaxAgeMs`
+/// bounds both the disk space and how long a dropped file's contents survive.
+const DROPPED_FILES_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 
 const DETACH_FLAG: &str = "--detach";
 
@@ -109,11 +118,30 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// This binary's [`pragma_protocol::executable_build_id`], advertised in every
+/// hello so the desktop can tell when an update shipped a different server.
+static BUILD_ID: OnceLock<Option<String>> = OnceLock::new();
+
+/// Hashes the executable once, at start-up.
+///
+/// It must be now and not on first use: a desktop update replaces this file
+/// while the process keeps running, and hashing the path later would report the
+/// *new* binary's identity from the old process — the one lie that would stop
+/// the app from ever replacing it.
+fn record_build_id() {
+    let build_id = std::env::current_exe()
+        .and_then(|path| pragma_protocol::executable_build_id(&path))
+        .map_err(|error| eprintln!("could not hash the server executable: {error}"))
+        .ok();
+    let _ = BUILD_ID.set(build_id);
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = server_paths();
     if should_relay() {
         return relay_stdio(&paths.socket);
     }
+    record_build_id();
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
     // Before anything opens an fd, and before any session shell is spawned:
@@ -142,9 +170,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         paths.dir.clone(),
         workspace_root(),
     ));
-    let core = Arc::new(Core);
+    let core = Arc::new(Core::new(&paths.dir)?);
     start_watcher_reconciler(&registry);
     start_viewport_lease_sweeper(&registry);
+    start_account_token_sync(&registry);
+    start_dropped_files_sweeper();
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
         // must not take the whole process down with it: every other
@@ -208,6 +238,31 @@ fn start_viewport_lease_sweeper(registry: &Arc<Registry>) {
     });
 }
 
+/// How often shared sign-ins are brought onto their newest token between
+/// launches. A harness refreshes an OAuth token about once every 8–10 days;
+/// syncing every few minutes passes the rotated refresh token on long before
+/// another copy needs it.
+const ACCOUNT_TOKEN_SYNC_INTERVAL: Duration = Duration::from_mins(5);
+
+fn start_account_token_sync(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    thread::spawn(move || loop {
+        thread::sleep(ACCOUNT_TOKEN_SYNC_INTERVAL);
+        registry.sync_account_tokens();
+    });
+}
+
+/// Sweeps stale dropped-file directories at startup (covering whatever a prior
+/// run or crash left behind) and again on [`DROPPED_FILES_SWEEP_INTERVAL`], so
+/// a long-lived server also cleans up drops from sessions that have since
+/// ended.
+fn start_dropped_files_sweeper() {
+    thread::spawn(|| loop {
+        pragma_core::fs::cleanup_dropped_files(&std::env::temp_dir());
+        thread::sleep(DROPPED_FILES_SWEEP_INTERVAL);
+    });
+}
+
 fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<Core>) {
     // Bound every write to this client so a peer that stops reading cannot
     // pin a writer thread (and the mutex it holds) forever — see
@@ -223,6 +278,7 @@ fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<C
     if let Ok(mut writer_guard) = writer.lock() {
         let hello = ServerFrame::Hello(HelloFrame {
             protocol_version: pragma_protocol::PROTOCOL_VERSION.to_string(),
+            build_id: BUILD_ID.get().cloned().flatten(),
         });
         if write_json_frame(&mut *writer_guard, &hello).is_err() {
             return;
@@ -411,20 +467,7 @@ fn handle_request(
     core: &Core,
 ) -> Result<Outcome, HandledRequestError> {
     match request.kind {
-        RequestKind::Spawn => {
-            let session_id = required(request.session_id, "sessionId")?;
-            let worktree_id = required(request.worktree_id, "worktreeId")?;
-            let cwd = required(request.cwd, "cwd")?;
-            let cols = request.cols.unwrap_or(80);
-            let rows = request.rows.unwrap_or(24);
-            let (scrollback, rx) = registry
-                .spawn(session_id, worktree_id, cwd, cols, rows, request.shell)
-                .map_err(|err| HandledRequestError::Request(err.to_string()))?;
-            Ok(Outcome {
-                event_stream: Some(EventStream { scrollback, rx }),
-                control_rx: None,
-            })
-        }
+        RequestKind::Spawn => spawn_request(request, registry),
         RequestKind::Attach => {
             let session_id = required(request.session_id, "sessionId")?;
             // Only resize when the attacher declares a viewport; a size-less
@@ -796,6 +839,10 @@ fn handle_server_owned_rpc(
             &rpc.payload,
             registry,
         ))),
+        ProtocolRpcMethod::Accounts => Some(Ok(rpc_response(
+            request_id.to_string(),
+            registry.handle_accounts_rpc(rpc.payload.clone()),
+        ))),
         ProtocolRpcMethod::Ai => Some(Ok(rpc_response(
             request_id.to_string(),
             registry
@@ -1008,6 +1055,35 @@ fn handle_rpc_request(
                 details: None,
             }),
         },
+    })
+}
+
+/// Spawns one PTY session, exporting any extra env the caller sent (an agent
+/// launch's bound accounts).
+fn spawn_request(
+    request: RequestFrame,
+    registry: &Registry,
+) -> Result<Outcome, HandledRequestError> {
+    let session_id = required(request.session_id, "sessionId")?;
+    let worktree_id = required(request.worktree_id, "worktreeId")?;
+    let cwd = required(request.cwd, "cwd")?;
+    let cols = request.cols.unwrap_or(80);
+    let rows = request.rows.unwrap_or(24);
+    let env = request.env.unwrap_or_default();
+    let (scrollback, rx) = registry
+        .spawn_with_env(
+            session_id,
+            worktree_id,
+            cwd,
+            cols,
+            rows,
+            request.shell,
+            &env,
+        )
+        .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+    Ok(Outcome {
+        event_stream: Some(EventStream { scrollback, rx }),
+        control_rx: None,
     })
 }
 
@@ -1297,7 +1373,7 @@ struct ServerPaths {
     lock: PathBuf,
     /// Only read on Unix, where `daemonize` redirects the standard streams into
     /// it. On Windows the spawning client opens this same path itself and hands
-    /// it to the new process — see `detach_spawned` in `pragma-client`.
+    /// it to the new process — see `spawn_server` in `pragma-client`.
     #[cfg_attr(not(unix), allow(dead_code))]
     log: PathBuf,
 }

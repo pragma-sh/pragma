@@ -8,19 +8,18 @@
 //! whichever host owns the socket — local for local projects, the remote box for
 //! SSH-bridged projects.
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use pragma_constants::{DirEntry, FileChunk, FileContents, CONSTANTS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::cancel::CancelRegistry;
 use crate::process_env;
+use crate::storage;
 use crate::{CoreError, CoreResult};
 
 /// Files larger than this are reported as `truncated` and never read into memory
@@ -35,8 +34,8 @@ const MAX_SEARCH_SNIPPET_BYTES: usize = 512;
 const MIN_FILE_MATCH_SCORE: f64 = 0.45;
 const MAX_CONCURRENT_SEARCHES: usize = if cfg!(test) { 1_024 } else { 2 };
 
-static ACTIVE_SEARCHES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ACTIVE_SEARCHES: CancelRegistry =
+    CancelRegistry::new("palette search", MAX_CONCURRENT_SEARCHES);
 
 /// One trusted worktree root included in a project palette search.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -121,6 +120,15 @@ pub enum FsRequest {
         path: String,
         contents: String,
     },
+    /// Copies a file dropped onto a terminal into a fresh private directory
+    /// under the host's temporary directory and returns its absolute path. The
+    /// webview never learns a dropped file's real path, and a remote PTY could
+    /// not open it anyway, so the bytes travel to whichever host runs the shell.
+    /// A deliberate, narrow exception to "no absolute path crosses IPC" (see
+    /// `apps/pragma/AGENTS.md`): the path is meant to be visible, typed at the
+    /// shell prompt, and is never accepted back as input to a worktree-scoped
+    /// command.
+    SaveDroppedFile { name: String, contents: String },
     /// Renames (or moves) an entry within the worktree.
     Rename {
         root: String,
@@ -140,6 +148,13 @@ pub enum FsRequest {
     },
     /// Cancels an active palette search. Safe when the id is already complete.
     CancelPaletteSearch { search_id: String },
+    /// Measures a worktree's disk usage: totals, largest files, and the
+    /// gitignored folders the Storage page offers to delete.
+    StorageScan { scan_id: String, root: String },
+    /// Stops an active storage scan. Safe when the id is already complete.
+    CancelStorageScan { scan_id: String },
+    /// Deletes one gitignored folder after the host re-checks it is safe to.
+    DeleteIgnoredFolder { root: String, path: String },
 }
 
 /// Dispatches a `filesystem` RPC payload to the matching operation and returns a
@@ -176,6 +191,9 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             path,
             contents,
         } => to_value(write_bytes(&root, &path, &contents)?),
+        FsRequest::SaveDroppedFile { name, contents } => {
+            to_value(save_dropped_file(&std::env::temp_dir(), &name, &contents)?)
+        }
         FsRequest::Rename { root, from, to } => to_value(rename(&root, &from, &to)?),
         FsRequest::Delete { root, path } => to_value(delete(&root, &path)?),
         FsRequest::PaletteSearch {
@@ -194,45 +212,17 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             deadline_ms,
         )?),
         FsRequest::CancelPaletteSearch { search_id } => {
-            cancel_palette_search(&search_id);
+            ACTIVE_SEARCHES.cancel(&search_id);
             to_value(())
         }
-    }
-}
-
-fn register_search(search_id: &str) -> CoreResult<Arc<AtomicBool>> {
-    if search_id.is_empty() {
-        return Err(CoreError::InvalidPayload(
-            "search id is required".to_string(),
-        ));
-    }
-    let mut active = ACTIVE_SEARCHES
-        .lock()
-        .map_err(|error| CoreError::Operation(error.to_string()))?;
-    if let Some(previous) = active.remove(search_id) {
-        previous.store(true, Ordering::Relaxed);
-    }
-    if active.len() >= MAX_CONCURRENT_SEARCHES {
-        return Err(CoreError::Operation(
-            "too many concurrent palette searches".to_string(),
-        ));
-    }
-    let cancelled = Arc::new(AtomicBool::new(false));
-    active.insert(search_id.to_string(), Arc::clone(&cancelled));
-    Ok(cancelled)
-}
-
-fn cancel_palette_search(search_id: &str) {
-    if let Ok(active) = ACTIVE_SEARCHES.lock() {
-        if let Some(cancelled) = active.get(search_id) {
-            cancelled.store(true, Ordering::Relaxed);
+        FsRequest::StorageScan { scan_id, root } => to_value(storage::scan(&scan_id, &root)?),
+        FsRequest::CancelStorageScan { scan_id } => {
+            storage::cancel_scan(&scan_id);
+            to_value(())
         }
-    }
-}
-
-fn unregister_search(search_id: &str) {
-    if let Ok(mut active) = ACTIVE_SEARCHES.lock() {
-        active.remove(search_id);
+        FsRequest::DeleteIgnoredFolder { root, path } => {
+            to_value(storage::delete_ignored_folder(&root, &path)?)
+        }
     }
 }
 
@@ -257,7 +247,7 @@ fn palette_search(
         ));
     }
 
-    let cancelled = register_search(search_id)?;
+    let cancelled = ACTIVE_SEARCHES.register(search_id)?;
     let result = (|| {
         let deadline = Instant::now() + Duration::from_millis(deadline_ms.clamp(1, 5_000));
         let smart_case = query.chars().any(char::is_uppercase);
@@ -271,7 +261,7 @@ fn palette_search(
         'roots: for search_root in roots {
             let root = pragma_platform::path::canonicalize(&search_root.root)?;
             for relative in search_paths(&root) {
-                if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                if cancelled.is_cancelled() || Instant::now() >= deadline {
                     truncated = true;
                     break 'roots;
                 }
@@ -372,7 +362,7 @@ fn palette_search(
         });
         Ok(PaletteSearchResponse { matches, truncated })
     })();
-    unregister_search(search_id);
+    drop(cancelled);
     result
 }
 
@@ -490,7 +480,7 @@ fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
 
 /// Validates a worktree-relative path: rejects absolute paths and any `..`
 /// component before any disk access, returning the cleaned relative path.
-fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
+pub(crate) fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
     let rel = Path::new(relative);
     let mut cleaned = PathBuf::new();
     for component in rel.components() {
@@ -755,6 +745,84 @@ fn write_bytes(root: &str, path: &str, contents: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// Writes a dropped file to `<temp>/<droppedFilesDirName>/<uuid>/<name>` and
+/// returns the absolute path. Both directories are owner-only, and the per-drop
+/// directory is created fresh so a same-named drop never overwrites another.
+fn save_dropped_file(temp: &Path, name: &str, contents: &str) -> CoreResult<String> {
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, contents)
+        .map_err(|error| CoreError::InvalidPayload(format!("invalid base64 contents: {error}")))?;
+    let max_bytes = CONSTANTS.terminal_defaults.max_dropped_file_bytes.get();
+    if bytes.len() as u64 > max_bytes {
+        return Err(CoreError::InvalidPayload(format!(
+            "dropped files must be {max_bytes} bytes or smaller"
+        )));
+    }
+    let base = temp.join(CONSTANTS.terminal_defaults.dropped_files_dir_name.as_str());
+    pragma_platform::perms::create_private_dir(&base)?;
+    let dir = base.join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir(&dir)?;
+    pragma_platform::perms::restrict_to_owner(&dir)?;
+    let target = dir.join(dropped_file_name(name));
+    pragma_platform::perms::create_private_file(&target)?;
+    std::fs::write(&target, bytes)?;
+    Ok(pragma_platform::path::canonicalize(&target)?
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// Removes per-drop directories under `<temp>/<droppedFilesDirName>/` older
+/// than `terminalDefaults.droppedFilesMaxAgeMs`, so repeated terminal drops
+/// don't retain copies (and disk space, and potentially sensitive contents)
+/// forever. Best-effort: a missing directory, a permission error, or a race
+/// with an in-flight [`save_dropped_file`] is silently skipped rather than
+/// failing the caller, which runs this on a maintenance schedule rather than
+/// in response to a request. See `DROPPED_FILES_SWEEP_INTERVAL` in
+/// `pragma-server` for when it's called.
+pub fn cleanup_dropped_files(temp: &Path) {
+    let max_age = Duration::from_millis(CONSTANTS.terminal_defaults.dropped_files_max_age_ms.get());
+    sweep_dropped_files(temp, max_age);
+}
+
+/// [`cleanup_dropped_files`] with an explicit `max_age`, so a sweep can be
+/// exercised in tests without waiting out the real, day-long default.
+fn sweep_dropped_files(temp: &Path, max_age: Duration) {
+    let base = temp.join(CONSTANTS.terminal_defaults.dropped_files_dir_name.as_str());
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age > max_age {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Reduces a dropped file's name to one safe path component, keeping its
+/// extension so tools that sniff by extension (image-aware agents) still work.
+fn dropped_file_name(name: &str) -> String {
+    let leaf = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let cleaned: String = leaf.chars().filter(|char| !char.is_control()).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        "dropped-file".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
 /// Renames (or moves) a worktree-relative entry. Both paths are resolved through
 /// the worktree so symlink escapes and `..` are rejected. Errors if the source
 /// is missing or the destination already exists.
@@ -799,7 +867,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{palette_search, resolve_in_worktree, PaletteSearchRoot, MAX_READ_BYTES};
+    use super::{
+        dropped_file_name, palette_search, resolve_in_worktree, save_dropped_file,
+        sweep_dropped_files, PaletteSearchRoot, MAX_READ_BYTES,
+    };
 
     fn git_init(path: &std::path::Path) {
         Command::new("git")
@@ -807,6 +878,58 @@ mod tests {
             .current_dir(path)
             .output()
             .expect("git init");
+    }
+
+    #[test]
+    fn saves_dropped_files_under_a_fresh_private_directory() {
+        let temp = tempdir().expect("tempdir");
+        let contents = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"png");
+        let first = save_dropped_file(temp.path(), "shot.png", &contents).expect("save");
+        let second = save_dropped_file(temp.path(), "shot.png", &contents).expect("save");
+        assert_ne!(first, second);
+        let first = std::path::Path::new(&first);
+        assert!(first.is_absolute());
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("shot.png")
+        );
+        assert_eq!(std::fs::read(first).expect("read"), b"png");
+    }
+
+    #[test]
+    fn sweeps_dropped_files_past_the_max_age_but_leaves_fresh_ones() {
+        use std::time::Duration;
+
+        let temp = tempdir().expect("tempdir");
+        let contents = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"png");
+        let stale = save_dropped_file(temp.path(), "stale.png", &contents).expect("save");
+        let fresh = save_dropped_file(temp.path(), "fresh.png", &contents).expect("save");
+        // Backdate the stale drop's directory rather than sleeping: a real
+        // sleep races a slow runner, which can age the fresh drop past a
+        // small `max_age` before the sweep runs.
+        let stale_dir = std::path::Path::new(&stale).parent().expect("drop dir");
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_hours(1);
+        filetime::set_file_mtime(stale_dir, filetime::FileTime::from_system_time(an_hour_ago))
+            .expect("backdate");
+
+        sweep_dropped_files(temp.path(), Duration::from_mins(30));
+
+        assert!(!std::path::Path::new(&stale).exists());
+        assert!(std::path::Path::new(&fresh).exists());
+    }
+
+    #[test]
+    fn sweep_is_a_no_op_when_nothing_has_been_dropped() {
+        let temp = tempdir().expect("tempdir");
+        sweep_dropped_files(temp.path(), std::time::Duration::from_secs(0));
+    }
+
+    #[test]
+    fn reduces_dropped_file_names_to_one_component() {
+        assert_eq!(dropped_file_name("../../etc/passwd"), "passwd");
+        assert_eq!(dropped_file_name("C:\\Users\\me\\a b.png"), "a b.png");
+        assert_eq!(dropped_file_name(".."), "dropped-file");
+        assert_eq!(dropped_file_name("  "), "dropped-file");
     }
 
     #[test]
@@ -914,9 +1037,10 @@ mod tests {
             vec!["alert.mp3".to_string(), "Chime.WAV".to_string()]
         );
         // A directory that does not exist yet lists empty rather than failing.
-        assert!(super::list_file_names(&root, ".pragma/assets/missing", &[])
-            .expect("list missing")
-            .is_empty());
+        assert_eq!(
+            super::list_file_names(&root, ".pragma/assets/missing", &[]).expect("list missing"),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

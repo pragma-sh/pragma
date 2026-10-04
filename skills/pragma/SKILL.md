@@ -1,6 +1,6 @@
 ---
 name: pragma
-description: Use when someone wants an agent to operate Pragma, automate a Pragma workspace, build a Pragma plugin, write a Pragma automation, integrate a coding-agent tool such as OpenCode, Claude Code, Cursor, or Codex so it reports status into Pragma and appears in its launcher, use pragma-cli or @pragma/sdk, or understand user-facing Pragma concepts such as projects, worktrees, tabs, agents, scratchpads, and fanouts.
+description: Use when someone wants an agent to operate Pragma, automate a Pragma workspace, build a Pragma plugin, write a Pragma automation, integrate a coding-agent tool such as OpenCode, Claude Code, Cursor, or Codex so it reports status into Pragma and appears in its launcher, use pragma-cli or @pragma-sh/sdk, or understand user-facing Pragma concepts such as projects, worktrees, tabs, agents, scratchpads, whiteboards, and fanouts.
 ---
 
 # Use Pragma
@@ -13,16 +13,20 @@ Pragma is workspace for running persistent coding-agent sessions in isolated Git
 
 Use these user-facing terms:
 
-| Term           | Meaning                                                                     |
-| -------------- | --------------------------------------------------------------------------- |
-| **Project**    | Repository added to Pragma.                                                 |
-| **Worktree**   | Isolated Git checkout and its tabs.                                         |
-| **Tab**        | Terminal, browser, editor, diff, review, log, or scratchpad workspace item. |
-| **Agent**      | Coding tool Pragma can launch and interact with.                            |
-| **Scratchpad** | Managed MDX document for agent-authored rich output and collaboration.      |
-| **Fanout**     | Same prompt run as isolated attempts, followed by selecting one result.     |
-| **Plugin**     | Trusted extension adding UI, commands, agents, themes, or integrations.     |
-| **Automation** | Trusted TypeScript/JavaScript task triggered by cron, event, or Run now.    |
+| Term           | Meaning                                                                  |
+| -------------- | ------------------------------------------------------------------------ |
+| **Project**    | Repository added to Pragma.                                              |
+| **Worktree**   | Isolated Git checkout and its tabs.                                      |
+| **Tab**        | Terminal, browser, editor, diff, review, log, scratchpad, or whiteboard. |
+| **Agent**      | Coding tool Pragma can launch and interact with.                         |
+| **Scratchpad** | Managed MDX document for agent-authored rich output and collaboration.   |
+| **Whiteboard** | Worktree-scoped Excalidraw canvas agents and users can create or revise. |
+| **Fanout**     | Same prompt run as isolated attempts, followed by selecting one result.  |
+| **Plugin**     | Trusted extension adding UI, commands, agents, themes, or integrations.  |
+| **Automation** | Trusted TypeScript/JavaScript task triggered by cron, event, or Run now. |
+| **Auto mode**  | System 1 model (Jev) picks agent, model, and effort for a launch prompt. |
+
+Auto mode follows the user's `automode.md` (`~/.pragma/automode.md`, overridden by `<project>/.pragma/automode.md`): YAML frontmatter `agents`/`models` `include`/`exclude` globs (`model` or `agent/model`) plus `priority` (`accuracy`, `speed`, `efficiency`, `balanced`), then free-text notes the System 1 model treats as the user's priorities. When a user asks to change how Auto picks, edit that file instead of changing their launches.
 
 Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate names. Those describe implementation, not how agent or user gets work done.
 
@@ -31,11 +35,12 @@ Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate na
 | Goal                                                                        | Surface                                     | Reference                    |
 | --------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------- |
 | Control worktrees, tabs, agents, browser, or fanout                         | `pragma-cli`                                | `references/cli.md`          |
-| Build typed JavaScript/TypeScript integration                               | `@pragma/sdk`                               | `references/sdk.md`          |
-| Add Pragma UI, commands, launchable agents, themes                          | `@pragma/plugin`                            | `references/plugin-api.md`   |
-| Run scheduled or event-driven host tasks                                    | `@pragma/automations`                       | `references/automations.md`  |
-| Make coding-agent tool report status and appear in launcher                 | `@pragma/plugin` + `pragma-cli`             | `references/agent-plugin.md` |
+| Build typed JavaScript/TypeScript integration                               | `@pragma-sh/sdk`                            | `references/sdk.md`          |
+| Add Pragma UI, commands, launchable agents, themes                          | `@pragma-sh/plugin`                         | `references/plugin-api.md`   |
+| Run scheduled or event-driven host tasks                                    | `@pragma-sh/automations`                    | `references/automations.md`  |
+| Make coding-agent tool report status and appear in launcher                 | `@pragma-sh/plugin` + `pragma-cli`          | `references/agent-plugin.md` |
 | Author rich, interactive agent output (plan, comparison, review, dashboard) | Scratchpad (`pragma-cli scratchpad create`) | `references/scratchpads.md`  |
+| Create, search, edit, render, or embed a visual canvas                      | `pragma-cli whiteboard`                     | `references/whiteboards.md`  |
 | Make repository-internal architecture change                                | `pragma-architecture` skill                 | Not this skill.              |
 
 Prefer, in order:
@@ -62,6 +67,7 @@ Useful agent patterns:
 - Use `tab exec` or SDK `exec.run` for bounded background command needing collected output.
 - Use `tab read --watch` or SDK streams for long-running output; cancel stream when finished.
 - Use scratchpad for durable rich findings instead of dumping large output into chat. Never write scratchpad files by hand; read `references/scratchpads.md` for creation, MDX authoring rules, and the component API before authoring one.
+- Use whiteboard for spatial architecture, flows, and visual collaboration. Prefer it over Mermaid in scratchpads unless the user explicitly needs a text-only diagram. Read `references/whiteboards.md` before authoring scene JSON, preserve the complete scene when editing, and embed it with `<Whiteboard id="..." />` when prose needs live visual context.
 - Use fanout when attempts benefit from independent branches, not merely parallel shell commands.
 - Treat `attention` as user action needed, `done` as completed work worth reviewing, and `cleared` as no remaining result or stale state.
 
@@ -76,6 +82,11 @@ Before writing extension code:
 3. Keep plugin or automation self-contained and use only public package exports.
 4. Assume code has host access. Explain trust impact and avoid hidden destructive behavior.
 5. Add focused tests for behavior, then run package typecheck and tests.
+
+Every plugin-creation task also ends with the publication handoff in
+`references/plugin-api.md`. Choose its internal or external route, then ask whether the user
+wants the completed plugin published and submitted to Pragma's official plugin list. Never
+silently skip the question or perform public publishing without approval.
 
 ### Agent Plugins
 

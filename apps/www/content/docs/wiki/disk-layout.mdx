@@ -22,25 +22,29 @@ use `pragma-dev-<hash>`.
 | `workspace.json`         | Persisted workspace snapshot (headless launches with the app closed). |
 | `plugin-roots.json`      | Registered project roots for the plugin catalog.                      |
 | `fanouts.json`           | Durable fanout records (0600, atomic writes).                         |
+| `whiteboards.db`         | Worktree-scoped Excalidraw boards (SQLite; scenes stored losslessly). |
 | `automations-state.json` | Per-content-hash trust verdicts for automations.                      |
 | `bin/pragma-cli`         | Dev-channel CLI install target.                                       |
 
 The desktop keeps its own SQLite state (kanban cards, settings, split layouts, worktree
-rows, selection) in the app data directory — tab _agent metadata_ lives in the server's
+rows, selection) in the app data directory, beside the two owner-only credential files it
+holds itself: `github-token` and `system1-key` (the System 1 API key) — tab _agent metadata_ lives in the server's
 `workspace.json`, everything else client-side.
 
 ## `~/.pragma/`
 
-| Path                | Purpose                                                                                                     |
-| ------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `config.json`       | Global settings: `plugins[]`, `tunnel`, `agentStatus`, `github.prSignature`, `gateway.webEnabled`, `other`. |
-| `keybindings.json`  | Global keybinding overrides.                                                                                |
-| `theme.json`        | Global colour overrides (merged: defaults ← global ← project).                                              |
-| `automations/`      | Global automations (implicitly trusted).                                                                    |
-| `assets/sounds/`    | Global agent alert clips (≤5 s, ≤5 MB).                                                                     |
-| `automation-cache/` | The automations sidecar's managed dependency + entry cache.                                                 |
-| `plugins/npm/`      | Official plugins installed through the app.                                                                 |
-| `pragma-wsl/`       | Inside WSL distros: the WSL server's socket directory.                                                      |
+| Path                | Purpose                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.json`       | Global settings: `plugins[]`, `tunnel`, `agentStatus`, `github.prSignature`, `gateway.webEnabled`, `gateway.keepAwake`, `other`, `storage.reminder`, `system1.baseUrl`/`model`. |
+| `keybindings.json`  | Global keybinding overrides.                                                                                                                                                    |
+| `theme.json`        | Global colour overrides (merged: defaults ← global ← project).                                                                                                                  |
+| `automode.md`       | Global [auto mode](/docs/user-guide/auto-mode) preferences: include/exclude frontmatter + free-text priorities for the System 1 model.                                          |
+| `cache/`            | 24-hour caches of the model (modelgrep) and harness (Terminal-Bench) benchmark catalogs auto mode and the AI helpers read.                                                      |
+| `automations/`      | Global automations (implicitly trusted).                                                                                                                                        |
+| `assets/sounds/`    | Global agent alert clips (≤5 s, ≤5 MB).                                                                                                                                         |
+| `automation-cache/` | The automations sidecar's managed dependency + entry cache.                                                                                                                     |
+| `plugins/npm/`      | Official plugins installed through the app.                                                                                                                                     |
+| `pragma-wsl/`       | Inside WSL distros: the WSL server's socket directory.                                                                                                                          |
 
 The production CLI installs to `~/.local/bin/pragma-cli` (Windows: alongside the app
 data dir); that directory is prepended to `PATH` in Pragma terminals.
@@ -50,16 +54,18 @@ data dir); that directory is prepended to `PATH` in Pragma terminals.
 Checked in (worktree copies are never scanned for automations; the worktrees and
 scratchpads directories are git-excluded via `$GIT_DIR/info/exclude`).
 
-| Path               | Purpose                                                   |
-| ------------------ | --------------------------------------------------------- |
-| `config.json`      | Project settings: `plugins[]`, `terminal`, `agentStatus`. |
-| `keybindings.json` | Project keybinding overrides (win over global).           |
-| `theme.json`       | Project colour overrides (win over global).               |
-| `scripts.json`     | `setup` / `teardown` / `runScripts` definitions.          |
-| `automations/`     | Project automations (approval required).                  |
-| `assets/sounds/`   | Project agent alert clips.                                |
-| `worktrees/`       | Created worktrees (git-excluded).                         |
-| `scratchpads/`     | Agent-authored MDX + comment threads (git-excluded).      |
+| Path                   | Purpose                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `config.json`          | Project settings: `plugins[]`, `terminal`, `agentStatus`.                          |
+| `keybindings.json`     | Project keybinding overrides (win over global).                                    |
+| `theme.json`           | Project colour overrides (win over global).                                        |
+| `automode.md`          | Project auto-mode preferences (win over global).                                   |
+| `scripts.json`         | `setup` / `teardown` / `runScripts` definitions.                                   |
+| `automations/`         | Project automations (approval required).                                           |
+| `assets/sounds/`       | Project agent alert clips.                                                         |
+| `worktrees/`           | Created worktrees (git-excluded).                                                  |
+| `scratchpads/`         | Agent-authored MDX + comment threads (git-excluded).                               |
+| `scratchpads/exports/` | Standalone HTML exports (git-excluded); unique filenames preserve earlier exports. |
 
 ## `PRAGMA_*` environment variables
 

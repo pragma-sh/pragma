@@ -1,6 +1,6 @@
 # packages/constants — Shared Source of Truth
 
-`@pragma/constants` is consumed by **both** the React frontend and the Rust backend.
+`@pragma-sh/constants` is consumed by **both** the React frontend and the Rust backend.
 It is the single authoritative location for any value that crosses the TS/Rust boundary.
 
 ## File map
@@ -21,19 +21,46 @@ packages/constants/
 3. Run `bun run generate` from the repo root (regenerates TS types; Rust regenerates on
    next `cargo build`).
 4. Use it:
-   - **TS:** `import { constants } from "@pragma/constants"` → `constants.app.name`
+   - **TS:** `import { constants } from "@pragma-sh/constants"` → `constants.app.name`
    - **Rust:** `pragma_constants::CONSTANTS.app.name`
 
 The Rust side parses `values.json` against the schema-generated types at startup and
 **panics loudly** if they ever drift apart — that's intentional.
 
+## Publishing
+
+This package is published to npm as **TypeScript source** (`exports` points at
+`src/index.ts`), so consumers need a bundler or Bun — which every real consumer
+has, since they reach it through `@pragma-sh/plugin`, `@pragma-sh/automations` or a
+scratchpad frame.
+
+Two things that break the tarball if changed carelessly:
+
+- **`src/generated/constants.ts` is gitignored but must ship.** The `files`
+  allowlist in `package.json` is what overrides `.gitignore` at pack time. Verify
+  with `npm pack --dry-run` after touching `files` — a tarball without the
+  generated module imports a path that does not exist.
+- **`files` deliberately excludes `src/lib.rs` and the tests.** `lib.rs` is the
+  Rust half of this package and has no business in an npm tarball.
+
 ## Key values
 
 - `app.name` / `app.identifier` — mirror in `src-tauri/tauri.conf.json` (Tauri reads
   its config statically; keep the two in sync if you change window defaults here).
-- `daemon.protocolVersion` — SemVer string mirrored from `crates/pragma-protocol`'s
-  Cargo version by `bun run generate`. Exact equality on Hello / pairing / health.
-  Do not edit it by hand.
+- `daemon.protocolVersion` — the **internal** daemon wire protocol. SemVer string
+  mirrored from `crates/pragma-protocol`'s Cargo version by `bun run generate`.
+  Exact equality on Hello, `gateway.json`, and `/v1/health`. Do not edit it by hand.
+  Because `pragma-protocol` is in the linked desktop release group, this moves on
+  every desktop release — which is deliberate: every peer that compares it ships in
+  one bundle, so a mismatch is a stale process to evict, not a peer to negotiate with.
+- `gateway.apiVersion` — the **client-facing** gateway HTTP contract, advertised in the
+  pairing payload. **Hand-owned**: no release-please extra-file writes it and
+  `bun run generate` does not sync it, and `scripts/release-config.test.ts` fails if
+  either ever starts to. It must not be conflated with `daemon.protocolVersion`: Pragma
+  Go and the web build embed their copy at build time and reach users on their own
+  cadence, so a per-release bump would refuse every installed client the moment the
+  desktop shipped a patch. Bump it only on a breaking `/v1` change, and only in the same
+  release as a client build that embeds the new value.
 - `updates.*` — shipped desktop auto-update defaults (production/dev check URLs,
   poll interval, apply-mode labels, installer platform ids). User overrides live in
   global `.pragma/config.json` `other` block (`OtherSettings`).
@@ -44,15 +71,20 @@ The Rust side parses `values.json` against the schema-generated types at startup
   with the pure formatter in `src/welcome.ts`. Two authored lists, not one list with the
   location clause cut out: the desktop workspace knows which worktree is selected, the
   mobile all-projects home does not.
-- `usageLimits.*` — the host's refresh policy for plugin usage providers (floor, retry
-  ceiling, stale window, sidecar timeout) plus the `UsageLimit*` wire shapes. The host
-  owns the single cache every client reads; `@pragma/plugin` re-exports these types rather
-  than defining its own, and `src/usage-limits.ts` holds the pure presentation helpers
-  (percentage, severity, reset countdown) shared by desktop and mobile.
+- `UsageLimit*` — the wire shapes of a usage reading (`AccountUsageEntry.result` carries
+  one). `@pragma-sh/plugin` re-exports these types rather than defining its own, and
+  `src/usage-limits.ts` holds the pure presentation helpers (percentage, severity, reset
+  countdown) shared by desktop and mobile. Refresh cadence is the host's, under
+  `accounts.*`.
 - `onboarding.*` — first-run flow values: `mediaBaseUrl` for the streamed preview clips,
   and `skill.id` / `skill.targets[]` (`id`, home-relative `directory`, button `label`) for
   the global skill directories the skills step installs into. Rust resolves `directory`
   against the home directory; the frontend only ever sends `id` over IPC.
+- `storage.*` — Settings → Storage: large-file threshold/limit, the smallest ignored
+  folder offered for deletion, the host scan entry cap, page scan concurrency,
+  `protectedFolders` the host never deletes, and reminder interval default/presets.
+  The user's reminder lives in global `.pragma/config.json` `storage.reminder`
+  (`StorageSettings`); `WorktreeStorage` is the host scan's response shape.
 - `theme.fileName` / `theme.modes` — location and color-scheme blocks of the optional
   `.pragma/theme.json` color overrides (see `apps/pragma/AGENTS.md`). Only the file
   contract is shared; the token catalog is derived from `apps/pragma/src/index.css`.
@@ -81,13 +113,27 @@ The Rust side parses `values.json` against the schema-generated types at startup
   base64 adds a third) and the frontend refuses to assemble anything past
   `maxBinaryBytes` in the webview's heap.
 - `scratchpads.*` — managed local MDX directory, extension, frontmatter key, and metadata
-  version shared by CLI, Rust host, and desktop editor.
+  version shared by CLI, Rust host, and desktop editor; `exportsDirectory` is the
+  worktree-relative destination for standalone HTML exports.
+  `exportHomepageUrl` is the homepage linked from their watermark.
 - `fanout.*` — the durable fanout state file, attempt branch prefix, the member
   floor (there is no ceiling), launch concurrency, follow-up delivery timeout, and the
   `PRAGMA_FANOUT_ID` / `PRAGMA_FANOUT_MEMBER_ID` environment variables every
   attempt session exports. The whole fanout wire contract (`Fanout`,
   `FanoutMember`, statuses, finalize stages, request/result types) lives in
   `schema.json` so the host, the CLI, the SDK, and the desktop share one shape.
+- `system1.*` — System 1 (Jev) defaults: `defaultBaseUrl`, `defaultModel`,
+  `evaluatePath` (skipped when the configured URL already ends in `/systemone` or
+  `/decisions`, e.g. OpenRouter's `/api/alpha/decisions`), `hostModels` (the model a
+  blank `system1.model` resolves to per API host — OpenRouter names Jev
+  `~typesafe/jev-latest`; read by both `system1.rs` and `lib/system1-settings.ts`),
+  the owner-only `credentialFileName` under the app data dir,
+  `autoModeFileName` (`.pragma/automode.md`, home- or project-relative), the request
+  timeout, and the prompt / `automode.md` character caps. User overrides for the URL and
+  model live in the global `config.json` `system1` block (`System1Settings`);
+  `System1Status` is what the backend reports to the UI (never the key).
+- `AgentModelEntry.canonicalId` — optional provider-qualified id for an aliased model,
+  used only by auto mode's benchmark matching.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

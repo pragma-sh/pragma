@@ -1,5 +1,13 @@
-import type { Worktree } from "@pragma/constants";
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import type { Worktree } from "@pragma-sh/constants";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -102,6 +110,21 @@ vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
 }));
 
+const viewCreationMock = vi.fn();
+const leaveCreationMock = vi.fn();
+let creationMock: unknown = null;
+
+vi.mock("@/state/worktree-creation-context", () => ({
+  useWorktreeCreation: () => ({
+    creation: creationMock,
+    startCreation: vi.fn(),
+    viewCreation: viewCreationMock,
+    leaveCreation: leaveCreationMock,
+    dismiss: vi.fn(),
+    retry: vi.fn(),
+  }),
+}));
+
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({ exitBoard: vi.fn() }),
 }));
@@ -111,7 +134,14 @@ vi.mock("@/state/github-context", () => ({
 }));
 
 import { WorktreeTree } from "./WorktreeTree";
+import { setCompactWorktreeRows } from "@/state/sidebar-preferences";
+import {
+  clearPullRequestDraft,
+  storeGeneratedPullRequestDraft,
+} from "@/state/pull-request-draft-store";
+import { trackWorktreeActivity } from "@/state/worktree-activity-store";
 import { useWorktreeShortcutOrder } from "@/lib/shortcut-hints";
+import { deferred } from "@/test/deferred";
 
 afterEach(() => {
   cleanup();
@@ -122,6 +152,9 @@ afterEach(() => {
   openWorktreeInEditorMock.mockReset();
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
+  viewCreationMock.mockReset();
+  leaveCreationMock.mockReset();
+  creationMock = null;
   activateTabLocationMock.mockReset();
   restoreFanoutTabMock.mockReset();
   restoreFanoutTabMock.mockResolvedValue(undefined);
@@ -153,6 +186,96 @@ describe("WorktreeTree", () => {
     render(<WorktreeTree onCreateChild={vi.fn()} />);
 
     await vi.waitFor(() => expect(result.current).toEqual(["main", "child", "sibling"]));
+  });
+
+  it("shows a root-level spinner row while a worktree is created from main", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "Second feature",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    const { container } = render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    const row = await screen.findByTestId("pending-worktree-row");
+    expect(row).toHaveTextContent("Second feature");
+    // Main is never a parent row, so its pending child sits at the root depth.
+    expect(row).toHaveStyle({ paddingLeft: "8px" });
+    expect(container.querySelector(".lucide-loader-circle")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Second feature" }));
+    expect(viewCreationMock).toHaveBeenCalled();
+    // Re-opening the screen from the pending row is not a navigation away.
+    expect(leaveCreationMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves the creation screen when the already-selected row is clicked", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "feature-2",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: true,
+      viewedFrom: "p|main|",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "main" }));
+
+    // The click selects the row it is already on, so the selection identity
+    // does not change — the explicit leave is what dismisses the screen.
+    expect(selectWorktreeMock).toHaveBeenCalledWith("main");
+    expect(leaveCreationMock).toHaveBeenCalled();
+  });
+
+  it("nests the spinner row under a non-main parent", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "child",
+      branch: "nested",
+      label: "nested",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    expect(await screen.findByTestId("pending-worktree-row")).toHaveStyle({ paddingLeft: "22px" });
+  });
+
+  it("does not show the spinner row for another project's creation", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "other",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "feature-2",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    await screen.findByText("feature");
+    expect(screen.queryByTestId("pending-worktree-row")).toBeNull();
   });
 
   it("uses the merged icon for a child worktree with no remaining changes", async () => {
@@ -346,6 +469,61 @@ describe("WorktreeTree", () => {
     fireEvent.click(unpin);
 
     expect(screen.queryByRole("button", { name: "Unpin feature" })).toBeNull();
+  });
+
+  it("lists a worktree's agents under its title, and folds them away in compact rows", async () => {
+    localStorage.clear();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    applyAgentReport({ agent: "claude", worktreeId: "child", tabId: "tab-1", status: "running" });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    const open = await screen.findByRole("button", { name: "Open claude" });
+    expect(open).toHaveTextContent("Running");
+    // The bar is always drawn, floored at 10% before any estimate arrives.
+    expect(within(open).getByLabelText("Estimated progress")).toHaveValue(10);
+    fireEvent.click(open);
+    expect(activateTabLocationMock).toHaveBeenCalledWith("p", "child", "tab-1");
+    // The agent line opens its tab alone; the card's own select does not race it.
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    // Anywhere else on the card selects the worktree, not just the title.
+    const details = open.closest("[data-slot='worktree-row-details']");
+    fireEvent.click(details!);
+    expect(selectWorktreeMock).toHaveBeenCalledWith("child");
+
+    act(() => setCompactWorktreeRows(true));
+    expect(screen.queryByRole("button", { name: "Open claude" })).toBeNull();
+    // The title line, and its aggregate status dot, are the same in both layouts.
+    expect(screen.getByText("feature")).toBeInTheDocument();
+    expect(screen.getByTitle("Agent running")).toBeInTheDocument();
+    act(() => setCompactWorktreeRows(false));
+  });
+
+  it("shows the latest git action on the worktree's row", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await screen.findByText("feature");
+
+    const push = deferred<void>();
+    act(() => {
+      void trackWorktreeActivity("child", "push", () => push.promise);
+    });
+    expect(await screen.findByText("Pushing")).toBeInTheDocument();
+    await act(async () => push.resolve());
+    expect(await screen.findByText("Pushed")).toBeInTheDocument();
+  });
+
+  it("says a worktree is ready for a PR once one is drafted, until it is opened", async () => {
+    localStorage.clear();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await screen.findByText("feature");
+    expect(screen.queryByText("Ready for PR")).toBeNull();
+
+    act(() => storeGeneratedPullRequestDraft("child", { title: "Add refresh", body: "" }));
+    expect(await screen.findByText("Ready for PR")).toBeInTheDocument();
+
+    act(() => clearPullRequestDraft("child"));
+    expect(screen.queryByText("Ready for PR")).toBeNull();
   });
 });
 

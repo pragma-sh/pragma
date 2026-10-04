@@ -167,7 +167,11 @@ exit cleanup and rely on next `SessionStart` stale clear.
 
 Model provider runs supported `codex debug models` command, keeps `visibility: "list"`, and
 maps `supported_reasoning_levels[].effort`. Launch uses `--model`; reasoning uses
-`--config model_reasoning_effort="..."`; permission modes use `--ask-for-approval`.
+`--config model_reasoning_effort="..."`; permission modes use `--ask-for-approval`, except
+the first, `default`, which passes nothing so Codex's config decides. Slash commands are
+`/init`, `/review`, `/status`, `/diff`, custom prompts in `~/.codex/prompts` as
+`/prompts:<name>`, and every skill Codex resolved — read from the "Available skills" section
+of `codex debug prompt-input` — invoked as `$<name>` (Codex has no `/` form for skills).
 
 Usage provider launches short-lived `codex app-server --stdio`, performs required
 `initialize` / `initialized` handshake, then calls stable `account/rateLimits/read`. Transport
@@ -175,6 +179,19 @@ and normalization live in bundled `src/usage-limits.ts`; `assets/` contains only
 artwork. Codex owns credentials and refresh, so Pragma never reads or prints tokens. Provider
 normalizes primary and secondary windows to percentage limits and treats API-key-only /
 signed-out accounts as `authentication-required`.
+
+Normalization dedupes by identity, never by window length. `rateLimits` is the protocol's
+backward-compatible single-bucket view and mirrors one `rateLimitsByLimitId` entry, so
+buckets are keyed by slugged `limitId`: the mirror is emitted once, the default snapshot
+survives when the map omits `codex` (keeping `codex-primary` for the collapsed row), and a
+window repeated with identical usage, duration, and reset in the same snapshot's other slot
+is emitted once. That check is per bucket: distinct buckets always remain, even when their
+windows coincide (two untouched weekly quotas look identical), and a
+non-`codex` bucket is titled with its `limitName` (e.g. `gpt-reserve weekly limit`) so a
+genuinely separate weekly quota cannot read as the default weekly limit twice. Limit ids
+are `${bucketId}-primary` / `${bucketId}-secondary`, unique by construction. Response
+shape spot-checked against `codex-cli 0.153.4` on 2026-09-24; re-verify it on every
+tested-version bump.
 
 ## Branding provenance
 
@@ -198,7 +215,10 @@ bun run --filter @pragma-sh/codex-plugin install:local
 
 Installer registers this package as local Codex marketplace and installs
 `pragma-codex@pragma`. Restart Codex, run `/hooks`, and trust Pragma hook definitions. Re-run
-install and trust again after `hooks/hooks.json` changes.
+install and trust again after `hooks/hooks.json` changes. The installer removes any existing
+`pragma` marketplace first: Codex rejects re-adding a name from a different source ("already
+added from a different source"), and every desktop upgrade installs into a new versioned
+directory, so without that step no upgrade could succeed.
 
 For local verification, register this package's absolute path in global
 `~/.pragma/config.json`. An absolute path ensures desktop plugin discovery and the host
@@ -255,3 +275,9 @@ The shared approval scenarios (`command-allow`/`command-deny`/`decision-timeout`
 `PermissionRequest`, so an `ls`-based prompt fails with "agent settled without command
 attention" even though the blocking approval hook works. A write outside the workspace
 escalates and fires the hook.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `openai` (agent `codex`). Each account is a `CODEX_HOME`; login is `codex login`; `identify` sends app-server `account/read` and uses the ChatGPT email (an API-key login has no identity and no plan limits).
+
+`sharedToken` (`src/shared-token.ts`, kind `chatgpt`) reads and writes `$CODEX_HOME/auth.json` `tokens` so OpenCode, Pi, and Prime Agent can use a Codex sign-in (same OAuth client, `app_EMoamEEZ73f0CkXaXp7hrann`) and the reverse. Codex needs an `id_token` the others drop: a token written here keeps the existing one, and Codex refuses a sign-in it has never had. `last_refresh` is set to the access token's `iat`, so Codex's ~8-day refresh schedule is unchanged.

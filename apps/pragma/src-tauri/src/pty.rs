@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_client::request_spawn;
+use pragma_client::{request_spawn, SpawnOptions};
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
-use pragma_constants::{ShellProfile, CONSTANTS};
+use pragma_constants::CONSTANTS;
 use pragma_platform::ipc::LocalStream;
 use pragma_platform::process;
 use pragma_protocol::{
@@ -184,13 +184,13 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
-        shell: Option<ShellProfile>,
+        options: SpawnOptions,
         stream_generation: u64,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
         let stream =
             self.inner
-                .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows, shell)?;
+                .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows, options)?;
         self.track_stream(&session_id, stream_generation, &stream);
         forward_stream(stream, on_event);
         Ok(())
@@ -207,9 +207,9 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
-        shell: Option<ShellProfile>,
+        options: impl Into<SpawnOptions>,
     ) -> AppResult<()> {
-        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, shell);
+        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, options.into());
         let mut stream = self.connect_with_spawn()?;
         write_json_frame(&mut stream, &request)?;
         loop {
@@ -525,7 +525,7 @@ pub fn instance_data_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
 ///
 /// Tauri lays resources out differently per bundle format — some put them at
 /// the resource root, others under a `resources/` sub-directory — so both are
-/// probed, exactly as bundled plugins are resolved in `plugins.rs`.
+/// probed so every package format finds the web bundle.
 fn web_bundle_dir(resource_dir: &Path) -> PathBuf {
     let relative = Path::new(CONSTANTS.gateway.web.resource_dir.as_str());
     [

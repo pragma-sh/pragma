@@ -176,8 +176,11 @@ no limit — grok enforces a free ceiling ("You've reached your free Grok Build 
 for now") that this API does not expose. That is reported as `unsupported` with the tier
 name rather than a row of zeros.
 
-Grok has **no permission-mode flag**; the launcher's three modes map to real launch flags:
-`default` -> none, `no-plan` -> `--no-plan`, `always-approve` -> `--always-approve`.
+Permission modes map to `--permission-mode <id>` (`acceptEdits`, `auto`, `plan`, `dontAsk`,
+`bypassPermissions`); the first, `default`, passes no flag so Grok's own config decides.
+Slash commands come from `grok agent stdio` (ACP `available_commands_update`), with three
+built-ins plus the skill and command roots Grok scans (`.grok`, `.agents`, `.claude`) as the
+fallback.
 
 ## Branding provenance
 
@@ -230,3 +233,7 @@ grok's usage ceiling quickly, and a rate-limited turn is recorded as
 `cleared`, so scenarios fail for reasons that have nothing to do with the plugin. Check
 `~/.grok/sessions/<encoded-cwd>/<id>/updates.jsonl` for that record before debugging a
 failure.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `xai`. Each account is a `GROK_HOME`; login is `grok login --oauth`. No `identify` yet, so every Pragma-created login is its own account.

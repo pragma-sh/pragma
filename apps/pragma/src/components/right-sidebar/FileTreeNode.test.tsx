@@ -1,4 +1,4 @@
-import type { DirEntry } from "@pragma/constants";
+import type { DirEntry } from "@pragma-sh/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

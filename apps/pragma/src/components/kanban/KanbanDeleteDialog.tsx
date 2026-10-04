@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import type { KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma-sh/constants";
 
 import {
   AlertDialog,

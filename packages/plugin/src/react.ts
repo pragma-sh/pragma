@@ -36,7 +36,7 @@ export type {
 
 // Runtime values come from the host bridge, never from a real `react` import.
 // This is deliberate: a plugin author's bundler typically aliases the bare
-// `"react"` specifier to `@pragma/plugin/react` so every dependency shares one
+// `"react"` specifier to `@pragma-sh/plugin/react` so every dependency shares one
 // React instance with the host. If this module itself imported `"react"`
 // normally, that alias would redirect right back here — an infinite loop.
 // Sourcing values from `__PRAGMA__.react` avoids that entirely.

@@ -1,4 +1,4 @@
-import type { GitHubPullRequest } from "@pragma/constants";
+import type { GitHubPullRequest } from "@pragma-sh/constants";
 
 import { createGitHubClient } from "./index";
 

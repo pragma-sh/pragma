@@ -1,9 +1,10 @@
 # `apps/www` — Pragma marketing + docs site
 
 Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
-plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
-app. Its `@pragma/*` dependencies are data-only `@pragma/plugin-registry` and render-only
-`@pragma/brand`; nothing in desktop app may import from website.
+blog at `/blog`, plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
+app. Its `@pragma-sh/*` dependencies are data-only `@pragma-sh/plugin-registry` and render-only
+`@pragma-sh/brand` and the geometry-only `@pragma-sh/treemap`; nothing in desktop app may
+import from website.
 
 ## Stack
 
@@ -33,6 +34,7 @@ but a bare `next dev`/`tsc` in a clean checkout will fail until you run `fumadoc
 ```
 apps/www/
 ├── DESIGN.md                # the marketing design system — tokens + rules, edited before the CSS
+├── content/blog/            # one Markdown or MDX file per post (filename = slug)
 ├── content/docs/            # MDX documentation pages (the /docs sidebar mirrors this tree)
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
@@ -41,22 +43,29 @@ apps/www/
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, plugins, privacy, deep-link
-    │   │                    # forwarders /open + /install-plugin, plugins/[...package]) in
-    │   │                    # the `.artboard` layout
+    │   ├── (home)/          # marketing route group (landing, blog/[slug], downloads, plugins, privacy, support,
+    │   │                    # deep-link forwarders /open + /install-plugin,
+    │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
-    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
+    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma-sh/*`)
+    │   ├── download/[target]/ # redirects to the latest release's installer for one platform
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
+    │   ├── og/blog/         # code-drawn blog covers (storage-manager: the Storage treemap)
     │   └── global.css       # Tailwind + shadcn tokens + the `.artboard` palette + Fumadocs preset
     ├── components/
     │   ├── ui/              # shadcn primitives — do not hand-edit, re-add via the CLI
     │   ├── mdx.tsx          # MDX component map exposed to docs authors
     │   ├── site-navbar.tsx  # shared floating marketing/docs nav + docs mobile sidebar trigger
-    │   ├── brand-favicon.tsx # compact mark rendered from @pragma/brand geometry
+    │   ├── brand-favicon.tsx # compact mark rendered from @pragma-sh/brand geometry
     │   ├── github-mark.tsx  # shared GitHub brand glyph
+    │   ├── platform-marks.tsx # Apple / Windows / Tux glyphs (Simple Icons, CC0)
+    │   ├── download-button.tsx # the one Download button: detects the OS, shows its mark
+    │   ├── app-store-button.tsx # Pragma Go App Store pill → dialog with QR code + store link
     │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
+    │   ├── blog-tags.tsx    # a post's frontmatter tags as pills (index + article)
+    │   ├── support/         # the support request form (client) posting to the route's action
     │   ├── deep-link-forward.tsx  # one pragma:// hand-off page (auto-redirect + fallback pills)
     │   └── home/            # landing page sections
     │       ├── agents.ts            # the shipped agent integrations (id, name, mark, tint)
@@ -70,9 +79,17 @@ apps/www/
     └── lib/
         ├── css-color.ts     # resolves a CSS token to hex so three.js can use the palette
         ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
+        ├── support.ts       # support route, address, reply window, topics + the pure request validator
+        ├── support-rate-limit.ts # per-connection submission cap the support action checks first
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
+        ├── deploy.ts        # pure Ignored-Build-Step decision (production = release commits only)
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
+        ├── blog.ts          # Fumadocs blog collection with required frontmatter schema
+        ├── blog-utils.ts    # date formatting, newest-first sort, and tag labels
+        ├── storage-cover.ts # layout of the Storage treemap blog cover (@pragma-sh/treemap)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
+        ├── downloads.ts     # installer targets, OS/CPU detection, latest-release asset lookup
+        ├── github-api.ts    # server-side GitHub REST base + token headers
         ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
@@ -80,6 +97,38 @@ apps/www/
 
 ## Rules
 
+- **Production deploys only on a release; previews are untouched.** `vercel.json`'s
+  `ignoreCommand` runs `scripts/should-deploy.ts`, whose decision lives in the unit-tested
+  `lib/deploy.ts`: any non-production deployment builds, and a production deployment builds
+  only for a Release Please commit (the squashed `chore(main): release …` subject, or a
+  merge commit whose subject names the `release-please--branches--*` source branch), or
+  for a merge whose pull request carries the **`deploy:www`** label (`DEPLOY_LABEL`).
+  Every pattern is anchored and read against the **subject line only** — an unanchored
+  search over the whole message lets any commit that merely quotes a release branch in
+  its body deploy production. The site is the
+  update endpoint and the docs contract for whatever desktop build is current, so it should
+  change when a release changes it — not on every merge to `main`. Both failure modes are
+  deliberately "build": an unreadable commit message, and a broken script (Vercel treats a
+  failing Ignored Build Step as build). Override a skip by redeploying from the dashboard.
+  The label is the opposite: `fetchPrLabels` asks GitHub for the PR whose
+  `merge_commit_sha` is `VERCEL_GIT_COMMIT_SHA`, and any failure there returns no labels,
+  so an unconfirmed opt-in falls back to the release rule instead of shipping. Use it only
+  for content that can go live on its own (a blog post, landing copy, a docs fix for a
+  shipped feature) — never docs for an unreleased feature. It must be applied **before**
+  merging: adding it afterwards does not re-run the push deployment.
+  This assumes the Vercel project's Root Directory is `apps/www`, which is where
+  `vercel.json` has to live for it to be read at all.
+- **Two environment variables are required in production, and neither fails loudly.**
+  `NEXT_PUBLIC_SITE_URL` (or `siteUrl` falls back to `http://localhost:3000` and every OG
+  image URL breaks) and `GITHUB_TOKEN` — `/api/updates` fetches the releases list plus two
+  assets per manifest behind only a 60s in-process cache, and unauthenticated GitHub is 60
+  requests/hour per IP shared across serverless instances, so without it the endpoint
+  starts answering `{ available: false }` from its own `catch` under real polling load.
+- **This site trails the product by nothing.** When a feature ships in the app, the CLI,
+  the SDK, or the host, its docs page lands here in the same change — including the
+  `meta.json` entry that puts it in the sidebar, the cross-links from the pages it makes
+  incomplete, and a landing-page tile when it is worth announcing. Check the root
+  `AGENTS.md` rule before calling a feature done.
 - **`DESIGN.md` is the source of truth for the theme, and it is edited first.** The
   marketing design system — palette, type scale, radii, spacing, component specs — is
   specified in `apps/www/DESIGN.md`. Any change to the look of the landing page changes
@@ -93,6 +142,22 @@ apps/www/
   token in a component — a literal hex or a hand-mixed grey in a `className` is a bug.
 - **Route strings live in `lib/shared.ts`.** `/docs`, `/og/docs`, and `/llms.mdx/docs` are
   referenced by the source loader, the proxy, and the page components — change them there.
+- **Blog posts are files in `content/blog/`.** Add a root-level `.md` or `.mdx` file;
+  its filename is the slug. The Fumadocs schema in `lib/blog.ts` requires `title`,
+  `description`, and a quoted ISO `date` in frontmatter. Optional `tags` are limited to the
+  keys of `blogTagLabels` in `lib/blog-utils.ts` (`release` for a version announcement) and
+  render as pills on the index and the post. An optional `cover` object
+  has `src` (a file in `public/blog/`, an existing shared `public/` image, or a
+  code-drawn `/og/blog/*` route) and descriptive `alt`; an optional `video`
+  has a public HTTPS `src`, required local `poster` (the reduced-motion fallback) and required WebVTT `captions`, and takes over the featured
+  media while the cover remains the social image. The index sorts newest
+  first and features that entry; `/blog/[slug]` pre-renders each file. A Markdown
+  image in a post body is imported by Fumadocs as an object, so the article renders it
+  with Fumadocs' `img` (a `next/image`); a bare `<img>` would get `src="[object Object]"`. See
+  `README.md` for a copy-ready post.
+  Fumadocs discovers these files at build time, so Fallow cannot trace imports to
+  them: keep `apps/www/content/blog/**` in `.fallowrc.jsonc`'s
+  `dynamicallyLoaded` list when changing the content pipeline.
 - **`/{action}` pages forward deep links; they do not parse them.** GitHub's markdown
   sanitizer keeps only `http`/`https` hrefs, so every link that must survive a PR body
   points at a web route (`/open?...`, `/install-plugin?...`) whose `DeepLinkForward`
@@ -110,7 +175,19 @@ apps/www/
   are republished (`plugins.yml` publish → refresh-lock); never commit `lock:local`
   output — its tarball integrity hashes describe locally-packed bytes, not the npm
   releases the desktop verifies against.
-- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
+- **Every automatic Download button is `DownloadButton`, and it links to `/download/{target}`.**
+  Installer asset names carry the version (`Pragma-<version>-<target>.<ext>`, written by
+  `release.yml`), so there is no stable GitHub URL to link to; the route reads the
+  repository's Latest release (pinned to the newest desktop release) and redirects to the
+  matching asset, falling back to the release page on any miss. The button server-renders
+  as a generic link and swaps in the visitor's platform mark after hydration; phones,
+  tablets, and ChromeOS keep the generic link. macOS defaults to Apple silicon because
+  Safari reports every Mac as Intel. The README's download badges and table use the same
+  route, so **renaming a release asset or a `DOWNLOAD_TARGETS` key breaks published
+  links** — keep them in step with `release.yml`. `/downloads` is the explicit platform
+  and architecture picker; Windows must list both x64 and ARM64 because browser CPU hints
+  are not universally available.
+- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma-sh/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
   In development a local fixture stands in for that file; production fetches signed
@@ -119,6 +196,31 @@ apps/www/
   the newest restart manifest so a client that skipped native releases gets the required
   installer before a newer UI overlay. An update without the requested
   UI/platform/package-format asset is unavailable rather than an un-installable offer.
+- **`/support` is the App Store Connect Support URL, and the form key stays on the
+  server.** App Review guideline 1.5 wants a reachable page with current contact details,
+  so the reply window, the products, and the topics live in `lib/support.ts` — one place
+  the page, the footer, and the listing all read. There is deliberately **no** published
+  support address: the form is the whole channel, security reports included, because a
+  mailbox nobody reads fails App Review harder than a form that works. If one is ever
+  stood up it goes in `lib/support.ts` and nowhere else. The form posts to the
+  server action in `(home)/support/actions.ts`, which validates through
+  `validateSupportRequest` before spending the form's monthly quota and only then POSTs to
+  splitforms' `/api/submit` with `SPLIT_FORMS_ACCESS_KEY` from the environment. Two
+  consequences worth remembering: a `"use server"` module may export **only** async
+  functions, so `SupportFormState` and its initial value live in `lib/support.ts` (Next
+  strips anything else, and the form then renders `undefined.fieldErrors`); and the key is
+  read at request time, so a deployment without it answers with the email fallback rather
+  than failing silently. Set it in every Vercel environment. The action checks a
+  per-connection rate limit (`lib/support-rate-limit.ts`) before the honeypot or
+  validation, so a flood cannot spend the shared splitforms quota; it is in-memory and
+  best-effort (one bucket per warm serverless instance), kept in its own module — not the
+  `"use server"` one — so the counting logic is unit-testable and `support.test.ts` can
+  reset it between cases via `resetRateLimiterForTests`. Because it sends your name,
+  email, and message to splitforms, that processor is named in `/privacy` — update that
+  page's "Services we may operate" and "Third parties" sections (and bump
+  `privacyLastUpdated` in `lib/legal.ts`) if the support form's data handling changes
+  again.
+
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep
   the rest of the page a server component.
@@ -231,7 +333,7 @@ apps/www/
 - **Shadow strength is theme-dependent.** `--shadow-raised`/`--shadow-floating` resolve
   through per-theme `*-value` custom properties, because a drop that reads on a near-black
   surface is a smear on a white one.
-- **Agent marks are copies, not imports.** `@pragma/brand` supplies only Pragma's own mark;
+- **Agent marks are copies, not imports.** `@pragma-sh/brand` supplies only Pragma's own mark;
   official agent marks in `public/agents/` remain copies from each
   `packages/*-plugin/assets/` directory. Adding an agent plugin means copying its mark here
   and adding a row to `components/home/agents.ts`.
@@ -280,7 +382,9 @@ apps/www/
   actually do with data (see `apps/pragma-go/AGENTS.md`); it is written to cover future
   analytics and hosted services as _disclosed-before-they-launch_, so adding either means
   editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
-  Support is handled through GitHub issues, so there is no support page here.
+  `/support` is its sibling artifact and follows the same rules; unlike the policy it
+  _is_ linked from the footer, because App Review expects the support route to be
+  reachable by a user who never saw the listing.
 - **Docs content mirrors the product's six audiences.** `content/docs/` holds
   `user-guide/`, `sdk/`, `cli/`, `automations/`, `plugins/`, and `wiki/` — each with its
   own `meta.json` and an `index.mdx` landing page. A new page joins its folder's
@@ -301,6 +405,20 @@ apps/www/
   (dialog titles like `Keep {attempt}?`, templates like `{agent}`) in backticks.
   Build (`bun run --filter www build`) prerenders every page and is the only check that
   catches this; `tsc` alone does not.
+- **Competitor comparisons have one data source.** `lib/compare-data.ts` holds `ROWS` (the
+  feature matrix) and `COMPETITORS` (per-competitor copy, license, logo, migration steps).
+  The landing page's `Comparison` table and every `/compare/[slug]` page render from the
+  same array — a correction to a claim about Emdash, Orca, or Superset happens once, in
+  that file, never by editing a table's JSX directly. `SupportCell`
+  (`components/compare/support-cell.tsx`) is the one renderer for a matrix cell, shared the
+  same way. Claims there are checked against each competitor's own GitHub repository
+  (README, LICENSE, linked docs), not just its marketing site — this space ships fast
+  enough that a claim can go stale in days (see `FOOTNOTE`'s dated corrections); re-check
+  before trusting an old claim rather than assuming the array is current.
+- **Competitor logos are bundled copies, checked into `public/compare/`,** pulled from
+  each project's own `resources/build` (or equivalent) app-icon asset — the same
+  nominative-fair-use pattern as the agent marks in `public/agents/`. Never hotlink a
+  competitor's logo from their site or a CDN.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

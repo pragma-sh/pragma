@@ -8,8 +8,7 @@ import type {
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
-  UsageLimitProviderDefinition,
-} from "@pragma/plugin";
+} from "@pragma-sh/plugin";
 import {
   PluginBoundary,
   notifyFromPlugin,
@@ -54,13 +53,6 @@ export function usePluginSidebarCards(
   activeProjectId: string | null,
 ): VisiblePluginContribution<SidebarCardDefinition>[] {
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarCards);
-}
-
-/** Returns active providers for the shared usage-limits display. */
-export function usePluginUsageLimitProviders(
-  activeProjectId: string | null,
-): VisiblePluginContribution<UsageLimitProviderDefinition>[] {
-  return useVisibleContributions(activeProjectId, (definition) => definition.usageLimits);
 }
 
 function useVisibleContributions<TContribution extends object>(
@@ -126,10 +118,7 @@ function shouldShow<TConfig>(
 }
 
 /** Builds callback context for a loaded plugin record. */
-export function pluginContextForRecord(
-  record: PluginRecord,
-  runtime: PluginRuntime,
-): PluginContext {
+function pluginContextForRecord(record: PluginRecord, runtime: PluginRuntime): PluginContext {
   if (!runtime.sdk) {
     throw new Error("Plugin SDK is not connected yet");
   }
@@ -152,15 +141,26 @@ interface PluginErrorBoundaryProps {
 
 interface PluginErrorBoundaryState {
   error: string | null;
+  resetKey: string;
 }
 
 class PluginErrorBoundary extends ReactComponent<
   PluginErrorBoundaryProps,
   PluginErrorBoundaryState
 > {
-  state: PluginErrorBoundaryState = { error: null };
+  state: PluginErrorBoundaryState = { error: null, resetKey: "" };
 
-  static getDerivedStateFromError(cause: unknown): PluginErrorBoundaryState {
+  static getDerivedStateFromProps(
+    props: PluginErrorBoundaryProps,
+    state: PluginErrorBoundaryState,
+  ): Partial<PluginErrorBoundaryState> | null {
+    if (props.resetKey !== state.resetKey) {
+      return { error: null, resetKey: props.resetKey };
+    }
+    return null;
+  }
+
+  static getDerivedStateFromError(cause: unknown): Partial<PluginErrorBoundaryState> {
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
 
@@ -181,7 +181,18 @@ class PluginErrorBoundary extends ReactComponent<
   }
 }
 
-/** Renders a plugin component with per-plugin config and crash isolation. */
+/**
+ * Renders a plugin component with per-plugin config and crash isolation.
+ *
+ * The boundary resets on gateway connectivity as well as the caller's reset
+ * key: the gateway spawns lazily, so a contribution that calls `useSdk` during
+ * that window throws, and without this the boundary would latch that startup
+ * transient for the rest of the session even though the SDK arrives seconds
+ * later. The reset clears the caught error without remounting healthy child
+ * subtrees — only a contribution that actually crashed is rendered afresh, so
+ * component-local state and mount effects in working plugins survive the
+ * startup connectivity flip.
+ */
 export function RenderPluginContribution(props: {
   pluginId: string;
   config: unknown;
@@ -190,8 +201,10 @@ export function RenderPluginContribution(props: {
   component: PluginComponent;
 }): ReactNode {
   const PluginComponent = props.component;
+  const connected = usePluginRuntimeState().sdk !== null;
+  const resetKey = `${props.resetKey}:${connected ? "sdk" : "no-sdk"}`;
   return (
-    <PluginErrorBoundary key={props.resetKey} pluginId={props.pluginId} resetKey={props.resetKey}>
+    <PluginErrorBoundary pluginId={props.pluginId} resetKey={resetKey}>
       <PluginBoundary
         config={props.config}
         pluginId={props.pluginId}

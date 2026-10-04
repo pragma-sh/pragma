@@ -25,6 +25,10 @@ describe("constants", () => {
     expect(constants.daemon.protocolVersion).toMatch(/^\d+\.\d+\.\d+/);
   });
 
+  it("exposes the gateway API version as a SemVer string", () => {
+    expect(constants.gateway.apiVersion).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
   it("ships update check defaults", () => {
     expect(constants.updates.devCheckUrl).toContain("localhost:3000");
     expect(constants.updates.applyModes).toEqual(["reload", "restart"]);

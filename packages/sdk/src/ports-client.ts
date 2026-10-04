@@ -1,4 +1,4 @@
-import type { OpenPort, PortForwardRequest, PortForwardResult } from "@pragma/constants";
+import type { OpenPort, PortForwardRequest, PortForwardResult } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
 import type { Transport } from "./transport";

@@ -13,10 +13,11 @@ import {
 } from "react";
 import { useRequiredContext } from "@/lib/context";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 import type {
   AgentReportPayload,
   DiffSide,
+  ExcalidrawScene,
   Project,
   ProjectIcon,
   ProjectScriptsConfig,
@@ -24,7 +25,7 @@ import type {
   Tab,
   Worktree,
   WorktreeStatus,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { toast } from "sonner";
 
@@ -69,6 +70,7 @@ import {
   closeTab as closeTabCommand,
   createPluginWebViewTab,
   createTab as createTabCommand,
+  createWhiteboard as createWhiteboardCommand,
   deleteWorktree as deleteWorktreeCommand,
   getActiveSelection,
   listProjects,
@@ -91,6 +93,7 @@ import {
   onWorktreeChanged,
   takePendingDeepLink,
   openScratchpadTab as openScratchpadTabCommand,
+  openWhiteboardTab as openWhiteboardTabCommand,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
@@ -106,7 +109,11 @@ import {
   type WorkspaceChangedEvent,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
-import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import {
+  listPluginAgents,
+  resolvePluginAgentModels,
+  resolvePluginAgentOptions,
+} from "@/plugins/agents";
 import { disposeTab as disposeEditorTab } from "@/state/editor-dirty-store";
 import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
@@ -282,6 +289,8 @@ interface WorkspaceContextValue extends WorkspaceState {
    */
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
+  /** Creates a blank whiteboard in the active worktree and opens it. */
+  createWhiteboard: (paneId?: string) => Promise<void>;
   /**
    * Launches an agent thread in a worktree: switches to it, opens a terminal
    * tab, starts the agent, and optionally prefills its TUI with `message`.
@@ -311,6 +320,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   /** Opens (or focuses) a managed scratchpad tab for a worktree-relative MDX file. */
   openScratchpadFile: (filePath: string, title: string) => Promise<void>;
+  /** Opens (or focuses) a host-owned whiteboard by id. */
+  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
@@ -365,6 +376,17 @@ interface WorkspaceContextValue extends WorkspaceState {
 interface WorktreeTargetOptions {
   projectId?: string;
   shell?: ShellProfile | null;
+  /**
+   * Host path of the target worktree, for a background agent launch whose
+   * worktree is not in the loaded project snapshot — a run that finishes after
+   * the user switched projects deliberately skips the refresh's state writes,
+   * so the path cannot be resolved from `worktrees` at launch time.
+   */
+  worktreePath?: string;
+  /** False keeps the new tab (and its worktree selection) out of the
+   *  foreground — used by background worktree creation so a completion that
+   *  finishes after the user has moved on doesn't steal focus. Defaults to true. */
+  focus?: boolean;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -373,6 +395,14 @@ const TERMINAL_TITLE_FLUSH_MS = 100;
 /** Wait after script tabs mount before injecting commands so the PTY shell is ready. */
 const INTERACTIVE_SCRIPT_START_DELAY_MS = 2000;
 const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
+const EMPTY_WHITEBOARD_SCENE: ExcalidrawScene = {
+  type: "excalidraw",
+  version: 2,
+  source: "pragma",
+  elements: [],
+  appState: { viewBackgroundColor: "#ffffff" },
+  files: {},
+};
 const AGENT_BACK_TTL_MS = 10 * 60 * 1000;
 
 interface AgentBackLocation {
@@ -2021,6 +2051,83 @@ function resolveCreateTabWorktreeId(
   return worktreeId ?? (projectId ? selectedWorktreeByProject[projectId] : undefined);
 }
 
+/** Resolves a worktree's host path from the loaded project snapshots. */
+function resolveWorktreePath(
+  worktrees: Record<string, Worktree[]>,
+  worktreeId: string,
+  projectId?: string | null,
+): string | null {
+  const lists = projectId ? [worktrees[projectId]] : Object.values(worktrees);
+  for (const list of lists) {
+    const match = list?.find((worktree) => worktree.id === worktreeId);
+    if (match) {
+      return match.path;
+    }
+  }
+  return null;
+}
+
+/** Resolves the project and worktree a new tab belongs to, or `null` when either is unknown. */
+function resolveCreateTabTarget(
+  worktreeId: string | undefined,
+  requestedProjectId: string | undefined,
+  worktreeProjectIds: Record<string, string>,
+  selectedProjectId: string | null,
+  selectedWorktreeByProject: WorkspaceState["selectedWorktreeByProject"],
+): { projectId: string; worktreeId: string } | null {
+  const projectId =
+    requestedProjectId ??
+    resolveCreateTabProject(worktreeId, worktreeProjectIds, selectedProjectId);
+  const targetWorktreeId = resolveCreateTabWorktreeId(
+    worktreeId,
+    projectId,
+    selectedWorktreeByProject,
+  );
+  return projectId && targetWorktreeId ? { projectId, worktreeId: targetWorktreeId } : null;
+}
+
+/**
+ * The workspace only keeps tabs for its selected project. A tab created for
+ * another project is never dispatched into this list — a later refresh would
+ * drop it anyway — but it still exists on the host, so a background caller gets
+ * it back instead of a false failure. A foreground create still fails: nothing
+ * would ever mount it to receive the agent command.
+ */
+function tabForUnselectedProject(tab: Tab, options?: WorktreeTargetOptions): Tab | null {
+  return options?.focus === false ? tab : null;
+}
+
+/**
+ * Background launch: the tab is deliberately not selected, so no terminal
+ * mounts and the mounted path would wait forever for a PTY connection that only
+ * a focus change can produce. Spawn the daemon PTY directly instead — the same
+ * path the agent board uses — so the agent and its prompt start immediately and
+ * the session is there to attach to when the user opens the tab.
+ */
+async function launchBackgroundAgent(
+  tab: Tab,
+  worktreeId: string,
+  worktrees: Record<string, Worktree[]>,
+  options: WorktreeTargetOptions | undefined,
+  launch: { agent: AgentConfig; message?: string; modelSelection?: AgentModelSelection },
+): Promise<Tab | null> {
+  const cwd =
+    options?.worktreePath ?? resolveWorktreePath(worktrees, worktreeId, options?.projectId);
+  if (!cwd) {
+    console.warn(`background agent session for ${worktreeId} has no worktree path`);
+    return null;
+  }
+  await startBackgroundAgentSession(
+    tab.id,
+    worktreeId,
+    cwd,
+    launch.agent,
+    launch.message,
+    launch.modelSelection,
+  );
+  return tab;
+}
+
 /** Creates a terminal or browser tab via the Tauri command. */
 async function createTabOfKind(
   kind: "terminal" | "browser",
@@ -2055,8 +2162,9 @@ function dispatchNewTab(
   dispatch: (action: WorkspaceAction) => void,
   tab: Tab,
   paneId: string | null,
+  focus = true,
 ): void {
-  dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+  dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab, focus });
 }
 
 /** Handlers needed to react to a single agent status report. */
@@ -2790,27 +2898,23 @@ function useTabCreation(
       worktreeId?: string,
       options?: WorktreeTargetOptions,
     ) => {
-      const projectId =
-        options?.projectId ??
-        resolveCreateTabProject(worktreeId, worktreeProjectIdRef.current, state.selectedProjectId);
-      const targetWorktreeId = resolveCreateTabWorktreeId(
+      const target = resolveCreateTabTarget(
         worktreeId,
-        projectId,
+        options?.projectId,
+        worktreeProjectIdRef.current,
+        state.selectedProjectId,
         state.selectedWorktreeByProject,
       );
-      if (!projectId || !targetWorktreeId) {
+      if (!target) {
         return null;
       }
+      const { projectId, worktreeId: targetWorktreeId } = target;
       try {
         const tab = await createTabOfKind(kind, projectId, targetWorktreeId, options?.shell);
-        // The workspace only keeps tabs for its selected project. A background
-        // creation may finish after its owner is no longer selected — treat it
-        // as failed rather than handing callers a tab that was never dispatched
-        // (and so will never mount a terminal to receive an agent command).
         if (selectedProjectIdRef.current !== projectId) {
-          return null;
+          return tabForUnselectedProject(tab, options);
         }
-        dispatchNewTab(dispatch, tab, paneId);
+        dispatchNewTab(dispatch, tab, paneId, options?.focus);
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
@@ -2847,6 +2951,8 @@ function useSessionLaunch(
   selectWorktree: (worktreeId: string | null, projectId?: string) => void,
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>,
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>,
+  closeTab: (tabId: string) => Promise<void>,
+  worktrees: Record<string, Worktree[]>,
 ): (
   worktreeId: string,
   agent: AgentConfig,
@@ -2862,16 +2968,39 @@ function useSessionLaunch(
       modelSelection?: AgentModelSelection,
       options?: WorktreeTargetOptions,
     ): Promise<Tab | null> => {
-      selectWorktree(worktreeId, options?.projectId);
+      const focus = options?.focus !== false;
+      if (focus) {
+        selectWorktree(worktreeId, options?.projectId);
+      }
       const tab = await createTerminalTab(worktreeId, options);
       if (!tab) {
         return null;
       }
       void markTabAgent(tab.id, agent);
+      if (!focus) {
+        // The tab exists before the PTY does. A failed spawn must not leave it
+        // behind as an empty agent tab — a retry would add a second one.
+        try {
+          const launched = await launchBackgroundAgent(tab, worktreeId, worktrees, options, {
+            agent,
+            message,
+            modelSelection,
+          });
+          if (!launched) {
+            await closeTab(tab.id);
+          }
+          return launched;
+        } catch (cause) {
+          await closeTab(tab.id);
+          throw cause;
+        }
+      }
+      // Foreground: the tab was just revealed and will mount a terminal;
+      // `startAgentInTab` waits for that PTY connection before writing.
       startAgentInTab(tab.id, agent, message, modelSelection);
       return tab;
     },
-    [createTerminalTab, markTabAgent, selectWorktree],
+    [closeTab, createTerminalTab, markTabAgent, selectWorktree, worktrees],
   );
 }
 
@@ -3071,6 +3200,8 @@ function useTabOpeners(
   openDaemonLogTab: () => Promise<void>;
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   openScratchpadFile: (filePath: string, title: string) => Promise<void>;
+  createWhiteboard: (paneId?: string) => Promise<void>;
+  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
 } {
   const openDedupedTab = useOpenDedupedTab(state, dispatch);
 
@@ -3183,6 +3314,35 @@ function useTabOpeners(
     [openDedupedTab],
   );
 
+  const createWhiteboard = useCallback(
+    (paneId?: string) =>
+      openDedupedTab({
+        paneId,
+        match: () => false,
+        create: async ({ worktreeId }) => {
+          const board = await createWhiteboardCommand(
+            worktreeId,
+            constants.whiteboards.defaultTitle,
+            EMPTY_WHITEBOARD_SCENE,
+          );
+          return openWhiteboardTabCommand(worktreeId, board.id, board.title);
+        },
+      }),
+    [openDedupedTab],
+  );
+
+  const openWhiteboard = useCallback(
+    (whiteboardId: string, title: string) =>
+      openDedupedTab({
+        match: (tab, { worktreeId }) =>
+          tab.kind === "whiteboard" &&
+          tab.worktreeId === worktreeId &&
+          tab.whiteboardId === whiteboardId,
+        create: ({ worktreeId }) => openWhiteboardTabCommand(worktreeId, whiteboardId, title),
+      }),
+    [openDedupedTab],
+  );
+
   return {
     openFileTab,
     openDiffTab,
@@ -3190,6 +3350,8 @@ function useTabOpeners(
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
   };
 }
 
@@ -3402,17 +3564,31 @@ function useProjectLoading(
       void setTabAgentCommand(request.tabId, agent.id, agent.name).catch((cause) => {
         dispatch({ type: "load-error", error: errorMessage(cause) });
       });
-      void startBackgroundAgentSession(
-        request.tabId,
-        request.worktreeId,
-        request.worktreePath,
-        agent,
-        request.prompt ?? undefined,
-        { modelId: request.modelId, reasoningId: request.reasoningId, modelCmd: request.modelCmd },
-      ).catch((cause: unknown) => {
-        console.warn(`failed to launch remote agent ${agent.id}`, cause);
-        toast.error("Couldn't launch agent session from your phone.");
-      });
+      // Resolve the agent's modes first so an unselected mode or permission
+      // mode falls back to the agent's own default rather than to no flag.
+      void resolvePluginAgentOptions(agent.id)
+        .catch(() => null)
+        .then(() =>
+          startBackgroundAgentSession(
+            request.tabId,
+            request.worktreeId,
+            request.worktreePath,
+            agent,
+            request.prompt ?? undefined,
+            {
+              modelId: request.modelId,
+              reasoningId: request.reasoningId,
+              modelCmd: request.modelCmd,
+              modeId: request.modeId,
+              permissionModeId: request.permissionModeId,
+              slashCommand: request.slashCommand,
+            },
+          ),
+        )
+        .catch((cause: unknown) => {
+          console.warn(`failed to launch remote agent ${agent.id}`, cause);
+          toast.error("Couldn't launch agent session from your phone.");
+        });
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();
@@ -4308,7 +4484,13 @@ function useTabManagement({
   );
   const { closeTab, renameTerminalTab, markTabAgent, setActiveTab, setActiveTabRef } =
     useTabLifecycle(state, dispatch, setManagedScriptsState);
-  const startSession = useSessionLaunch(selectWorktree, createTerminalTab, markTabAgent);
+  const startSession = useSessionLaunch(
+    selectWorktree,
+    createTerminalTab,
+    markTabAgent,
+    closeTab,
+    state.worktrees,
+  );
   useDeepLinkHandler(
     stateRef,
     resolveProjectForWorktree,
@@ -4330,6 +4512,8 @@ function useTabManagement({
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
   } = useTabOpeners(state, dispatch);
   const terminalTabIdsKey = useMemo(
     () =>
@@ -4350,6 +4534,8 @@ function useTabManagement({
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4756,6 +4942,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     openDaemonLogTab,
     openPluginWebView,
     openScratchpadFile,
+    createWhiteboard,
+    openWhiteboard,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4794,6 +4982,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      createWhiteboard,
       startSession,
       createTabInPane,
       openFileTab,
@@ -4802,6 +4991,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDaemonLogTab,
       openPluginWebView,
       openScratchpadFile,
+      openWhiteboard,
       closeTab,
       renameTerminalTab,
       markTabAgent,
@@ -4826,6 +5016,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      createWhiteboard,
       startSession,
       createTabInPane,
       openFileTab,
@@ -4834,6 +5025,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDaemonLogTab,
       openPluginWebView,
       openScratchpadFile,
+      openWhiteboard,
       closeTab,
       renameTerminalTab,
       markTabAgent,

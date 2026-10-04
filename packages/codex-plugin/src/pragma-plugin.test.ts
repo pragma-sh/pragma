@@ -4,13 +4,37 @@ import { codexAgentPlugin, parseCodexModels } from "./pragma-plugin";
 import {
   extractCodexUsageLimits,
   loadCodexUsageLimits,
+  parseCodexAccount,
   parseCodexUsageLimits,
 } from "./usage-limits";
 
 it("uses Codex as the integration display name", () => {
   expect(codexAgentPlugin.name).toBe("Codex");
   expect(codexAgentPlugin.agents?.[0]?.name).toBe("Codex");
-  expect(codexAgentPlugin.usageLimits?.[0]?.title).toBe("Codex");
+  expect(codexAgentPlugin.accounts?.[0]).toMatchObject({
+    provider: "openai",
+    agent: "codex",
+    login: { command: ["codex", "login"] },
+  });
+  expect(codexAgentPlugin.accounts?.[0]?.env?.("/h/1")).toEqual({ CODEX_HOME: "/h/1" });
+});
+
+/** App-server output holding an `account/read` reply for `account`. */
+function reply(account: unknown): string {
+  return [
+    '{"id":1,"result":{}}',
+    JSON.stringify({ id: 3, result: { account, requiresOpenaiAuth: true } }),
+  ].join("\n");
+}
+
+it("identifies a ChatGPT login from app-server account/read", () => {
+  expect(parseCodexAccount(reply({ type: "chatgpt", email: "a@b.c", planType: "plus" }))).toEqual({
+    id: "a@b.c",
+    email: "a@b.c",
+    plan: "Plus",
+  });
+  expect(parseCodexAccount(reply({ type: "apiKey" }))).toBeNull();
+  expect(parseCodexAccount(reply(null))).toBeNull();
 });
 
 it("parses visible Codex models and reasoning levels", () => {
@@ -103,6 +127,140 @@ it("returns unsupported when no usage windows exist", () => {
   expect(parseCodexUsageLimits({ rateLimits: {} }, 1)).toMatchObject({
     status: "unavailable",
     reason: "unsupported",
+  });
+});
+
+it("merges the default snapshot with its bucket and keeps distinct buckets", () => {
+  const observedAt = 1_800_000_000_000;
+  const codexSnapshot = {
+    limitId: "codex",
+    primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1_800_003_600 },
+    secondary: { usedPercent: 75, windowDurationMins: 10_080, resetsAt: 1_800_086_400 },
+  };
+  expect(
+    parseCodexUsageLimits(
+      {
+        rateLimits: codexSnapshot,
+        rateLimitsByLimitId: {
+          codex: codexSnapshot,
+          base_model_inference: {
+            limitId: "base_model_inference",
+            limitName: "gpt-reserve",
+            // Same weekly reset as codex, but its own usage: a distinct quota.
+            primary: { usedPercent: 10, windowDurationMins: 10_080, resetsAt: 1_800_086_400 },
+            secondary: null,
+          },
+        },
+      },
+      observedAt,
+    ),
+  ).toEqual({
+    status: "ready",
+    observedAt,
+    limits: [
+      { id: "codex-primary", title: "5-hour limit", used: 25, limit: 100, resetsInMs: 3_600_000 },
+      {
+        id: "codex-secondary",
+        title: "Weekly limit",
+        used: 75,
+        limit: 100,
+        resetsInMs: 86_400_000,
+      },
+      {
+        id: "base-model-inference-primary",
+        title: "gpt-reserve weekly limit",
+        used: 10,
+        limit: 100,
+        resetsInMs: 86_400_000,
+      },
+    ],
+  });
+});
+
+it("keeps the default snapshot when the bucket map omits codex", () => {
+  const observedAt = 1_800_000_000_000;
+  expect(
+    parseCodexUsageLimits(
+      {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 61, windowDurationMins: 300, resetsAt: 1_800_003_600 },
+        },
+        rateLimitsByLimitId: {
+          base_model_inference: {
+            limitId: "base_model_inference",
+            limitName: "gpt-reserve",
+            primary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_800_086_400 },
+            secondary: null,
+          },
+        },
+      },
+      observedAt,
+    ),
+  ).toEqual({
+    status: "ready",
+    observedAt,
+    limits: [
+      { id: "codex-primary", title: "5-hour limit", used: 61, limit: 100, resetsInMs: 3_600_000 },
+      {
+        id: "base-model-inference-primary",
+        title: "gpt-reserve weekly limit",
+        used: 0,
+        limit: 100,
+        resetsInMs: 86_400_000,
+      },
+    ],
+  });
+});
+
+it("keeps buckets whose windows happen to match", () => {
+  const observedAt = 1_800_000_000_000;
+  const weekly = { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_800_086_400 };
+  expect(
+    parseCodexUsageLimits(
+      {
+        rateLimitsByLimitId: {
+          codex: { limitId: "codex", primary: weekly, secondary: null },
+          base_model_inference: {
+            limitId: "base_model_inference",
+            limitName: "gpt-reserve",
+            primary: weekly,
+            secondary: null,
+          },
+        },
+      },
+      observedAt,
+    ),
+  ).toEqual({
+    status: "ready",
+    observedAt,
+    limits: [
+      { id: "codex-primary", title: "Weekly limit", used: 0, limit: 100, resetsInMs: 86_400_000 },
+      {
+        id: "base-model-inference-primary",
+        title: "gpt-reserve weekly limit",
+        used: 0,
+        limit: 100,
+        resetsInMs: 86_400_000,
+      },
+    ],
+  });
+});
+
+it("emits one row when a bucket repeats its window in both slots", () => {
+  const observedAt = 1_800_000_000_000;
+  const weekly = { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_800_086_400 };
+  expect(
+    parseCodexUsageLimits(
+      { rateLimits: { limitId: "codex", primary: weekly, secondary: weekly } },
+      observedAt,
+    ),
+  ).toEqual({
+    status: "ready",
+    observedAt,
+    limits: [
+      { id: "codex-primary", title: "Weekly limit", used: 40, limit: 100, resetsInMs: 86_400_000 },
+    ],
   });
 });
 

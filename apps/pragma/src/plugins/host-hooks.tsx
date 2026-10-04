@@ -23,8 +23,8 @@ import type {
   PluginSessionSummary,
   PluginStorage,
   PragmaHooksBridge,
-} from "@pragma/plugin";
-import type { AgentMessage, PragmaClient } from "@pragma/sdk";
+} from "@pragma-sh/plugin";
+import type { AgentMessage, PragmaClient } from "@pragma-sh/sdk";
 
 import { useRequiredContext } from "@/lib/context";
 import { errorMessage } from "@/lib/errors";
@@ -39,7 +39,7 @@ import { subscribePluginEvent } from "./events";
 
 /**
  * Host-side implementations behind `__PRAGMA__.hooks`. Plugin components call
- * the delegator hooks exported by `@pragma/plugin`; those land here, where the
+ * the delegator hooks exported by `@pragma-sh/plugin`; those land here, where the
  * host owns the real React state, SDK client, and stores.
  */
 

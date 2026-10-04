@@ -4,7 +4,7 @@ import {
   type Project,
   type Tab,
   type Worktree,
-} from "@pragma/constants";
+} from "@pragma-sh/constants";
 
 import { statusRank } from "../agent-status";
 import { runtimeAgentId } from "../launch-form";

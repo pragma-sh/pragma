@@ -16,7 +16,7 @@
  *   put it.
  */
 
-import type { HostTheme } from "@pragma/sdk";
+import type { HostTheme } from "@pragma-sh/sdk";
 import { converter, type Rgb } from "culori";
 
 const toRgb = converter("rgb");

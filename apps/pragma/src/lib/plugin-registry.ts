@@ -1,4 +1,4 @@
-import { officialPluginLock, type LockedPlugin } from "@pragma/plugin-registry";
+import { officialPluginLock, type LockedPlugin } from "@pragma-sh/plugin-registry";
 
 import { installOfficialPlugin } from "@/lib/tauri";
 

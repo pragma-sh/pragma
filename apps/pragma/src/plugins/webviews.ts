@@ -1,4 +1,4 @@
-import type { OpenWebViewOptions, WebViewDefinition, WebViewReference } from "@pragma/plugin";
+import type { OpenWebViewOptions, WebViewDefinition, WebViewReference } from "@pragma-sh/plugin";
 
 import type { PluginRecord } from "./registry";
 
@@ -45,7 +45,7 @@ export async function openRegisteredWebView<TPayload = unknown>(
   options: OpenWebViewOptions<TPayload> = {},
 ): Promise<void> {
   if (!opener) {
-    throw new Error("@pragma/plugin: openWebView is unavailable before the workspace is ready");
+    throw new Error("@pragma-sh/plugin: openWebView is unavailable before the workspace is ready");
   }
   const registered = resolveWebView(reference);
   const payloadJson = encodePayload(options.payload);
@@ -63,7 +63,7 @@ function resolveWebView<TPayload>(reference: WebViewReference<TPayload>): Regist
     const registered = activeWebViews.find((candidate) => candidate.webView === reference);
     if (!registered) {
       throw new Error(
-        `@pragma/plugin: web view "${reference.id}" is not registered by an active plugin`,
+        `@pragma-sh/plugin: web view "${reference.id}" is not registered by an active plugin`,
       );
     }
     return registered;
@@ -71,11 +71,11 @@ function resolveWebView<TPayload>(reference: WebViewReference<TPayload>): Regist
 
   const matches = activeWebViews.filter((candidate) => candidate.webView.id === reference);
   if (matches.length === 0) {
-    throw new Error(`@pragma/plugin: web view "${reference}" was not found`);
+    throw new Error(`@pragma-sh/plugin: web view "${reference}" was not found`);
   }
   if (matches.length > 1) {
     throw new Error(
-      `@pragma/plugin: web view id "${reference}" is ambiguous; pass the defineWebView() handle instead`,
+      `@pragma-sh/plugin: web view id "${reference}" is ambiguous; pass the defineWebView() handle instead`,
     );
   }
   return matches[0] as RegisteredWebView;
@@ -89,7 +89,7 @@ function encodePayload(payload: unknown): string | null {
     return JSON.stringify(payload);
   } catch (cause) {
     throw new Error(
-      `@pragma/plugin: web view payload must be JSON-serializable (${String(cause)})`,
+      `@pragma-sh/plugin: web view payload must be JSON-serializable (${String(cause)})`,
       { cause },
     );
   }

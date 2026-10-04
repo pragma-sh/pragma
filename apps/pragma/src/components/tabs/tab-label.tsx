@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { motion } from "motion/react";
 
-import type { Tab } from "@pragma/constants";
+import type { Tab } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
 import {
   GitPullRequest,
   Globe,
   PanelsTopLeft,
+  PencilRuler,
   ScrollText,
   SquareTerminal,
   StickyNote,
@@ -49,6 +50,7 @@ const STATIC_TAB_ICONS: Partial<Record<Tab["kind"], LucideIcon>> = {
   "plugin-webview": PanelsTopLeft,
   "pr-review": GitPullRequest,
   scratchpad: StickyNote,
+  whiteboard: PencilRuler,
 };
 
 /**

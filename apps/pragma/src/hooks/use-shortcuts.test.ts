@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { KeybindingsConfig } from "@pragma/constants";
+import type { KeybindingsConfig } from "@pragma-sh/constants";
 
 const loadKeybindingsMock = vi.fn();
 const getPlatformMock = vi.fn();
@@ -145,6 +145,7 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onCloseTopTab: vi.fn(),
     onNewTerminalTab: vi.fn(),
     onNewBrowserTab: vi.fn(),
+    onNewWhiteboard: vi.fn(),
     onClearTerminal: vi.fn(),
     onBrowserReload: vi.fn(),
     onBrowserDevtools: vi.fn(),
@@ -155,6 +156,7 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onScrollTerminalBottom: vi.fn(),
     onOpenCommandPalette: vi.fn(),
     onOpenCommandMode: vi.fn(),
+    onOpenSettings: vi.fn(),
     ...overrides,
   };
 }
@@ -193,6 +195,19 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("creates a whiteboard for cmd+shift+w", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onNewWhiteboard = vi.fn();
+    renderHook(() => useShortcuts(options({ onNewWhiteboard })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "w" });
+
+    expect(onNewWhiteboard).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("handles a remapped command palette chord in the webview", async () => {
     getPlatformMock.mockResolvedValue("mac");
     const remapped = config();
@@ -219,6 +234,47 @@ describe("useShortcuts", () => {
 
     expect(onOpenCommandMode).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("defers default cmd+, settings to the native app menu on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onOpenSettings = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenSettings })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, key: "," });
+
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("defers a remapped settings chord to the native app menu on mac too, since Rust re-syncs its accelerator", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    const remapped = config();
+    remapped.bindings.openSettings.mac = { modifiers: ["cmd", "shift"], key: "o" };
+    loadKeybindingsMock.mockResolvedValue(remapped);
+    const onOpenSettings = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenSettings })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "o" });
+
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("handles ctrl+, in the webview on linux, where the menu bar may be hidden", async () => {
+    getPlatformMock.mockResolvedValue("linux");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onOpenSettings = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenSettings })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ ctrlKey: true, key: "," });
+
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("fires onClearTerminal for cmd+k on mac when a terminal is focused", async () => {

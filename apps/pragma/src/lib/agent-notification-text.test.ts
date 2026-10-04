@@ -1,4 +1,4 @@
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentReportPayload } from "@pragma-sh/constants";
 import { describe, expect, it } from "vitest";
 
 import { agentAlertBody, agentAlertTitle } from "./agent-notification-text";

@@ -6,6 +6,11 @@
       "inputs": ["schema.json", "values.json"],
       "outputs": ["src/generated/**"]
     },
+    "@pragma-sh/scratchpad-viewer#generate": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": ["src/generated/**"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "schema.json", "values.json"],

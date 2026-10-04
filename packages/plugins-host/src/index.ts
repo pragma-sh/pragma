@@ -10,10 +10,4 @@ export {
 } from "./catalog";
 export { resolveManifests, type ResolvedManifest } from "./manifest";
 export { runPluginLifecycles } from "./lifecycle";
-export {
-  assembleUsageProviders,
-  loadUsageLimits,
-  validateResult,
-  visibleProviders,
-  type UsageLimitsProviderMeta,
-} from "./usage-limits";
+export { loadUsageLimits, type ResolvedUsageLimits } from "./usage-limits";

@@ -6,7 +6,7 @@ import {
   type UpdateCheckResponse,
 } from "@/lib/updates";
 
-/** `GET /api/updates` — desktop poll endpoint. Never imports `@pragma/*`. */
+/** `GET /api/updates` — desktop poll endpoint. Never imports `@pragma-sh/*`. */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const documents = await availableManifests();

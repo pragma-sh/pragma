@@ -1,6 +1,6 @@
 [package]
 name = "pragma"
-version = "0.0.0"
+version = "1.2.0"
 description = "Pragma desktop app"
 authors = ["Pragma"]
 edition = "2021"
@@ -10,7 +10,12 @@ publish = false
 
 [lib]
 name = "pragma_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop-only: `main.rs` links the rlib, and Pragma ships no Tauri mobile target
+# (the phone client is `apps/pragma-go`). The Tauri template's `cdylib` is for
+# mobile, and it cannot be produced here: `pragma-core` pulls in `excalidraw-image`
+# -> `deno_core` -> `v8`, whose prebuilt objects use TLS relocations that Linux
+# rejects in a shared object (`R_X86_64_TPOFF32 ... cannot be used with -shared`).
+crate-type = ["staticlib", "rlib"]
 
 [lints]
 workspace = true
@@ -39,7 +44,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { workspace = true }
 scopeguard = "1"
 semver = "1"
 tauri = { version = "2.11.2", features = [
@@ -57,7 +62,7 @@ tauri-plugin-log = "2"
 tiny_http = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
-pragma-platform = { version = "0.0.0", path = "../../../crates/pragma-platform" }
+pragma-platform = { path = "../../../crates/pragma-platform" }
 sha2 = { workspace = true }
 tar = "0.4"
 
@@ -67,3 +72,11 @@ window-vibrancy = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Deep links only reach a *running* app on Linux and Windows through the
+# single-instance plugin; its `deep-link` feature re-emits the forwarded URL
+# through `on_open_url`, so those platforms take the same code path macOS
+# gets from the OS. macOS must NOT load it: launchd already routes URLs to
+# the running app, and a second instance there would be the bug, not the fix.
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

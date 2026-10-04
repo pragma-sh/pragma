@@ -44,6 +44,24 @@ struct PackResult {
     integrity: String,
 }
 
+/// `npm pack --json` prints an array up to npm 11 and, from npm 12, an object keyed by
+/// package name.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PackOutput {
+    List(Vec<PackResult>),
+    ByName(std::collections::BTreeMap<String, PackResult>),
+}
+
+impl PackOutput {
+    fn into_first(self) -> Option<PackResult> {
+        match self {
+            Self::List(list) => list.into_iter().next(),
+            Self::ByName(map) => map.into_values().next(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct PackageJson {
     name: String,
@@ -127,10 +145,8 @@ fn install_into(
         Some(staging),
         Some(staging),
     )?;
-    let packed: Vec<PackResult> = serde_json::from_str(&pack)?;
-    let packed = packed
-        .into_iter()
-        .next()
+    let packed = serde_json::from_str::<PackOutput>(&pack)?
+        .into_first()
         .ok_or_else(|| AppError::Plugin("npm pack returned no package".to_string()))?;
     if packed.integrity != request.integrity {
         return Err(AppError::Plugin(
@@ -373,6 +389,19 @@ pub fn set_agent_plugin_prompt_dismissed(db: State<'_, Db>, dismissed: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_npm_pack_output_from_every_npm_major() {
+        let entry = r#"{"filename":"p-1.0.0.tgz","integrity":"sha512-x","version":"1.0.0"}"#;
+        for output in [format!("[{entry}]"), format!(r#"{{"p":{entry}}}"#)] {
+            let packed = serde_json::from_str::<PackOutput>(&output)
+                .expect("pack output parses")
+                .into_first()
+                .expect("one packed package");
+            assert_eq!(packed.filename, "p-1.0.0.tgz");
+            assert_eq!(packed.integrity, "sha512-x");
+        }
+    }
 
     #[test]
     fn validates_exact_npm_releases_only() {

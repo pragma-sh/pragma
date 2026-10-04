@@ -1,9 +1,9 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
-import type { PluginDefinition } from "@pragma/plugin";
+import type { PluginDefinition } from "@pragma-sh/plugin";
 
 /** Where a plugin was declared. */
-export type PluginScope = "bundled" | "global" | "project";
+export type PluginScope = "global" | "project";
 
 /** Load status of one plugin entry. */
 export type PluginStatus = "loaded" | "failed" | "disabled";
@@ -50,10 +50,7 @@ const groups = new Map<string, PluginRecord[]>();
 let snapshot: PluginRecord[] = [];
 
 function emit(): void {
-  snapshot = [
-    ...(groups.get(scopeKey("bundled")) ?? []),
-    ...(groups.get(scopeKey("global")) ?? []),
-  ];
+  snapshot = [...(groups.get(scopeKey("global")) ?? [])];
   for (const [key, records] of groups) {
     if (key.startsWith("project:")) {
       snapshot = [...snapshot, ...records];
@@ -110,7 +107,7 @@ export function getAllPlugins(): PluginRecord[] {
 }
 
 /**
- * Records visible for the given active project: builtins, globals, and only
+ * Records visible for the given active project: globals and only
  * the active project's records. Inactive projects' records stay cached in the
  * registry but are filtered out here.
  */
@@ -133,10 +130,16 @@ function usePlugins(): PluginRecord[] {
 
 /** React hook: records visible to the active project. */
 export function useActivePlugins(activeProjectId: string | null): PluginRecord[] {
-  return preferHigherScope(
-    usePlugins().filter(
-      (record) => record.scope !== "project" || record.projectId === activeProjectId,
-    ),
+  const records = usePlugins();
+  // Memoized on the registry snapshot so consumers can key effects on the result.
+  return useMemo(
+    () =>
+      preferHigherScope(
+        records.filter(
+          (record) => record.scope !== "project" || record.projectId === activeProjectId,
+        ),
+      ),
+    [records, activeProjectId],
   );
 }
 

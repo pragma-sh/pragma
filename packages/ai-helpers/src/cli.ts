@@ -12,19 +12,30 @@
  *   status                        → { type: "status", available, signedIn }
  *   set-key --provider <id>       (key on stdin)  → status
  *   logout --provider <id>        → status
- *   commit-message --cwd <path>   (diff on stdin) → { type: "result", message } | error
+ *   commit-message --cwd <path> [--note <text>]  (diff on stdin) → { type: "result", message } | error
  *   commit-plan --cwd <path>      (JSON context on stdin) → { type: "result", commits } | error
  *   pull-request --cwd <path>     (JSON context on stdin) → { type: "result", title, body } | error
  *   inline-edit --cwd <path>      (JSON context on stdin) → { type: "result", summary, edits } | error
  *   ask --cwd <path>              (JSON context on stdin) → streams delta/reset; → { type: "result", text } | error
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
+ *   auto-select                   (AutoSelectRequest JSON on stdin) → { type: "result", selection } | error
+ *   system1-check                 (System1Endpoint JSON on stdin) → { type: "result", model } | error
+ *   agent-progress                (AgentProgressRequest JSON on stdin) → { type: "result", estimate } | error
+ *   resolve-conflicts --cwd <path> (ResolveConflictsRequest JSON on stdin) → streams progress;
+ *                                 → { type: "result", files } | error
  */
-import { readStdinLines } from "@pragma/sidecar-kit";
+import { readStdinLines } from "@pragma-sh/sidecar-kit";
+import { checkEndpoint, System1Error, type System1Endpoint } from "@pragma-sh/system1";
 
 import {
+  AgentProgressError,
+  autoSelect,
+  AutoSelectError,
+  parseAutoSelectRequest,
   type AiAuthMethod,
   createAuthStorage,
   createModelRegistry,
+  estimateAgentProgress,
   generateCommitMessage,
   generateCommitPlan,
   generateInlineEdit,
@@ -37,12 +48,19 @@ import {
   NoQuestionError,
   NoWorktreeChangesError,
   logout,
+  parseAgentProgressRequest,
   NoStagedChangesError,
   setApiKey,
   signedInProviders,
   streamAskAi,
   type AskAiWorktreeRef,
+  buildConflictVerificationPrompt,
+  cleanConflictVerification,
+  INLINE_EDIT_TOOLS,
+  parseResolveConflictsRequest,
+  resolveMergeConflicts,
 } from "./index.ts";
+import { runPromptWithFallback } from "./session.ts";
 
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -203,6 +221,7 @@ async function runCommitMessage(args: string[]): Promise<number> {
   const session = await withAuthSession(args);
   const message = await generateCommitMessage({
     stagedDiff: await readAllStdin(),
+    note: flag(args, "note") ?? "",
     ...session,
   });
   emit({ type: "result", message });
@@ -317,6 +336,50 @@ async function runAsk(args: string[]): Promise<number> {
   return 0;
 }
 
+async function runAutoSelect(): Promise<number> {
+  const selection = await autoSelect(parseAutoSelectRequest(await readAllStdin()));
+  emit({ type: "result", selection });
+  return 0;
+}
+
+async function runSystem1Check(): Promise<number> {
+  const endpoint = JSON.parse(await readAllStdin()) as System1Endpoint;
+  const model = await checkEndpoint(endpoint, { signal: AbortSignal.timeout(10_000) });
+  emit({ type: "result", model });
+  return 0;
+}
+
+async function runAgentProgress(): Promise<number> {
+  const estimate = await estimateAgentProgress(parseAgentProgressRequest(await readAllStdin()));
+  emit({ type: "result", estimate });
+  return 0;
+}
+
+async function runResolveConflicts(args: string[]): Promise<number> {
+  const { cwd, authStorage, registry } = await withAuthSession(args);
+  const request = parseResolveConflictsRequest(await readAllStdin());
+  const files = await resolveMergeConflicts(request, {
+    onProgress: (event) => emit({ type: "progress", ...event }),
+    // TEMPORARY: System 1's raw answers, for tuning the escalation bar. stderr
+    // is forwarded into the app log by `run_streaming` in `ai.rs`.
+    log: (entry) => process.stderr.write(`[system1] ${JSON.stringify(entry)}\n`),
+    // The verifier is the high tier with read-only tools, so it can check how
+    // the conflicting code is used before overriding System 1.
+    verify: (context) =>
+      runPromptWithFallback(
+        { modelKind: "high", cwd, authStorage, registry, tools: INLINE_EDIT_TOOLS },
+        buildConflictVerificationPrompt(context),
+        (raw) =>
+          cleanConflictVerification(
+            raw,
+            context.hunks.map((hunk) => hunk.id),
+          ),
+      ),
+  });
+  emit({ type: "result", files });
+  return 0;
+}
+
 async function runLoginCommand(args: string[]): Promise<number> {
   const provider = flag(args, "provider");
   if (!provider) throw new Error("--provider is required");
@@ -335,6 +398,10 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   "inline-edit": runInlineEdit,
   ask: runAsk,
   login: runLoginCommand,
+  "auto-select": runAutoSelect,
+  "system1-check": runSystem1Check,
+  "agent-progress": runAgentProgress,
+  "resolve-conflicts": runResolveConflicts,
 };
 
 async function main(): Promise<number> {
@@ -362,10 +429,18 @@ const TYPED_ERROR_CODES: ReadonlyArray<[new (...args: never[]) => Error, string]
   [NoWorktreeChangesError, "no-changes"],
   [NoInstructionError, "no-instruction"],
   [NoQuestionError, "no-question"],
+  [AutoSelectError, "auto-unavailable"],
+  [AgentProgressError, "progress-unavailable"],
 ];
 
 /** Maps a thrown error to its NDJSON `code` for the "nothing to do" cases. */
 function emitCommandError(error: unknown): void {
+  // `system1-auth`, `system1-rate-limit`, … let the UI say "check your key"
+  // rather than showing a raw HTTP status.
+  if (error instanceof System1Error) {
+    emitError(error, `system1-${error.kind}`);
+    return;
+  }
   for (const [ErrorClass, code] of TYPED_ERROR_CODES) {
     if (error instanceof ErrorClass) {
       emitError(error, code);

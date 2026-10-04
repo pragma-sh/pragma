@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { PluginContext } from "@pragma/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readGrokAcp } from "./acp";

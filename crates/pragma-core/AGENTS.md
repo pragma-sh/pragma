@@ -15,7 +15,10 @@ Tauri or client presentation code.
 
 - **Done (host RPC):** `filesystem` (`fs.rs`), `git` (`git.rs`), headless
   lifecycle command execution (`exec.rs`), and managed scratchpad listing
-  (`scratchpads.rs`) are implemented behind `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
+  (`scratchpads.rs`), plus durable whiteboard CRUD/search/rendering (`whiteboards.rs`), the host account store and
+  binding rules (`accounts.rs`: `~/.pragma/accounts.json`, owner-only credential dirs under
+  `~/.pragma/accounts/<provider>/<login>`, project override > global > default login),
+  are implemented behind `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
   absolute project/worktree roots (and, for git, DB-derived parent branches)
   from the client DB, then forward via `PragmaClient::rpc`. The host
   re-validates paths and runs the work on its own disk, so the same command
@@ -31,9 +34,24 @@ Tauri or client presentation code.
 - GitHub API/auth and AI are intentionally kept as local sidecars, not core RPC.
   Worktree-scoped git operations that support the GitHub PR flow still belong in the
   `git` RPC, because they must execute on the host that owns the worktree path.
+- `exec` batches are cancellable: an `ExecRequest` carrying a `runId` is
+  registered for its lifetime, and a second `exec` call with `{ "cancelRunId" }`
+  (on its own pooled connection, so it is served concurrently) kills the batch's
+  live process trees and skips its queued commands; those results come back with
+  `cancelled: true`. Agent prompts' `!!` pre-launch commands use this for
+  their **Skip** action.
+- `prelaunch.rs` holds the pure `!!` rules (split the inline `` !!`command` ``
+  chips out of a prompt, format each command's output for the agent). Its TypeScript twin is
+  `apps/pragma/src/lib/prelaunch-commands.ts` — the desktop runs single launches,
+  the host runs fanout attempts — and the two must stay byte-identical; both
+  test suites pin the same cases. The prefix and output limit are shared
+  constants (`agents.prelaunchCommandPrefix`, `agents.prelaunchOutputLimit`).
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`,
-  `scratchpads::ScratchpadsRequest`) are the client↔core contract; both sides
+  `scratchpads::ScratchpadsRequest`, `whiteboards::WhiteboardsRequest`) are the client↔core contract; both sides
   depend on this crate to build/parse them.
+- `scratchpads::ExportHtml` saves uniquely named standalone HTML exports under
+  `constants.scratchpads.exportsDirectory`, ensures Git excludes are present, and
+  uses the filesystem's path validation. Bundling stays in the client.
 - `scratchpads::list` is the **only** place scratchpad frontmatter is parsed on
   the host: the desktop's `list_scratchpads` command and the gateway's
   `GET /v1/scratchpads` both go through it, so the sidebar and a paired phone
@@ -68,6 +86,21 @@ Tauri or client presentation code.
   `constants.files.chunkBytes`, so the caller walks `offset` until `eof` instead of
   hitting `MAX_READ_BYTES` — the PDF viewer's path. Keep the chunk cap comfortably below
   the protocol's 16 MB frame limit: base64 inflates every chunk by 4/3.
+
+- **Storage scans (`storage.rs`) skip `.pragma/worktrees/`** so a main checkout never
+  counts its linked worktrees twice, charge allocated bytes once per hard-linked inode
+  (`pragma_platform::disk`), and take ignored folders from
+  `git ls-files --others --ignored --exclude-standard --directory`. `DeleteIgnoredFolder`
+  never trusts the client's list: it re-runs `git check-ignore`, refuses links and
+  anything under `constants.storage.protectedFolders` (`.git`, `.pragma`), then removes.
+  Palette search and storage scans share `cancel::CancelRegistry` for cancel-by-id.
+
+- **A field added to an RPC response must be optional on the wire.** The client talks to
+  whatever server is already running — a detached dev server from an earlier build, or
+  an SSH host on an older release — and `daemon.protocolVersion` only moves on a release,
+  so a newly required field fails the whole call with `json error: missing field`. That
+  is exactly how `WorktreeStorage.tree` first shipped; it is now optional and the client
+  degrades (one box per worktree) instead of failing.
 
 ## Rules
 

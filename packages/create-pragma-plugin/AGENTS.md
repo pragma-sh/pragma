@@ -1,7 +1,19 @@
 # packages/create-pragma-plugin — Plugin Scaffolder
 
 Scaffolds a pure-TypeScript Pragma plugin project. The generated template
-stays aligned with `@pragma/plugin` and the host loader contract.
+stays aligned with `@pragma-sh/plugin` and the host loader contract.
+
+## Publishing
+
+This CLI is published to npm (`npm create pragma-plugin`), as is the
+`@pragma-sh/plugin` it scaffolds against. Both go out from the `publish-packages`
+job in `.github/workflows/release.yml` — see the root `AGENTS.md`.
+
+The scaffolded project's `@pragma-sh/plugin` range is **never a literal** — it comes
+from this package's own `version`, which Release Please keeps equal to
+`@pragma-sh/plugin`'s through the linked `desktop` group, and bunup bakes in at build
+time. A hardcoded value scaffolds a dependency on a version that was never
+published; `src/scaffold.test.ts` asserts against the real one.
 
 ## CLI
 
@@ -17,9 +29,9 @@ bun packages/create-pragma-plugin/dist/cli.js <directory> \
 
 - **Name handling:** `normalizePluginName` (see `src/names.ts`) lower-cases and
   strips scope prefixes — `--name @scope/foo` becomes the un-scoped
-  `scope-foo`. A monorepo-internal plugin that should be `@pragma/…` must be
+  `scope-foo`. A monorepo-internal plugin that should be `@pragma-sh/…` must be
   renamed in its generated `package.json` after scaffolding (this is what
-  `@pragma/dev-test-plugin` did).
+  `@pragma-sh/dev-test-plugin` did).
 - `--force` overwrites a non-empty destination.
 
 ## Generated template contract
@@ -27,13 +39,13 @@ bun packages/create-pragma-plugin/dist/cli.js <directory> \
 - Generated plugins build to a single self-contained ESM bundle and set
   `package.json` `main` to that bundle (`./dist/index.js`, via `vite build`).
 - The bundler config externalizes/delegates React by aliasing `react`,
-  `react-dom`, and `react/jsx-runtime` to `@pragma/plugin/react`,
-  `@pragma/plugin/react-dom`, and `@pragma/plugin/jsx-runtime`.
+  `react-dom`, and `react/jsx-runtime` to `@pragma-sh/plugin/react`,
+  `@pragma-sh/plugin/react-dom`, and `@pragma-sh/plugin/jsx-runtime`.
 - The generated `tsconfig.json` uses `jsxImportSource: "react"` (NOT
-  `@pragma/plugin`): the `@pragma/plugin` jsx-runtime shim re-exports
+  `@pragma-sh/plugin`): the `@pragma-sh/plugin` jsx-runtime shim re-exports
   `jsx`/`jsxs`/`Fragment` but not a JSX namespace, so intrinsic elements
   would not type-check against the shim. The vite alias still redirects
-  `react/jsx-runtime` → `@pragma/plugin/jsx-runtime` at build time, so the
+  `react/jsx-runtime` → `@pragma-sh/plugin/jsx-runtime` at build time, so the
   bundle never bundles React.
 - README output shows adding `{ "path": "./my-plugin" }` to
   `.pragma/config.json` and includes the local-code trust note.
@@ -43,7 +55,7 @@ bun packages/create-pragma-plugin/dist/cli.js <directory> \
 ## Rules
 
 - Keep `src/templates.ts` as the single source for generated file contents.
-- When `@pragma/plugin` gains a new contribution type, surface it through a
+- When `@pragma-sh/plugin` gains a new contribution type, surface it through a
   new `ScaffoldCapability` and template branch here.
 
 ## Commands

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
-import { useNotify, useSdk } from "@pragma/plugin";
-import { Button } from "@pragma/plugin/ui";
+import { useNotify, useSdk } from "@pragma-sh/plugin";
+import { Button } from "@pragma-sh/plugin/ui";
 
 const fieldStyle = { display: "grid", gap: 4 } as const;
 const inputStyle = {

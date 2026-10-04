@@ -1,4 +1,4 @@
-# packages/terminal-viewer — `@pragma/terminal-viewer`
+# packages/terminal-viewer — `@pragma-sh/terminal-viewer`
 
 A browser-safe terminal renderer: one self-contained HTML document running
 xterm.js, plus the typed message protocol a native client drives it with.

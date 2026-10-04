@@ -4,9 +4,20 @@
 # before compiling the workspace.
 bun run typecheck
 cargo fmt --all -- --check
-bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
+bun run --filter pragma sidecar:server
 cargo check --workspace --all-targets
 
 # Fallow code intelligence: block on dead-code/duplication/complexity issues
 # this branch *introduces* (audit --gate new-only, diffed against main).
-bun run fallow:check
+# Release PR branches hold only release-please's generated version bumps and
+# CHANGELOGs, so there is nothing to audit — the same exemption CI applies in
+# .github/workflows/fallow.yml.
+branch="$(git rev-parse --abbrev-ref HEAD)"
+case "$branch" in
+  release-please--branches--*)
+    echo "pre-push: skipping fallow on release branch $branch"
+    ;;
+  *)
+    bun run fallow:check
+    ;;
+esac

@@ -6,6 +6,9 @@ describe("plugin", () => {
   it("exports a stamped Pragma plugin", () => {
     expect(plugin.__apiVersion).toBeTypeOf("string");
     expect(plugin.name).toBeTypeOf("string");
-    expect(plugin.ui?.settingsPages?.[0]?.title).toBe("Dev Test Plugin");
+    expect(plugin.ui?.settingsPages?.map((page) => page.title)).toEqual([
+      "Board Drafts",
+      "Diagnostics",
+    ]);
   });
 });

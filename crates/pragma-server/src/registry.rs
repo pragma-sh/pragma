@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::agent_options::{self, AgentLaunchOptions};
 use crate::automations::{AutomationError, AutomationsRegistry};
 use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::ports::{self, SessionOwner};
@@ -138,9 +139,23 @@ pub struct Registry {
     /// commit, and the finalize stage. Host-owned so a fanout survives the
     /// desktop being closed or the server restarting.
     fanouts: Arc<crate::fanouts::FanoutStore>,
+    /// Host-owned account providers: logins, bindings, hidden sign-in
+    /// terminals, and the env every launch path resolves through.
+    accounts: crate::accounts::AccountsHost,
 }
 
 type AgentKey = (String, String, String);
+
+/// An agent's catalog launch resolved for one selection.
+struct ResolvedAgentLaunch {
+    /// The catalog `launch` config (startup input, prefill timing).
+    spec: Value,
+    /// The shell command line that starts the agent.
+    command: String,
+    agent_name: String,
+    /// The full catalog entry, for slash-command lookup.
+    agent: Value,
+}
 
 /// One server-owned agent launch. Shared by the controller-free
 /// `agentSessionLaunch` and by every fanout attempt so both build the command,
@@ -157,6 +172,8 @@ pub struct AgentLaunch {
     pub reasoning_id: Option<String>,
     /// Raw model snippet that bypasses catalog model/reasoning args.
     pub model_cmd: Option<String>,
+    /// Mode, permission mode, and slash command; defaults select the agent's own.
+    pub options: AgentLaunchOptions,
     pub prompt: Option<String>,
     /// Set when this session is one attempt of a fanout.
     pub fanout: Option<FanoutMembership>,
@@ -218,7 +235,7 @@ fn now_timestamp() -> String {
 /// The command is *typed into* a live interactive shell, so it must be quoted
 /// the way that shell parses it — POSIX quoting typed into PowerShell mangles
 /// every Windows path with a space in it.
-fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
+pub(crate) fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
     let launch = shell.map_or_else(
         || pragma_platform::shell::resolve_launch(None),
         |profile| pragma_platform::shell::resolve_profile_launch(profile, None),
@@ -398,8 +415,28 @@ impl Registry {
                 store.reconcile_after_restart();
                 store
             },
+            accounts: crate::accounts::AccountsHost::new(),
             server_dir,
         }
+    }
+
+    /// Routes an `accounts` RPC to the host account providers.
+    pub fn handle_accounts_rpc(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.accounts.handle(self, payload)
+    }
+
+    /// Keeps every shared sign-in on its newest token (see
+    /// `AccountsHost::sync_all_token_groups`).
+    pub fn sync_account_tokens(&self) {
+        self.accounts.sync_all_token_groups(self);
+    }
+
+    /// The plugin catalog host, for account callbacks that run in its sidecar.
+    pub fn plugins(&self) -> &Arc<PluginsRegistry> {
+        &self.plugins
     }
 
     pub fn handle_tunnel_rpc(
@@ -696,6 +733,7 @@ impl Registry {
             plugin_view_id: None,
             plugin_payload: None,
             plugin_dedupe_key: None,
+            whiteboard_id: None,
             agent_id: None,
             fanout_id: None,
             fanout_member_id: None,
@@ -1163,6 +1201,11 @@ impl Registry {
             model_id: args.model_id.clone(),
             reasoning_id: args.reasoning_id.clone(),
             model_cmd: args.model_cmd.clone(),
+            options: AgentLaunchOptions {
+                mode_id: args.mode_id.clone(),
+                permission_mode_id: args.permission_mode_id.clone(),
+                slash_command: args.slash_command.clone(),
+            },
             prompt: args.prompt.clone(),
             fanout: None,
         })?;
@@ -1177,14 +1220,32 @@ impl Registry {
     /// `agentSessionLaunch` and every fanout attempt go through it, so the two
     /// cannot drift in command construction, tagging, or watcher supervision.
     pub fn launch_agent_session(&self, launch: &AgentLaunch) -> Result<String, String> {
-        let (_plugin_id, spec, command, agent_name) = self.resolve_agent_launch(
+        let resolved = self.resolve_agent_launch(
             &launch.agent_id,
             launch.model_id.as_deref(),
             launch.reasoning_id.as_deref(),
             launch.model_cmd.as_deref(),
-            None,
+            &launch.options,
         )?;
+        let prompt = agent_options::launch_prompt(
+            &resolved.agent,
+            launch.options.slash_command.as_deref(),
+            launch.prompt.as_deref(),
+        )?;
+        let ResolvedAgentLaunch {
+            spec,
+            command,
+            agent_name,
+            ..
+        } = resolved;
         let tab_id = Uuid::new_v4().to_string();
+        let project_root = self.mirrored_project_path(&launch.project_id).ok();
+        let account_env = self.accounts.launch_env(
+            self,
+            &launch.agent_id,
+            project_root.as_deref(),
+            Some(&tab_id),
+        );
         // A server-owned launch has no shell picker behind it, so the project's
         // own configured shell decides.
         let _events = self
@@ -1193,6 +1254,7 @@ impl Registry {
                 &launch.worktree_id,
                 &launch.cwd,
                 launch.fanout.as_ref(),
+                &account_env,
             )
             .map_err(|error| error.to_string())?;
         let session = self
@@ -1202,7 +1264,6 @@ impl Registry {
             .get(&tab_id)
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
-        let prompt = launch.prompt.clone();
         thread::spawn(move || {
             schedule_agent_launch(&session, &spec, &command, prompt.as_deref());
         });
@@ -1292,6 +1353,13 @@ impl Registry {
         Ok((raw, text))
     }
 
+    /// A session's raw scrollback and whether its shell has exited, or `None`
+    /// once the session is gone.
+    pub fn session_scrollback(&self, session_id: &str) -> Option<(Vec<u8>, bool)> {
+        let session = self.sessions.lock().ok()?.get(session_id).cloned()?;
+        Some((session.scrollback_bytes(), session.has_exited()))
+    }
+
     /// True when a watcher is attached to this session.
     pub fn has_watcher(&self, tab_id: &str) -> bool {
         self.watchers.is_watching(tab_id)
@@ -1312,8 +1380,9 @@ impl Registry {
         worktree_id: &str,
         cwd: &str,
         fanout: Option<&FanoutMembership>,
+        account_env: &[(String, String)],
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
-        let env = fanout.map_or_else(Vec::new, |fanout| {
+        let mut env = fanout.map_or_else(Vec::new, |fanout| {
             vec![
                 (
                     pragma_constants::CONSTANTS.fanout.env_fanout_id.clone(),
@@ -1325,6 +1394,7 @@ impl Registry {
                 ),
             ]
         });
+        env.extend_from_slice(account_env);
         self.spawn_with_env(
             tab_id.to_string(),
             worktree_id.to_string(),
@@ -1472,6 +1542,7 @@ impl Registry {
             title: Some(agent_title.to_string()),
             url: None,
             file_path: None,
+            whiteboard_id: None,
             diff_side: None,
             diff_commit: None,
             pr_number: None,
@@ -1511,15 +1582,16 @@ impl Registry {
     /// for the selected model/reasoning combination. A `model_cmd` snippet
     /// (for example `--model moonshot/kimi-k3`) overrides the catalog
     /// selection: the base launch command (no model/reasoning args) is used
-    /// and the snippet is appended verbatim.
+    /// and the snippet is appended verbatim. The mode and permission-mode args
+    /// from `options` follow the model/reasoning args.
     fn resolve_agent_launch(
         &self,
         agent_id: &str,
         model_id: Option<&str>,
         reasoning_id: Option<&str>,
         model_cmd: Option<&str>,
-        shell: Option<&ShellProfile>,
-    ) -> Result<(String, Value, String, String), String> {
+        options: &AgentLaunchOptions,
+    ) -> Result<ResolvedAgentLaunch, String> {
         let catalog = self
             .plugins
             .handle_rpc(&json!({ "action": "catalog" }))
@@ -1551,21 +1623,24 @@ impl Registry {
                     .ok_or_else(|| "agent launch command contains non-string".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let command = agent_command_line(&command, shell);
+        let mut command = command;
+        command.extend(agent_options::option_args(agent, options)?);
+        let command = agent_command_line(&command, None);
         let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
             Some(model_cmd) => format!("{command} {model_cmd}"),
             None => command,
         };
-        let plugin_id = agent["pluginId"]
-            .as_str()
-            .ok_or_else(|| "agent catalog entry has no plugin id".to_string())?
-            .to_string();
         let agent_name = agent["name"]
             .as_str()
             .filter(|name| !name.is_empty())
             .unwrap_or(agent_id)
             .to_string();
-        Ok((plugin_id, agent["launch"].clone(), command, agent_name))
+        Ok(ResolvedAgentLaunch {
+            spec: agent["launch"].clone(),
+            command,
+            agent_name,
+            agent: agent.clone(),
+        })
     }
 
     /// Subscribes to the workspace snapshot-then-delta stream. The snapshot is
@@ -1614,6 +1689,7 @@ impl Registry {
         }
     }
 
+    /// Spawns a session with no extra environment.
     pub fn spawn(
         &self,
         session_id: String,
@@ -2306,7 +2382,7 @@ impl Registry {
         }
     }
 
-    fn session(&self, session_id: &str) -> Result<Arc<Session>, RegistryError> {
+    pub(crate) fn session(&self, session_id: &str) -> Result<Arc<Session>, RegistryError> {
         self.sessions
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?
@@ -2543,6 +2619,7 @@ fn required_field(payload: &serde_json::Value, key: &str) -> Result<String, AiEr
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+    use std::sync::mpsc::RecvTimeoutError;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -2572,8 +2649,10 @@ mod tests {
                 id: "project-1".to_string(),
                 name: "sandbox".to_string(),
                 path: project_path.to_string(),
+                icon_emoji: None,
                 order_index: 0,
                 created_at: "2026-01-01 00:00:00".to_string(),
+                is_git: true,
             }],
             worktrees: vec![Worktree {
                 id: "worktree-main".to_string(),
@@ -2602,6 +2681,7 @@ mod tests {
             title: Some("Shell".to_string()),
             url: None,
             file_path: None,
+            whiteboard_id: None,
             diff_side: None,
             diff_commit: None,
             pr_number: None,
@@ -2679,7 +2759,10 @@ mod tests {
         registry
             .set_tab_agent(tab, "pragma.codex", "Codex")
             .expect("agent metadata should persist");
-        assert!(registry.desired_watchers().is_empty());
+        assert_eq!(
+            registry.desired_watchers(),
+            [] as [crate::watchers::DesiredWatcher; 0]
+        );
 
         registry
             .spawn(
@@ -3336,21 +3419,42 @@ mod tests {
         let query = "stty size\r";
         #[cfg(windows)]
         let query = "\"$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)\"\r";
-        registry.write(&id, query).expect("write");
-
         let mut output = String::new();
-        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut next_query = Instant::now();
         while Instant::now() < deadline {
-            if let Ok(EventFrame::Output { data, .. }) =
-                rx.recv_timeout(std::time::Duration::from_millis(200))
+            if Instant::now() >= next_query {
+                registry.write(&id, query).expect("write");
+                // ConPTY may consume input while PowerShell is still painting
+                // its initial prompt after the resize. Keep probing rather
+                // than making shell startup timing part of this assertion.
+                next_query = Instant::now() + Duration::from_millis(500);
+            }
+            // Drain every frame that is already queued before waiting again.
+            // The subscriber channel is bounded and a full one is dropped as
+            // stalled, so taking one frame per 200ms wait loses the stream
+            // outright when the shell repaints in a burst (PowerShell does,
+            // right after the resize above).
+            let frame = match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(frame) => Some(frame),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("output subscriber was dropped; output so far was: {output:?}")
+                }
+            };
+            for frame in frame
+                .into_iter()
+                .chain(std::iter::from_fn(|| rx.try_recv().ok()))
             {
-                output.push_str(&String::from_utf8_lossy(&data));
-                if output.contains("40 120") {
-                    return;
+                if let EventFrame::Output { data, .. } = frame {
+                    output.push_str(&String::from_utf8_lossy(&data));
                 }
             }
+            if output.contains("40 120") {
+                return;
+            }
         }
-        panic!("expected stty to report 40 120 (rows cols); output was: {output:?}");
+        panic!("expected shell to report 40 120 (rows cols); output was: {output:?}");
     }
 
     #[test]
@@ -3844,9 +3948,11 @@ mod tests {
         let result = registry.run_script("worktree-main", "missing", "request-1");
 
         assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
-        assert!(registry
-            .managed_tabs_for(&["worktree-main".to_string()])
-            .expect("managed tabs")
-            .is_empty());
+        assert_eq!(
+            registry
+                .managed_tabs_for(&["worktree-main".to_string()])
+                .expect("managed tabs"),
+            [] as [pragma_constants::Tab; 0]
+        );
     }
 }

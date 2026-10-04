@@ -144,6 +144,26 @@ export async function createPragmaSession(
   return { session, model };
 }
 
+/**
+ * The user's available models for a tier, best first, ranked with modelgrep
+ * insights. Throws when the tier has no model at all.
+ */
+async function loadModelCandidates(
+  kind: ModelKind,
+  registry: ModelRegistry,
+  credentialedProviders?: readonly string[],
+): Promise<Model<Api>[]> {
+  const insights = await loadModelInsights();
+  const candidates = selectModelCandidates(kind, registry.getAvailable(), {
+    insights,
+    credentialedProviders,
+  });
+  if (candidates.length === 0) {
+    throw new Error(`No ${kind} model is available. Sign in to a provider that offers one.`);
+  }
+  return candidates;
+}
+
 /** Options for {@link runPromptWithFallback} — one feature's whole model setup. */
 export interface RunPromptWithFallbackOptions {
   /** Tier to select candidates from. */
@@ -199,16 +219,11 @@ export async function runPromptWithFallback<T>(
   prompt: string,
   parse: (raw: string) => T,
 ): Promise<T> {
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
-    insights,
-    credentialedProviders: options.authStorage.list(),
-  });
-  if (candidates.length === 0) {
-    throw new Error(
-      `No ${options.modelKind} model is available. Sign in to a provider that offers one.`,
-    );
-  }
+  const candidates = await loadModelCandidates(
+    options.modelKind,
+    options.registry,
+    options.authStorage.list(),
+  );
 
   const failures: AttemptFailure[] = [];
   const retiredProviders = new Set<string>();
@@ -369,16 +384,11 @@ export async function runPromptStreamingWithFallback(
   onDelta: (delta: string) => void,
   onReset?: () => void,
 ): Promise<string> {
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
-    insights,
-    credentialedProviders: options.authStorage.list(),
-  });
-  if (candidates.length === 0) {
-    throw new Error(
-      `No ${options.modelKind} model is available. Sign in to a provider that offers one.`,
-    );
-  }
+  const candidates = await loadModelCandidates(
+    options.modelKind,
+    options.registry,
+    options.authStorage.list(),
+  );
 
   const failures: AttemptFailure[] = [];
   const retiredProviders = new Set<string>();

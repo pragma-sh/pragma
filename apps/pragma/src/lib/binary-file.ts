@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { decodeBase64 } from "@/lib/base64";
 import { errorMessage } from "@/lib/errors";
@@ -21,12 +21,12 @@ const { chunkBytes, maxBinaryBytes } = constants.files;
  * single-frame byte read is capped well below an ordinary media file, so the
  * file is walked with `readFileChunk` until the host reports `eof`.
  */
-async function readWholeFile(
+export async function readBinaryFile(
   worktreeId: string,
   filePath: string,
   label: string,
-  onProgress: (loadedBytes: number, totalBytes: number) => void,
-  isCancelled: () => boolean,
+  onProgress: (loadedBytes: number, totalBytes: number) => void = () => undefined,
+  isCancelled: () => boolean = () => false,
 ): Promise<ArrayBuffer> {
   const first = await readFileChunk(worktreeId, filePath, 0, chunkBytes);
   if (first.byteSize > maxBinaryBytes) {
@@ -53,7 +53,7 @@ async function readWholeFile(
 
 /** Human-readable byte size for the size-limit and progress messages. */
 export function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
@@ -98,7 +98,7 @@ async function readCachedFile(
     bufferCache.set(key, cached);
     return cached.slice(0);
   }
-  const buffer = await readWholeFile(worktreeId, filePath, label, onProgress, isCancelled);
+  const buffer = await readBinaryFile(worktreeId, filePath, label, onProgress, isCancelled);
   if (isCancelled()) return buffer;
   bufferCache.set(key, buffer);
   while (bufferCache.size > CACHED_FILES) {

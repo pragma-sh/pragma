@@ -1,7 +1,8 @@
-import { useEffect, useRef, type Ref } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type Ref } from "react";
+import { Smile, Trash2 } from "lucide-react";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { ProjectIconDialog } from "@/components/dialogs/ProjectIconDialog";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import {
   ContextMenu,
@@ -67,11 +68,13 @@ export function ProjectSwitcher() {
               <ProjectButton
                 active={active}
                 icon={icon ?? null}
+                iconEmoji={project.iconEmoji}
                 index={index}
                 key={project.id}
                 modifier={modifier}
                 name={project.name}
                 onRemove={() => handleRemoveProject(project.id)}
+                projectId={project.id}
                 onSelect={() => workspace.selectProject(project.id)}
                 ref={active ? activeRef : undefined}
                 worktreeIds={(workspace.worktrees[project.id] ?? []).map((worktree) => worktree.id)}
@@ -87,11 +90,14 @@ export function ProjectSwitcher() {
 interface ProjectButtonProps {
   active: boolean;
   icon: ReturnType<typeof useWorkspace>["icons"][string];
+  /** User-chosen emoji; it wins over a favicon found in the checkout. */
+  iconEmoji: string | null;
   index: number;
   modifier: string;
   name: string;
   onRemove: () => Promise<void>;
   onSelect: () => Promise<void>;
+  projectId: string;
   ref?: Ref<HTMLButtonElement>;
   worktreeIds: string[];
 }
@@ -99,75 +105,99 @@ interface ProjectButtonProps {
 function ProjectButton({
   active,
   icon,
+  iconEmoji,
   index,
   modifier,
   name,
   onRemove,
   onSelect,
+  projectId,
   ref,
   worktreeIds,
 }: ProjectButtonProps) {
   const status = useProjectAgentStatus(worktreeIds);
   const shortcutHint = useShortcutHint("project", index < 9 ? index + 1 : null);
+  const [iconDialogOpen, setIconDialogOpen] = useState(false);
   return (
-    <Tooltip>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <TooltipTrigger asChild>
-            <button
-              aria-label={name}
-              aria-pressed={active}
-              className={cn(
-                "relative flex size-7 shrink-0 items-center justify-center rounded-md p-0",
-                "transition-colors focus-visible:outline-none",
-                active
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-              )}
-              onClick={() => void onSelect()}
-              ref={ref}
-              type="button"
-            >
-              {icon ? (
-                <span
-                  aria-hidden="true"
-                  className="size-4 bg-current"
-                  style={{
-                    maskImage: `url(data:${icon.mime};base64,${icon.dataBase64})`,
-                    WebkitMaskImage: `url(data:${icon.mime};base64,${icon.dataBase64})`,
-                    maskSize: "contain",
-                    WebkitMaskSize: "contain",
-                    maskRepeat: "no-repeat",
-                    WebkitMaskRepeat: "no-repeat",
-                    maskPosition: "center",
-                    WebkitMaskPosition: "center",
-                  }}
-                />
-              ) : (
-                <span className="text-xs font-semibold">{leadingInitial(name)}</span>
-              )}
-              <AgentStatusDot className="absolute top-0 right-0" status={status} />
-              <ShortcutHint className="absolute inset-1 z-10" value={shortcutHint} />
-            </button>
-          </TooltipTrigger>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem variant="destructive" onSelect={() => void onRemove()}>
-            <Trash2 />
-            Remove project
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      <TooltipContent>
-        {name}
-        <kbd
-          data-slot="kbd"
-          className="bg-background/15 rounded px-1 text-[10px] font-medium uppercase"
-        >
-          {modifier}
-          {index + 1}
-        </kbd>
-      </TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={name}
+                aria-pressed={active}
+                className={cn(
+                  "relative flex size-7 shrink-0 items-center justify-center rounded-md p-0",
+                  "transition-colors focus-visible:outline-none",
+                  active
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                )}
+                onClick={() => void onSelect()}
+                ref={ref}
+                type="button"
+              >
+                {iconEmoji ? (
+                  // Sized to match the 16px favicon mask below, so swapping
+                  // between the two doesn't change the button's optical weight.
+                  <span aria-hidden="true" className="text-base leading-none">
+                    {iconEmoji}
+                  </span>
+                ) : icon ? (
+                  <span
+                    aria-hidden="true"
+                    className="size-4 bg-current"
+                    style={{
+                      maskImage: `url(data:${icon.mime};base64,${icon.dataBase64})`,
+                      WebkitMaskImage: `url(data:${icon.mime};base64,${icon.dataBase64})`,
+                      maskSize: "contain",
+                      WebkitMaskSize: "contain",
+                      maskRepeat: "no-repeat",
+                      WebkitMaskRepeat: "no-repeat",
+                      maskPosition: "center",
+                      WebkitMaskPosition: "center",
+                    }}
+                  />
+                ) : (
+                  <span className="text-xs font-semibold">{leadingInitial(name)}</span>
+                )}
+                <AgentStatusDot className="absolute top-0 right-0" status={status} />
+                <ShortcutHint className="absolute inset-1 z-10" value={shortcutHint} />
+              </button>
+            </TooltipTrigger>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={() => setIconDialogOpen(true)}>
+              <Smile />
+              Set icon…
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" onSelect={() => void onRemove()}>
+              <Trash2 />
+              Remove project
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+        <TooltipContent>
+          {name}
+          <kbd
+            data-slot="kbd"
+            className="bg-background/15 rounded px-1 text-[10px] font-medium uppercase"
+          >
+            {modifier}
+            {index + 1}
+          </kbd>
+        </TooltipContent>
+      </Tooltip>
+      {/* Outside the tooltip: the dialog outlives the hover that opened the
+          context menu, and a modal nested in a tooltip root fights it for focus. */}
+      <ProjectIconDialog
+        iconEmoji={iconEmoji}
+        onOpenChange={setIconDialogOpen}
+        open={iconDialogOpen}
+        projectId={projectId}
+        projectName={name}
+      />
+    </>
   );
 }

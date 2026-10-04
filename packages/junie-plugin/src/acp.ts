@@ -18,7 +18,7 @@
 // `--cache-dir` points Junie's caches at a throwaway directory so these probe
 // sessions leave nothing behind but an empty session folder (they never reach
 // `sessions/index.jsonl`, so they do not show up in `junie --resume`).
-import type { PluginContext } from "@pragma/plugin/catalog";
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 
 /** Exit status the wrapper uses to say `junie` is not installed. */
 const MISSING_STATUS = 20;

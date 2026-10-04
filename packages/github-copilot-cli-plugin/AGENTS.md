@@ -121,6 +121,15 @@ https://brand.github.com/brand-identity/copilot. This package uses vendor-shippe
 only inside Pragma's explicitly named GitHub Copilot integration and must not imply GitHub
 endorsement. Do not trace, recolor, or replace it with icon-aggregator artwork.
 
+## Launch options
+
+Modes (Shift+Tab in the launcher) are `default` plus custom agents (`*.agent.md` in
+`.github/agents` and `~/.copilot/agents`), started with `--agent <name>`. Slash commands are
+`/review`, `/delegate`, `/usage`, then `copilot --acp`'s ACP command list (unverified: Copilot
+was not installed when this was written), then skills in `.github`, `.claude`, `.agents`
+(project) and `~/.copilot`, `~/.claude`, `~/.agents`.
+Permission modes: `ask` (default, no flag) and `allow-all` (`--allow-all`).
+
 ## Build, install, verify
 
 ```bash
@@ -129,13 +138,13 @@ bun run --filter @pragma-sh/github-copilot-cli-plugin install:local
 copilot plugin list
 ```
 
-Production builds bundle this package into Pragma's plugin resources. For local development,
-register package's absolute path in `~/.pragma/config.json`. Rebuild bundle and reload Pragma
-plugin host after edits. Then run:
+Pragma never bundles or activates this package automatically. Onboarding installs it only after
+user selection. For local development, register package's absolute path in
+`~/.pragma/config.json`, rebuild bundle, and reload Pragma plugin host after edits. Then run:
 
-Keep this bundle on `bun build`, matching the other agent plugins. Bunup's declaration build
-crashes on Windows when bundled workspace dependency paths contain backslashes; runtime plugin
-resources only consume `dist/pragma-plugin.mjs` and do not need emitted declarations.
+Keep this bundle on `bun build`, matching other agent plugins. Bunup's declaration build
+crashes on Windows when workspace dependency paths contain backslashes; runtime plugin loader
+only consumes `dist/pragma-plugin.mjs` and does not need emitted declarations.
 
 ```bash
 bun run --filter @pragma-sh/github-copilot-cli-plugin test
@@ -145,3 +154,7 @@ pragma-cli agent verify --agent pragma.github-copilot --abort-input '\x1b' --inc
 
 Verifier skips explicitly unsupported question and abort/interrupt scenarios. Command approval,
 subagents, session naming, usage limits, stream integrity, and crash cleanup remain required.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `github-copilot`. Each account is a `COPILOT_HOME`; login is `copilot login` (device flow). Copilot prefers the system credential store and falls back to a plain-text token under `COPILOT_HOME`; whether two logins coexist in the Keychain still needs a real two-account test. `identify` reads `$COPILOT_HOME/config.json` (`last_logged_in_user`, then `logged_in_users`) and returns the lowercased github.com login — the id OpenCode and Pi Copilot sign-ins also produce, so they merge. The format was confirmed from a third-party reader (VTCode's Copilot auth), not a local install; enterprise hosts return null.

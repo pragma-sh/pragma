@@ -1,7 +1,7 @@
 /** `pragma-watch` host-side sidecar for plugin watcher instances. */
 import { pathToFileURL } from "node:url";
 
-import { PragmaClient, type AgentMessage } from "@pragma/sdk";
+import { PragmaClient, type AgentMessage } from "@pragma-sh/sdk";
 
 import { attachSessionEvents, waitForExit } from "./session-attach";
 

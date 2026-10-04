@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { constants } from "@pragma/constants";
+import { constants } from "@pragma-sh/constants";
 
 import { cn } from "@/lib/utils";
 

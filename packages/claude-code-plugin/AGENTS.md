@@ -14,7 +14,7 @@ packages/claude-code-plugin/
 ├── .claude-plugin/
 │   ├── plugin.json          # Plugin manifest (do NOT set hooks here — see gotcha below)
 │   └── marketplace.json     # For `claude plugin marketplace add`
-├── assets/                  # Claude Code brand assets used by the built-in launcher
+├── assets/                  # Claude Code brand assets used by plugin launcher
 ├── src/pragma-plugin.ts     # Agent, watcher, and structured usage-limit declaration
 ├── hooks/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
@@ -150,13 +150,13 @@ parse helpers are python3-based, like the transcript helpers above).
 
 **Interjections** (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are
 **not** handled by these hooks. They are delivered by this plugin's shared
-`@pragma/watcher-kit` watcher, which writes the text into the live terminal followed by a
+`@pragma-sh/watcher-kit` watcher, which writes the text into the live terminal followed by a
 submit key. These hooks stay status/approval-only.
 
 Claude Code is paste-aware: bracketed-paste text and Enter must be separate PTY writes,
 with a short delay between them. Sending both in one write leaves the reply staged in the
 composer instead of submitting it. Keep `interjectSubmitDelayMs` on the Claude watcher and
-the separate paste/submit writes in `@pragma/watcher-kit`.
+the separate paste/submit writes in `@pragma-sh/watcher-kit`.
 
 `Elicitation` stays observe-only (`attention` dot, no decision).
 
@@ -338,16 +338,19 @@ that absolute path before falling back to `pragma-cli` from `PATH`. Every call i
 `… >/dev/null 2>&1 || true` so a missing CLI or down daemon can never disrupt a Claude
 session.
 
-## Built-in launcher
+## Plugin launcher
 
-The launchable Claude Code entry is defined **here** in `src/pragma-agent.ts`; it starts
-`claude --permission-mode auto`. This is now the single source of truth: the
-`pragma-plugins` catalog sidecar (`@pragma/plugins-host`) imports it directly to assemble
-the agent catalog, and `apps/pragma/src/plugins/builtin-agents.ts` re-exports it
-(overriding `iconPath` with a browser URL and attaching the built-in watcher) so the
-webview path shares the same definition. Its icon asset stays in this package under
-`assets/`, not in Pragma core.
-Because the built-in launcher runs `--permission-mode auto`, shell commands are
+The launchable Claude Code entry is defined **here** in `src/pragma-plugin.ts`; it starts
+`claude` plus the selected permission mode (`--permission-mode <id>`), whose first entry,
+`auto`, is the default every launch applies when none is selected. Modes (Shift+Tab in the
+launcher) come from Claude Code itself: `claude -p --agent <unknown>` prints
+`Available agents: claude, …` (built-in, user, project, and plugin agents) and exits before
+any model call. `claude` is the default (no flag), `statusline-setup` is hidden, and the rest
+start with `--agent <name>`; `.claude/agents` files are the fallback; slash commands are `/init`, `/review`, `/security-review`
+plus project and user commands and skills. This is single source of truth. After user installs this
+integration, desktop and `pragma-plugins` load same configured bundle. Its icon asset stays
+in this package under `assets/`, not in Pragma core.
+Because the default permission mode is `auto`, shell commands are
 auto-approved and **never raise a command-approval attention** — `pragma-cli agent
 verify`'s `command-allow`/`command-deny` (and `decision-timeout`/`abort-mid-approval`)
 cannot pass for a launched session, so the agent declares
@@ -358,7 +361,7 @@ exclusion (and the `command-no-permission` scenario must be re-checked against t
 default allowlist).
 
 Claude Code supports `--model` and `--effort` but does not expose a supported model-list
-command, so the built-in agent uses static model metadata. Reasoning efforts are listed
+command, so plugin agent uses static model metadata. Reasoning efforts are listed
 per model and are appended as `--effort {reasoning}` when selected; choosing a model with
 Auto reasoning appends only `--model`. If Claude Code changes its supported surface,
 prefer an official CLI/API model-list command before using private databases or internal
@@ -371,3 +374,7 @@ caches.
    hooks file detected". The manifest `hooks` field is only for _additional_ hook files.
 2. Installed at user scope, the plugin runs in **every Claude session**, including
    outside Pragma — hence the `PRAGMA_DAEMON_SOCKET` guard on every hook.
+
+## Account provider
+
+Declared through `defineAccounts` as provider `anthropic` (agent `claude-code`). Each Pragma-created account is a `CLAUDE_CONFIG_DIR` under `~/.pragma/accounts/anthropic/`; login is `claude auth login`; `identify` parses `claude auth status --json` (`orgId:email`, so two users of one Team org stay separate). On macOS the token lives in the Keychain, which Claude Code keys by config dir, so `credentialPath` reports the Keychain rather than a file.

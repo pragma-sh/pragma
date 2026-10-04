@@ -1,6 +1,6 @@
 /// <reference types="node" />
 /**
- * Two-stage build, mirroring `@pragma/scratchpad-viewer`.
+ * Two-stage build, mirroring `@pragma-sh/scratchpad-viewer`.
  *
  * 1. esbuild bundles `src/runtime/main.ts` — xterm and its addons — into one
  *    IIFE, and reads xterm's stylesheet, writing both out as a TypeScript

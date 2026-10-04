@@ -57,6 +57,44 @@ pub fn hide_console(command: &mut Command) {
     }
 }
 
+/// Detaches a long-lived child from this process, where the platform needs it.
+///
+/// Used for children that must outlive the app: the server, and the update
+/// helper that replaces the app after it quits. On Unix there is nothing to do
+/// — a child already survives its parent's exit (the server additionally
+/// detaches itself with `daemonize`). Windows has no `fork`, so detaching has
+/// to happen at creation time instead:
+///
+/// - `CREATE_NO_WINDOW` gives the child its own console that is never displayed.
+///   That keeps it off *this* process's console — so closing the app's console
+///   delivers no close event — while still leaving it *a* console to inherit
+///   down the chain.
+/// - `CREATE_NEW_PROCESS_GROUP` stops a Ctrl+C in the launching console from
+///   being broadcast to the child.
+///
+/// **`DETACHED_PROCESS` must not be added back.** Win32 documents
+/// `CREATE_NO_WINDOW` as *ignored* when combined with `DETACHED_PROCESS` (or
+/// `CREATE_NEW_CONSOLE`), so the pair left the child with **no** console at all
+/// — and a console grandchild spawned from a consoleless parent gets a brand-new
+/// *visible* one. In a debug build the server and gateway are started via
+/// `cargo run`, so every `cargo`, `rustc`, and `pragma-server.exe` in that chain
+/// popped a console window: the "command prompts launching at random" during
+/// `bun run dev`.
+pub fn detach(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 /// Windows process-creation flag: run a console program with no console window.
 ///
 /// Exported for spawners that cannot take a `std::process::Command` — notably
