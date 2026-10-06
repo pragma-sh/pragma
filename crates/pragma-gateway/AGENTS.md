@@ -5,7 +5,14 @@
 
 ## Responsibilities
 
-- Bind only to `127.0.0.1`, normally on an ephemeral port.
+- Bind only to `127.0.0.1`, normally on an ephemeral port — except that a gateway
+  replacing a stale or crashed one first tries its predecessor's port (read from the old
+  `gateway.json`, retried for ~1s while the killed process lets go), falling back to an
+  ephemeral port only if something else holds it (`bind.rs`). The remote-access tunnel
+  captures the port once at start, and the gateway is replaced under it after every
+  update; a new port would strand the tunnel (the phone sees "couldn't reach the
+  desktop") and, for anonymous tunnels, force a new URL and a re-pair. Same reasoning as
+  the persisted token below. Never make the port a constant.
 - Write `gateway.json` beside `daemon.sock` with `{ port, token, pid, protocolVersion }`
   using mode `0600`.
 - Begin serving HTTP immediately after writing `gateway.json`. Post-discovery work such

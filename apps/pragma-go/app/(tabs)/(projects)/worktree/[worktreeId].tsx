@@ -16,6 +16,7 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { LaunchAgentButton } from "@/components/LaunchAgentButton";
 import { LaunchSheet } from "@/components/LaunchSheet";
 import { CommitAndPrSheet } from "@/components/CommitAndPrSheet";
+import { FileExplorer } from "@/components/FileExplorer";
 import { IconSymbol } from "@/components/IconSymbol";
 import { NavGroup, NavRow } from "@/components/NavRow";
 import { RenameTabSheet } from "@/components/RenameTabSheet";
@@ -23,7 +24,7 @@ import { ScriptsMenuButton } from "@/components/ScriptsMenuButton";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
-import { WorktreeNavRow } from "@/components/WorktreeNavRow";
+import { FanoutMembershipGroup, WorktreeGroup } from "@/components/WorktreeGroup";
 import { useConnection } from "@/lib/connection-context";
 import {
   useAgentActions,
@@ -130,7 +131,7 @@ export default function WorktreeScreen() {
     ],
   );
 
-  // Terminals are always offered, so "empty" is only about what already exists.
+  // Terminals and agents are always offered, so "empty" is only about what already exists.
   const empty = children.length === 0 && agentTabs.length === 0 && terminalTabs.length === 0;
 
   return (
@@ -141,8 +142,10 @@ export default function WorktreeScreen() {
         commitAndPr={commitAndPr}
         empty={empty}
         insetBottom={insets.bottom}
+        onLaunchAgent={openLaunchSheet}
         ports={ports}
         projectId={worktree?.projectId ?? ""}
+        root={status === "paired" ? worktree?.path : undefined}
         terminalTabs={terminalTabs}
         worktreeId={worktreeId}
         worktreeNodes={children}
@@ -198,8 +201,10 @@ function WorktreeContents({
   commitAndPr,
   empty,
   insetBottom,
+  onLaunchAgent,
   ports,
   projectId,
+  root,
   terminalTabs,
   worktreeId,
   worktreeNodes,
@@ -208,8 +213,11 @@ function WorktreeContents({
   commitAndPr: CommitAndPr;
   empty: boolean;
   insetBottom: number;
+  onLaunchAgent: () => void;
   ports: OpenPort[];
   projectId: string;
+  /** The worktree's host path, once paired and loaded; the file explorer needs it. */
+  root: string | undefined;
   terminalTabs: TerminalTab[];
   worktreeId: string;
   worktreeNodes: WorktreeNode[];
@@ -221,16 +229,18 @@ function WorktreeContents({
       contentInsetAdjustmentBehavior="automatic"
     >
       <LinkedPullRequest flow={commitAndPr} />
-      <WorktreesGroup nodes={worktreeNodes} />
+      <FanoutMembershipGroup worktreeId={worktreeId} />
+      <WorktreeGroup nodes={worktreeNodes} title="Worktrees" />
       <TerminalsGroup tabs={terminalTabs} worktreeId={worktreeId} />
       <PortsGroup ports={ports} projectId={projectId} />
-      <AgentTabsGroup tabs={agentTabs} />
+      <AgentTabsGroup onLaunch={onLaunchAgent} tabs={agentTabs} />
       <ScratchpadsGroup agentTabs={agentTabs} worktreeId={worktreeId} />
       {empty ? (
         <Text className="px-4 py-6 text-muted-foreground">
           Nothing running here yet. Open a terminal or launch an agent.
         </Text>
       ) : null}
+      {root ? <FileExplorer root={root} worktreeId={worktreeId} /> : null}
     </ScrollView>
   );
 }
@@ -332,18 +342,6 @@ const PULL_REQUEST_STATE_LABEL = {
   merged: "Merged",
   closed: "Closed",
 } as const;
-
-/** The nested child worktrees section, or nothing when there are none. */
-function WorktreesGroup({ nodes }: { nodes: WorktreeNode[] }) {
-  if (nodes.length === 0) return null;
-  return (
-    <NavGroup title="Worktrees">
-      {nodes.map((node) => (
-        <WorktreeNavRow key={node.worktree.id} worktree={node.worktree} />
-      ))}
-    </NavGroup>
-  );
-}
 
 /**
  * The worktree's managed scratchpads, listed in the same row style as its
@@ -518,14 +516,22 @@ function TerminalTabActionSheets({
   );
 }
 
-/** The worktree's agent tabs section, or nothing when there are none. */
-function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
+/**
+ * The worktree's agent tabs, with a row that launches another.
+ *
+ * Always rendered while paired, like Terminals: "no agent here yet" is exactly
+ * when the user wants to start one. The row opens the same launch sheet as the
+ * header's + button.
+ */
+function AgentTabsGroup({ onLaunch, tabs }: { onLaunch: () => void; tabs: AgentTab[] }) {
+  const { status } = useConnection();
   const [menuTab, setMenuTab] = useState<AgentTab | null>(null);
-  if (tabs.length === 0) return null;
+  if (status !== "paired") return null;
 
   return (
     <NavGroup title="Agents">
       <AgentTabRows tabs={tabs} onOpenActions={setMenuTab} />
+      <NavRow chevron={false} onPress={onLaunch} title="New agent" />
       <AgentTabActionSheets menuTab={menuTab} onMenuTabChange={setMenuTab} />
     </NavGroup>
   );

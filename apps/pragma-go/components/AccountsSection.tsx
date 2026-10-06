@@ -32,7 +32,6 @@ import { switchMenuActions, switchTarget } from "@/lib/account-switch";
 import { hapticSelection, hapticSuccess } from "@/lib/haptics";
 import { useThemeColors } from "@/lib/theme";
 import type { Accounts } from "@/lib/use-accounts";
-import { useWideLayout } from "@/lib/use-wide-layout";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "./AgentIcon";
 import { IconSymbol } from "./IconSymbol";
@@ -49,16 +48,6 @@ const BAR_CLASS = {
   warning: "bg-warning",
   critical: "bg-destructive",
 } as const;
-
-/**
- * Grid basis per card. `flexBasis` (not a fixed width) is what makes these a
- * grid: cards wrap at a column count, then grow to share the leftover row,
- * and each row's cards stretch to the tallest — so an expanded card never
- * leaves its neighbour a different size.
- */
-const CARD_BASIS = { narrow: "46%", wide: "30%" } as const;
-
-type CardBasis = (typeof CARD_BASIS)[keyof typeof CARD_BASIS];
 
 /**
  * The home screen's account cards: one per provider, its accounts' usage, and
@@ -78,26 +67,23 @@ export function AccountsSection({ accounts }: { accounts: Accounts }) {
       <Text className="px-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         Accounts
       </Text>
-      <ProviderGrid accounts={accounts} />
+      <ProviderList accounts={accounts} />
     </View>
   );
 }
 
-/** The cards, or placeholders while the first list is still on its way. */
-function ProviderGrid({ accounts }: { accounts: Accounts }) {
-  const basis = useWideLayout() ? CARD_BASIS.wide : CARD_BASIS.narrow;
+/**
+ * The cards, stacked full width, or placeholders while the first list is still
+ * on its way.
+ */
+function ProviderList({ accounts }: { accounts: Accounts }) {
   const placeholders = accounts.providers.length === 0;
   return (
-    <View className="flex-row flex-wrap gap-3">
+    <View className="gap-3">
       {placeholders
-        ? [0, 1].map((index) => <ProviderSkeleton basis={basis} key={index} />)
+        ? [0, 1].map((index) => <ProviderSkeleton key={index} />)
         : accounts.providers.map((provider) => (
-            <ProviderCard
-              accounts={accounts}
-              basis={basis}
-              key={provider.provider}
-              provider={provider}
-            />
+            <ProviderCard accounts={accounts} key={provider.provider} provider={provider} />
           ))}
     </View>
   );
@@ -106,11 +92,11 @@ function ProviderGrid({ accounts }: { accounts: Accounts }) {
 /**
  * A card-shaped placeholder while the first read is in flight.
  *
- * It occupies the same grid cell as a real card so the section does not jump
+ * It occupies the same space as a real card so the section does not jump
  * when the list lands, and it pulses so a slow host reads as "loading" rather
  * than as a provider with nothing to say.
  */
-function ProviderSkeleton({ basis }: { basis: CardBasis }) {
+function ProviderSkeleton() {
   const pulse = useSharedValue(0.4);
   useEffect(() => {
     pulse.value = withRepeat(withTiming(0.9, { duration: 700 }), -1, true);
@@ -121,7 +107,7 @@ function ProviderSkeleton({ basis }: { basis: CardBasis }) {
     <Animated.View
       accessibilityLabel="Loading accounts"
       className="gap-3 overflow-hidden rounded-xl border border-border bg-card p-3"
-      style={[{ flexGrow: 1, flexBasis: basis }, style]}
+      style={style}
     >
       <View className="flex-row items-center gap-2">
         <View className="h-[18px] w-[18px] rounded-full bg-muted" />
@@ -136,22 +122,13 @@ function ProviderSkeleton({ basis }: { basis: CardBasis }) {
  * One provider: a collapsed row showing the account that runs out first, which
  * expands to every account and a switcher per harness.
  */
-function ProviderCard({
-  accounts,
-  basis,
-  provider,
-}: {
-  accounts: Accounts;
-  basis: CardBasis;
-  provider: ProviderView;
-}) {
+function ProviderCard({ accounts, provider }: { accounts: Accounts; provider: ProviderView }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <Animated.View
       className="overflow-hidden rounded-xl border border-border bg-card"
       layout={LinearTransition.duration(EXPAND_MS)}
-      style={{ flexGrow: 1, flexBasis: basis }}
     >
       <Pressable
         accessibilityHint="Shows every account and which one each agent uses"

@@ -105,6 +105,37 @@ any machine. The warning is real: the link contains the token, treat it like a p
 - Read and comment on [scratchpads](/docs/user-guide/scratchpads), including embedded
   [whiteboards](/docs/user-guide/whiteboards), which the host renders for the phone.
 - Your custom agents and their icons resolve exactly as they do on the desktop.
+- **Fan out** one prompt to several agents and compare the attempts — see below.
+- **Browse a worktree's files** and read any of them, or an attempt's changes, read-only.
+
+## Fanouts on the phone
+
+In the launch sheet, **Run in → Fan out** turns the agent picker into attempt rows: one
+agent, model, and effort per attempt (at least two, the same model twice is fine). Name the
+fanout's branch, write the prompt every attempt runs, and tap **Fan out**. Like the desktop,
+the attempts hang off a fresh coordination branch made from the worktree you opened the
+sheet on — see [Fan out](/docs/user-guide/worktrees#fan-out).
+
+Attempt worktrees are folded into a single fanout row under their parent, with a combined
+status dot. Tapping it opens the compare view: one page per attempt, swiped between, with a
+chip row to jump to one. Each page shows the attempt's status, the last lines of its
+terminal, the scratchpads it wrote, and every file it changed against the fanout's base
+commit — tap a file for its diff. From there:
+
+- **Open chat** goes to the attempt's live session.
+- **Retry** restarts an attempt's agent in its existing worktree, keeping its work.
+- **Pick this attempt** commits and merges it into the fanout branch, then deletes every
+  attempt worktree — the phone asks first. A merge conflict is left for the desktop to resolve.
+- The composer at the bottom sends a follow-up to **all attempts** or only the one in view.
+- **⋯ → Cancel fanout** stops every attempt and keeps their worktrees.
+
+## Files
+
+The bottom of a worktree's screen is a file explorer, like the desktop's Files tab: folders
+expand in place, and tapping a file opens it in a read-only viewer with the desktop's syntax
+highlighting. **Wrap / No wrap** in the header toggles soft wrapping. Binary files and files
+too large for the host to send say so instead of rendering. Nothing on the phone can edit,
+rename, or delete a file.
 
 ## Notifications
 

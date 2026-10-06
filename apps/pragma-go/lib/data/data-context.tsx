@@ -22,11 +22,7 @@ import {
   markTabStatusesSeen,
   parseAgentStatuses,
 } from "./workspace-map";
-
-const RECONNECT_INITIAL_MS = 500;
-const RECONNECT_MAX_MS = 10_000;
-/** A connection that lived this long counts as healthy: reset the backoff. */
-const RECONNECT_HEALTHY_MS = 30_000;
+import { subscriptionLoop } from "./subscription-loop";
 
 /** How the user resolved an inbox item. */
 export type InboxResolution =
@@ -413,64 +409,6 @@ function runAgentStatusSubscription(
       onStatuses(parseAgentStatuses(event.payload));
     }
   });
-}
-
-/** Retries `body` with exponential backoff until the signal aborts. */
-async function subscriptionLoop(
-  signal: AbortSignal,
-  onUnauthorized: () => void,
-  body: (onDelivered: () => void) => Promise<void>,
-): Promise<void> {
-  let backoff = RECONNECT_INITIAL_MS;
-  while (!signal.aborted) {
-    const result = await runSubscription(body);
-    if (result === "unauthorized") {
-      onUnauthorized();
-      return;
-    }
-    if (signal.aborted) return;
-    backoff = reconnectDelay(backoff, result);
-    // oxlint-disable-next-line no-await-in-loop -- backoff between reconnects.
-    await delay(backoff, signal);
-    backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
-  }
-}
-
-async function runSubscription(
-  body: (onDelivered: () => void) => Promise<void>,
-): Promise<{ startedAt: number; delivered: boolean } | "unauthorized"> {
-  const startedAt = Date.now();
-  let delivered = false;
-  try {
-    // oxlint-disable-next-line no-await-in-loop -- sequential reconnect attempts.
-    await body(() => {
-      delivered = true;
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) return "unauthorized";
-  }
-  return { startedAt, delivered };
-}
-
-function reconnectDelay(
-  backoff: number,
-  result: { startedAt: number; delivered: boolean },
-): number {
-  // Streams routinely die after tunnel idle. A connection that delivered data —
-  // or simply lived a long time — is healthy, so reconnect promptly instead of
-  // carrying a large backoff across its lifetime.
-  if (result.delivered || Date.now() - result.startedAt >= RECONNECT_HEALTHY_MS) {
-    return RECONNECT_INITIAL_MS;
-  }
-  return backoff;
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, ms));
-  const aborted = new Promise<void>((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
-  return Promise.race([timeout, aborted]);
 }
 
 function useData(): DataContextValue {

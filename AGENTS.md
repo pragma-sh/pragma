@@ -116,6 +116,8 @@ than no guide.
 │   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── accounts-view/           # `@pragma-sh/accounts-view` account/usage view model shared by desktop + mobile → see packages/accounts-view/AGENTS.md
+│   ├── code-viewer/             # `@pragma-sh/code-viewer` shared CodeMirror theme/grammars/unified diff + read-only web-view document → see packages/code-viewer/AGENTS.md
+│   ├── fanout-view/             # `@pragma-sh/fanout-view` fanout view model (relations, labels, pairing) shared by desktop + mobile → see packages/fanout-view/AGENTS.md
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── jev/                     # `bun run jev` drives the running dev app (DOM, input, screenshots, Jev agent) → see packages/jev/AGENTS.md
@@ -268,7 +270,16 @@ than no guide.
   rules (selector resolution, branch naming, status roll-up, scratchpad
   promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
   (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
-  callers of the same `fanouts` RPC — never a second implementation.
+  callers of the same `fanouts` RPC — never a second implementation. Pragma Go is
+  a fourth, through the SDK. How a client _presents_ a fanout (which worktrees
+  are attempts, member labels, status wording, pairing scratchpads and changed
+  files across attempts) → `packages/fanout-view` (`@pragma-sh/fanout-view`),
+  shared by the desktop and Pragma Go.
+- Reading code anywhere other than a desktop editor tab (a phone, the browser
+  build) → `packages/code-viewer` (`@pragma-sh/code-viewer`): a self-contained
+  read-only CodeMirror document for web views, built from the same theme,
+  grammar loader, and unified diff the desktop editor imports from its
+  `./codemirror` entry. Never a second highlighter or diff renderer.
 - A terminal rendered anywhere other than the desktop (a phone web view, the
   browser build) → `packages/terminal-viewer` (`@pragma-sh/terminal-viewer`): one
   self-contained xterm document plus the message protocol a native client drives

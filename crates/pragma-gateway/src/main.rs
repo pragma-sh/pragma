@@ -1,4 +1,5 @@
 mod auth;
+mod bind;
 mod client;
 mod config;
 mod devices;
@@ -69,15 +70,14 @@ fn run(args: Args) -> GatewayResult<()> {
     };
     let config = GatewayConfig::new(socket_path, args.port, token, discovery_path);
 
-    remove_stale_or_refuse(
+    let previous_port = remove_stale_or_refuse(
         &config.discovery_path,
         CONSTANTS.daemon.protocol_version.as_str(),
     )?;
     let client = client::GatewayClient::new(config.socket_path.clone());
     client.ensure_protocol()?;
 
-    let server = Server::http(("127.0.0.1", config.port))
-        .map_err(|error| GatewayError::Http(error.to_string()))?;
+    let server = bind::bind_server(config.port, previous_port)?;
     let port = bound_port(&server)?;
     write_discovery(
         &config.discovery_path,

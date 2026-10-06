@@ -142,6 +142,27 @@ from the desktop.
   (`+N` when there are more) directly above the composer, tapping through to the
   scratchpad screen. It sits **inside** the chat's `KeyboardAvoidingView`, which is what
   keeps the keyboard from covering it — do not hoist it above that subtree.
+- **Fanouts** (`lib/fanouts-context.tsx`, `app/fanout/[fanoutId].tsx`): one app-wide
+  `client.fanouts.subscribe()` — the host has no list action; the stream's snapshot is the
+  list — owned by `FanoutsProvider`. The launch sheet's **Fan out** mode builds the create
+  request with the pure `lib/fanout-form.ts` (always a `new` coordination parent, as on the
+  desktop). Worktree lists go through `components/WorktreeGroup.tsx`, which drops attempt
+  worktrees of _active_ fanouts and shows one fanout row after the parent — the desktop's
+  rule, from `@pragma-sh/fanout-view`; attempts of finished fanouts are plain rows again.
+  The compare view is an attempt **pager**, not the desktop's grid: per attempt the
+  host's escape-stripped output tail (`fanouts.read`, polled only while that page is in
+  view), its scratchpads, and `git.changesSinceCommit` against `baseCommit`. Every
+  destructive or disruptive action (`pick`, `retry`, `cancel`) confirms in
+  `lib/use-fanout-actions.ts` — the SDK leaves confirming to the caller — and errors
+  show the host's `FanoutFailure` message (`fanoutFailureMessage`).
+- **Code viewing** (`components/code/`, `app/file/[worktreeId].tsx`,
+  `app/diff/[worktreeId].tsx`): read-only, rendered by `@pragma-sh/code-viewer`'s
+  self-contained CodeMirror document in a web view (sandboxed iframe on web). The content
+  is baked into the document when it is built, so nothing streams in and nothing writes
+  back. Files come from `fs.readFile` (binary/truncated reported, never rendered); diffs
+  from `git.baseFileDiff`. The worktree screen ends with `components/FileExplorer.tsx`, a
+  lazy tree over `fs.listDir` (pure flattening in `lib/file-tree.ts`) with no create,
+  rename, move, or delete.
 - **New worktree** (`components/NewWorktreeSheet.tsx`, from project/chat header "+"):
   agent picker uses same host catalog as launch. Submission uses the same headless-capable
   `client.agents.launch()` control route as existing-worktree launches.
@@ -317,6 +338,9 @@ app/
     worktree/[worktreeId].tsx     #   nested worktrees + agent tabs (header + launches agent)
   chat/[tabId].tsx                # full-screen live agent chat (outside tabs)
   scratchpad/[scratchpadId].tsx   # read-only scratchpad web view + touch comments
+  fanout/[fanoutId].tsx           # fanout compare view: attempt pager + follow-up composer
+  file/[worktreeId].tsx           # read-only file viewer (?path=)
+  diff/[worktreeId].tsx           # read-only base-commit diff (?path=&base=)
   (tabs)/inbox/                   # Stack: swipeable event cards
   (tabs)/settings/                # Stack: host connection — heartbeat probe + unpair
 components/
@@ -325,6 +349,11 @@ components/
   scratchpad/                     # ScratchpadWebView, ScratchpadLoading, CommentComposerSheet, AttachAgentDrawer
   chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill, AgentViewTabs
   terminal/                       # TerminalSurface (shared attached terminal), TerminalWebView twins, TerminalKeyBar
+  code/                           # CodeWebView twins (code-viewer document) + CodeScreen frame
+  fanout/                         # AttemptPage, FanoutComposer
+  WorktreeGroup                   # worktree list with fanout rows folded in; FanoutMembershipGroup
+  FanoutAttemptRows               # launch sheet's per-attempt pickers
+  FileExplorer                    # worktree file tree (read-only) at the bottom of a worktree
   AgentIcon                       # plugin agent icon fetched by hash (SVG/raster, cached)
   LaunchSheet                     # launch a new agent session (catalog-fed picker)
   LaunchAgentButton               # project/worktree header-right "+" → Launch sheet
@@ -340,11 +369,17 @@ lib/
   transcript-store.ts            # pure: event fold → rows + attention (Vitest)
   pairing.ts                     # pure: QR/manual validation + protocol check (Vitest)
   launch-form.ts                 # pure: launch payload shaping (Vitest)
+  fanout-form.ts                 # pure: fanout create request + failure wording (Vitest)
+  fanout-status.ts               # pure: attempt/fanout status → status dot (Vitest)
+  fanouts-context.tsx            # the one fanouts subscription + grouping hooks
+  use-fanout-actions.ts          # pick/retry/cancel/send with confirmations
+  file-tree.ts                   # pure: file explorer flattening (Vitest)
+  use-host-value.ts              # one keyed host read with reload; 401 → connection
   use-catalog.ts                 # cached host agent catalog
   use-scratchpads.ts             # a worktree's managed scratchpads, re-read on demand
   use-scratchpad-comments.ts     # the desktop's sibling comment file, read + serialized writes
   scratchpad-agent.ts            # pure: attached-tab resolution, tab → scratchpads, row label (Vitest)
-  data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest)
+  data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest) + subscription-loop (shared reconnect)
   types.ts                       # re-exports @pragma-sh/constants domain types + view shapes
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop
   agent-status.ts                # status rollup priority
@@ -440,6 +475,10 @@ implemented in `lib/widgets/`:
 
 ## Rules
 
+- **No Reanimated `entering`/`exiting` animations inside `BottomSheet`.** On iOS the
+  entering animation never completes inside the sheet's modal, so the view is laid out
+  (it is in the accessibility tree) but stays fully transparent. The launch sheet's
+  branch field was invisible this way for a release before Fan out exposed it.
 - **One source of truth for the domain.** `Project`, `Worktree`, `AgentStatus`, and
   `AgentAttentionKind` are imported (type-only) from `@pragma-sh/constants`; wire event
   types (`AgentStreamEvent`, `AgentMessage`, `AgentReportPayload`, …) come from

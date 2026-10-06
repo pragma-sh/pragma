@@ -1,0 +1,45 @@
+{
+  "name": "@pragma-sh/code-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Read-only code viewing shared by the desktop and Pragma Go: the CodeMirror theme, grammar loading, and unified diff, plus one self-contained HTML document a native client embeds in a web view.",
+  "license": "AGPL-3.0-only",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./codemirror": "./src/codemirror/index.ts"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "pretypecheck": "bun scripts/build.ts --runtime-only",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "bun scripts/build.ts --runtime-only",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/merge": "^6.12.2",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.1",
+    "@lezer/highlight": "^1.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "bunup": "^0.16.32",
+    "esbuild": "^0.25.12",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

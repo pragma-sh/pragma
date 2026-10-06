@@ -55,7 +55,9 @@
         "@lezer/highlight": "^1.2.3",
         "@mdx-js/mdx": "^3.1.1",
         "@pragma-sh/accounts-view": "workspace:*",
+        "@pragma-sh/code-viewer": "workspace:*",
         "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/fanout-view": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/plugin-registry": "workspace:*",
         "@pragma-sh/scratchpad": "workspace:*",
@@ -145,7 +147,9 @@
         "@expo/ui": "~57.0.8",
         "@pragma-sh/accounts-view": "workspace:*",
         "@pragma-sh/brand": "workspace:*",
+        "@pragma-sh/code-viewer": "workspace:*",
         "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/fanout-view": "workspace:*",
         "@pragma-sh/scratchpad-viewer": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",
         "@pragma-sh/terminal-viewer": "workspace:*",
@@ -316,6 +320,25 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/code-viewer": {
+      "name": "@pragma-sh/code-viewer",
+      "version": "0.0.0",
+      "dependencies": {
+        "@codemirror/language": "^6.12.3",
+        "@codemirror/language-data": "^6.5.2",
+        "@codemirror/merge": "^6.12.2",
+        "@codemirror/state": "^6.6.0",
+        "@codemirror/view": "^6.43.1",
+        "@lezer/highlight": "^1.2.3",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
+        "esbuild": "^0.25.12",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/codex-plugin": {
       "name": "@pragma-sh/codex-plugin",
       "version": "1.1.0",
@@ -381,6 +404,17 @@
         "react-dom": "^19.2.6",
         "typescript": "^6.0.3",
         "vite": "^8.0.16",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/fanout-view": {
+      "name": "@pragma-sh/fanout-view",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pragma-sh/constants": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
     },
@@ -1786,6 +1820,8 @@
 
     "@pragma-sh/claude-code-plugin": ["@pragma-sh/claude-code-plugin@workspace:packages/claude-code-plugin"],
 
+    "@pragma-sh/code-viewer": ["@pragma-sh/code-viewer@workspace:packages/code-viewer"],
+
     "@pragma-sh/codex-plugin": ["@pragma-sh/codex-plugin@workspace:packages/codex-plugin"],
 
     "@pragma-sh/constants": ["@pragma-sh/constants@workspace:packages/constants"],
@@ -1793,6 +1829,8 @@
     "@pragma-sh/cursor-plugin": ["@pragma-sh/cursor-plugin@workspace:packages/cursor-plugin"],
 
     "@pragma-sh/dev-test-plugin": ["@pragma-sh/dev-test-plugin@workspace:packages/dev-test-plugin"],
+
+    "@pragma-sh/fanout-view": ["@pragma-sh/fanout-view@workspace:packages/fanout-view"],
 
     "@pragma-sh/github-copilot-cli-plugin": ["@pragma-sh/github-copilot-cli-plugin@workspace:packages/github-copilot-cli-plugin"],
 

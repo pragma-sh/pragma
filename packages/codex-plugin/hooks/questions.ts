@@ -40,13 +40,56 @@ function parseQuestions(value: unknown) {
 
 type Pending = Map<string, NonNullable<ReturnType<typeof request>>>;
 
+const CODE_MODE_CALL = "tools.request_user_input(";
+
+/**
+ * Codex 0.153+ runs tools in "code mode": the model writes one `exec` custom
+ * tool call whose JavaScript `input` calls `tools.request_user_input({...})`.
+ * The argument is the same JSON object the direct function call carried.
+ */
+export function codeModeArguments(input: unknown): unknown {
+  if (typeof input !== "string") return undefined;
+  const call = input.indexOf(CODE_MODE_CALL);
+  if (call === -1) return undefined;
+  const start = input.indexOf("{", call + CODE_MODE_CALL.length);
+  const end = start === -1 ? -1 : objectEnd(input, start);
+  if (end === -1) return undefined;
+  const literal = input.slice(start, end + 1);
+  // A JS literal may leave keys unquoted (`{ questions: [...] }`); quote them
+  // only as a fallback so string contents of valid JSON are never touched.
+  return (
+    parseJson(literal) ?? parseJson(literal.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":'))
+  );
+}
+
+/** Index of the brace closing the object opened at `start`, skipping strings. */
+function objectEnd(source: string, start: number): number {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (quote) {
+      if (char === "\\") index++;
+      else if (char === quote) quote = undefined;
+    } else if (char === '"' || char === "'" || char === "`") quote = char;
+    else if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) return index;
+  }
+  return -1;
+}
+
 function updatePending(pending: Pending, payload: Record<string, unknown>) {
-  if (payload.type === "function_call_output") {
+  if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
     resolvePending(pending, payload.call_id);
     return;
   }
-  if (payload.type !== "function_call" || payload.name !== "request_user_input") return;
-  addPending(pending, payload);
+  if (payload.type === "function_call" && payload.name === "request_user_input") {
+    addPending(pending, payload);
+    return;
+  }
+  if (payload.type !== "custom_tool_call") return;
+  const args = codeModeArguments(payload.input);
+  if (args !== undefined) addPending(pending, { ...payload, arguments: args });
 }
 
 function resolvePending(pending: Pending, callId: unknown) {

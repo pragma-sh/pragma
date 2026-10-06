@@ -32,6 +32,22 @@ describe("rpc namespace clients", () => {
     expect(JSON.parse(body)).toEqual({ op: "isDirty", root: "/repo" });
   });
 
+  it("maps base-commit comparisons with the host's snake_case fields", async () => {
+    const bodies: unknown[] = [];
+    const client = clientWithFetch(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ committed: [], staged: [], unstaged: [] });
+    });
+
+    await client.git.changesSinceCommit({ root: "/repo", base: "abc123" });
+    await client.git.baseFileDiff({ root: "/repo", base: "abc123", path: "b.ts", oldPath: "a.ts" });
+
+    expect(bodies).toEqual([
+      { op: "changesSinceCommit", root: "/repo", base: "abc123" },
+      { op: "baseFileDiff", root: "/repo", base: "abc123", path: "b.ts", old_path: "a.ts" },
+    ]);
+  });
+
   it("maps exec operations", async () => {
     let body = "";
     const client = clientWithFetch(async (_input, init) => {

@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectionProvider, useConnection } from "@/lib/connection-context";
 import { DataProvider } from "@/lib/data/data-context";
+import { FanoutsProvider } from "@/lib/fanouts-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { usePushNotifications } from "@/lib/use-push-notifications";
 import { useThemeColors } from "@/lib/theme";
@@ -29,9 +30,11 @@ export default function RootLayout() {
         <ConnectionProvider>
           <ThemeProvider>
             <DataProvider>
-              <StatusBar style="auto" />
-              <WidgetSync />
-              <ConnectionGate />
+              <FanoutsProvider>
+                <StatusBar style="auto" />
+                <WidgetSync />
+                <ConnectionGate />
+              </FanoutsProvider>
             </DataProvider>
           </ThemeProvider>
         </ConnectionProvider>
@@ -93,6 +96,18 @@ function ConnectionGate() {
         />
         <Stack.Screen
           name="terminal/[tabId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="fanout/[fanoutId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="file/[worktreeId]"
+          options={{ headerShown: true, headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="diff/[worktreeId]"
           options={{ headerShown: true, headerBackTitle: "Back" }}
         />
       </Stack>

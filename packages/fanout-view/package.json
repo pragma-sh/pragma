@@ -1,0 +1,23 @@
+{
+  "name": "@pragma-sh/fanout-view",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client-side view model over the host's fanouts: active/attempt relations, member labels, status wording, and cross-attempt pairing. Shared by the desktop and Pragma Go.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma-sh/constants": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
