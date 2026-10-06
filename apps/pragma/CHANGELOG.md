@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.2.0...pragma-v1.2.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **pragma:** 1.2.1 fixes ([df0870f](https://github.com/pragma-sh/pragma/commit/df0870fb2faace96e0cfa6e02357cde5d8693bf4))
+* **pragma:** hide agent mode and permission options while Auto picks the agent ([ce37be0](https://github.com/pragma-sh/pragma/commit/ce37be0cb57a113f39731823246a8eb6441231bd))
+* **pragma:** show a pushed merge-conflict fix as mergeable right away ([c8d918a](https://github.com/pragma-sh/pragma/commit/c8d918adcd69b2919627635761f968d9dfe9d4a6))
+* **pragma:** size the account providers trigger to its contents ([25b5cda](https://github.com/pragma-sh/pragma/commit/25b5cda7530e749f21bffbd5eece9056ae548bed))
+* **release:** cut 1.2.1 instead of 1.3.0, and deflake the merge-conflict test ([2cde499](https://github.com/pragma-sh/pragma/commit/2cde499b5df715793f0c2babd2834cb4113db7fe))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.2.1
+    * @pragma-sh/plugin bumped to 1.2.1
+    * @pragma-sh/scratchpad bumped to 1.2.1
+    * @pragma-sh/scratchpad-viewer bumped to 1.2.1
+    * @pragma-sh/sdk bumped to 1.2.1
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.1.0...pragma-v1.2.0) (2026-10-03)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.2.0...sidecar-kit-v1.2.1) (2026-10-04)
+
+
+### Miscellaneous Chores
+
+* **sidecar-kit:** Synchronize desktop versions
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.1.0...sidecar-kit-v1.2.0) (2026-10-03)
 
 
