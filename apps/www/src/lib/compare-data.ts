@@ -129,7 +129,7 @@ export const ROWS: readonly ComparisonRow[] = [
     pragma: "iOS, Android, Web — own tunnel",
     emdash: "no",
     orca: "iOS, Android — Orca Relay (hosted) or LAN",
-    superset: 'none yet — listed "coming soon"',
+    superset: "iPhone only — Pro plan, hosted relay",
   },
   {
     feature: "Persistent host server",
@@ -230,7 +230,7 @@ export const COMPETITORS: readonly Competitor[] = [
     license: "MIT",
     logo: "/compare/orca-icon.png",
     summary: [
-      'Orca is an Electron app supporting several coding agents (Claude Code, Codex, Cursor, OpenCode, and others), with a terminal, a browser pane whose "Design Mode" turns a clicked UI element into prompt context, SSH worktrees, and a CLI. It ships a mobile companion app (iOS App Store, Android APK, both beta) for monitoring agents from your phone, paired to a desktop or a self-hosted "Remote Orca Server" — reaching that desktop off your LAN means signing in to Orca\'s own hosted "Orca Relay," or running your own Tailscale/VPN.',
+      'Orca is an Electron app supporting several coding agents (Claude Code, Codex, Cursor, OpenCode, and others), with a terminal, a browser pane whose "Design Mode" turns a clicked UI element into prompt context, SSH worktrees, and a CLI. It ships a mobile companion app (iOS App Store, Android APK, both beta) for steering agents from your phone — terminals, replies, and source-control review and commits — paired to a desktop or a self-hosted "Remote Orca Server" — reaching that desktop off your LAN means signing in to Orca\'s own hosted "Orca Relay," or running your own Tailscale/VPN.',
       "Orca tracks agent status per worktree rather than moving cards through a board, and its scheduled automations run on a cron rather than reacting to host events. Pragma adds a public plugin API, interactive scratchpads, an agent board, and a tunnel command you run yourself instead of a hosted relay.",
       "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a kanban-style agent board, automations that react to host events rather than only a cron, and reaching a desktop off your LAN through a tunnel command you control instead of signing in to a required Orca Relay. Both apps switch agent accounts and show usage, but only Pragma lets a project pick its own account.",
     ],
@@ -264,9 +264,9 @@ export const COMPETITORS: readonly Competitor[] = [
     logo: "/compare/superset-icon.png",
     summary: [
       "Superset is an Electron app for running coding agents in parallel, each in its own git worktree. It has a board (columns for Idle, Working, Needs attention, Needs review, tied to agent and PR state), a diff viewer, an in-app browser, scheduled automations, and a CLI.",
-      'Remote access runs through its own hosted "Superset Relay" — reaching a workspace on another machine needs an account on Superset\'s service, not a command you run yourself. Its own pricing page lists a mobile app as "Coming soon" on every plan; there\'s no shipped phone client today.',
+      'Remote access runs through its own hosted "Superset Relay" — reaching a workspace on another machine needs an account on Superset\'s service, not a command you run yourself. Its iPhone app (launched 2026-09-21) goes through that same relay, needs iOS 26 and the paid Pro plan, and has no Android or web build yet.',
       "It's also the only one of the three that isn't open source: Elastic License 2.0 is source-available, not OSI open source — you can read and modify it, but you may not offer it to others as a hosted service, and its license-key gating may not be circumvented. Like Emdash and Orca, it has no public plugin API or interactive scratchpads, and its fan-out is parallel workspaces without a unified compare view.",
-      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a unified fan-out view for comparing attempts rather than separate parallel workspaces, built-in AI for inline edits and PR drafting, Auto agent and model picks, AI merge-conflict resolution, per-project agent accounts, a shipped mobile and web client, SSH remote projects, and an AGPL-3.0 license that's fully open source rather than source-available.",
+      "Pragma is currently ahead on a few fronts: a public plugin API, interactive MDX scratchpads, a unified fan-out view for comparing attempts rather than separate parallel workspaces, built-in AI for inline edits and PR drafting, Auto agent and model picks, AI merge-conflict resolution, per-project agent accounts, a free mobile client on Android and the web as well as iPhone, SSH remote projects, and an AGPL-3.0 license that's fully open source rather than source-available.",
     ],
     migration: [
       {
@@ -301,4 +301,4 @@ export function compareDetailRoute(slug: string): string {
 /** Shown under every comparison table — what was checked, and what changed recently. */
 export const FOOTNOTE = `Checked against the ${COMPETITORS.map((c) => c.repo).join(
   ", ",
-)} repositories (README, LICENSE, and linked docs) as of 2026-08-29, with the mobile row re-verified on 2026-09-05 after both projects shipped changes: Orca added a hosted "Orca Relay" tunnel option, and Superset's own pricing page now lists its mobile app as "Coming soon" rather than shipped. The Auto, agent progress, merge-conflict, and accounts rows were checked on 2026-10-03: Orca and Superset both track usage and switch accounts globally (Superset for Claude Code and Codex), with no per-project choice, and Orca resolves conflicts by launching an agent on them. This space moves fast — if something here is out of date, open an issue on ${repoUrl} and we will correct it.`;
+)} repositories (README, LICENSE, and linked docs) as of 2026-08-29, with the mobile row re-verified on 2026-10-06: Orca added a hosted "Orca Relay" tunnel option, and Superset shipped an iPhone app on 2026-09-21 for Pro subscribers. The phone clients are compared in detail on the Pragma Go page. The Auto, agent progress, merge-conflict, and accounts rows were checked on 2026-10-03: Orca and Superset both track usage and switch accounts globally (Superset for Claude Code and Codex), with no per-project choice, and Orca resolves conflicts by launching an agent on them. This space moves fast — if something here is out of date, open an issue on ${repoUrl} and we will correct it.`;

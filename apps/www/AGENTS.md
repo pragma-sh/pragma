@@ -39,11 +39,12 @@ apps/www/
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
 │   ├── media/               # product screenshots and self-hosted screen recordings
+│   │   └── go/              # Pragma Go simulator captures (WebP) + the /mobile social card
 │   └── pragma-app.png       # hero screenshot and reflected still
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, blog/[slug], downloads, plugins, privacy, support,
+    │   ├── (home)/          # marketing route group (landing, mobile, blog/[slug], downloads, plugins, privacy, support,
     │   │                    # deep-link forwarders /open + /install-plugin,
     │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
@@ -88,6 +89,8 @@ apps/www/
         ├── blog-utils.ts    # date formatting, newest-first sort, and tag labels
         ├── storage-cover.ts # layout of the Storage treemap blog cover (@pragma-sh/treemap)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
+        ├── compare-data.ts  # the desktop orchestrator matrix behind /compare and the landing table
+        ├── mobile-compare.ts # Pragma Go vs Superset Mobile vs Orca Mobile, with its verified-on date
         ├── downloads.ts     # installer targets, OS/CPU detection, latest-release asset lookup
         ├── github-api.ts    # server-side GitHub REST base + token headers
         ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
@@ -374,6 +377,16 @@ apps/www/
   `sticky` so its 68px row (12px top offset plus 56px bar) remains in flow above the hero;
   docs uses `fixed` because a full-width grid child changes Fumadocs' mobile track sizing.
   Docs adds matching top padding and reserves that offset for its sticky sidebar.
+- **`/mobile` is the Pragma Go page, and its screenshots are the real app.** Every image in
+  `public/media/go/` is captured from the iOS simulator (`ios-simulator-skill`) against a live
+  host, with the Expo dev-tools button hidden
+  (`defaults write sh.pragma.go EXDevMenuShowFloatingActionButton -bool false`) and the status
+  bar set to the clean preset. Never ship a capture showing a real account: the home screen's
+  Accounts cards print sign-in emails, so it is deliberately not on the page. Its comparison
+  table lives in `lib/mobile-compare.ts` with `MOBILE_VERIFIED_ON`; re-check Superset's and
+  Orca's own pages and bump that date when you touch a row, and keep the desktop table's
+  "Mobile & web client" row in `compare-data.ts` agreeing with it. The page emits
+  `MobileApplication` + `FAQPage` JSON-LD built from the same constants it renders.
 - **`/privacy` is an App Store submission artifact, not a marketing page.** App Store
   Connect stores its URL for Pragma Go and App Review follows it, which is why it is
   reached by URL and deliberately kept out of the site navigation. Change its route only

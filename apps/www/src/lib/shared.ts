@@ -14,6 +14,8 @@ export const downloadsRoute = "/downloads";
 export const pluginsRoute = "/plugins";
 export const compareRoute = "/compare";
 export const blogRoute = "/blog";
+/** The Pragma Go landing page — linked from the home page's mobile section, the nav, and the footer. */
+export const mobileRoute = "/mobile";
 
 /** Base route for generated per-page OG images. */
 export const docsImageRoute = "/og/docs";

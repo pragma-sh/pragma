@@ -2,7 +2,7 @@ import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
 import { BrandIcon } from "@/components/brand-icon";
 
-import { appName, compareRoute, docsRoute, pluginsRoute, repoUrl } from "./shared";
+import { appName, compareRoute, docsRoute, mobileRoute, pluginsRoute, repoUrl } from "./shared";
 
 /** Navigation options shared by the marketing layout and the docs layout. */
 export function baseOptions(): BaseLayoutProps {
@@ -16,6 +16,7 @@ export function baseOptions(): BaseLayoutProps {
       ),
     },
     links: [
+      { text: "Mobile", url: mobileRoute, active: "nested-url" },
       { text: "Plugins", url: pluginsRoute, active: "nested-url" },
       { text: "Compare", url: compareRoute, active: "nested-url" },
       { text: "Docs", url: docsRoute, active: "nested-url" },

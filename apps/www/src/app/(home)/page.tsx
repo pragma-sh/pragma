@@ -15,7 +15,7 @@ import { SiteFooter } from "@/components/home/site-footer";
 import { TerminalCard, type TerminalLine } from "@/components/home/terminal-card";
 import { AndroidMark } from "@/components/platform-marks";
 import { Button } from "@/components/ui/button";
-import { androidInstallRoute, appName } from "@/lib/shared";
+import { androidInstallRoute, appName, mobileRoute } from "@/lib/shared";
 
 export const metadata: Metadata = {
   title: { absolute: `${appName} — run teams of coding agents` },
@@ -390,6 +390,9 @@ export default function HomePage() {
                 <AndroidMark className="size-4" />
                 Android
               </Link>
+            </Button>
+            <Button asChild variant="secondary" className="pill-cta">
+              <Link href={mobileRoute}>Learn more about Pragma Go</Link>
             </Button>
           </>
         }
