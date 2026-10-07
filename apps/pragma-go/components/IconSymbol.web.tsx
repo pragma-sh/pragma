@@ -20,6 +20,7 @@ import {
   Maximize2,
   MessagesSquare,
   Plus,
+  RotateCw,
   Settings,
   Square,
   Terminal,
@@ -41,6 +42,7 @@ import { Text } from "./ui/text";
 // symbol degrades instead of disappearing.
 
 const LUCIDE_BY_SF_SYMBOL: Record<string, LucideIcon> = {
+  "arrow.clockwise": RotateCw,
   "arrow.left": ArrowLeft,
   "arrow.triangle.branch": GitBranch,
   "arrow.up.left.and.arrow.down.right": Maximize2,

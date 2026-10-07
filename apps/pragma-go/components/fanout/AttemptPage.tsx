@@ -8,7 +8,7 @@ import {
 } from "@pragma-sh/fanout-view";
 import type { ScratchpadFile } from "@pragma-sh/sdk";
 import { router } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 
 import { AgentIcon } from "@/components/AgentIcon";
@@ -16,8 +16,6 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { IconSymbol } from "@/components/IconSymbol";
 import { NavRow } from "@/components/NavRow";
 import { ScratchpadWebView } from "@/components/scratchpad/ScratchpadWebView";
-import { Button } from "@/components/ui/button";
-import { MenuView } from "@/components/ui/menu-view";
 import { Text } from "@/components/ui/text";
 import { useWorktree } from "@/lib/data/data-context";
 import { attemptScratchpads, memberDotStatus } from "@/lib/fanout-status";
@@ -33,45 +31,33 @@ const LIVE_REFRESH_MS = 5_000;
 /** Tallest the expanded changed-file list grows before it scrolls. */
 const FILE_LIST_MAX_HEIGHT = 240;
 
+/** Back-button text on screens pushed from a fanout, instead of the worktree's name. */
+const FANOUT_BACK_LABEL = "Fanout";
+
 /**
- * One attempt: who it is and how it is doing, then the scratchpad it wrote —
- * rendered, filling the page — and a one-line summary of the files it changed
- * that expands into the list.
+ * One attempt's body: the scratchpad it wrote — rendered, filling the page —
+ * and a one-line summary of the files it changed that expands into the list.
+ * Who the attempt is, and its actions, sit above the pager in
+ * {@link AttemptHeader}, so they stay put while the pages swipe.
  *
  * The scratchpad is the attempt's answer; a TUI agent's terminal tail is mostly
  * chrome, so it is not shown here. "Open chat" goes to the live session.
  */
 export function AttemptPage({
   active,
-  busy,
-  catalog,
   fanout,
   member,
-  onPick,
-  onRetry,
   width,
 }: {
   /** This page is the one in view, on a focused screen; only it refreshes. */
   active: boolean;
-  busy: FanoutBusy | null;
-  catalog: ReturnType<typeof useCatalog>;
   fanout: Fanout;
   member: FanoutMember;
-  onPick: (member: FanoutMember) => void;
-  onRetry: (member: FanoutMember) => void;
   width: number;
 }) {
   const data = useAttemptData(fanout, member, active);
   return (
     <View className="flex-1 gap-3 px-4 pb-2 pt-1" style={{ width }}>
-      <AttemptHeader
-        actionable={canActOnFanout(fanout) && !!member.worktreeId}
-        busy={busy}
-        catalog={catalog}
-        member={member}
-        onPick={onPick}
-        onRetry={onRetry}
-      />
       {member.failure ? (
         <Text className="text-sm text-destructive">{member.failure.message}</Text>
       ) : null}
@@ -100,6 +86,7 @@ function useAttemptData(fanout: Fanout, member: FanoutMember, active: boolean) {
   );
   const scratchpads = useHostValue(root, readScratchpads(root));
   useLiveRefresh(active && isWorking(member), [scratchpads.reload, changes.reload]);
+  useRefreshOnChange(active, member.status, [scratchpads.reload, changes.reload]);
   const ordered = useMemo(
     () => attemptScratchpads(scratchpads.value ?? [], member.tabId),
     [member.tabId, scratchpads.value],
@@ -151,60 +138,141 @@ function useLiveRefresh(live: boolean, reloads: Array<() => void>): void {
   }, [live]);
 }
 
-/** Icon, name, status, and the actions — one row. Retry lives in the overflow menu. */
-function AttemptHeader({
-  actionable,
+/**
+ * Re-reads once when the page comes into view and whenever the attempt's
+ * status changes. An agent writes its scratchpad and edits just before it
+ * reports done, which is also when the live interval stops — without this the
+ * last read is from before the work landed.
+ */
+function useRefreshOnChange(
+  active: boolean,
+  status: FanoutMember["status"],
+  reloads: Array<() => void>,
+): void {
+  const latest = useRef(reloads);
+  latest.current = reloads;
+  useEffect(() => {
+    if (!active) return;
+    for (const reload of latest.current) reload();
+  }, [active, status]);
+}
+
+/**
+ * The attempt in view: its agent and status, then its actions as icon buttons —
+ * open the chat, retry, and pick (the check). Lives above the pager, so it
+ * names whichever attempt is showing.
+ */
+export function AttemptHeader({
   busy,
   catalog,
+  fanout,
   member,
   onPick,
   onRetry,
 }: {
-  actionable: boolean;
   busy: FanoutBusy | null;
   catalog: ReturnType<typeof useCatalog>;
+  fanout: Fanout;
   member: FanoutMember;
   onPick: (member: FanoutMember) => void;
   onRetry: (member: FanoutMember) => void;
 }) {
   const colors = useThemeColors();
+  const actionable = canActOnFanout(fanout) && !!member.worktreeId;
   const picking = busy?.kind === "pick" && busy.memberId === member.id;
   const retrying = busy?.kind === "retry" && busy.memberId === member.id;
   return (
-    <View className="flex-row items-center gap-2.5">
+    <View className="flex-row items-center gap-2.5 px-4 pb-1 pt-2">
       <AgentIcon
         fallback="◆"
         icon={catalogAgentById(catalog, member.catalogAgentId)?.icon}
-        size={24}
+        size={28}
       />
       <View className="min-w-0 flex-1">
-        <Text className="font-semibold" numberOfLines={1}>
+        <Text className="text-base font-semibold" numberOfLines={1}>
           {memberLabel(member)}
         </Text>
         <View className="flex-row items-center gap-1.5">
           <AgentStatusDot status={memberDotStatus(member)} />
           <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-            {retrying ? "Retrying…" : memberStatusLabel(member)}
+            {attemptStatusText(member, picking, retrying)}
           </Text>
         </View>
       </View>
       <ChatButton color={colors.foreground} member={member} />
       {actionable ? (
         <>
-          <MenuView
-            actions={[{ id: "retry", title: "Retry attempt" }]}
-            onPressAction={({ nativeEvent }) => {
-              if (nativeEvent.event === "retry" && busy === null) onRetry(member);
-            }}
-          >
-            <IconSymbol color={colors.foreground} fallback="⋯" name="ellipsis.circle" size={20} />
-          </MenuView>
-          <Button disabled={busy !== null} onPress={() => onPick(member)} size="sm">
-            <Text>{picking ? "Picking…" : "Pick"}</Text>
-          </Button>
+          <HeaderIconButton
+            busy={retrying}
+            color={colors.foreground}
+            disabled={busy !== null}
+            fallback="↻"
+            label="Retry attempt"
+            name="arrow.clockwise"
+            onPress={() => onRetry(member)}
+          />
+          <HeaderIconButton
+            busy={picking}
+            color={colors.primaryForeground}
+            disabled={busy !== null}
+            fallback="✓"
+            label="Pick this attempt"
+            name="checkmark"
+            onPress={() => onPick(member)}
+            primary
+          />
         </>
       ) : null}
     </View>
+  );
+}
+
+function attemptStatusText(member: FanoutMember, picking: boolean, retrying: boolean): string {
+  if (picking) return "Picking…";
+  if (retrying) return "Retrying…";
+  return memberStatusLabel(member);
+}
+
+/** A round icon-only header action; `primary` fills it, for the one that ends the fanout. */
+function HeaderIconButton({
+  busy,
+  color,
+  disabled,
+  fallback,
+  label,
+  name,
+  onPress,
+  primary = false,
+}: {
+  busy: boolean;
+  color: string;
+  disabled: boolean;
+  fallback: string;
+  label: string;
+  name: ComponentProps<typeof IconSymbol>["name"];
+  onPress: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ busy, disabled }}
+      className={cn(
+        "h-9 w-9 items-center justify-center rounded-full active:opacity-60",
+        primary ? "bg-primary" : "border border-border bg-card",
+        disabled && !busy && "opacity-40",
+      )}
+      disabled={disabled}
+      hitSlop={4}
+      onPress={onPress}
+    >
+      {busy ? (
+        <ActivityIndicator color={color} size="small" />
+      ) : (
+        <IconSymbol color={color} fallback={fallback} name={name} size={17} />
+      )}
+    </Pressable>
   );
 }
 
@@ -213,19 +281,25 @@ function ChatButton({ color, member }: { color: string; member: FanoutMember }) 
   const { tabId, worktreeId } = member;
   if (!tabId || !worktreeId) return null;
   return (
-    <Pressable
-      accessibilityLabel="Open chat"
-      accessibilityRole="button"
-      hitSlop={8}
+    <HeaderIconButton
+      busy={false}
+      color={color}
+      disabled={false}
+      fallback="💬"
+      label="Open chat"
+      name="bubble.left.and.text.bubble.right"
       onPress={() =>
         router.push({
           pathname: "/chat/[tabId]",
-          params: { agent: member.runtimeAgentId, tabId, worktreeId },
+          params: {
+            agent: member.runtimeAgentId,
+            backLabel: FANOUT_BACK_LABEL,
+            tabId,
+            worktreeId,
+          },
         })
       }
-    >
-      <IconSymbol color={color} fallback="💬" name="bubble.left.and.text.bubble.right" size={20} />
-    </Pressable>
+    />
   );
 }
 
@@ -365,6 +439,7 @@ function openScratchpad(scratchpad: ScratchpadFile, worktreeId: string): void {
     pathname: "/scratchpad/[scratchpadId]",
     params: {
       scratchpadId: scratchpad.id,
+      backLabel: FANOUT_BACK_LABEL,
       filePath: scratchpad.filePath,
       title: scratchpad.title,
       worktreeId,

@@ -32,6 +32,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{
     tabId: string;
     agent?: string;
+    backLabel?: string;
     initialMessage?: string;
     initialMessageTs?: string;
     title?: string;
@@ -43,6 +44,8 @@ export default function ChatScreen() {
 type ChatParams = {
   tabId: string;
   agent?: string;
+  /** Back-button text when opened from somewhere other than the worktree. */
+  backLabel?: string;
   initialMessage?: string;
   initialMessageTs?: string;
   title?: string;
@@ -70,7 +73,11 @@ function ChatSession({ params, tab }: { params: ChatParams; tab: ReturnType<type
   });
   return (
     <>
-      <ChatNavigation title={details.title} worktreeId={details.worktreeId} />
+      <ChatNavigation
+        backLabel={params.backLabel}
+        title={details.title}
+        worktreeId={details.worktreeId}
+      />
       <MarkDoneAgent status={details.status} tabId={details.tabId} />
       <AgentSurfaces
         chat={
@@ -187,7 +194,15 @@ function resolvedWorktreeId(
   return worktreeId ?? tab?.worktreeId ?? "";
 }
 
-function ChatNavigation({ title, worktreeId }: { title: string | undefined; worktreeId: string }) {
+function ChatNavigation({
+  backLabel,
+  title,
+  worktreeId,
+}: {
+  backLabel: string | undefined;
+  title: string | undefined;
+  worktreeId: string;
+}) {
   const { foreground } = useThemeColors();
   return (
     <Stack.Screen
@@ -198,7 +213,11 @@ function ChatNavigation({ title, worktreeId }: { title: string | undefined; work
         headerRight: renderNewWorktreeButton,
         // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
         headerLeft: ({ tintColor }) => (
-          <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+          <WorktreeBackButton
+            color={tintColor ?? foreground}
+            label={backLabel}
+            worktreeId={worktreeId}
+          />
         ),
       }}
     />

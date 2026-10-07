@@ -1,7 +1,6 @@
 import type { Fanout, FanoutMember } from "@pragma-sh/constants";
 import {
   canActOnFanout,
-  fanoutStatusLabel,
   isActiveFanout,
   memberLabel,
   orderedMembers,
@@ -25,7 +24,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { composerKeyboardOffset } from "@/components/chat/Composer";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
-import { AttemptPage } from "@/components/fanout/AttemptPage";
+import { AttemptHeader, AttemptPage } from "@/components/fanout/AttemptPage";
 import { FanoutComposer } from "@/components/fanout/FanoutComposer";
 import { IconSymbol } from "@/components/IconSymbol";
 import { Button } from "@/components/ui/button";
@@ -47,9 +46,11 @@ import { worktreeLabel } from "@/lib/worktree-tree";
  * A fanout's compare view on a phone: one page per attempt, swiped between.
  *
  * The desktop lays attempts side by side, which a phone cannot; paging keeps
- * each attempt full width and readable end to end, with a chip row on top to
- * jump straight to one. The follow-up composer stays below the pager so a
- * message can go to every attempt — or just the one in view — without leaving.
+ * each attempt full width and readable end to end. The attempt in view heads
+ * the screen — its agent, status, and the chat/retry/pick buttons — with a chip
+ * row under it to jump straight to another. The follow-up composer stays below
+ * the pager so a message can go to every attempt — or just the one in view —
+ * without leaving.
  */
 export default function FanoutScreen() {
   const { fanoutId } = useLocalSearchParams<{ fanoutId: string }>();
@@ -136,8 +137,27 @@ function ActiveFanout({ fanout }: { fanout: Fanout }) {
         <Stack.Screen
           options={{ title: fanout.title, headerRight: acting ? renderMenu : undefined }}
         />
-        <FanoutSummary fanout={fanout} />
+        {current ? (
+          <AttemptHeader
+            busy={actions.busy}
+            catalog={catalog}
+            fanout={fanout}
+            member={current}
+            onPick={(member) =>
+              actions.pick(member, (result) => {
+                // Only a pick that removed every attempt worktree has nothing
+                // left to show here. One that stopped with survivors stays
+                // put, so tapping pick again can finish the cleanup.
+                if (isCleanPick(result) && router.canGoBack()) router.back();
+              })
+            }
+            onRetry={actions.retry}
+          />
+        ) : null}
         <AttemptChips current={index} members={members} onSelect={jumpTo} />
+        {fanout.failure ? (
+          <Text className="px-4 pb-1 text-sm text-destructive">{fanout.failure.message}</Text>
+        ) : null}
         <FlatList
           data={members}
           getItemLayout={(_data, itemIndex) => ({
@@ -153,20 +173,8 @@ function ActiveFanout({ fanout }: { fanout: Fanout }) {
           renderItem={({ item, index: itemIndex }) => (
             <AttemptPage
               active={focused && itemIndex === index}
-              busy={actions.busy}
-              catalog={catalog}
               fanout={fanout}
               member={item}
-              onPick={(member) =>
-                actions.pick(member, (result) => {
-                  // Only a pick that removed every attempt worktree has
-                  // nothing left to show here. One that stopped with
-                  // survivors stays put, so tapping pick again can finish
-                  // the cleanup.
-                  if (isCleanPick(result) && router.canGoBack()) router.back();
-                })
-              }
-              onRetry={actions.retry}
               width={width}
             />
           )}
@@ -181,27 +189,6 @@ function ActiveFanout({ fanout }: { fanout: Fanout }) {
         />
       </SafeAreaView>
     </KeyboardAvoidingView>
-  );
-}
-
-/** The fanout's overall state and shared prompt, collapsed to two lines. */
-function FanoutSummary({ fanout }: { fanout: Fanout }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <Pressable
-      accessibilityHint={expanded ? "Collapses the prompt" : "Shows the whole prompt"}
-      accessibilityRole="button"
-      className="gap-1 px-4 pb-1 pt-2"
-      onPress={() => setExpanded((value) => !value)}
-    >
-      <Text className="text-sm text-muted-foreground" numberOfLines={expanded ? undefined : 2}>
-        <Text className="text-sm font-medium text-foreground">{fanoutStatusLabel(fanout)} · </Text>
-        {fanout.prompt}
-      </Text>
-      {fanout.failure ? (
-        <Text className="text-sm text-destructive">{fanout.failure.message}</Text>
-      ) : null}
-    </Pressable>
   );
 }
 

@@ -35,8 +35,10 @@ import { useWhiteboardSnapshotLoader } from "@/lib/use-whiteboard-snapshot";
  * "Resolve comments" button sends.
  */
 export default function ScratchpadScreen() {
-  const { worktreeId, filePath, title } = useLocalSearchParams<{
+  const { backLabel, worktreeId, filePath, title } = useLocalSearchParams<{
     scratchpadId: string;
+    /** Back-button text when opened from somewhere other than the worktree. */
+    backLabel?: string;
     worktreeId: string;
     filePath: string;
     title: string;
@@ -51,12 +53,17 @@ export default function ScratchpadScreen() {
           title: scratchpad?.title ?? title,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+            <WorktreeBackButton
+              color={tintColor ?? foreground}
+              label={backLabel}
+              worktreeId={worktreeId}
+            />
           ),
         }}
       />
       {scratchpad ? (
         <ScratchpadContent
+          backLabel={backLabel}
           onReload={reload}
           root={root}
           scratchpad={scratchpad}
@@ -82,11 +89,13 @@ function ScratchpadPlaceholder({ loading }: { loading: boolean }) {
 }
 
 function ScratchpadContent({
+  backLabel,
   onReload,
   root,
   scratchpad,
   worktreeId,
 }: {
+  backLabel: string | undefined;
   onReload: () => void;
   root: string | undefined;
   scratchpad: ScratchpadFile;
@@ -163,7 +172,11 @@ function ScratchpadContent({
           headerRight: renderCommentModeButton,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+            <WorktreeBackButton
+              color={tintColor ?? foreground}
+              label={backLabel}
+              worktreeId={worktreeId}
+            />
           ),
         }}
       />
