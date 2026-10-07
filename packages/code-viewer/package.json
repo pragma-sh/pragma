@@ -21,6 +21,7 @@
   },
   "scripts": {
     "build": "bun scripts/build.ts",
+    "generate": "bun scripts/build.ts --runtime-only",
     "pretypecheck": "bun scripts/build.ts --runtime-only",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "bun scripts/build.ts --runtime-only",
