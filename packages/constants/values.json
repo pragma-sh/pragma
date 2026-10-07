@@ -311,6 +311,17 @@
     "titlebarHeight": 38,
     "trafficLightInset": 12
   },
+  "miniWindow": {
+    "labelPrefix": "mini-",
+    "sessionIdPrefix": "mini-",
+    "homeWorktreeId": "pragma-mini-home",
+    "launchArg": "--mini",
+    "menuTitle": "New Pragma Mini Window",
+    "defaultWidth": 820,
+    "defaultHeight": 520,
+    "minWidth": 420,
+    "minHeight": 260
+  },
   "editorLaunchers": {
     "defaultEditorId": "system",
     "options": [
