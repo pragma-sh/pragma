@@ -1022,6 +1022,23 @@ fn a_failing_commit_message_helper_stops_finalization_and_keeps_every_attempt() 
     let fanout = store.get_by_id(&created.id).expect("fanout");
     assert_eq!(fanout.status, FanoutStatus::NeedsResolution);
     assert_eq!(fanout.members.len(), 2);
+
+    // Once the helper works again, a retried pick completes — and must not
+    // keep reporting the failure that halted the first attempt.
+    host.state().commit_message = Ok("feat: retry".to_string());
+    store
+        .pick(
+            &host,
+            &FanoutMemberRequest {
+                fanout_id: Some(created.id.clone()),
+                worktree_id: None,
+                member_id: winner.id.clone(),
+            },
+        )
+        .expect("retry completes");
+    let fanout = store.get_by_id(&created.id).expect("fanout");
+    assert_eq!(fanout.status, FanoutStatus::Completed);
+    assert_eq!(fanout.failure, None);
 }
 
 #[test]

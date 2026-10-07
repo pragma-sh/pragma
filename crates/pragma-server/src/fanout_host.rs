@@ -310,6 +310,14 @@ impl FanoutHost for Registry {
     /// diff. Every failure — no provider, a sidecar crash, an empty message —
     /// is surfaced; the caller must never invent one.
     fn generate_commit_message(&self, root: &str) -> HostResult<String> {
+        // The winner's work is uncommitted, not staged: stage it first so the
+        // diff describes what `stage_and_commit` will actually commit.
+        git::<Value>(
+            &GitRequest::StageAll {
+                root: root.to_string(),
+            },
+            FanoutFailureCode::CommitMessageFailed,
+        )?;
         let diff = staged_diff(root)?;
         if diff.trim().is_empty() {
             return Err(host_error(
