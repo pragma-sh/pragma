@@ -70,5 +70,6 @@ export function attemptScratchpads<T extends AttemptScratchpad>(
   tabId: string | null,
 ): T[] {
   const own = (scratchpad: T) => (tabId !== null && scratchpad.agentTabId === tabId ? 1 : 0);
-  return scratchpads.toSorted((a, b) => own(b) - own(a) || b.createdAt - a.createdAt);
+  // oxlint-disable-next-line unicorn/no-array-sort -- Hermes has no Array#toSorted; sorting a copy is equivalent.
+  return [...scratchpads].sort((a, b) => own(b) - own(a) || b.createdAt - a.createdAt);
 }
