@@ -40,6 +40,12 @@ Two details carry the design:
   colour literals — `terminalThemeCss` is writing into a `<style>` element.
   xterm reads its palette from options, not CSS, so the runtime pushes the
   resolved colours into the terminal; a `var()` never reaches the canvas.
+- **A swipe never becomes input.** xterm 6 turns a touch drag into mouse-wheel
+  reports (mouse tracking on) or ↑/↓ keys (alternate screen), which typed junk
+  into agents whenever someone scrolled on a phone. `runtime/touch-scroll.ts`
+  catches touches in the capture phase, ahead of xterm's recogniser, and only
+  scrolls local scrollback. Taps still focus and open links via the synthesized
+  mouse events.
 - **Do not add `@xterm/addon-attach`.** It assumes a WebSocket; Pragma's
   transport is NDJSON over the authenticated gateway, and the host owns it.
 - Keep the xterm versions in step with `apps/pragma`, so desktop and mobile

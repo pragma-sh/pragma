@@ -10,7 +10,13 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 
 import { isTerminalViewerCommand, type TerminalViewerMessage } from "../messages";
-import { TERMINAL_FALLBACK_COLORS, TERMINAL_FALLBACK_SELECTION } from "../theme";
+import {
+  TERMINAL_FALLBACK_COLORS,
+  TERMINAL_FALLBACK_SELECTION,
+  TERMINAL_LIGHT_ANSI,
+  TERMINAL_MINIMUM_CONTRAST,
+} from "../theme";
+import { bindTouchScroll } from "./touch-scroll";
 
 declare global {
   interface Window {
@@ -51,7 +57,14 @@ terminal.loadAddon(
 );
 
 const root = document.getElementById("terminal");
-if (root) terminal.open(root);
+if (root) {
+  terminal.open(root);
+  bindTouchScroll(root, {
+    lineHeight: () =>
+      (terminal.element?.querySelector(".xterm-screen")?.clientHeight ?? 0) / terminal.rows,
+    scrollLines: (lines) => terminal.scrollLines(lines),
+  });
+}
 
 function send(message: TerminalViewerMessage): void {
   const raw = JSON.stringify(message);
@@ -141,12 +154,27 @@ function applyTheme(css: string, mode: "light" | "dark"): void {
   const fallback = TERMINAL_FALLBACK_COLORS[mode];
   const foreground = read("--terminal-foreground", fallback.foreground);
   terminal.options.theme = {
+    ...(mode === "light" ? TERMINAL_LIGHT_ANSI : {}),
     background: read("--terminal-background", fallback.background),
     foreground,
     cursor: read("--terminal-cursor", foreground),
     selectionBackground: read("--terminal-selection", TERMINAL_FALLBACK_SELECTION),
   };
+  terminal.options.minimumContrastRatio = TERMINAL_MINIMUM_CONTRAST[mode];
 }
+
+/**
+ * The palette the document was built with. A native host bakes the mode and
+ * its overrides into the HTML and rebuilds the document for a new palette
+ * rather than sending a `theme` command, so the canvas has to read them here —
+ * otherwise xterm keeps its own default white text on a light page.
+ */
+function applyDocumentTheme(): void {
+  const css = document.getElementById("pragma-terminal-theme")?.textContent ?? "";
+  applyTheme(css, document.documentElement.classList.contains("light") ? "light" : "dark");
+}
+
+applyDocumentTheme();
 
 window.pragmaTerminalCommand = apply;
 // A native web view delivers host commands as `message` events on `document`;
