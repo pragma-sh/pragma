@@ -1,9 +1,10 @@
-import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useState } from "react";
+import { Stack, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { TerminalSurface } from "@/components/terminal/TerminalSurface";
 import { useProjectRootPath, useTerminalTab, useWorktree } from "@/lib/data/data-context";
+import { useScreenFocused } from "@/lib/use-screen-focused";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
 /**
@@ -21,27 +22,32 @@ export default function TerminalScreen() {
     worktreeId?: string;
   }>();
   const tab = useTerminalTab(tabId);
-  const worktree = useWorktree(worktreeId ?? tab?.worktreeId ?? "");
-  useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
-  const [attached, setAttached] = useState(false);
-  const [shellTitle, setShellTitle] = useState<string | null>(null);
-
+  useViewTerminalProject(worktreeId ?? tab?.worktreeId);
   // Attach only while the screen is in front: a backgrounded terminal should
   // not hold the session's viewport, and the host expires the lease if this
   // app is suspended before it can release.
-  useFocusEffect(
-    useCallback(() => {
-      setAttached(true);
-      return () => setAttached(false);
-    }, []),
-  );
-
-  const label = shellTitle ?? tab?.title ?? title ?? "Terminal";
+  const attached = useScreenFocused();
+  const [shellTitle, setShellTitle] = useState<string | null>(null);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-      <Stack.Screen options={{ title: label }} />
+      <Stack.Screen options={{ title: terminalLabel(shellTitle, tab?.title, title) }} />
       <TerminalSurface attached={attached} onTitle={setShellTitle} tabId={tabId} />
     </SafeAreaView>
   );
+}
+
+/** Marks the terminal's project as the one in view, once its worktree is known. */
+function useViewTerminalProject(worktreeId: string | undefined): void {
+  const worktree = useWorktree(worktreeId ?? "");
+  useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
+}
+
+/** The shell's own title, else the tab's, else the one it was opened with. */
+function terminalLabel(
+  shellTitle: string | null,
+  tabTitle: string | undefined,
+  openedTitle: string | undefined,
+): string {
+  return shellTitle ?? tabTitle ?? openedTitle ?? "Terminal";
 }

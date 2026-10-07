@@ -136,6 +136,7 @@ export type TranscriptRow =
 export type ChatConnectionState = "connecting" | "open" | "empty" | "error";
 
 /** An item awaiting the user in the Inbox tab. */
+// fallow-ignore-next-line code-duplication -- a plain field list whose shape matches unrelated interfaces (ThemePalette, ChipBody); no logic to extract.
 export interface InboxItem {
   id: string;
   kind: AgentAttentionKind;

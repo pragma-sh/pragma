@@ -1,7 +1,7 @@
-import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { useCallback } from "react";
 
 import { useConnection } from "./connection-context";
+import { settle } from "./host-read";
 import { getWhiteboardSnapshot, type ScratchpadWhiteboardSnapshot } from "./whiteboard-snapshot";
 
 /**
@@ -20,12 +20,12 @@ export function useWhiteboardSnapshotLoader(
   return useCallback(
     async (id: string, knownVersion?: number, dark?: boolean) => {
       if (!client) throw new Error("Host is unavailable");
-      try {
-        return await getWhiteboardSnapshot(client.whiteboards, worktreeId, id, knownVersion, dark);
-      } catch (cause) {
-        if (cause instanceof PragmaGatewayError && cause.httpStatus === 401) handleUnauthorized();
-        throw cause;
-      }
+      const result = await settle(
+        getWhiteboardSnapshot(client.whiteboards, worktreeId, id, knownVersion, dark),
+        handleUnauthorized,
+      );
+      if (!result.ok) throw result.error;
+      return result.value;
     },
     [client, handleUnauthorized, worktreeId],
   );

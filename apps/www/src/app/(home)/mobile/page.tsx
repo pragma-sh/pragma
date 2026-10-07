@@ -3,21 +3,13 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { AppStoreButton } from "@/components/app-store-button";
-import { SupportCell } from "@/components/compare/support-cell";
+import { ComparisonTable } from "@/components/compare/comparison-table";
 import { PhoneFrame } from "@/components/home/device-frame";
 import { FeaturePoint, FeatureSection, Reveal, SectionShell } from "@/components/home/section";
 import { SiteFooter } from "@/components/home/site-footer";
 import { AndroidMark } from "@/components/platform-marks";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { MOBILE_FOOTNOTE, MOBILE_ROWS } from "@/lib/mobile-compare";
+import { MOBILE_COLUMNS, MOBILE_FOOTNOTE, MOBILE_ROWS } from "@/lib/mobile-compare";
 import {
   androidInstallRoute,
   appName,
@@ -364,39 +356,12 @@ export default function MobilePage() {
             </p>
           </Reveal>
           <div className="border-border bg-card mt-8 overflow-x-auto rounded-xl border">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[40%] min-w-56">Capability</TableHead>
-                  <TableHead className="text-foreground text-center font-medium">
-                    Pragma Go
-                  </TableHead>
-                  <TableHead className="text-center">Superset Mobile</TableHead>
-                  <TableHead className="text-center">Orca Mobile</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {MOBILE_ROWS.map((row) => (
-                  <TableRow key={row.feature}>
-                    <TableCell className="align-top">
-                      <span className="text-foreground font-medium">{row.feature}</span>
-                      <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
-                        {row.detail}
-                      </span>
-                    </TableCell>
-                    <TableCell className="bg-foreground/[0.04] text-center align-middle">
-                      <SupportCell value={row.pragma} highlight />
-                    </TableCell>
-                    <TableCell className="text-center align-middle">
-                      <SupportCell value={row.superset} />
-                    </TableCell>
-                    <TableCell className="text-center align-middle">
-                      <SupportCell value={row.orca} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ComparisonTable
+              rows={MOBILE_ROWS}
+              pragmaLabel="Pragma Go"
+              columns={MOBILE_COLUMNS}
+              capabilityClassName="w-[40%] min-w-56"
+            />
           </div>
           <p className="text-muted-foreground mt-6 max-w-3xl text-sm leading-relaxed">
             Where the others are ahead: Orca Mobile can keep several desktops paired at once and

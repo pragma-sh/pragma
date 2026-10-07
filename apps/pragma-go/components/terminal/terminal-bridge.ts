@@ -1,4 +1,4 @@
-import { parseTerminalViewerMessage } from "@pragma-sh/terminal-viewer";
+import { parseTerminalViewerMessage, type TerminalViewerMessage } from "@pragma-sh/terminal-viewer";
 
 /** What the terminal screen wants back from the renderer, on either platform. */
 export interface TerminalViewProps {
@@ -28,25 +28,27 @@ export function terminalMessageHandler(props: TerminalViewProps): (raw: string) 
   return (raw: string) => {
     const message = parseTerminalViewerMessage(raw);
     if (!message) return;
-    switch (message.type) {
-      case "ready":
-        props.onReady();
-        break;
-      case "input":
-        props.onInput(message.dataBase64);
-        break;
-      case "resize":
-        props.onResize(message.cols, message.rows);
-        break;
-      case "written":
-        props.onWritten?.(message.bytes);
-        break;
-      case "link":
-        props.onLink?.(message.url);
-        break;
-      case "scroll":
-        props.onScroll?.(message.atBottom);
-        break;
-    }
+    const route = MESSAGE_ROUTES[message.type] as (
+      message: TerminalViewerMessage,
+      props: TerminalViewProps,
+    ) => void;
+    route(message, props);
   };
 }
+
+type MessageOf<T extends TerminalViewerMessage["type"]> = Extract<
+  TerminalViewerMessage,
+  { type: T }
+>;
+
+/** Which prop each renderer message is delivered to. */
+const MESSAGE_ROUTES: {
+  [T in TerminalViewerMessage["type"]]: (message: MessageOf<T>, props: TerminalViewProps) => void;
+} = {
+  ready: (_message, props) => props.onReady(),
+  input: (message, props) => props.onInput(message.dataBase64),
+  resize: (message, props) => props.onResize(message.cols, message.rows),
+  written: (message, props) => props.onWritten?.(message.bytes),
+  link: (message, props) => props.onLink?.(message.url),
+  scroll: (message, props) => props.onScroll?.(message.atBottom),
+};

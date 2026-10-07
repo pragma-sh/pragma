@@ -58,12 +58,20 @@ function readConfig(): ViewerConfig | null {
 }
 
 function parseEmbedded(raw: string | null | undefined): Record<string, unknown> {
+  const value = parseJson(raw ?? "");
+  return isRecord(value) ? value : {};
+}
+
+function parseJson(raw: string): unknown {
   try {
-    const value: unknown = JSON.parse(raw ?? "");
-    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+    return JSON.parse(raw);
   } catch {
-    return {};
+    return undefined;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function showEmpty(root: HTMLElement, text: string): void {
@@ -107,18 +115,29 @@ async function mount(): Promise<void> {
     send({ type: "error", message: "The document carried no readable content." });
     return;
   }
+  const view = render(root, config);
+  if (view) await highlight(view, config.content.path);
+}
+
+/** Paints the content as plain text, or the empty note for an unchanged diff. */
+function render(root: HTMLElement, config: ViewerConfig): EditorView | null {
   const state = createState(config);
   if (!state) {
     showEmpty(root, "No changes");
     send({ type: "ready", lines: 0 });
-    return;
+    return null;
   }
   const view = new EditorView({ state, parent: root });
   send({ type: "ready", lines: view.state.doc.lines });
+  return view;
+}
 
-  // The grammar arrives after the first paint: plain text is readable at once,
-  // and colour follows a moment later rather than holding the whole view back.
-  const language = await loadLanguageExtension(config.content.path);
+/**
+ * The grammar arrives after the first paint: plain text is readable at once,
+ * and colour follows a moment later rather than holding the whole view back.
+ */
+async function highlight(view: EditorView, path: string): Promise<void> {
+  const language = await loadLanguageExtension(path);
   if (language) view.dispatch({ effects: StateEffect.appendConfig.of(language) });
 }
 

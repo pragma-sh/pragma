@@ -111,6 +111,17 @@ export function TerminalSurface({ attached, onTitle, tabId }: TerminalSurfacePro
   );
 }
 
+/** What the status line says in each state; nothing while live. */
+const STATUS_MESSAGES: Record<
+  TerminalStatus,
+  (exitCode: number | null, error: string | null) => string | null
+> = {
+  live: () => null,
+  connecting: () => "Connecting…",
+  exited: (exitCode) => `Session ended${exitCode === null ? "" : ` (exit ${exitCode})`}`,
+  unavailable: (_exitCode, error) => error ?? "This terminal is not available",
+};
+
 /**
  * The connection state, above the terminal.
  *
@@ -127,13 +138,8 @@ function StatusLine({
   exitCode: number | null;
   status: TerminalStatus;
 }) {
-  if (status === "live") return null;
-  const message =
-    status === "exited"
-      ? `Session ended${exitCode === null ? "" : ` (exit ${exitCode})`}`
-      : status === "unavailable"
-        ? (error ?? "This terminal is not available")
-        : "Connecting…";
+  const message = STATUS_MESSAGES[status](exitCode, error);
+  if (message === null) return null;
   return (
     <View className="border-b border-border bg-muted px-4 py-2">
       <Text className="text-xs text-muted-foreground">{message}</Text>

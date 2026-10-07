@@ -81,7 +81,7 @@ export function AttemptPage({
 function useAttemptData(fanout: Fanout, member: FanoutMember, active: boolean) {
   const root = useAttemptRoot(member.worktreeId);
   const changes = useHostValue(
-    root ? `${root}\0${fanout.baseCommit}` : null,
+    changesKey(root, fanout.baseCommit),
     readChanges(root, fanout.baseCommit),
   );
   const scratchpads = useHostValue(root, readScratchpads(root));
@@ -93,10 +93,20 @@ function useAttemptData(fanout: Fanout, member: FanoutMember, active: boolean) {
   );
   return {
     files: changedFiles(changes.value ?? null),
-    changesLoading: changes.loading && !changes.value,
+    changesLoading: firstLoad(changes),
     scratchpads: ordered,
-    scratchpadsLoading: scratchpads.loading && !scratchpads.value,
+    scratchpadsLoading: firstLoad(scratchpads),
   };
+}
+
+/** Cache key for an attempt's changes: they depend on both the worktree and the base. */
+function changesKey(root: string | null, base: string): string | null {
+  return root ? `${root}\0${base}` : null;
+}
+
+/** Loading with nothing to show yet; a refresh behind a shown value is not "loading". */
+function firstLoad(read: { loading: boolean; value?: unknown }): boolean {
+  return read.loading && !read.value;
 }
 
 /** The attempt worktree's host path, or null until the workspace knows it. */
@@ -178,16 +188,12 @@ export function AttemptHeader({
   onRetry: (member: FanoutMember) => void;
 }) {
   const colors = useThemeColors();
-  const actionable = canActOnFanout(fanout) && !!member.worktreeId;
-  const picking = busy?.kind === "pick" && busy.memberId === member.id;
-  const retrying = busy?.kind === "retry" && busy.memberId === member.id;
+  const busyKind = busyFor(busy, member);
+  const picking = busyKind === "pick";
+  const retrying = busyKind === "retry";
   return (
     <View className="flex-row items-center gap-2.5 px-4 pb-1 pt-2">
-      <AgentIcon
-        fallback="◆"
-        icon={catalogAgentById(catalog, member.catalogAgentId)?.icon}
-        size={28}
-      />
+      <AgentIcon fallback="◆" icon={agentIcon(catalog, member)} size={28} />
       <View className="min-w-0 flex-1">
         <Text className="text-base font-semibold" numberOfLines={1}>
           {memberLabel(member)}
@@ -200,30 +206,71 @@ export function AttemptHeader({
         </View>
       </View>
       <ChatButton color={colors.foreground} member={member} />
-      {actionable ? (
-        <>
-          <HeaderIconButton
-            busy={retrying}
-            color={colors.foreground}
-            disabled={busy !== null}
-            fallback="↻"
-            label="Retry attempt"
-            name="arrow.clockwise"
-            onPress={() => onRetry(member)}
-          />
-          <HeaderIconButton
-            busy={picking}
-            color={colors.primaryForeground}
-            disabled={busy !== null}
-            fallback="✓"
-            label="Pick this attempt"
-            name="checkmark"
-            onPress={() => onPick(member)}
-            primary
-          />
-        </>
-      ) : null}
+      <AttemptActions
+        actionable={canActOnFanout(fanout) && !!member.worktreeId}
+        busy={busy !== null}
+        member={member}
+        onPick={onPick}
+        onRetry={onRetry}
+        picking={picking}
+        retrying={retrying}
+      />
     </View>
+  );
+}
+
+/** Which action, if any, is in flight for this attempt. */
+function busyFor(busy: FanoutBusy | null, member: FanoutMember): "pick" | "retry" | null {
+  return busy && "memberId" in busy && busy.memberId === member.id ? busy.kind : null;
+}
+
+function agentIcon(catalog: ReturnType<typeof useCatalog>, member: FanoutMember) {
+  return catalogAgentById(catalog, member.catalogAgentId)?.icon;
+}
+
+/** Retry and pick, for an attempt the fanout still lets the user act on. */
+function AttemptActions({
+  actionable,
+  busy,
+  member,
+  onPick,
+  onRetry,
+  picking,
+  retrying,
+}: {
+  actionable: boolean;
+  /** Any fanout action is in flight; every button waits for it. */
+  busy: boolean;
+  member: FanoutMember;
+  onPick: (member: FanoutMember) => void;
+  onRetry: (member: FanoutMember) => void;
+  picking: boolean;
+  retrying: boolean;
+}) {
+  const colors = useThemeColors();
+  if (!actionable) return null;
+  return (
+    <>
+      <HeaderIconButton
+        busy={retrying}
+        color={colors.foreground}
+        disabled={busy}
+        fallback="↻"
+        label="Retry attempt"
+        name="arrow.clockwise"
+        onPress={() => onRetry(member)}
+      />
+      <HeaderIconButton
+        busy={picking}
+        color={colors.primaryForeground}
+        disabled={busy}
+        fallback="✓"
+        label="Pick this attempt"
+        name="checkmark"
+        onPress={() => onPick(member)}
+        primary
+      />
+    </>
   );
 }
 
@@ -233,17 +280,7 @@ function attemptStatusText(member: FanoutMember, picking: boolean, retrying: boo
   return memberStatusLabel(member);
 }
 
-/** A round icon-only header action; `primary` fills it, for the one that ends the fanout. */
-function HeaderIconButton({
-  busy,
-  color,
-  disabled,
-  fallback,
-  label,
-  name,
-  onPress,
-  primary = false,
-}: {
+interface HeaderIconButtonProps {
   busy: boolean;
   color: string;
   disabled: boolean;
@@ -251,28 +288,37 @@ function HeaderIconButton({
   label: string;
   name: ComponentProps<typeof IconSymbol>["name"];
   onPress: () => void;
+  /** Filled rather than outlined, for the one action that ends the fanout. */
   primary?: boolean;
-}) {
+}
+
+/** A round icon-only header action. */
+function HeaderIconButton(props: HeaderIconButtonProps) {
+  const { busy, color, disabled } = props;
   return (
     <Pressable
-      accessibilityLabel={label}
+      accessibilityLabel={props.label}
       accessibilityRole="button"
       accessibilityState={{ busy, disabled }}
-      className={cn(
-        "h-9 w-9 items-center justify-center rounded-full active:opacity-60",
-        primary ? "bg-primary" : "border border-border bg-card",
-        disabled && !busy && "opacity-40",
-      )}
+      className={headerButtonClass(props)}
       disabled={disabled}
       hitSlop={4}
-      onPress={onPress}
+      onPress={props.onPress}
     >
       {busy ? (
         <ActivityIndicator color={color} size="small" />
       ) : (
-        <IconSymbol color={color} fallback={fallback} name={name} size={17} />
+        <IconSymbol color={color} fallback={props.fallback} name={props.name} size={17} />
       )}
     </Pressable>
+  );
+}
+
+function headerButtonClass({ busy, disabled, primary }: HeaderIconButtonProps): string {
+  return cn(
+    "h-9 w-9 items-center justify-center rounded-full active:opacity-60",
+    primary ? "bg-primary" : "border border-border bg-card",
+    disabled && !busy && "opacity-40",
   );
 }
 
@@ -314,8 +360,7 @@ function AttemptScratchpad({
   scratchpads: ScratchpadFile[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected =
-    scratchpads.find((scratchpad) => scratchpad.id === selectedId) ?? scratchpads[0] ?? null;
+  const selected = selectedScratchpad(scratchpads, selectedId);
   const { worktreeId } = member;
   if (!worktreeId || !selected) {
     return <ScratchpadEmpty loading={loading} member={member} />;
@@ -331,6 +376,14 @@ function AttemptScratchpad({
       <InlineScratchpad scratchpad={selected} worktreeId={worktreeId} />
     </View>
   );
+}
+
+/** The scratchpad the user picked, else the first one, else none. */
+function selectedScratchpad(
+  scratchpads: ScratchpadFile[],
+  selectedId: string | null,
+): ScratchpadFile | null {
+  return scratchpads.find((scratchpad) => scratchpad.id === selectedId) ?? scratchpads[0] ?? null;
 }
 
 function ScratchpadEmpty({ loading, member }: { loading: boolean; member: FanoutMember }) {
@@ -462,9 +515,8 @@ function ChangedFiles({
   worktreeId: string | null;
 }) {
   const [open, setOpen] = useState(false);
-  const colors = useThemeColors();
   if (!worktreeId) return null;
-  const expandable = !loading && files.length > 0;
+  const expandable = canExpand(files, loading);
   return (
     <View className="overflow-hidden rounded-xl border border-border bg-card">
       <Pressable
@@ -475,36 +527,79 @@ function ChangedFiles({
         onPress={() => setOpen((value) => !value)}
       >
         <Text className="flex-1 text-sm">{changesTitle(files, loading)}</Text>
-        {expandable ? (
-          <>
-            <ChangeTotals files={files} />
-            <IconSymbol
-              color={colors.mutedForeground}
-              fallback={open ? "▾" : "▸"}
-              name={open ? "chevron.down" : "chevron.right"}
-              size={13}
-            />
-          </>
-        ) : null}
+        <ChangesTrailer expandable={expandable} files={files} open={open} />
       </Pressable>
-      {open && expandable ? (
-        <ScrollView className="border-t border-border" style={{ maxHeight: FILE_LIST_MAX_HEIGHT }}>
-          {files.map((file) => (
-            <NavRow
-              key={file.path}
-              onPress={() =>
-                router.push({
-                  pathname: "/diff/[worktreeId]",
-                  params: { worktreeId, path: file.path, base, oldPath: file.oldPath ?? "", label },
-                })
-              }
-              subtitle={changeSummary(file)}
-              title={file.path}
-            />
-          ))}
-        </ScrollView>
-      ) : null}
+      <ChangedFileList
+        base={base}
+        files={files}
+        label={label}
+        shown={open && expandable}
+        worktreeId={worktreeId}
+      />
     </View>
+  );
+}
+
+function canExpand(files: ChangedFileSummary[], loading: boolean): boolean {
+  return !loading && files.length > 0;
+}
+
+/** The totals and the disclosure chevron, once there is a list to open. */
+function ChangesTrailer({
+  expandable,
+  files,
+  open,
+}: {
+  expandable: boolean;
+  files: ChangedFileSummary[];
+  open: boolean;
+}) {
+  const colors = useThemeColors();
+  if (!expandable) return null;
+  return (
+    <>
+      <ChangeTotals files={files} />
+      <IconSymbol
+        color={colors.mutedForeground}
+        fallback={open ? "▾" : "▸"}
+        name={open ? "chevron.down" : "chevron.right"}
+        size={13}
+      />
+    </>
+  );
+}
+
+/** One row per changed file, each opening its diff against the fanout's base. */
+function ChangedFileList({
+  base,
+  files,
+  label,
+  shown,
+  worktreeId,
+}: {
+  base: string;
+  files: ChangedFileSummary[];
+  label: string;
+  shown: boolean;
+  worktreeId: string;
+}) {
+  if (!shown) return null;
+  return (
+    <ScrollView className="border-t border-border" style={{ maxHeight: FILE_LIST_MAX_HEIGHT }}>
+      {files.map((file) => (
+        <NavRow
+          key={file.path}
+          onPress={() =>
+            router.push({
+              pathname: "/diff/[worktreeId]",
+              params: { worktreeId, path: file.path, base, oldPath: file.oldPath ?? "", label },
+            })
+          }
+          subtitle={changeSummary(file)}
+          title={file.path}
+        />
+      ))}
+    </ScrollView>
   );
 }
 

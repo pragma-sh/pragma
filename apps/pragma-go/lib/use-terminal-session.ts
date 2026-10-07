@@ -1,8 +1,14 @@
 import { constants } from "@pragma-sh/constants";
-import { base64ToBytes, PragmaGatewayError, type SessionEvent } from "@pragma-sh/sdk";
+import {
+  base64ToBytes,
+  PragmaGatewayError,
+  type SessionEvent,
+  type StreamOptions,
+} from "@pragma-sh/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
+import { errorText } from "./utils";
 
 /** How long to wait before retrying a dropped stream, and the ceiling. */
 const RECONNECT_INITIAL_MS = 500;
@@ -78,35 +84,39 @@ export function useTerminalSession(
     let delay = RECONNECT_INITIAL_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    // Ends this attempt: true to back off and reattach, false to stop for good.
+    const handleFailure = (failure: StreamFailure): boolean => {
+      if (failure.kind === "unauthorized") handleUnauthorized();
+      else if (failure.kind === "gone") {
+        setStatus("unavailable");
+        setError("This terminal is no longer running on the host.");
+      } else setError(failure.message);
+      return failure.kind === "retry";
+    };
+
+    const pump = async (): Promise<void> => {
+      const request = attachOptions(controller.signal, lease.current, size.current, cursor.current);
+      for await (const event of client.sessions.attach(sessionId, request)) {
+        if (!attachment.live) return;
+        delay = RECONNECT_INITIAL_MS;
+        applyEvent(event, { cursor, sink: sinkRef.current, setStatus, setExitCode });
+      }
+    };
+
+    // A stream that ends without an exit event is a dropped connection, so a
+    // clean return still means "reattach".
+    const attemptOnce = async (): Promise<boolean> => {
+      try {
+        await pump();
+        return true;
+      } catch (cause: unknown) {
+        return attachment.live && handleFailure(classifyFailure(cause));
+      }
+    };
+
     const run = async (): Promise<void> => {
       while (attachment.live) {
-        try {
-          for await (const event of client.sessions.attach(sessionId, {
-            signal: controller.signal,
-            // The viewport travels with the attach only while this client owns
-            // it; a size-less attach observes without disturbing the grid.
-            ...(lease.current && size.current ? size.current : {}),
-            ...(cursor.current === null ? {} : { cursor: cursor.current }),
-          })) {
-            if (!attachment.live) return;
-            delay = RECONNECT_INITIAL_MS;
-            applyEvent(event, cursor, sinkRef.current, setStatus, setExitCode);
-          }
-          // A stream that ends without an exit event is a dropped connection.
-          if (!attachment.live) return;
-        } catch (cause: unknown) {
-          if (!attachment.live) return;
-          if (cause instanceof PragmaGatewayError && cause.httpStatus === 401) {
-            handleUnauthorized();
-            return;
-          }
-          if (cause instanceof PragmaGatewayError && cause.httpStatus === 404) {
-            setStatus("unavailable");
-            setError("This terminal is no longer running on the host.");
-            return;
-          }
-          setError(cause instanceof Error ? cause.message : String(cause));
-        }
+        if (!(await attemptOnce()) || !attachment.live) return;
         setStatus("connecting");
         await new Promise<void>((resolve) => {
           timer = setTimeout(resolve, delay);
@@ -195,39 +205,73 @@ export function useTerminalSession(
   return { status, exitCode, error, write, resize };
 }
 
+/** Why an attach attempt failed, and so whether it is worth another. */
+type StreamFailure =
+  | { kind: "unauthorized" }
+  | { kind: "gone" }
+  | { kind: "retry"; message: string };
+
+function classifyFailure(cause: unknown): StreamFailure {
+  const status = cause instanceof PragmaGatewayError ? cause.httpStatus : null;
+  if (status === 401) return { kind: "unauthorized" };
+  if (status === 404) return { kind: "gone" };
+  return { kind: "retry", message: errorText(cause, String(cause)) };
+}
+
+/**
+ * The attach request. The viewport travels with it only while this client owns
+ * it; a size-less attach observes without disturbing the grid. The cursor
+ * resumes from the last byte the renderer accepted.
+ */
+function attachOptions(
+  signal: AbortSignal,
+  lease: string | null,
+  size: { cols: number; rows: number } | null,
+  cursor: number | null,
+): StreamOptions {
+  return {
+    signal,
+    ...(lease && size ? size : {}),
+    ...(cursor === null ? {} : { cursor }),
+  };
+}
+
+/** Where stream events land: the renderer, the resume cursor, and React state. */
+interface StreamTarget {
+  cursor: { current: number | null };
+  sink: TerminalSink;
+  setStatus: (status: TerminalStatus) => void;
+  setExitCode: (code: number | null) => void;
+}
+
+type EventOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>;
+
+const EVENT_HANDLERS: {
+  [T in SessionEvent["type"]]: (event: EventOf<T>, target: StreamTarget) => void;
+} = {
+  replay: (event, { cursor, sink, setStatus }) => {
+    // A reset means the retained buffer no longer covers where this renderer
+    // was; its screen is stale and the bytes that follow rebuild it.
+    if (event.reset) sink.onReset();
+    cursor.current = event.cursor;
+    setStatus("live");
+  },
+  output: (event, { cursor, sink, setStatus }) => {
+    const at = cursor.current ?? 0;
+    sink.onOutput(event.dataBase64, at);
+    cursor.current = at + base64ToBytes(event.dataBase64).length;
+    setStatus("live");
+  },
+  title: (event, { sink }) => sink.onTitle?.(event.title),
+  exit: (event, { setStatus, setExitCode }) => {
+    setExitCode(event.code);
+    setStatus("exited");
+  },
+  echoMode: () => undefined,
+};
+
 /** Applies one stream event to the renderer and the connection state. */
-function applyEvent(
-  event: SessionEvent,
-  cursor: { current: number | null },
-  sink: TerminalSink,
-  setStatus: (status: TerminalStatus) => void,
-  setExitCode: (code: number | null) => void,
-): void {
-  switch (event.type) {
-    case "replay":
-      if (event.reset) {
-        // The retained buffer no longer covers where this renderer was; its
-        // screen is stale and the bytes that follow rebuild it.
-        sink.onReset();
-      }
-      cursor.current = event.cursor;
-      setStatus("live");
-      break;
-    case "output": {
-      const at = cursor.current ?? 0;
-      sink.onOutput(event.dataBase64, at);
-      cursor.current = at + base64ToBytes(event.dataBase64).length;
-      setStatus("live");
-      break;
-    }
-    case "title":
-      sink.onTitle?.(event.title);
-      break;
-    case "exit":
-      setExitCode(event.code);
-      setStatus("exited");
-      break;
-    case "echoMode":
-      break;
-  }
+function applyEvent(event: SessionEvent, target: StreamTarget): void {
+  const handler = EVENT_HANDLERS[event.type] as (event: SessionEvent, target: StreamTarget) => void;
+  handler(event, target);
 }

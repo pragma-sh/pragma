@@ -1,18 +1,13 @@
-import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import { buildCommitMessagePrompt, cleanCommitMessage } from "./prompts.ts";
+import { type AiFeatureContext, featureRunOptions } from "./feature-context.ts";
 import { runPromptWithFallback } from "./session.ts";
 
 /** Options for {@link generateCommitMessage}. */
-export interface GenerateCommitMessageOptions {
+export interface GenerateCommitMessageOptions extends AiFeatureContext {
   /** The staged diff (`git diff --cached`). */
   stagedDiff: string;
   /** What the change is, when the diff cannot say (e.g. a merge-conflict resolution). */
   note?: string;
-  /** Worktree root — used for AGENTS.md/skill context. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
 }
 
 /** Raised when there is nothing staged to summarize. */
@@ -34,12 +29,7 @@ export function generateCommitMessage(options: GenerateCommitMessageOptions): Pr
   }
 
   return runPromptWithFallback(
-    {
-      modelKind: "fast",
-      cwd: options.cwd,
-      authStorage: options.authStorage,
-      registry: options.registry,
-    },
+    featureRunOptions(options, "fast"),
     buildCommitMessagePrompt(options.stagedDiff, options.note),
     cleanCommitMessage,
   );

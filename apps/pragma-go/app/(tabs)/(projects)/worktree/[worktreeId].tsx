@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -47,6 +47,7 @@ import { useScratchpads } from "@/lib/use-scratchpads";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel, type WorktreeNode } from "@/lib/worktree-tree";
 import { useThemeColors } from "@/lib/theme";
+import { errorText } from "@/lib/utils";
 
 /** A worktree's view: nested child worktrees, then its agent tabs. Nests until
  *  a worktree has no children left — same recursion as the desktop sidebar. */
@@ -58,81 +59,21 @@ export default function WorktreeScreen() {
   const terminalTabs = useTerminalTabs(worktreeId);
   const ports = useOpenPorts(worktreeId);
   const commitAndPr = useCommitAndPr(worktreeId, worktree?.path);
-  const [commitOpen, setCommitOpen] = useState(false);
+  const { commitOpen, setCommitOpen, openCommitSheet } = useCommitSheet(commitAndPr);
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
-  const [launchOpen, setLaunchOpen] = useState(false);
-  const { foreground } = useThemeColors();
   useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
-
+  const [launchOpen, setLaunchOpen] = useState(false);
   const openLaunchSheet = useCallback(() => {
     hapticImpact();
     setLaunchOpen(true);
   }, []);
-  // Header right, in the order the plan calls for: scripts, then launch. Both
-  // are the same size and hit target, so a long worktree title truncates rather
-  // than pushing either off the edge.
-  const openCommitSheet = useCallback(() => {
-    hapticImpact();
-    setCommitOpen(true);
-  }, []);
-  // The run is the host's, and the sheet is closed while it goes: the header
-  // action is the progress. It comes back on its own once there is something to
-  // act on — the pull request draft, or a failure worth reading.
-  const working = commitAndPr.phase === "running";
-  // Two things block the flow before it starts: a host with no GitHub token
-  // cannot push or open a pull request, and a clean worktree has nothing to
-  // commit. Both are the desktop's conditions. Unknown blocks neither.
-  const blocked = commitAndPr.githubReady === false || commitAndPr.hasChanges === false;
-  const settled = commitAndPr.phase === "review" || commitAndPr.phase === "failed";
-  useEffect(() => {
-    if (settled) setCommitOpen(true);
-  }, [settled]);
-  const renderHeaderActions = useCallback(
-    ({ tintColor }: { tintColor?: ColorValue }) => (
-      <View className="flex-row items-center gap-4">
-        <Pressable
-          accessibilityLabel={commitActionLabel({
-            githubReady: commitAndPr.githubReady,
-            hasChanges: commitAndPr.hasChanges,
-            working,
-          })}
-          accessibilityRole="button"
-          accessibilityState={{ busy: working, disabled: working || blocked }}
-          disabled={working || blocked}
-          hitSlop={8}
-          onPress={openCommitSheet}
-          style={blocked ? { opacity: 0.4 } : undefined}
-        >
-          {working ? (
-            <ActivityIndicator color={tintColor ?? foreground} size="small" />
-          ) : (
-            <IconSymbol
-              color={tintColor ?? foreground}
-              fallback="⑂"
-              name="arrow.triangle.pull"
-              size={22}
-            />
-          )}
-        </Pressable>
-        <ScriptsMenuButton color={tintColor ?? foreground} worktreeId={worktreeId} />
-        <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
-      </View>
-    ),
-    [
-      blocked,
-      commitAndPr.githubReady,
-      commitAndPr.hasChanges,
-      foreground,
-      openCommitSheet,
-      openLaunchSheet,
-      working,
-      worktreeId,
-    ],
+  const renderHeaderActions = useHeaderActions(
+    commitAndPr,
+    openCommitSheet,
+    openLaunchSheet,
+    worktreeId,
   );
-
-  // Terminals and agents are always offered, so "empty" is only about what already exists.
-  const empty = children.length === 0 && agentTabs.length === 0 && terminalTabs.length === 0;
 
   return (
     <>
@@ -140,12 +81,12 @@ export default function WorktreeScreen() {
       <WorktreeContents
         agentTabs={agentTabs}
         commitAndPr={commitAndPr}
-        empty={empty}
+        empty={isEmptyWorktree(children, agentTabs, terminalTabs)}
         insetBottom={insets.bottom}
         onLaunchAgent={openLaunchSheet}
         ports={ports}
-        projectId={worktree?.projectId ?? ""}
-        root={status === "paired" ? worktree?.path : undefined}
+        projectId={projectIdOf(worktree)}
+        root={pairedRoot(status, worktree)}
         terminalTabs={terminalTabs}
         worktreeId={worktreeId}
         worktreeNodes={children}
@@ -155,9 +96,161 @@ export default function WorktreeScreen() {
         flow={commitAndPr}
         onOpenChange={setCommitOpen}
         open={commitOpen}
-        worktreeName={worktree ? worktreeLabel(worktree) : "this worktree"}
+        worktreeName={worktreeName(worktree)}
       />
     </>
+  );
+}
+
+type WorktreeValue = ReturnType<typeof useWorktree>;
+
+/**
+ * The header's right-hand actions. Keyed on the three fields the commit action
+ * reads rather than the whole flow, which is a new object every render — the
+ * header options would otherwise be replaced on every one.
+ */
+function useHeaderActions(
+  flow: CommitAndPr,
+  onCommit: () => void,
+  onLaunch: () => void,
+  worktreeId: string,
+) {
+  const { foreground } = useThemeColors();
+  const { phase, githubReady, hasChanges } = flow;
+  const commitState = useMemo(
+    () => ({ phase, githubReady, hasChanges }),
+    [githubReady, hasChanges, phase],
+  );
+  return useCallback(
+    ({ tintColor }: { tintColor?: ColorValue }) => (
+      <WorktreeHeaderActions
+        color={tintColor ?? foreground}
+        flow={commitState}
+        onCommit={onCommit}
+        onLaunch={onLaunch}
+        worktreeId={worktreeId}
+      />
+    ),
+    [commitState, foreground, onCommit, onLaunch, worktreeId],
+  );
+}
+
+/** Terminals and agents are always offered, so "empty" is only about what already exists. */
+function isEmptyWorktree(
+  children: WorktreeNode[],
+  agentTabs: AgentTab[],
+  terminalTabs: TerminalTab[],
+): boolean {
+  return children.length === 0 && agentTabs.length === 0 && terminalTabs.length === 0;
+}
+
+function projectIdOf(worktree: WorktreeValue): string {
+  return worktree?.projectId ?? "";
+}
+
+/** The worktree's host path, once paired and loaded; the file explorer needs it. */
+function pairedRoot(
+  status: ReturnType<typeof useConnection>["status"],
+  worktree: WorktreeValue,
+): string | undefined {
+  return status === "paired" ? worktree?.path : undefined;
+}
+
+function worktreeName(worktree: WorktreeValue): string {
+  return worktree ? worktreeLabel(worktree) : "this worktree";
+}
+
+/**
+ * Whether the Commit & PR sheet is open. The run is the host's, and the sheet
+ * is closed while it goes: the header action is the progress. It comes back on
+ * its own once there is something to act on — the pull request draft, or a
+ * failure worth reading.
+ */
+function useCommitSheet(flow: CommitAndPr) {
+  const [commitOpen, setCommitOpen] = useState(false);
+  const openCommitSheet = useCallback(() => {
+    hapticImpact();
+    setCommitOpen(true);
+  }, []);
+  const settled = flow.phase === "review" || flow.phase === "failed";
+  useEffect(() => {
+    if (settled) setCommitOpen(true);
+  }, [settled]);
+  return { commitOpen, setCommitOpen, openCommitSheet };
+}
+
+/**
+ * Header right, in the order the plan calls for: commit, scripts, then launch.
+ * All are the same size and hit target, so a long worktree title truncates
+ * rather than pushing any off the edge.
+ */
+function WorktreeHeaderActions({
+  color,
+  flow,
+  onCommit,
+  onLaunch,
+  worktreeId,
+}: {
+  color: ColorValue;
+  flow: CommitActionState;
+  onCommit: () => void;
+  onLaunch: () => void;
+  worktreeId: string;
+}) {
+  return (
+    <View className="flex-row items-center gap-4">
+      <CommitActionButton color={color} flow={flow} onPress={onCommit} />
+      <ScriptsMenuButton color={color} worktreeId={worktreeId} />
+      <LaunchAgentButton color={color} onPress={onLaunch} />
+    </View>
+  );
+}
+
+/**
+ * Two things block the flow before it starts: a host with no GitHub token
+ * cannot push or open a pull request, and a clean worktree has nothing to
+ * commit. Both are the desktop's conditions. Unknown blocks neither.
+ */
+function isCommitBlocked(flow: CommitActionState): boolean {
+  return flow.githubReady === false || flow.hasChanges === false;
+}
+
+/** What the header's Commit & PR action reads from the flow. */
+type CommitActionState = Pick<CommitAndPr, "phase" | "githubReady" | "hasChanges">;
+
+/** The Commit & PR header action; a spinner while the host's run is going. */
+function CommitActionButton({
+  color,
+  flow,
+  onPress,
+}: {
+  color: ColorValue;
+  flow: CommitActionState;
+  onPress: () => void;
+}) {
+  const working = flow.phase === "running";
+  const blocked = isCommitBlocked(flow);
+  const disabled = working || blocked;
+  return (
+    <Pressable
+      accessibilityLabel={commitActionLabel({
+        githubReady: flow.githubReady,
+        hasChanges: flow.hasChanges,
+        working,
+      })}
+      accessibilityRole="button"
+      accessibilityState={{ busy: working, disabled }}
+      disabled={disabled}
+      hitSlop={8}
+      onPress={onPress}
+      style={blocked ? { opacity: 0.4 } : undefined}
+    >
+      {working ? (
+        <ActivityIndicator color={color} size="small" />
+      ) : (
+        <IconSymbol color={color} fallback="⑂" name="arrow.triangle.pull" size={22} />
+      )}
+    </Pressable>
   );
 }
 
@@ -256,7 +349,7 @@ function PortsGroup({ ports, projectId }: { ports: OpenPort[]; projectId: string
 
   const open = async (port: OpenPort): Promise<void> => {
     const key = `${port.tabId}:${port.port}`;
-    if (busyRef.current || !(await confirmPortForward(port)) || busyRef.current) return;
+    if (!(await confirmIdleForward(busyRef, port))) return;
     busyRef.current = key;
     setForwarding(key);
     hapticImpact();
@@ -268,7 +361,7 @@ function PortsGroup({ ports, projectId }: { ports: OpenPort[]; projectId: string
       hapticWarning();
       Alert.alert(
         "Couldn't forward port",
-        error instanceof Error ? error.message : "The host could not expose this port.",
+        errorText(error, "The host could not expose this port."),
       );
     } finally {
       busyRef.current = null;
@@ -291,6 +384,18 @@ function PortsGroup({ ports, projectId }: { ports: OpenPort[]; projectId: string
       })}
     </NavGroup>
   );
+}
+
+/**
+ * Confirms a forward only while none is in flight — checked again after the
+ * prompt, since another tap may have started one while it was open.
+ */
+async function confirmIdleForward(
+  busyRef: { current: string | null },
+  port: OpenPort,
+): Promise<boolean> {
+  if (busyRef.current) return false;
+  return (await confirmPortForward(port)) && !busyRef.current;
 }
 
 function WorktreeLaunchSheet({

@@ -14,6 +14,7 @@
         "@remotion/google-fonts": "4.0.520",
         "@remotion/media": "4.0.520",
         "@tailwindcss/typography": "^0.5.20",
+        "esbuild": "^0.25.12",
         "fallow": "^2.102.0",
         "husky": "^9.1.7",
         "json-schema-to-typescript": "^15.0.4",
@@ -28,7 +29,7 @@
     },
     "apps/pragma": {
       "name": "pragma",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@codemirror/language": "^6.12.3",
         "@codemirror/language-data": "^6.5.2",
@@ -261,7 +262,7 @@
     },
     "packages/ai-helpers": {
       "name": "@pragma-sh/ai-helpers",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-ai": "./src/cli.ts",
       },
@@ -280,7 +281,7 @@
     },
     "packages/automations": {
       "name": "@pragma-sh/automations",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-automations": "src/cli.ts",
       },
@@ -295,7 +296,7 @@
     },
     "packages/bench": {
       "name": "@pragma-sh/bench",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -310,7 +311,7 @@
     },
     "packages/claude-code-plugin": {
       "name": "@pragma-sh/claude-code-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -341,7 +342,7 @@
     },
     "packages/codex-plugin": {
       "name": "@pragma-sh/codex-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -353,7 +354,7 @@
     },
     "packages/constants": {
       "name": "@pragma-sh/constants",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "devDependencies": {
         "json-schema-to-typescript": "^15.0.4",
         "typescript": "^6.0.3",
@@ -362,7 +363,7 @@
     },
     "packages/create-pragma-plugin": {
       "name": "create-pragma-plugin",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "create-pragma-plugin": "./dist/cli.js",
       },
@@ -375,7 +376,7 @@
     },
     "packages/cursor-plugin": {
       "name": "@pragma-sh/cursor-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -387,7 +388,7 @@
     },
     "packages/dev-test-plugin": {
       "name": "@pragma-sh/dev-test-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
@@ -420,7 +421,7 @@
     },
     "packages/github-copilot-cli-plugin": {
       "name": "@pragma-sh/github-copilot-cli-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -432,7 +433,7 @@
     },
     "packages/github-helpers": {
       "name": "@pragma-sh/github-helpers",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-github": "./src/cli.ts",
       },
@@ -449,7 +450,7 @@
     },
     "packages/grok-plugin": {
       "name": "@pragma-sh/grok-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -476,7 +477,7 @@
     },
     "packages/junie-plugin": {
       "name": "@pragma-sh/junie-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -488,7 +489,7 @@
     },
     "packages/kimi-plugin": {
       "name": "@pragma-sh/kimi-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -500,7 +501,7 @@
     },
     "packages/opencode-plugin": {
       "name": "@pragma-sh/opencode-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
         "@pragma-sh/plugin": "workspace:*",
@@ -514,7 +515,7 @@
     },
     "packages/pi-plugin": {
       "name": "@pragma-sh/pi-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "0.80.10",
         "@pragma-sh/plugin": "workspace:*",
@@ -531,7 +532,7 @@
     },
     "packages/plugin": {
       "name": "@pragma-sh/plugin",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@pragma-sh/constants": "^1.2.0",
         "@pragma-sh/sdk": "^1.2.0",
@@ -564,7 +565,7 @@
     },
     "packages/plugins-host": {
       "name": "@pragma-sh/plugins-host",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-plugins": "./src/cli.ts",
       },
@@ -582,7 +583,7 @@
     },
     "packages/prime-agent-plugin": {
       "name": "@pragma-sh/prime-agent-plugin",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/pi-plugin": "workspace:*",
         "@types/node": "^24.12.3",
@@ -592,7 +593,7 @@
     },
     "packages/scratchpad": {
       "name": "@pragma-sh/scratchpad",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@pragma-sh/sdk": "^1.2.0",
       },
@@ -610,7 +611,7 @@
     },
     "packages/scratchpad-contract": {
       "name": "@pragma-sh/scratchpad-contract",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@pragma-sh/constants": "^1.2.0",
       },
@@ -621,7 +622,7 @@
     },
     "packages/scratchpad-viewer": {
       "name": "@pragma-sh/scratchpad-viewer",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "dependencies": {
         "@pragma-sh/constants": "^1.2.0",
         "@pragma-sh/scratchpad-contract": "^1.2.0",
@@ -644,7 +645,7 @@
     },
     "packages/sdk": {
       "name": "@pragma-sh/sdk",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/scratchpad-contract": "workspace:*",
@@ -656,7 +657,7 @@
     },
     "packages/sidecar-kit": {
       "name": "@pragma-sh/sidecar-kit",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -696,7 +697,7 @@
     },
     "packages/watcher": {
       "name": "@pragma-sh/watcher",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-watch": "./src/cli.ts",
       },
@@ -711,7 +712,7 @@
     },
     "packages/watcher-kit": {
       "name": "@pragma-sh/watcher-kit",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",

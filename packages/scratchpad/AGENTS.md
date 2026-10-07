@@ -45,7 +45,7 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
 - React remains a peer dependency.
 - Browser bundles must use the production JSX runtime, not `jsxDEV`; React's production
   `jsx-dev-runtime` intentionally leaves `jsxDEV` undefined. Keep bunup in the child
-  process with startup `NODE_ENV=production` in `scripts/build.ts` until Bun honors
+  process with startup `NODE_ENV=production` (`runBunup` in the root `scripts/package-build.ts`) until Bun honors
   `jsx.development: false` after startup.
 - **Never bundle dependencies into this package (`--packages bundle`).** Inlining
   `@pragma-sh/sdk` resolves it through `node_modules`, a path outside the entry root, and

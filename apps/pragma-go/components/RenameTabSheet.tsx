@@ -49,9 +49,11 @@ export function RenameTabSheet({
     if (tab) setTitle(tab.title);
   }, [tab]);
 
+  const nextTitle = title.trim();
+  const canRename = nextTitle.length > 0 && !renaming;
+
   async function submit(): Promise<void> {
-    const nextTitle = title.trim();
-    if (!tab || !nextTitle || renaming) return;
+    if (!tab || !canRename) return;
     setRenaming(true);
     try {
       await rename(tab.id, nextTitle);
@@ -72,7 +74,7 @@ export function RenameTabSheet({
           <Button onPress={onDone} size="sm" variant="outline">
             <Text>Cancel</Text>
           </Button>
-          <Button disabled={!title.trim() || renaming} onPress={() => void submit()} size="sm">
+          <Button disabled={!canRename} onPress={() => void submit()} size="sm">
             <Text>{renaming ? "Renaming..." : "Rename"}</Text>
           </Button>
         </View>

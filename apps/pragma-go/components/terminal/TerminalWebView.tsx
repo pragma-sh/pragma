@@ -6,11 +6,11 @@ import {
   type TerminalViewerCommand,
 } from "@pragma-sh/terminal-viewer";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { View, useColorScheme } from "react-native";
+import { View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { createTerminalCommandQueue } from "@/lib/terminal-command-queue";
-import { useHostThemeOverrides } from "@/lib/theme-context";
+import { useViewerTheme } from "@/lib/theme-context";
 import { terminalMessageHandler, type TerminalViewProps } from "./terminal-bridge";
 
 /** Imperative handle the terminal screen drives the renderer through. */
@@ -30,9 +30,7 @@ export interface TerminalViewHandle {
 export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalWebView(props, ref) {
     const webView = useRef<WebView>(null);
-    const scheme = useColorScheme() === "dark" ? "dark" : "light";
-    const overrides = useHostThemeOverrides();
-    const themeCss = useMemo(() => terminalThemeCss(overrides), [overrides]);
+    const { scheme, overrides, themeCss } = useViewerTheme(terminalThemeCss);
     // The document is built once per palette: rebuilding it remounts xterm and
     // throws away the screen the session has been writing to.
     const html = useMemo(

@@ -1,5 +1,4 @@
 import type { AgentReportPayload, Tab } from "@pragma-sh/constants";
-import { PragmaGatewayError } from "@pragma-sh/sdk";
 import {
   createContext,
   useCallback,
@@ -12,6 +11,7 @@ import {
 
 import { statusForTabs } from "../agent-status";
 import { useConnection } from "../connection-context";
+import { reportUnauthorized } from "../report-unauthorized";
 import type { AgentStatus, AgentTab, InboxItem, Project, TerminalTab, Worktree } from "../types";
 import { buildWorktreeTree, type WorktreeNode } from "../worktree-tree";
 import { MOCK_AGENT_TABS, MOCK_INBOX, MOCK_PROJECTS, MOCK_WORKTREES } from "./fixtures";
@@ -69,74 +69,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const { client, status: connectionStatus, handleUnauthorized } = useConnection();
   const paired = connectionStatus === "paired" && !!client;
   const { snapshot, statuses, setStatuses } = useSubscriptionData(client, handleUnauthorized);
-  const {
-    dismissed,
-    hiddenTabIds,
-    renamedTitles,
-    setDismissed,
-    setHiddenTabIds,
-    setRenamedTitles,
-  } = useAgentPresentation(client);
-  const visibleStatuses = useMemo(
-    () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
-    [hiddenTabIds, statuses],
-  );
+  const presentation = useAgentPresentation(client);
+  const view = useWorkspaceView(paired, snapshot, statuses, presentation);
+  const actions = useTabActions(client, paired, handleUnauthorized, presentation);
 
-  const projects = useMemo<Project[]>(
-    () => (paired ? (snapshot?.projects ?? []) : MOCK_PROJECTS),
-    [paired, snapshot],
-  );
-  const worktrees = useMemo<Worktree[]>(
-    () => (paired ? (snapshot?.worktrees ?? []) : MOCK_WORKTREES),
-    [paired, snapshot],
-  );
-
-  const agentTabs = useMemo<Record<string, AgentTab[]>>(() => {
-    const tabs = paired
-      ? agentTabsBySnapshot(snapshot?.tabs ?? [], visibleStatuses)
-      : MOCK_AGENT_TABS;
-    return Object.fromEntries(
-      Object.entries(tabs).map(([worktreeId, entries]) => [
-        worktreeId,
-        entries
-          .filter((entry) => !hiddenTabIds.has(entry.id))
-          .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
-      ]),
-    );
-  }, [hiddenTabIds, paired, renamedTitles, snapshot, visibleStatuses]);
-
-  // Unpaired, the fixtures carry agent sessions only: an invented shell would
-  // imply a terminal the demo cannot attach to.
-  const terminalTabs = useMemo<Record<string, TerminalTab[]>>(
-    () =>
-      paired
-        ? Object.fromEntries(
-            Object.entries(terminalTabsBySnapshot(snapshot?.tabs ?? [], statuses)).map(
-              ([worktreeId, entries]) => [
-                worktreeId,
-                entries
-                  .filter((entry) => !hiddenTabIds.has(entry.id))
-                  .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
-              ],
-            ),
-          )
-        : {},
-    [hiddenTabIds, paired, renamedTitles, snapshot, statuses],
-  );
-
-  const derivedInbox = useMemo<InboxItem[]>(
-    () =>
-      paired
-        ? inboxFromStatuses(visibleStatuses, projects, worktrees, snapshot?.tabs ?? [])
-        : MOCK_INBOX,
-    [paired, visibleStatuses, projects, worktrees, snapshot],
-  );
-
-  const inbox = useMemo(
-    () => derivedInbox.filter((item) => !dismissed.has(item.id)),
-    [derivedInbox, dismissed],
-  );
-
+  const { setDismissed } = presentation;
+  const { derivedInbox } = view;
   const resolveInboxItem = useCallback(
     (id: string, resolution: InboxResolution) => {
       setDismissed((prev) => new Set(prev).add(id));
@@ -152,18 +90,138 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setStatuses((previous) => markTabStatusesSeen(previous, tabId));
       if (!paired || !client) return;
       void client.agents.markAgentsSeen({ tabId }).catch((error: unknown) => {
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        reportUnauthorized(error, handleUnauthorized);
       });
     },
     [client, handleUnauthorized, paired, setStatuses],
   );
 
+  const { projects, worktrees, agentTabs, terminalTabs, inbox } = view;
+  const { clearAgent, renameTab, openTerminal, closeTerminal } = actions;
+  const value = useMemo<DataContextValue>(
+    () => ({
+      projects,
+      worktrees,
+      agentTabs,
+      terminalTabs,
+      inbox,
+      resolveInboxItem,
+      markAgentSeen,
+      clearAgent,
+      renameTab,
+      openTerminal,
+      closeTerminal,
+    }),
+    [
+      projects,
+      worktrees,
+      agentTabs,
+      terminalTabs,
+      inbox,
+      resolveInboxItem,
+      markAgentSeen,
+      clearAgent,
+      renameTab,
+      openTerminal,
+      closeTerminal,
+    ],
+  );
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+}
+
+type Presentation = ReturnType<typeof useAgentPresentation>;
+
+/**
+ * The view models every screen reads: the live snapshot when paired, the
+ * fixtures otherwise, with locally hidden and renamed tabs applied on top.
+ */
+function useWorkspaceView(
+  paired: boolean,
+  snapshot: LiveSnapshot | null,
+  statuses: AgentReportPayload[],
+  { dismissed, hiddenTabIds, renamedTitles }: Presentation,
+) {
+  const visibleStatuses = useMemo(
+    () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
+    [hiddenTabIds, statuses],
+  );
+  const tabs = snapshot?.tabs;
+
+  const projects = useMemo<Project[]>(
+    () => (paired ? (snapshot?.projects ?? []) : MOCK_PROJECTS),
+    [paired, snapshot],
+  );
+  const worktrees = useMemo<Worktree[]>(
+    () => (paired ? (snapshot?.worktrees ?? []) : MOCK_WORKTREES),
+    [paired, snapshot],
+  );
+
+  const agentTabs = useMemo<Record<string, AgentTab[]>>(
+    () =>
+      presentTabs(
+        paired ? agentTabsBySnapshot(tabs ?? [], visibleStatuses) : MOCK_AGENT_TABS,
+        hiddenTabIds,
+        renamedTitles,
+      ),
+    [hiddenTabIds, paired, renamedTitles, tabs, visibleStatuses],
+  );
+
+  // Unpaired, the fixtures carry agent sessions only: an invented shell would
+  // imply a terminal the demo cannot attach to.
+  const terminalTabs = useMemo<Record<string, TerminalTab[]>>(
+    () =>
+      presentTabs(
+        paired ? terminalTabsBySnapshot(tabs ?? [], statuses) : {},
+        hiddenTabIds,
+        renamedTitles,
+      ),
+    [hiddenTabIds, paired, renamedTitles, tabs, statuses],
+  );
+
+  const derivedInbox = useMemo<InboxItem[]>(
+    () =>
+      paired ? inboxFromStatuses(visibleStatuses, projects, worktrees, tabs ?? []) : MOCK_INBOX,
+    [paired, visibleStatuses, projects, worktrees, tabs],
+  );
+
+  const inbox = useMemo(
+    () => derivedInbox.filter((item) => !dismissed.has(item.id)),
+    [derivedInbox, dismissed],
+  );
+
+  return { projects, worktrees, agentTabs, terminalTabs, derivedInbox, inbox };
+}
+
+/** Drops locally hidden tabs and applies local renames, per worktree. */
+function presentTabs<T extends { id: string; title: string }>(
+  byWorktree: Record<string, T[]>,
+  hiddenTabIds: ReadonlySet<string>,
+  renamedTitles: Record<string, string>,
+): Record<string, T[]> {
+  return Object.fromEntries(
+    Object.entries(byWorktree).map(([worktreeId, entries]) => [
+      worktreeId,
+      entries
+        .filter((entry) => !hiddenTabIds.has(entry.id))
+        .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
+    ]),
+  );
+}
+
+/** Tab mutations: each acts on the host when paired and updates the local view. */
+function useTabActions(
+  client: Client | null,
+  paired: boolean,
+  handleUnauthorized: () => void,
+  { setHiddenTabIds, setRenamedTitles }: Presentation,
+) {
   const clearAgent = useCallback(
     async (tabId: string) => {
       await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
         activeClient.sessions.kill(tabId),
       );
-      setHiddenTabIds((previous) => new Set(previous).add(tabId));
+      setHiddenTabIds((previous) => withId(previous, tabId));
     },
     [client, handleUnauthorized, paired, setHiddenTabIds],
   );
@@ -196,53 +254,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
     async (tabId: string) => {
       // Hide it locally first: the snapshot that drops the row arrives a beat
       // later, and a row that lingers after an explicit close looks broken.
-      setHiddenTabIds((previous) => new Set(previous).add(tabId));
-      if (!paired || !client) return;
+      setHiddenTabIds((previous) => withId(previous, tabId));
       try {
-        await client.tabs.close(tabId);
+        await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
+          activeClient.tabs.close(tabId),
+        );
       } catch (error: unknown) {
-        setHiddenTabIds((previous) => {
-          const next = new Set(previous);
-          next.delete(tabId);
-          return next;
-        });
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        setHiddenTabIds((previous) => withoutId(previous, tabId));
         throw error;
       }
     },
     [client, handleUnauthorized, paired, setHiddenTabIds],
   );
 
-  const value = useMemo<DataContextValue>(
-    () => ({
-      projects,
-      worktrees,
-      agentTabs,
-      terminalTabs,
-      inbox,
-      resolveInboxItem,
-      markAgentSeen,
-      clearAgent,
-      renameTab,
-      openTerminal,
-      closeTerminal,
-    }),
-    [
-      projects,
-      worktrees,
-      agentTabs,
-      terminalTabs,
-      inbox,
-      resolveInboxItem,
-      markAgentSeen,
-      clearAgent,
-      renameTab,
-      openTerminal,
-      closeTerminal,
-    ],
-  );
+  return { clearAgent, renameTab, openTerminal, closeTerminal };
+}
 
-  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+function withId(ids: ReadonlySet<string>, id: string): Set<string> {
+  return new Set(ids).add(id);
+}
+
+function withoutId(ids: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(ids);
+  next.delete(id);
+  return next;
 }
 
 type Client = NonNullable<ReturnType<typeof useConnection>["client"]>;
@@ -367,14 +402,6 @@ async function runSessionAction(
     reportUnauthorized(error, onUnauthorized);
     throw error;
   }
-}
-
-function isUnauthorized(error: unknown): boolean {
-  return error instanceof PragmaGatewayError && error.httpStatus === 401;
-}
-
-function reportUnauthorized(error: unknown, onUnauthorized: () => void): void {
-  if (isUnauthorized(error)) onUnauthorized();
 }
 
 /** Runs the workspace snapshot subscription with capped-backoff reconnect. */

@@ -9,7 +9,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 
-import { isTerminalViewerCommand, type TerminalViewerMessage } from "../messages";
+import {
+  isTerminalViewerCommand,
+  type TerminalViewerCommand,
+  type TerminalViewerMessage,
+} from "../messages";
 import {
   TERMINAL_FALLBACK_COLORS,
   TERMINAL_FALLBACK_SELECTION,
@@ -95,46 +99,48 @@ function bufferBottom(): number {
   return terminal.buffer.active.baseY;
 }
 
-/** Applies one host command. Unknown shapes are dropped, never guessed at. */
-function apply(raw: string): void {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return;
-  }
-  if (!isTerminalViewerCommand(parsed)) return;
-  switch (parsed.type) {
-    case "write": {
-      const bytes = decodeBase64(parsed.dataBase64);
+type CommandOf<T extends TerminalViewerCommand["type"]> = Extract<
+  TerminalViewerCommand,
+  { type: T }
+>;
+
+/** What each host command does to the terminal; one entry per command type. */
+const COMMAND_HANDLERS: { [T in TerminalViewerCommand["type"]]: (command: CommandOf<T>) => void } =
+  {
+    write: ({ dataBase64 }) => {
+      const bytes = decodeBase64(dataBase64);
       // The acknowledgement fires when the parser has consumed the bytes, not
       // when they were queued: that is what makes it usable as backpressure.
       terminal.write(bytes, () => send({ type: "written", bytes: bytes.length }));
-      break;
-    }
-    case "reset":
+    },
+    reset: () => {
       terminal.reset();
       terminal.clear();
-      break;
-    case "fit":
-      fitAddon.fit();
-      break;
-    case "focus":
-      terminal.focus();
-      break;
-    case "scrollToBottom":
-      terminal.scrollToBottom();
-      break;
-    case "theme":
-      applyTheme(parsed.css, parsed.mode);
-      break;
-    case "paste":
-      terminal.paste(parsed.text);
-      break;
-    case "exit":
+    },
+    fit: () => fitAddon.fit(),
+    focus: () => terminal.focus(),
+    scrollToBottom: () => terminal.scrollToBottom(),
+    theme: ({ css, mode }) => applyTheme(css, mode),
+    paste: ({ text }) => terminal.paste(text),
+    exit: () => {
       terminal.options.cursorBlink = false;
       terminal.options.disableStdin = true;
-      break;
+    },
+  };
+
+/** Applies one host command. Unknown shapes are dropped, never guessed at. */
+function apply(raw: string): void {
+  const parsed = parseJson(raw);
+  if (!isTerminalViewerCommand(parsed)) return;
+  const handler = COMMAND_HANDLERS[parsed.type] as (command: TerminalViewerCommand) => void;
+  handler(parsed);
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
   }
 }
 

@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { type ModelKind, RUN_FALLBACK } from "./constants.ts";
+import type { AiFeatureContext } from "./feature-context.ts";
 import { loadModelInsights, type ModelInsights } from "./model-insights.ts";
 import { pickModel, selectModelCandidates } from "./pick-model.ts";
 import { type AttemptFailure, describeFailure, NoWorkingModelError } from "./run-failure.ts";
@@ -165,13 +166,9 @@ async function loadModelCandidates(
 }
 
 /** Options for {@link runPromptWithFallback} — one feature's whole model setup. */
-export interface RunPromptWithFallbackOptions {
+export interface RunPromptWithFallbackOptions extends AiFeatureContext {
   /** Tier to select candidates from. */
   modelKind: ModelKind;
-  /** Working directory — drives AGENTS.md discovery, skills, and tool scope. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
   /** Selective tool allowlist; omitted means pi's defaults. */
   tools?: string[];
 }

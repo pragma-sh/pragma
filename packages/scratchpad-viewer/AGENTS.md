@@ -35,7 +35,10 @@ script and inlined, so a `file://` export never needs a Vite server or Pragma.
 - **esbuild bundles the runtime, not `Bun.build`.** Bun's Windows bundler panics
   ("Expected pretty file path to have only forward slashes") on `node_modules`
   paths outside the entry root, which is exactly what bundling the workspace
-  deps does. See `packages/scratchpad/AGENTS.md`.
+  deps does. See `packages/scratchpad/AGENTS.md`. The esbuild step, the
+  string-module writer, and the bunup invocation are shared with `code-viewer`,
+  `terminal-viewer`, and `scratchpad` through the root `scripts/package-build.ts`;
+  change them there, not in one package's `scripts/build.ts`.
 - **Stripped imports become page globals, not nothing.** `components` covers the
   capitalized tags MDX _renders_; it does not cover an identifier the document's
   own code _calls_. A scratchpad that defines a nested component

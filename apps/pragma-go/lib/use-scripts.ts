@@ -1,8 +1,9 @@
-import { PragmaGatewayError, type ScriptList } from "@pragma-sh/sdk";
+import type { ScriptList } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 
 import { useConnection } from "./connection-context";
+import { settle } from "./host-read";
 
 /** A worktree's project scripts, and how the last read went. */
 export interface Scripts {
@@ -40,16 +41,12 @@ export function useScripts(worktreeId: string): Scripts {
     let cancelled = false;
     setLoading(true);
     const load = async (): Promise<void> => {
-      try {
-        const next = await client.scripts.list(worktreeId);
-        if (!cancelled) setList(next);
-      } catch (error: unknown) {
-        // A failed read leaves the previous list in place: an unreachable host
-        // is not the same as a project without scripts.
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      const result = await settle(client.scripts.list(worktreeId), handleUnauthorized);
+      if (cancelled) return;
+      // A failed read leaves the previous list in place: an unreachable host
+      // is not the same as a project without scripts.
+      if (result.ok) setList(result.value);
+      setLoading(false);
     };
     void load();
     return () => {

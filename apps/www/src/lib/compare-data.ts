@@ -2,6 +2,12 @@ import { compareRoute, repoUrl } from "./shared";
 
 export type Support = "yes" | "partial" | "no" | string;
 
+/** One non-Pragma column of a comparison table: its heading and the row field it reads. */
+export interface ComparisonColumn<Row> {
+  label: string;
+  key: keyof Row;
+}
+
 export interface ComparisonRow {
   feature: string;
   detail: string;

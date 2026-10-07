@@ -5,7 +5,7 @@ import {
   memberLabel,
   orderedMembers,
 } from "@pragma-sh/fanout-view";
-import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -38,6 +38,7 @@ import { hapticSelection } from "@/lib/haptics";
 import { useThemeColors } from "@/lib/theme";
 import { useCatalog } from "@/lib/use-catalog";
 import { useFanoutActions } from "@/lib/use-fanout-actions";
+import { useScreenFocused } from "@/lib/use-screen-focused";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { cn } from "@/lib/utils";
 import { worktreeLabel } from "@/lib/worktree-tree";
@@ -83,81 +84,31 @@ function ActiveFanout({ fanout }: { fanout: Fanout }) {
   const members = useMemo(() => orderedMembers(fanout), [fanout]);
   const { width } = useWindowDimensions();
   const catalog = useCatalog();
-  const colors = useThemeColors();
   const actions = useFanoutActions(fanout);
-  const pager = useRef<FlatList<FanoutMember>>(null);
-  const [index, setIndex] = useState(0);
-  const [focused, setFocused] = useState(true);
-  useFocusEffect(
-    useCallback(() => {
-      setFocused(true);
-      return () => setFocused(false);
-    }, []),
-  );
-
-  const current = members[Math.min(index, members.length - 1)];
+  const focused = useScreenFocused(true);
+  const { current, index, jumpTo, onPageSettled, pager } = useAttemptPager(members, width);
   const acting = canActOnFanout(fanout);
-
-  const jumpTo = (next: number): void => {
-    hapticSelection();
-    setIndex(next);
-    pager.current?.scrollToIndex({ index: next, animated: true });
-  };
-  const onPageSettled = (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
-    const next = Math.round(event.nativeEvent.contentOffset.x / Math.max(width, 1));
-    if (next !== index) setIndex(next);
-  };
-
-  const renderMenu = useCallback(
-    ({ tintColor }: { tintColor?: ColorValue }) => (
-      <MenuView
-        actions={[{ id: "cancel", title: "Cancel fanout", attributes: { destructive: true } }]}
-        onPressAction={({ nativeEvent }) => {
-          if (nativeEvent.event === "cancel") actions.cancel();
-        }}
-      >
-        <IconSymbol
-          color={tintColor ?? colors.foreground}
-          fallback="⋯"
-          name="ellipsis.circle"
-          size={22}
-        />
-      </MenuView>
-    ),
-    [actions, colors.foreground],
-  );
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={KEYBOARD_BEHAVIOR}
       className="flex-1 bg-background"
       keyboardVerticalOffset={composerKeyboardOffset}
     >
       <SafeAreaView className="flex-1" edges={["bottom"]}>
-        <Stack.Screen
-          options={{ title: fanout.title, headerRight: acting ? renderMenu : undefined }}
-        />
+        <FanoutScreenOptions acting={acting} onCancel={actions.cancel} title={fanout.title} />
         {current ? (
           <AttemptHeader
             busy={actions.busy}
             catalog={catalog}
             fanout={fanout}
             member={current}
-            onPick={(member) =>
-              actions.pick(member, (result) => {
-                // Only a pick that removed every attempt worktree has nothing
-                // left to show here. One that stopped with survivors stays
-                // put, so tapping pick again can finish the cleanup.
-                if (isCleanPick(result) && router.canGoBack()) router.back();
-              })
-            }
+            onPick={(member) => actions.pick(member, leaveAfterCleanPick)}
             onRetry={actions.retry}
           />
         ) : null}
         <AttemptChips current={index} members={members} onSelect={jumpTo} />
-        {fanout.failure ? (
-          <Text className="px-4 pb-1 text-sm text-destructive">{fanout.failure.message}</Text>
-        ) : null}
+        <FanoutFailure fanout={fanout} />
         <FlatList
           data={members}
           getItemLayout={(_data, itemIndex) => ({
@@ -190,6 +141,72 @@ function ActiveFanout({ fanout }: { fanout: Fanout }) {
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
+}
+
+const KEYBOARD_BEHAVIOR = Platform.OS === "ios" ? "padding" : undefined;
+
+/**
+ * Only a pick that removed every attempt worktree has nothing left to show
+ * here. One that stopped with survivors stays put, so tapping pick again can
+ * finish the cleanup.
+ */
+function leaveAfterCleanPick(result: Parameters<typeof isCleanPick>[0]): void {
+  if (isCleanPick(result) && router.canGoBack()) router.back();
+}
+
+/** Which attempt the pager shows, kept in step with swipes and chip taps. */
+function useAttemptPager(members: FanoutMember[], width: number) {
+  const pager = useRef<FlatList<FanoutMember>>(null);
+  const [index, setIndex] = useState(0);
+  const current = members[Math.min(index, members.length - 1)];
+
+  const jumpTo = (next: number): void => {
+    hapticSelection();
+    setIndex(next);
+    pager.current?.scrollToIndex({ index: next, animated: true });
+  };
+  const onPageSettled = (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+    const next = Math.round(event.nativeEvent.contentOffset.x / Math.max(width, 1));
+    if (next !== index) setIndex(next);
+  };
+  return { current, index, jumpTo, onPageSettled, pager };
+}
+
+/** The title, and the cancel menu while the fanout can still be acted on. */
+function FanoutScreenOptions({
+  acting,
+  onCancel,
+  title,
+}: {
+  acting: boolean;
+  onCancel: () => void;
+  title: string;
+}) {
+  const colors = useThemeColors();
+  const renderMenu = useCallback(
+    ({ tintColor }: { tintColor?: ColorValue }) => (
+      <MenuView
+        actions={[{ id: "cancel", title: "Cancel fanout", attributes: { destructive: true } }]}
+        onPressAction={({ nativeEvent }) => {
+          if (nativeEvent.event === "cancel") onCancel();
+        }}
+      >
+        <IconSymbol
+          color={tintColor ?? colors.foreground}
+          fallback="⋯"
+          name="ellipsis.circle"
+          size={22}
+        />
+      </MenuView>
+    ),
+    [colors.foreground, onCancel],
+  );
+  return <Stack.Screen options={{ title, headerRight: acting ? renderMenu : undefined }} />;
+}
+
+function FanoutFailure({ fanout }: { fanout: Fanout }) {
+  if (!fanout.failure) return null;
+  return <Text className="px-4 pb-1 text-sm text-destructive">{fanout.failure.message}</Text>;
 }
 
 /** One chip per attempt, in creation order; the pager follows the selection. */

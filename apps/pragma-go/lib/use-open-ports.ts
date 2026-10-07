@@ -1,10 +1,10 @@
-import type { OpenPort } from "@pragma-sh/sdk";
-import { PragmaGatewayError } from "@pragma-sh/sdk";
+import type { OpenPort, PragmaClient } from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { AppState } from "react-native";
 
 import { useConnection } from "./connection-context";
+import { settle } from "./host-read";
 import { portsForWorktree } from "./ports";
 
 const POLL_MS = 2_000;
@@ -19,16 +19,10 @@ export function useOpenPorts(worktreeId: string): OpenPort[] {
       let active = true;
       let timer: ReturnType<typeof setInterval> | undefined;
 
+      const read = portsReader(client, status === "paired", worktreeId, handleUnauthorized);
       const refresh = async (): Promise<void> => {
-        if (!client || status !== "paired" || !worktreeId) return;
-        try {
-          const next = portsForWorktree(await client.ports.list([worktreeId]), worktreeId);
-          if (active) setPorts(next);
-        } catch (error) {
-          if (error instanceof PragmaGatewayError && error.httpStatus === 401) {
-            handleUnauthorized();
-          }
-        }
+        const next = await read();
+        if (active && next) setPorts(next);
       };
       const start = (): void => {
         if (timer) return;
@@ -54,4 +48,18 @@ export function useOpenPorts(worktreeId: string): OpenPort[] {
   );
 
   return ports;
+}
+
+/** Reads the worktree's ports, or null when there is no host to ask or the read failed. */
+function portsReader(
+  client: PragmaClient | null,
+  paired: boolean,
+  worktreeId: string,
+  onUnauthorized: () => void,
+): () => Promise<OpenPort[] | null> {
+  if (!client || !paired || !worktreeId) return async () => null;
+  return async () => {
+    const result = await settle(client.ports.list([worktreeId]), onUnauthorized);
+    return result.ok ? portsForWorktree(result.value, worktreeId) : null;
+  };
 }

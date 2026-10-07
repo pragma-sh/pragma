@@ -1,20 +1,15 @@
-import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import {
   buildPullRequestPrompt,
   cleanPullRequestDraft,
   type PullRequestDraft,
   type PullRequestPromptContext,
 } from "./prompts.ts";
+import { type AiFeatureContext, featureRunOptions } from "./feature-context.ts";
 import { runPromptWithFallback } from "./session.ts";
 
 /** Options for {@link generatePullRequestDraft}. */
-export interface GeneratePullRequestDraftOptions extends PullRequestPromptContext {
-  /** Worktree root — used for AGENTS.md/skill context and code investigation. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
-}
+export interface GeneratePullRequestDraftOptions
+  extends PullRequestPromptContext, AiFeatureContext {}
 
 /** Raised when there are no branch commits to summarize. */
 export class NoCommittedChangesError extends Error {
@@ -37,12 +32,7 @@ export function generatePullRequestDraft(
   }
 
   return runPromptWithFallback(
-    {
-      modelKind: "standard",
-      cwd: options.cwd,
-      authStorage: options.authStorage,
-      registry: options.registry,
-    },
+    featureRunOptions(options, "standard"),
     buildPullRequestPrompt(options),
     cleanPullRequestDraft,
   );

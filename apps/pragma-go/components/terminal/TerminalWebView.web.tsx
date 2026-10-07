@@ -5,10 +5,10 @@ import {
   type TerminalViewerCommand,
 } from "@pragma-sh/terminal-viewer";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { View, useColorScheme } from "react-native";
+import { View } from "react-native";
 
 import { createTerminalCommandQueue } from "@/lib/terminal-command-queue";
-import { useHostThemeOverrides } from "@/lib/theme-context";
+import { useViewerTheme } from "@/lib/theme-context";
 import { terminalMessageHandler, type TerminalViewProps } from "./terminal-bridge";
 
 import type { TerminalViewHandle } from "./TerminalWebView";
@@ -24,9 +24,7 @@ import type { TerminalViewHandle } from "./TerminalWebView";
 export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalWebView(props, ref) {
     const frame = useRef<HTMLIFrameElement | null>(null);
-    const scheme = useColorScheme() === "dark" ? "dark" : "light";
-    const overrides = useHostThemeOverrides();
-    const themeCss = useMemo(() => terminalThemeCss(overrides), [overrides]);
+    const { scheme, overrides, themeCss } = useViewerTheme(terminalThemeCss);
     const parentOrigin = typeof window === "undefined" ? "*" : window.location.origin;
     const html = useMemo(
       () => buildTerminalViewerHtml({ mode: scheme, themeCss, parentOrigin }),

@@ -1,9 +1,17 @@
 import type { GitHubPullRequest } from "@pragma-sh/constants";
-import { PragmaGatewayError, type AiJob, type GitHubBranches } from "@pragma-sh/sdk";
+import type {
+  AiJob,
+  AiJobStage,
+  GitHubBranches,
+  PragmaClient,
+  WorktreeChanges,
+} from "@pragma-sh/sdk";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
+import { settle, type Settled } from "./host-read";
+import { errorText } from "./utils";
 
 /** How often a running job is re-read. The work is minutes long, not seconds. */
 const POLL_MS = 1_500;
@@ -77,168 +85,24 @@ export interface CommitAndPr {
 export function useCommitAndPr(worktreeId: string, root: string | undefined): CommitAndPr {
   const { client, handleUnauthorized } = useConnection();
   const [job, setJob] = useState<AiJob | null>(null);
-  const [pullRequest, setPullRequest] = useState<GitHubPullRequest | null>(null);
-  const [githubReady, setGithubReady] = useState<boolean | null>(null);
-  const [branches, setBranches] = useState<GitHubBranches | null>(null);
-  const [branchesError, setBranchesError] = useState<string | null>(null);
-  // Bumped to re-read the branch list: a run that just made commits does not
-  // change it, but a failed read should be retryable from the picker.
-  const [branchRevision, setBranchRevision] = useState(0);
-  const [hasChanges, setHasChanges] = useState<boolean | null>(null);
   const [publishing, setPublishing] = useState(false);
-  const [prRevision, setPrRevision] = useState(0);
   // The request id belongs to the attempt, not the render: a retry after a lost
   // response must reuse it so the host replays rather than repeats.
   const requestId = useRef<string | null>(null);
 
-  const refreshPullRequest = useCallback(() => setPrRevision((value) => value + 1), []);
-
-  // Asked once per connection rather than per render: the answer is a stored
-  // token, and the host re-checks it against GitHub on every call.
-  useEffect(() => {
-    if (!client) {
-      setGithubReady(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      try {
-        const status = await client.github.status();
-        if (!cancelled) setGithubReady(status.authenticated);
-      } catch (error: unknown) {
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-        // An unreachable host is not a signed-out one; leave it unknown so the
-        // screen does not accuse the user of having no token.
-        if (!cancelled) setGithubReady(null);
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, handleUnauthorized]);
-
-  // Read on focus rather than on a timer: the answer only matters when the user
-  // is looking at the action, and a phone should not poll git in the background.
-  const readChanges = useCallback(async () => {
-    if (!client || !root) {
-      setHasChanges(null);
-      return;
-    }
-    try {
-      const changes = await client.git.worktreeChanges({ root });
-      setHasChanges(changes.staged.length > 0 || changes.unstaged.length > 0);
-    } catch (error: unknown) {
-      if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-      // Unknown, not clean: a failed read must not disable the action on a
-      // worktree that has plenty to commit.
-      setHasChanges(null);
-    }
-  }, [client, handleUnauthorized, root]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void readChanges();
-    }, [readChanges]),
+  const githubReady = useGithubReady(client, handleUnauthorized);
+  const hasChanges = useHasChanges(client, root, handleUnauthorized, job?.stage);
+  const { branches, branchesError, refreshBranches } = useBaseBranches(
+    client,
+    githubReady ? root : undefined,
+    handleUnauthorized,
   );
-
-  // A finished run is what made the worktree clean, so re-read on the stage
-  // that finished it rather than waiting for the screen to be focused again.
-  const stage = job?.stage;
-  useEffect(() => {
-    if (stage === undefined) return;
-    void readChanges();
-  }, [readChanges, stage]);
-
-  // Read as soon as the host is known to be signed in, not only once a draft
-  // exists: the picker is the first thing shown on the review step, and a list
-  // that starts loading then leaves the user with a menu that opens empty.
-  useEffect(() => {
-    if (!client || !root || !githubReady) return undefined;
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      try {
-        const found = await client.github.branches(root);
-        if (cancelled) return;
-        setBranches(found);
-        setBranchesError(null);
-      } catch (error: unknown) {
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-        // Without the list the publish still works — it goes to the default
-        // branch — but the picker must say so rather than opening empty.
-        if (!cancelled) {
-          setBranchesError(
-            error instanceof Error ? error.message : "The branch list could not be read.",
-          );
-        }
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [branchRevision, client, githubReady, handleUnauthorized, root]);
-
-  useEffect(() => {
-    if (!client || !root) {
-      setPullRequest(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      try {
-        const found = await client.github.pullRequest(root);
-        if (!cancelled) setPullRequest(found);
-      } catch (error: unknown) {
-        // Signed out, offline, or not a GitHub remote: the row simply does not
-        // appear, rather than showing an error on a repo that works fine.
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, handleUnauthorized, prRevision, root]);
-
-  // Poll only while the host says the run is going.
-  const running = job !== null && ["planning", "committing", "drafting"].includes(job.stage);
-  useEffect(() => {
-    if (!client || !job || !running) return undefined;
-    const jobId = job.jobId;
-    let cancelled = false;
-    const poll = async (): Promise<void> => {
-      try {
-        const next = await client.ai.getRun(jobId);
-        if (!cancelled && next) setJob(next);
-      } catch {
-        // A missed poll is not a state change: the next one will say where the
-        // run got to, and the host is the one keeping track.
-      }
-    };
-    const timer = setInterval(() => void poll(), POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [client, job, running]);
-
-  // Coming back to the screen re-reads the run rather than trusting what was on
-  // it: the host kept working while the app was away.
-  useFocusEffect(
-    useCallback(() => {
-      if (!client || !job) return;
-      const refresh = async (): Promise<void> => {
-        try {
-          const next = await client.ai.getRun(job.jobId);
-          if (next) setJob(next);
-        } catch {
-          // Leave the last known state on screen rather than blanking it.
-        }
-      };
-      void refresh();
-    }, [client, job]),
+  const { pullRequest, setPullRequest, refreshPullRequest } = usePullRequest(
+    client,
+    root,
+    handleUnauthorized,
   );
+  useJobRefresh(client, job, setJob);
 
   const start = useCallback(async () => {
     if (!client) throw new Error("Not connected to a host");
@@ -247,34 +111,26 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
   }, [client, worktreeId]);
 
   const publish = useCallback(
-    async (input: { title: string; body: string; draft: boolean; base?: string }) => {
+    async (input: PublishInput) => {
       if (!client || !root) throw new Error("Not connected to a host");
       setPublishing(true);
       try {
-        const published = await client.github.publish({
-          root,
-          title: input.title,
-          body: input.body,
-          draft: input.draft,
-          ...(input.base ? { base: input.base } : {}),
-          requestId: `${requestId.current ?? worktreeId}:publish`,
-        });
-        setPullRequest(published);
+        setPullRequest(
+          await client.github.publish(publishRequest(root, input, requestId.current ?? worktreeId)),
+        );
         setJob(null);
         requestId.current = null;
       } finally {
         setPublishing(false);
       }
     },
-    [client, root, worktreeId],
+    [client, root, setPullRequest, worktreeId],
   );
 
   const reset = useCallback(() => {
     setJob(null);
     requestId.current = null;
   }, []);
-
-  const refreshBranches = useCallback(() => setBranchRevision((value) => value + 1), []);
 
   return {
     phase: phaseFor(job, publishing),
@@ -292,40 +148,242 @@ export function useCommitAndPr(worktreeId: string, root: string | undefined): Co
   };
 }
 
-/** Maps the host's stage onto what the screen shows. */
-function phaseFor(job: AiJob | null, publishing: boolean): CommitAndPrPhase {
-  if (publishing) return "publishing";
-  if (!job) return "idle";
-  switch (job.stage) {
-    case "planning":
-    case "committing":
-    case "drafting":
-      return "running";
-    case "ready":
-      return "review";
-    default:
-      // Failed, cancelled, and interrupted all need the same thing from the
-      // screen: say what happened, and say what was committed anyway.
-      return "failed";
+type PublishInput = Parameters<CommitAndPr["publish"]>[0];
+
+/** The publish request for reviewed text, keyed off the run that made the commits. */
+function publishRequest(root: string, input: PublishInput, attemptId: string) {
+  return {
+    root,
+    title: input.title,
+    body: input.body,
+    draft: input.draft,
+    ...(input.base ? { base: input.base } : {}),
+    requestId: `${attemptId}:publish`,
+  };
+}
+
+/**
+ * Runs `load` whenever it or `revision` changes, handing it a `live()` check so
+ * an answer that arrives after the effect is torn down is dropped. Bumping
+ * `revision` is how a caller asks for a re-read.
+ */
+function useCancellableLoad(
+  load: ((live: () => boolean) => Promise<void>) | null,
+  revision = 0,
+): void {
+  useEffect(() => {
+    if (!load) return undefined;
+    let cancelled = false;
+    void load(() => !cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [load, revision]);
+}
+
+/**
+ * Whether the host is signed in to GitHub. Asked once per connection rather
+ * than per render: the answer is a stored token, and the host re-checks it
+ * against GitHub on every call.
+ */
+function useGithubReady(client: PragmaClient | null, onUnauthorized: () => void): boolean | null {
+  const [ready, setReady] = useState<boolean | null>(null);
+  const load = useMemo(() => {
+    if (!client) return async () => setReady(null);
+    return async (live: () => boolean) => {
+      const result = await settle(client.github.status(), onUnauthorized);
+      // An unreachable host is not a signed-out one; leave it unknown so the
+      // screen does not accuse the user of having no token.
+      if (live()) setReady(result.ok ? result.value.authenticated : null);
+    };
+  }, [client, onUnauthorized]);
+  useCancellableLoad(load);
+  return ready;
+}
+
+/**
+ * Whether the worktree has anything uncommitted. Read on focus rather than on a
+ * timer: the answer only matters when the user is looking at the action, and a
+ * phone should not poll git in the background.
+ */
+function useHasChanges(
+  client: PragmaClient | null,
+  root: string | undefined,
+  onUnauthorized: () => void,
+  stage: AiJobStage | undefined,
+): boolean | null {
+  const [hasChanges, setHasChanges] = useState<boolean | null>(null);
+  const readChanges = useCallback(async () => {
+    const result =
+      client && root ? await settle(client.git.worktreeChanges({ root }), onUnauthorized) : null;
+    setHasChanges(uncommitted(result));
+  }, [client, onUnauthorized, root]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void readChanges();
+    }, [readChanges]),
+  );
+
+  // A finished run is what made the worktree clean, so re-read on the stage
+  // that finished it rather than waiting for the screen to be focused again.
+  useEffect(() => {
+    if (stage === undefined) return;
+    void readChanges();
+  }, [readChanges, stage]);
+
+  return hasChanges;
+}
+
+/**
+ * Unknown, not clean, when the read failed: a failed read must not disable the
+ * action on a worktree that has plenty to commit.
+ */
+function uncommitted(result: Settled<WorktreeChanges> | null): boolean | null {
+  if (!result?.ok) return null;
+  return result.value.staged.length > 0 || result.value.unstaged.length > 0;
+}
+
+/**
+ * Branches a pull request could merge into. `root` is passed only once the host
+ * is known to be signed in — not only once a draft exists: the picker is the
+ * first thing shown on the review step, and a list that starts loading then
+ * leaves the user with a menu that opens empty.
+ */
+function useBaseBranches(
+  client: PragmaClient | null,
+  root: string | undefined,
+  onUnauthorized: () => void,
+) {
+  const [branches, setBranches] = useState<GitHubBranches | null>(null);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  // Bumped to re-read the branch list: a run that just made commits does not
+  // change it, but a failed read should be retryable from the picker.
+  const [revision, setRevision] = useState(0);
+  const load = useMemo(() => {
+    if (!client || !root) return null;
+    return async (live: () => boolean) => {
+      const result = await settle(client.github.branches(root), onUnauthorized);
+      if (!live()) return;
+      if (result.ok) {
+        setBranches(result.value);
+        setBranchesError(null);
+      } else {
+        // Without the list the publish still works — it goes to the default
+        // branch — but the picker must say so rather than opening empty.
+        setBranchesError(errorText(result.error, "The branch list could not be read."));
+      }
+    };
+  }, [client, onUnauthorized, root]);
+  useCancellableLoad(load, revision);
+  const refreshBranches = useCallback(() => setRevision((value) => value + 1), []);
+  return { branches, branchesError, refreshBranches };
+}
+
+/** The branch's pull request, if it has one. */
+function usePullRequest(
+  client: PragmaClient | null,
+  root: string | undefined,
+  onUnauthorized: () => void,
+) {
+  const [pullRequest, setPullRequest] = useState<GitHubPullRequest | null>(null);
+  const [revision, setRevision] = useState(0);
+  const load = useMemo(() => {
+    if (!client || !root) return async () => setPullRequest(null);
+    return async (live: () => boolean) => {
+      // Signed out, offline, or not a GitHub remote: the row simply does not
+      // appear, rather than showing an error on a repo that works fine.
+      const result = await settle(client.github.pullRequest(root), onUnauthorized);
+      if (live() && result.ok) setPullRequest(result.value);
+    };
+  }, [client, onUnauthorized, root]);
+  useCancellableLoad(load, revision);
+  const refreshPullRequest = useCallback(() => setRevision((value) => value + 1), []);
+  return { pullRequest, setPullRequest, refreshPullRequest };
+}
+
+/**
+ * Keeps the run current: polled while the host says it is going, and re-read on
+ * coming back to the screen rather than trusting what was on it — the host kept
+ * working while the app was away.
+ */
+function useJobRefresh(
+  client: PragmaClient | null,
+  job: AiJob | null,
+  setJob: (job: AiJob) => void,
+): void {
+  const running = job !== null && phaseFor(job, false) === "running";
+  const jobId = job?.jobId;
+  useEffect(() => {
+    if (!client || !jobId || !running) return undefined;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      const next = await readRun(client, jobId);
+      if (!cancelled && next) setJob(next);
+    };
+    const timer = setInterval(() => void poll(), POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [client, jobId, running, setJob]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!client || !jobId) return;
+      const refresh = async (): Promise<void> => {
+        const next = await readRun(client, jobId);
+        if (next) setJob(next);
+      };
+      void refresh();
+    }, [client, jobId, setJob]),
+  );
+}
+
+/**
+ * The run's current record, or null when it could not be read. A missed read
+ * is not a state change: the next one will say where the run got to, and the
+ * host is the one keeping track — so the last known state stays on screen.
+ */
+async function readRun(client: PragmaClient, jobId: string): Promise<AiJob | null> {
+  try {
+    return await client.ai.getRun(jobId);
+  } catch {
+    return null;
   }
 }
 
+/** What the screen shows for each stage; anything absent has failed. */
+const PHASE_BY_STAGE: Partial<Record<AiJobStage, CommitAndPrPhase>> = {
+  planning: "running",
+  committing: "running",
+  drafting: "running",
+  ready: "review",
+};
+
+/**
+ * Maps the host's stage onto what the screen shows. Failed, cancelled, and
+ * interrupted all need the same thing from the screen: say what happened, and
+ * say what was committed anyway.
+ */
+function phaseFor(job: AiJob | null, publishing: boolean): CommitAndPrPhase {
+  if (publishing) return "publishing";
+  if (!job) return "idle";
+  return PHASE_BY_STAGE[job.stage] ?? "failed";
+}
+
+const STAGE_LABELS: Partial<Record<AiJobStage, string>> = {
+  planning: "Reading your changes…",
+  committing: "Committing…",
+  drafting: "Writing the pull request…",
+  cancelled: "Stopped",
+  interrupted: "Interrupted",
+};
+
 /** What the user is told a running job is doing. */
 export function stageLabel(job: AiJob): string {
-  switch (job.stage) {
-    case "planning":
-      return "Reading your changes…";
-    case "committing":
-      return "Committing…";
-    case "drafting":
-      return "Writing the pull request…";
-    case "ready":
-      return `${job.commitCount} ${job.commitCount === 1 ? "commit" : "commits"} created`;
-    case "cancelled":
-      return "Stopped";
-    case "interrupted":
-      return "Interrupted";
-    default:
-      return "Failed";
+  if (job.stage === "ready") {
+    return `${job.commitCount} ${job.commitCount === 1 ? "commit" : "commits"} created`;
   }
+  return STAGE_LABELS[job.stage] ?? "Failed";
 }

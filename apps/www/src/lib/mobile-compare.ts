@@ -1,4 +1,4 @@
-import type { Support } from "./compare-data";
+import type { ComparisonColumn, Support } from "./compare-data";
 import { repoUrl } from "./shared";
 
 /** One capability row comparing the three phone clients. */
@@ -125,8 +125,14 @@ export const MOBILE_ROWS: readonly MobileComparisonRow[] = [
   },
 ] as const;
 
+/** The other phone clients, in the order the table shows them. */
+export const MOBILE_COLUMNS: readonly ComparisonColumn<MobileComparisonRow>[] = [
+  { label: "Superset Mobile", key: "superset" },
+  { label: "Orca Mobile", key: "orca" },
+];
+
 /** When the rows above were last checked against each project's own pages. */
-export const MOBILE_VERIFIED_ON = "2026-10-06";
+const MOBILE_VERIFIED_ON = "2026-10-06";
 
 /** Shown under the mobile comparison table. */
 export const MOBILE_FOOTNOTE = `Checked on ${MOBILE_VERIFIED_ON} against Superset's mobile launch post and pricing, and Orca's mobile documentation. "No" means the capability is not in that project's own documentation. Superset Mobile launched on 2026-09-21; its Android app is on a waitlist. Orca's relay needs a sign-in; its LAN mode does not. If something here is out of date, open an issue on ${repoUrl} and we will correct it.`;

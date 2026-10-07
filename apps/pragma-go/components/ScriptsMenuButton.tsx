@@ -1,3 +1,4 @@
+import type { ScriptList } from "@pragma-sh/sdk";
 import { useState } from "react";
 import { Alert, Pressable, type ColorValue } from "react-native";
 
@@ -86,6 +87,10 @@ function menuActions(scripts: ReturnType<typeof useScripts>): MenuAction[] {
       },
     ];
   }
+  return listActions(list);
+}
+
+function listActions(list: ScriptList): MenuAction[] {
   if (list.error) {
     return [{ id: "error", title: list.error, attributes: { disabled: true, destructive: true } }];
   }

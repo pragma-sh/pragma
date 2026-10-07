@@ -1,20 +1,14 @@
-import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import {
   buildCommitPlanPrompt,
   cleanCommitPlanDraft,
   type CommitPlanDraft,
   type CommitPlanPromptContext,
 } from "./prompts.ts";
+import { type AiFeatureContext, featureRunOptions } from "./feature-context.ts";
 import { runPromptWithFallback } from "./session.ts";
 
 /** Options for {@link generateCommitPlan}. */
-export interface GenerateCommitPlanOptions extends CommitPlanPromptContext {
-  /** Worktree root — used for AGENTS.md/skill context and code investigation. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
-}
+export interface GenerateCommitPlanOptions extends CommitPlanPromptContext, AiFeatureContext {}
 
 /** Raised when there are no changes to group into commits. */
 export class NoWorktreeChangesError extends Error {
@@ -35,12 +29,7 @@ export function generateCommitPlan(options: GenerateCommitPlanOptions): Promise<
   }
 
   return runPromptWithFallback(
-    {
-      modelKind: "standard",
-      cwd: options.cwd,
-      authStorage: options.authStorage,
-      registry: options.registry,
-    },
+    featureRunOptions(options, "standard"),
     buildCommitPlanPrompt(options),
     cleanCommitPlanDraft,
   );

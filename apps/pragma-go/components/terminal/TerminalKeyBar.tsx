@@ -53,12 +53,14 @@ const SECONDARY_KEYS: TerminalKey[] = [
 
 /** Control-modified byte for a printable key, or null when there is none. */
 export function controlByte(character: string): number | null {
-  const code = character.toUpperCase().codePointAt(0);
-  if (code === undefined) return null;
-  // Ctrl-@ through Ctrl-_ are the C0 controls; nothing else has one.
-  if (code >= 0x40 && code <= 0x5f) return code - 0x40;
-  if (code === 0x3f) return 0x7f; // Ctrl-? is delete
-  return null;
+  const code = character.toUpperCase().codePointAt(0) ?? -1;
+  if (hasC0Control(code)) return code - 0x40;
+  return code === 0x3f ? 0x7f : null; // Ctrl-? is delete
+}
+
+/** Ctrl-@ through Ctrl-_ are the C0 controls; nothing else has one. */
+function hasC0Control(code: number): boolean {
+  return code >= 0x40 && code <= 0x5f;
 }
 
 export interface TerminalKeyBarProps {
