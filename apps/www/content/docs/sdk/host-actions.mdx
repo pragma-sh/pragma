@@ -1,0 +1,137 @@
+---
+title: Terminals, scripts & GitHub
+description: Host-owned terminal tabs, project scripts, open ports, AI commits, and pull requests — the tabs, scripts, ports, ai, and github namespaces.
+---
+
+These namespaces let a client do work on the host that used to need a desktop window:
+open a terminal, start the dev server, commit with AI, and publish the pull request. Each
+one is owned by the host, so it keeps going when the client that started it goes away —
+which is what [Pragma Go](/docs/user-guide/mobile) is built on.
+
+<Callout title="Retries are safe by request id">
+  Every call here that creates something — a tab, a script run, an AI run, a pull request — takes a
+  caller-generated `requestId`. Reuse it when retrying after a lost response and the host returns
+  what it already made instead of making a second one. Generate a fresh one per user action, for
+  example with `crypto.randomUUID()`.
+</Callout>
+
+## tabs — host-owned terminals
+
+```ts
+const tab = await client.tabs.openTerminal({
+  worktreeId,
+  requestId: crypto.randomUUID(),
+  title: "logs", // optional; otherwise the shell's own title stands
+});
+
+await client.tabs.close(tab.id); // idempotent; ends the process on every device
+
+const { tabs, closedTabIds } = await client.tabs.listManaged([worktreeId]);
+```
+
+A tab opened here belongs to the host, not to the client that asked for it. It appears on
+the desktop as an ordinary tab, survives a host restart, and closing it ends the process for
+everyone watching — so confirm with the user before calling `close`. `listManaged` returns
+the host's tabs plus the ids of tabs closed through it; a client that keeps its own copy of
+the tab list should drop any row named in `closedTabIds` rather than recreate it. To read
+or type into the terminal, [attach to its session](/docs/sdk/sessions).
+
+## scripts — project run scripts
+
+```ts
+const { scripts, error } = await client.scripts.list(worktreeId);
+// scripts: { name, icon, commandCount, run: { runId, tabIds } | null }[]
+
+const run = await client.scripts.run({ worktreeId, name: "run", requestId: crypto.randomUUID() });
+await client.scripts.stop(run.runId); // ends the run and closes its terminals everywhere
+```
+
+The host reads [`.pragma/scripts.json`](/docs/user-guide/project-scripts) from the project
+root and allows **one run per script per worktree**: `run` on a script that is already going
+returns that run. Keep the three empty states apart — no scripts (`scripts: []`), a config
+that does not parse (`error` set), and a list you have not loaded yet.
+
+## ports — open listeners
+
+```ts
+const ports = await client.ports.list([worktreeId]);
+// OpenPort[]: { port, process, pid, tabId, worktreeId } — listeners started from terminals
+
+const { url } = await client.ports.forward({ projectId, port: ports[0] });
+```
+
+`forward` re-checks that the listener is still the one you listed, then exposes it through
+the user's configured tunnel command with the design-mode overlay injected, and returns the
+public URL. It publishes a local server to the internet, so confirm first.
+
+## ai — commit with AI, and the other host helpers
+
+Committing is a **job**: it plans, makes several commits, then drafts the pull request text,
+and the client that started it may be gone long before it finishes. The call returns
+immediately and you poll the run.
+
+```ts
+const { available, signedIn } = await client.ai.status();
+
+let job = await client.ai.commitAndDraftPullRequest({
+  worktreeId,
+  requestId: crypto.randomUUID(),
+});
+while (!["ready", "failed", "cancelled", "interrupted"].includes(job.stage)) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  job = (await client.ai.getRun(job.jobId)) ?? job;
+}
+// job: { stage, commitCount, title, body, error }
+```
+
+`stage` moves through `planning` → `committing` → `drafting` → `ready`. `commitCount` is
+meaningful in every stage, failures included: it is how a user knows whether anything reached
+their branch. `interrupted` means the host stopped mid-run; commits it had made are still
+there. `cancelRun(runId)` stops the run before its next step and never un-commits anything.
+The run takes the same per-project lock as the desktop's own commit button, so the two
+cannot stage against each other.
+
+The smaller helpers answer directly:
+
+```ts
+const message = await client.ai.generateCommitMessage(worktreeId); // for what is staged
+const { title, body } = await client.ai.generatePullRequestDraft(worktreeId);
+const { summary, edits } = await client.ai.inlineEdit({
+  worktreeId,
+  filePath,
+  instruction,
+  doc, // the buffer being edited — it may not be saved yet
+  startLine,
+  endLine,
+});
+const answer = await client.ai.ask({ worktreeId, question: "Where is auth handled?" });
+```
+
+`ask` is read-only by construction. Anything that should be able to change files goes
+through [`agents.launch`](/docs/sdk/agents), where the user can see and approve it.
+
+## github — pull requests through the host's token
+
+```ts
+const { authenticated, login } = await client.github.status();
+
+const existing = await client.github.pullRequest(worktreeRoot); // or null
+const { branches, defaultBranch, headBranch } = await client.github.branches(worktreeRoot);
+
+const pr = await client.github.publish({
+  root: worktreeRoot,
+  title: job.title!,
+  body: job.body!,
+  base: "main", // omit for the repository default
+  draft: false,
+  requestId: crypto.randomUUID(),
+});
+```
+
+The [GitHub token](/docs/user-guide/github#signing-in) stays on the host, and no method returns
+it — this namespace is reachable from a paired phone. `pullRequest` finds a branch's pull
+request by repository and exact head branch, so one opened on the web or another machine is
+found too, merged and closed ones included. `publish` pushes and creates; a push can succeed
+and the create response be lost, which is exactly when reusing the `requestId` matters.
+Publishing is deliberately a separate call from committing: a commit is local, a publish is
+not.

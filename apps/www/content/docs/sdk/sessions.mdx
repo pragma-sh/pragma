@@ -56,6 +56,33 @@ await client.sessions.killForCwd("/path/to/worktree"); // kill every session in 
 `write` posts raw octet-stream bytes to `POST /v1/sessions/{id}/input` — no JSON, no
 escaping.
 
+## Sharing a session's size: viewport leases
+
+A session has one PTY grid, shared by every client showing it. A small client — a phone —
+cannot just `resize` it to fit, or the desktop showing the same terminal is reflowed under
+the user. Borrow the grid with a lease instead:
+
+```ts
+const lease = await client.sessions.acquireViewport(sessionId, { cols: 48, rows: 30 });
+// { leaseId, cols, rows, previousCols?, previousRows?, generation, expiresInMs }
+
+const timer = setInterval(
+  () => client.sessions.renewViewport(sessionId, lease.leaseId),
+  lease.expiresInMs / 3,
+);
+
+// While leased, only the holder's resizes apply; anyone else's is remembered as the
+// size to restore. `resizeLeased` returns whether the host applied it.
+await client.sessions.resizeLeased(sessionId, { cols: 52, rows: 30 }, lease.leaseId);
+
+clearInterval(timer);
+await client.sessions.releaseViewport(sessionId, lease.leaseId); // restores the owner's size
+```
+
+The host sweeps expired leases on a timer, so a client that is suspended or loses its
+connection never strands the grid at phone size. `client.sessions.info(sessionId)` reports the
+grid, liveness, and whether the viewport is currently leased.
+
 ## Use cases
 
 - **Headless agents**: spawn a session per attempt and read its output from a script.

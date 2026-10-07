@@ -99,7 +99,13 @@ any machine. The warning is real: the link contains the token, treat it like a p
 ## What you can do from the phone
 
 - Create worktrees and launch agents — sessions appear on the desktop as background tabs.
-- Watch running sessions and read scrollback.
+- Watch running sessions and read scrollback. Swiping a terminal only scrolls it — it never
+  sends keystrokes or mouse input to the program running there.
+- **Open terminals and type into them** — see [Terminals](#terminals).
+- **Run project scripts** and open the ports they listen on — see
+  [Project scripts and ports](#project-scripts-and-ports).
+- **Commit and open the pull request** — see [Commit & PR](#commit--pr).
+- See every agent account's usage and **switch accounts** — see [Accounts](#accounts).
 - **Answer questions and approve commands** — the same prompts the desktop shows, answered
   from wherever you are.
 - Read and comment on [scratchpads](/docs/user-guide/scratchpads), including embedded
@@ -117,14 +123,16 @@ the attempts hang off a fresh coordination branch made from the worktree you ope
 sheet on — see [Fan out](/docs/user-guide/worktrees#fan-out).
 
 Attempt worktrees are folded into a single fanout row under their parent, with a combined
-status dot. Tapping it opens the compare view: one page per attempt, swiped between, with a
-chip row to jump to one. Each page shows the attempt's status, the last lines of its
-terminal, the scratchpads it wrote, and every file it changed against the fanout's base
-commit — tap a file for its diff. From there:
+status dot. Tapping it opens the compare view: the attempt in view heads the screen — its
+agent and status — with a chip row under it to jump to another, and one page per attempt,
+swiped between. Each page shows the scratchpads the attempt wrote and every file it changed
+against the fanout's base commit — tap a file for its diff. Screens you open from here
+go **Back** to the fanout. The header's buttons act on the attempt in view:
 
-- **Open chat** goes to the attempt's live session.
-- **Retry** restarts an attempt's agent in its existing worktree, keeping its work.
-- **Pick this attempt** commits and merges it into the fanout branch, then deletes every
+- **Chat** (speech bubbles) goes to the attempt's live session.
+- **Retry** (circular arrow) restarts an attempt's agent in its existing worktree, keeping
+  its work.
+- **Pick** (check) commits and merges it into the fanout branch, then deletes every
   attempt worktree — the phone asks first. A merge conflict is left for the desktop to resolve.
 - The composer at the bottom sends a follow-up to **all attempts** or only the one in view.
 - **⋯ → Cancel fanout** stops every attempt and keeps their worktrees.
@@ -136,6 +144,79 @@ expand in place, and tapping a file opens it in a read-only viewer with the desk
 highlighting. **Wrap / No wrap** in the header toggles soft wrapping. Binary files and files
 too large for the host to send say so instead of rendering. Nothing on the phone can edit,
 rename, or delete a file.
+
+## Terminals
+
+A worktree's **Terminals** section lists its shells and script runs; agent sessions stay under
+**Agents**, where the chat screen's **Chat / Terminal** switcher reaches the agent's raw TUI.
+Tap a row to attach to it, or **New terminal** to open a fresh shell. A terminal opened from
+the phone is a real tab: it shows up on the desktop too and survives a restart of the host.
+
+- The keys a phone keyboard lacks sit above it: **ctrl** (sticky), **esc**, **tab**, **^C**,
+  and the arrows, with the rest one tap away under **⋯**. Ctrl-D is deliberately not next to
+  Ctrl-C — it ends the shell.
+- While you look, the phone borrows the terminal's size; leaving hands it back, so the
+  desktop's layout is untouched. If the phone stops answering, the host takes the size back
+  on its own.
+- A dropped connection resumes from where it left off rather than replaying the whole
+  scrollback, and a keystroke whose delivery was uncertain is never resent.
+- Long-press a row to **Rename** it or **Close terminal**. Closing ends the process on every
+  device, so the phone asks first. Renaming needs Pragma open on the computer.
+
+## Project scripts and ports
+
+The worktree header's **play** button lists the project's
+[run scripts](/docs/user-guide/project-scripts). Tapping one starts it on the host without
+leaving the screen; its terminals appear under **Terminals**, one per command. A script that
+is already running shows as **Stop &lt;name&gt;** instead, and tapping it again never starts
+a second copy fighting for the same port.
+
+While a worktree is open, a **Ports** section lists the servers its terminals are listening
+on, with the process that owns each. Tap one and confirm **Forward port …?**: Pragma exposes
+it through your configured tunnel command and opens it in the phone's browser. Forwarded
+pages carry a draggable paintbrush — tap it to pick elements, describe a change, choose an
+agent, and launch it, the same flow as the desktop browser's
+[design mode](/docs/user-guide/browser). The paired gateway token never enters the
+forwarded page.
+
+## Commit & PR
+
+The worktree header's pull-request button runs the desktop's **Commit and draft a PR** flow, in the
+same order: AI groups your changes into logical commits, you review and edit the pull
+request **Title** and **Description** and choose the branch to **Merge into**, and only then
+does **Push & create PR** push and open it (**Open as draft** first if you like).
+
+The run belongs to the host, not the phone: locking the screen or losing signal neither
+cancels it nor starts it twice, and the sheet shows the host's stage — **Reading your
+changes…**, **Committing…**, **Writing the pull request…**. A run that fails, is stopped, or
+is interrupted says how many commits it already made. The button is disabled when the
+worktree has nothing to commit, and asks you to **Sign in to GitHub first** when the host has
+no GitHub token — see [GitHub](/docs/user-guide/github).
+
+A worktree whose branch has a pull request shows it at the top — including one opened on the
+web or from another machine — and says **merged** rather than closed once it is merged.
+
+## Accounts
+
+The home screen lists every [account provider](/docs/user-guide/account-providers): each
+account's plan usage, with a reset countdown, and which account each agent launches with.
+Switching here changes the all-projects choice; a project override set on the desktop still
+wins inside that project, and running agents keep the account they started with. Signing in
+to a new account is done from the desktop.
+
+## Widgets
+
+On iOS, long-press the Home Screen to add Pragma Go widgets:
+
+| Widget              | Sizes              | Shows                                      |
+| ------------------- | ------------------ | ------------------------------------------ |
+| **Needs Attention** | Small, Lock Screen | How many agents are waiting on you         |
+| **Agent Status**    | Medium             | Working, waiting, and done agents          |
+| **Inbox**           | Medium, Large      | The oldest pending approvals and questions |
+| **Projects**        | Medium, Large      | Projects with their live worktrees nested  |
+
+Widgets cannot reach your computer themselves; they show the state from the last time the app
+ran, and tapping a row deep-links into it.
 
 ## Notifications
 
