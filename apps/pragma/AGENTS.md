@@ -28,6 +28,7 @@ apps/pragma/
 │   │   └── utils.ts             # cn() + small utilities
 │   ├── generated/               # Git-ignored codegen output (emoji-catalog.ts; `bun run generate`)
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
+│   ├── components/mini/         # Pragma Mini window root (MiniApp), tab model, project/worktree menu
 │   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
     │   ├── state/
     │   │   ├── updates-context.tsx     # Polls GET /api/updates, Install Update, restart confirm
@@ -53,6 +54,8 @@ apps/pragma/
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
     ├── src/kanban.rs            # Tauri commands for the agent board (CRUD + move)
+    ├── src/mini_window.rs       # Pragma Mini windows: create, route menu actions, `--mini` argv, dock menu
+    ├── linux/pragma.desktop     # Bundler .desktop template (default + "New Pragma Mini Window" action)
     ├── src/updates.rs           # Desktop auto-update check/download/apply (reload overlay vs OS installer)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
@@ -89,6 +92,51 @@ apps/pragma/
    `pty_write` is deliberately sync: it only resolves in-memory host state and performs a
    bounded `try_send`; all socket work remains on `pragma-client`'s writer thread. Keeping
    this enqueue command sync preserves invoke order for terminal bytes.
+
+## Pragma Mini windows
+
+A mini window is a second webview running **the same bundle**; `main.tsx` renders
+`components/mini/MiniApp` instead of `App` when the window label starts with
+`constants.miniWindow.labelPrefix`. It is deliberately lean — no workspace reducer,
+onboarding, or board — and reuses the workspace's pieces rather than copying them:
+`TabChip` (the tab chrome both strips render), `AgentLauncher` (the presentational half
+of `AgentsMenu`), `useTabRenameState`, `TerminalView`/`terminalManager`, `useShortcuts`,
+`PluginRuntimeProvider` and `ThemeScopeProvider` (the scope-driven halves of
+`PluginProvider`/`ThemeProvider`, keyed on the active tab's project). Rules that keep it
+working:
+
+- **Mini chrome uses the shared macOS vibrancy surface.** Its root carries
+  `app-content` so the translucent `bg-sidebar` tab strip reveals the native effect;
+  the terminal section paints `bg-canvas`. Keep opaque backgrounds off the strip's
+  ancestors. Fullscreen and non-macOS windows retain solid surfaces.
+  `window_chrome::apply_titled` dispatches native effect installation to the main
+  thread: Mini's async window builder runs on a worker, where `window-vibrancy`
+  rejects the call and leaves the strip see-through without blur.
+- **Mini tabs are never persisted** and are synthetic `Tab`s. A home-directory tab's
+  `worktreeId` is `constants.miniWindow.homeWorktreeId`, which `Hosts::host_id_for_worktree`
+  routes to the local host. Re-homing a tab ("Open in Project" in its context menu)
+  kills its session and spawns a **new** one in the worktree under a fresh id — a remote
+  worktree's shell then runs on its own host, which a `cd` could never do.
+- **Session ids start with `constants.miniWindow.sessionIdPrefix`.** The main window
+  drops agent reports/messages for those ids (`isMiniSessionId`); the mini window applies,
+  alerts, and marks seen for its own (`use-mini-agent-status.ts`). Without the filter a
+  mini tab's `done` would stick on the main sidebar forever.
+- **Notification clicks stay in the originating window.** The native notification
+  command captures its calling webview, raises it on click, and emits only there.
+  Mini's status hook selects the reported tab; its toast offers **Go to tab**.
+  Home-directory tabs have a null notification `projectId`.
+- **Menu events go to one window.** `emit_menu_action` in `lib.rs` sends a native menu
+  action to the focused mini window when it implements it (`MINI_MENU_ACTIONS`: new tab,
+  close tab), otherwise to the main window, raising it. `onMenuAction` therefore listens on
+  the **current webview window**, not globally — a global listener would act in every
+  window. Anything else that the Rust side `emit`s globally reaches mini windows too.
+- **Capabilities** cover `mini-*` (`capabilities/default.json`); a new window label scheme
+  needs adding there.
+- **Entry points**: File → New Pragma Mini Window (⌘⇧N / Ctrl+Shift+N, handled entirely in
+  Rust), the dock/taskbar menu (`pragma_platform::dock`), and relaunching with
+  `constants.miniWindow.launchArg`, which the single-instance plugin forwards
+  (`on_second_instance`). Windows dev builds run without the single-instance guard, so
+  there the jump list starts a second dev instance instead.
 
 ## UI: Tailwind v4 + shadcn/ui
 
@@ -424,7 +472,8 @@ so the heartbeat is not restarted on every visibility flip.
 macOS agent system notifications are clickable: the frontend calls the macOS-only
 `show_agent_notification` Tauri command instead of the generic notification plugin, and
 Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, tabId }`;
-`workspace-context` routes that through `navigateToAgentLocation`. Non-macOS falls back
+the event is scoped to the originating webview. `workspace-context` routes that through
+`navigateToAgentLocation`, while Mini selects its own tab. Non-macOS falls back
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma

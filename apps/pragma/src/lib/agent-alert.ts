@@ -104,6 +104,8 @@ export interface AgentAlertOptions {
   /** Names of the project/worktree/tab the report came from, for the alert body. */
   location?: AgentAlertLocation;
   onGoTo?: () => void;
+  /** Label for the navigation action; defaults to the workspace destination. */
+  goToLabel?: string;
 }
 
 /** Plays a short alert and surfaces a focused/unfocused notification. */
@@ -145,12 +147,12 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   try {
     if (await ensureNotificationPermission()) {
       let nativeShown = false;
-      if (options.projectId) {
+      if (options.projectId || options.onGoTo) {
         try {
           nativeShown = await showAgentNotification(
             title,
             description,
-            options.projectId,
+            options.projectId ?? null,
             payload.worktreeId,
             payload.tabId,
           );
@@ -275,7 +277,7 @@ function agentToast(
                 options.onGoTo?.();
               },
             },
-            "Go to worktree",
+            options.goToLabel ?? "Go to worktree",
           )
         : null,
       createElement(

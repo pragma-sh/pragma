@@ -179,6 +179,22 @@ describe("alertAgent", () => {
     expect(sendNotificationMock).not.toHaveBeenCalled();
   });
 
+  it("makes home-directory Mini notifications clickable without a project", async () => {
+    showAgentNotificationMock.mockResolvedValue(true);
+    const payload = report({ status: "done", tabId: "mini-home-notification" });
+
+    await alertAgent(payload, { onGoTo: vi.fn(), goToLabel: "Go to tab" });
+
+    expect(showAgentNotificationMock).toHaveBeenCalledWith(
+      "OpenCode finished",
+      "Open Pragma to continue.",
+      null,
+      payload.worktreeId,
+      payload.tabId,
+    );
+    expect(sendNotificationMock).not.toHaveBeenCalled();
+  });
+
   it("closes the chime audio context after playback", async () => {
     fakeFutureTime(1_000);
     setAudioContext(AudioContextMock);

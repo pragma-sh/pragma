@@ -592,6 +592,28 @@ pub fn ui_overlay_url() -> String {
     }
 }
 
+/// The URL of the installed UI overlay, when one is active and complete.
+/// Every window a build opens (the main one at startup, each Pragma Mini window
+/// later) loads it, so all of them run the same UI version.
+#[must_use]
+pub fn active_ui_overlay_url(app: &AppHandle) -> Option<tauri::Url> {
+    if overlay_pending_path(app).is_ok_and(|path| path.exists()) {
+        return None;
+    }
+    let Ok(Some(_)) = active_overlay_version(app) else {
+        return None;
+    };
+    let root = overlay_dir(app).ok()?;
+    if !root.join("index.html").is_file() {
+        return None;
+    }
+    let url = tauri::Url::parse(&ui_overlay_url());
+    if url.is_err() {
+        log::warn!("invalid UI overlay URL");
+    }
+    url.ok()
+}
+
 /// Navigates the main webview to a previously installed overlay at startup.
 pub fn load_ui_overlay(app: &AppHandle) {
     if overlay_pending_path(app).is_ok_and(|path| path.exists()) {
@@ -602,17 +624,7 @@ pub fn load_ui_overlay(app: &AppHandle) {
         }
         return;
     }
-    let Ok(Some(_)) = active_overlay_version(app) else {
-        return;
-    };
-    let Ok(root) = overlay_dir(app) else {
-        return;
-    };
-    if !root.join("index.html").is_file() {
-        return;
-    }
-    let Ok(url) = tauri::Url::parse(&ui_overlay_url()) else {
-        log::warn!("invalid UI overlay URL");
+    let Some(url) = active_ui_overlay_url(app) else {
         return;
     };
     if let Some(window) = app.get_webview_window("main") {

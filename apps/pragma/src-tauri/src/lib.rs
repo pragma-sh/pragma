@@ -30,6 +30,7 @@ mod plugin_distribution;
 mod plugins;
 mod ports;
 pub(crate) use pragma_core::process_env;
+mod mini_window;
 mod projects;
 mod pty;
 mod scratchpads;
@@ -53,7 +54,6 @@ use pragma_constants::{
 };
 use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
 use tauri::ipc::{Channel, InvokeResponseBody};
-#[cfg(not(target_os = "macos"))]
 use tauri::menu::PredefinedMenuItem;
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
@@ -80,6 +80,15 @@ const MENU_CLOSE_ACTIVE_TAB: &str = "tabs.close-active";
 const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
 /// Menu item id for opening the palette directly in command mode.
 const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
+/// Menu item id for opening a new Pragma Mini window. Handled in Rust; never
+/// emitted to a webview.
+const MENU_NEW_MINI_WINDOW: &str = "window.new-mini";
+/// Accelerator for [`MENU_NEW_MINI_WINDOW`]. Not a user keybinding: it only
+/// exists as a native menu chord, like the macOS app-menu items.
+const NEW_MINI_WINDOW_ACCELERATOR: &str = "CmdOrCtrl+Shift+N";
+/// Menu actions a Pragma Mini window implements itself; every other action is
+/// sent to the main window (see [`mini_window::menu_target`]).
+const MINI_MENU_ACTIONS: [&str; 2] = [MENU_NEW_TERMINAL_TAB, MENU_CLOSE_ACTIVE_TAB];
 /// Menu item id for opening the full-frame Settings view.
 const MENU_OPEN_SETTINGS: &str = "settings.open";
 /// Menu item id for replaying the guided workspace tour.
@@ -121,13 +130,34 @@ pub(crate) fn dev_menu_accelerators() -> Vec<(&'static str, &'static str)> {
     MENU_ACCELERATORS
         .iter()
         .filter_map(|(id, _)| menu_accelerator(id).map(|accelerator| (*id, accelerator)))
+        .chain(std::iter::once((
+            MENU_NEW_MINI_WINDOW,
+            NEW_MINI_WINDOW_ACCELERATOR,
+        )))
         .collect()
 }
 
 /// Fires a workspace menu item exactly as choosing it would, for the dev bridge.
 pub(crate) fn dev_trigger_menu(app: &tauri::AppHandle, id: &str) -> bool {
+    if id == MENU_NEW_MINI_WINDOW {
+        mini_window::open_in_background(app);
+        return true;
+    }
     let known = id == MENU_START_TOUR || MENU_ACCELERATORS.iter().any(|(item, _)| *item == id);
-    known && app.emit(MENU_EVENT, id).is_ok()
+    known && emit_menu_action(app, id)
+}
+
+/// Delivers a menu action to the one window that should act on it — the
+/// focused mini window for its tab actions, otherwise the main window — rather
+/// than broadcasting it, which would open a tab in every window at once.
+fn emit_menu_action(app: &tauri::AppHandle, action: &str) -> bool {
+    let label = mini_window::menu_target(app, MINI_MENU_ACTIONS.contains(&action));
+    app.emit_to(
+        tauri::EventTarget::webview_window(label),
+        MENU_EVENT,
+        action,
+    )
+    .is_ok()
 }
 
 /// The workspace menu items whose accelerators Settings can suspend while
@@ -151,6 +181,7 @@ struct WorkspaceMenuItems {
     close_active_tab: MenuItem<tauri::Wry>,
     open_command_palette: MenuItem<tauri::Wry>,
     open_command_mode: MenuItem<tauri::Wry>,
+    new_mini_window: MenuItem<tauri::Wry>,
 }
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
@@ -178,8 +209,7 @@ fn take_pending_deep_link(pending: tauri::State<'_, PendingDeepLink>) -> Option<
     pending.0.lock().ok().and_then(|mut guard| guard.take())
 }
 
-/// Label of the app's main window (Tauri's default when none is set in config).
-const MAIN_WINDOW_LABEL: &str = "main";
+use mini_window::MAIN_WINDOW_LABEL;
 
 /// Raises and focuses the main window so a deep link surfaces the app.
 ///
@@ -194,6 +224,20 @@ fn focus_main_window(app: &tauri::AppHandle) {
         if let Err(error) = window.set_focus() {
             log::warn!("failed to focus main window for deep link: {error}");
         }
+    }
+}
+
+/// Handles a second launch forwarded by the single-instance guard: the dock /
+/// jump-list / desktop action asks for a mini window, anything else raises the
+/// main one. A deep link is not handled here — the `deep-link` feature hands
+/// the URL to `on_open_url`, which already emits `DEEP_LINK_EVENT`; emitting it
+/// here too would open the link twice.
+#[cfg(any(target_os = "linux", windows))]
+fn on_second_instance(app: &tauri::AppHandle, argv: &[String]) {
+    if mini_window::wants_mini(argv) {
+        mini_window::open_in_background(app);
+    } else {
+        focus_main_window(app);
     }
 }
 
@@ -264,6 +308,10 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         let action = event.id().as_ref();
+        if action == MENU_NEW_MINI_WINDOW {
+            mini_window::open_in_background(app);
+            return;
+        }
         if matches!(
             action,
             MENU_RESTART_DAEMON
@@ -276,7 +324,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
                 | MENU_OPEN_SETTINGS
                 | MENU_START_TOUR
         ) {
-            let _ = app.emit(MENU_EVENT, action);
+            let _ = emit_menu_action(app, action);
         }
     });
     Ok(())
@@ -322,6 +370,13 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
     // No accelerator: replaying the tour is a rare, deliberate action, and an
     // unregistered chord here would shadow one the workspace already owns.
     let start_tour = MenuItem::with_id(app, MENU_START_TOUR, "Guided Tour", true, None::<&str>)?;
+    let new_mini_window = MenuItem::with_id(
+        app,
+        MENU_NEW_MINI_WINDOW,
+        CONSTANTS.mini_window.menu_title.as_str(),
+        true,
+        Some(NEW_MINI_WINDOW_ACCELERATOR),
+    )?;
     app.manage(WorkspaceAccelerators(vec![
         open_settings.clone(),
         new_terminal_tab.clone(),
@@ -338,6 +393,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         close_active_tab,
         open_command_palette,
         open_command_mode,
+        new_mini_window,
     };
     #[cfg(target_os = "macos")]
     install_macos_workspace_menu(app, menu, &items)?;
@@ -371,6 +427,8 @@ fn install_macos_workspace_menu(
         "File",
         true,
         &[
+            &items.new_mini_window,
+            &PredefinedMenuItem::separator(app)?,
             &items.new_terminal_tab,
             &items.close_active_tab,
             &items.open_command_palette,
@@ -411,6 +469,7 @@ fn install_non_macos_workspace_menu(
             &items.open_settings,
             &items.start_tour,
             &separator,
+            &items.new_mini_window,
             &items.new_terminal_tab,
             &items.close_active_tab,
             &items.open_command_palette,
@@ -644,8 +703,10 @@ async fn tunnel_sync_keep_awake(pty: tauri::State<'_, PtyClient>) -> AppResult<(
 #[allow(clippy::too_many_arguments)] // PTY spawn carries session + geometry + channel.
 async fn pty_spawn(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
+    mini_sessions: tauri::State<'_, mini_window::MiniSessions>,
     session_id: String,
     worktree_id: String,
     cwd: String,
@@ -662,6 +723,7 @@ async fn pty_spawn(
     let is_local_host = host_id == LOCAL_HOST;
     let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
     hosts.bind_session(session_id.clone(), host_id)?;
+    mini_sessions.track(window.label(), &session_id);
     run_pty_task(move || {
         if is_local_host {
             if let Err(error) = client.ensure_gateway() {
@@ -689,8 +751,10 @@ async fn pty_spawn(
 #[allow(clippy::too_many_arguments)] // Detached spawn carries session routing and geometry.
 async fn pty_spawn_detached(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
+    mini_sessions: tauri::State<'_, mini_window::MiniSessions>,
     session_id: String,
     worktree_id: String,
     cwd: String,
@@ -703,6 +767,7 @@ async fn pty_spawn_detached(
     let is_local_host = host_id == LOCAL_HOST;
     let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
     hosts.bind_session(session_id.clone(), host_id)?;
+    mini_sessions.track(window.label(), &session_id);
     run_pty_task(move || {
         if is_local_host {
             if let Err(error) = client.ensure_gateway() {
@@ -1235,6 +1300,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(pty.clone());
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
+    app.manage(mini_window::MiniSessions::default());
     app.manage(plugin_distribution::PluginInstaller::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(ai::AskRegistry::default());
@@ -1254,6 +1320,10 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     updates::load_ui_overlay(app.handle());
     install_menu(app.handle())?;
     install_deep_links(app);
+    // A cold start from the Windows jump list or the Linux desktop action.
+    if mini_window::wants_mini(std::env::args()) {
+        mini_window::open_in_background(app.handle());
+    }
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
     fanouts::start_for(app.handle().clone(), pty.clone());
@@ -1321,13 +1391,7 @@ pub fn run() {
         builder.plugin(
             tauri_plugin_single_instance::Builder::new()
                 .dbus_id(format!("{}.{channel}", context.config().identifier))
-                .callback(|app, _argv, _cwd| {
-                    // Only raise the window here. The `deep-link` feature hands the URL
-                    // to the deep-link plugin's `on_open_url` handler, which already
-                    // emits `DEEP_LINK_EVENT`; emitting it here too would open the link
-                    // twice.
-                    focus_main_window(app);
-                })
+                .callback(|app, argv, _cwd| on_second_instance(app, &argv))
                 .build(),
         )
     };
@@ -1335,12 +1399,8 @@ pub fn run() {
     let builder = {
         let channel = pty::instance_channel(context.config().product_name.as_deref());
         if channel == pragma_protocol::PROD_CHANNEL {
-            builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-                // Only raise the window here. The `deep-link` feature hands the URL
-                // to the deep-link plugin's `on_open_url` handler, which already
-                // emits `DEEP_LINK_EVENT`; emitting it here too would open the link
-                // twice.
-                focus_main_window(app);
+            builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+                on_second_instance(app, &argv);
             }))
         } else {
             builder
@@ -1586,6 +1646,19 @@ pub fn run() {
         .build(context)
         .expect("error while running tauri application")
         .run(|app_handle, event| {
-            let _ = (app_handle, event);
+            // The dock menu needs the app delegate, which exists only once the
+            // event loop is running.
+            match event {
+                tauri::RunEvent::Ready => mini_window::install_dock_menu(app_handle),
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::Destroyed,
+                    ..
+                } if mini_window::is_mini_label(&label) => {
+                    mini_window::end_window_sessions(app_handle, &label);
+                }
+                tauri::RunEvent::Exit => mini_window::end_all_sessions(app_handle),
+                _ => {}
+            }
         });
 }

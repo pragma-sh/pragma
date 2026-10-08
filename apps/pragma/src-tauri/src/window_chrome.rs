@@ -1,5 +1,5 @@
 //! Native window chrome: the window title, plus macOS vibrancy + inset traffic
-//! lights.
+//! lights. Applied to the main window and to every Pragma Mini window.
 //!
 //! Pragma uses a custom (frontend-painted) titlebar. On macOS we make the window
 //! transparent and drop an `NSVisualEffectView` behind it ([`window-vibrancy`])
@@ -25,20 +25,36 @@ use pragma_constants::CONSTANTS;
 /// Applies native window chrome to `window`. Failures are logged, never fatal:
 /// a missing visual effect just falls back to the opaque charcoal surface.
 pub fn apply(window: &WebviewWindow) {
-    apply_title(window);
-    #[cfg(target_os = "macos")]
-    apply_macos(window);
+    apply_titled(window, &product_name(window));
 }
 
-/// Titles the window after the running product ("Pragma" / "Pragma Dev").
+/// [`apply`] with an explicit title (a Pragma Mini window's "Pragma Mini").
+pub fn apply_titled(window: &WebviewWindow, title: &str) {
+    apply_title(window, title);
+    #[cfg(target_os = "macos")]
+    {
+        // Mini windows are built on an async worker. AppKit's visual effect
+        // must be installed on the main thread, even after the builder returns.
+        let chrome_window = window.clone();
+        if let Err(error) = window.run_on_main_thread(move || apply_macos(&chrome_window)) {
+            log::warn!("failed to schedule macOS window chrome: {error}");
+        }
+    }
+}
+
+/// The running product's name ("Pragma" / "Pragma Dev").
 ///
-/// The title is set here rather than per-config because the dev overlay only
-/// differs from the shipped config in its product name, and duplicating the
+/// The title is set at runtime rather than per-config because the dev overlay
+/// only differs from the shipped config in its product name, and duplicating the
 /// whole window array to carry that one string is what would silently
 /// re-introduce the shipped config's other values on top of the platform ones.
-fn apply_title(window: &WebviewWindow) {
-    let name = window.package_info().name.clone();
-    if let Err(error) = window.set_title(&name) {
+#[must_use]
+pub fn product_name(window: &WebviewWindow) -> String {
+    window.package_info().name.clone()
+}
+
+fn apply_title(window: &WebviewWindow, name: &str) {
+    if let Err(error) = window.set_title(name) {
         log::warn!("failed to set window title: {error}");
     }
 }

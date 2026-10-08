@@ -32,6 +32,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => undefined),
 }));
 
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    label: "main",
+    listen: vi.fn().mockResolvedValue(() => undefined),
+  }),
+}));
+
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "test",

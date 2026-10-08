@@ -65,6 +65,14 @@
     "resources": [
       "resources/**/*"
     ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "./linux/pragma.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "./linux/pragma.desktop"
+      }
+    },
     "windows": {
       "nsis": {
         "installerHooks": "./installer-hooks.nsh"
