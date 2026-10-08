@@ -13,6 +13,7 @@ use crate::client::GatewayClient;
 use crate::devices::DeviceRegistry;
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::response::error_response;
+use crate::port_forward::PortForwardRegistry;
 use crate::push::{DesktopPresence, PushWorker};
 use crate::routes;
 use crate::web::WebBundle;
@@ -39,6 +40,8 @@ pub struct AppState {
     pub push: Option<PushWorker>,
     /// Last reported desktop window focus, which gates phone pushes.
     pub presence: DesktopPresence,
+    /// Verified public forwards for terminal-owned HTTP listeners.
+    pub port_forwards: PortForwardRegistry,
     /// The staged Pragma Go web bundle, absent when none is installed.
     pub web: Option<Arc<WebBundle>>,
 }
@@ -192,6 +195,11 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
         "assets.get" => respond_json(request, routes::assets::get(state, &matched)),
         "theme.get" => respond_json(request, routes::theme::get(state, &matched)),
         "scratchpads.list" => respond_json(request, routes::scratchpads::list(state, &matched)),
+        "ports.forward" => {
+            let mut req = request;
+            let result = routes::ports::forward(&mut req, state);
+            respond_json(req, result)
+        }
         "control" => {
             let mut req = request;
             let result = routes::control::control(&mut req, state, &matched);

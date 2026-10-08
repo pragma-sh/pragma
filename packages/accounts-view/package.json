@@ -1,0 +1,24 @@
+{
+  "name": "@pragma-sh/accounts-view",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client-side view model over the host's account providers: provider/account grouping, which accounts a harness can switch to, and usage-limit presentation. Shared by the desktop and Pragma Go.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma-sh/constants": "workspace:*",
+    "@pragma-sh/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

@@ -19,8 +19,8 @@ import {
   type HarnessAccountChoice,
   type HarnessView,
   type ProviderView,
-} from "@/lib/accounts";
-import { usagePercentLabel } from "@/lib/usage-limits";
+} from "@pragma-sh/accounts-view";
+import { usagePercentLabel } from "@pragma-sh/accounts-view";
 import { cn } from "@/lib/utils";
 
 /** What the harness account selects do. */

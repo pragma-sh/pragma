@@ -552,8 +552,17 @@ fn tabs_list(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_jso
     }
 }
 
+/// Resolves a tab id, adopting host-launched fanout tabs first when it is not
+/// known yet. A fanout created from a phone or the CLI spawns its agents on the
+/// host, and this database only learns their tabs on the next debounced
+/// workspace sync — so a fast agent calling `pragma-cli scratchpad create`
+/// would otherwise be told its own tab does not exist.
 fn resolve_tab(app: &AppHandle, tab_id: &str) -> AppResult<Tab> {
-    app.state::<Db>().tab_by_id_or_prefix(tab_id)
+    let db = app.state::<Db>();
+    db.tab_by_id_or_prefix(tab_id).or_else(|error| {
+        crate::workspace_mirror::adopt_fanout_workspace(&db, &app.state::<Hosts>());
+        db.tab_by_id_or_prefix(tab_id).map_err(|_| error)
+    })
 }
 
 #[derive(Deserialize)]

@@ -115,6 +115,9 @@ than no guide.
 │   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
 │   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
+│   ├── accounts-view/           # `@pragma-sh/accounts-view` account/usage view model shared by desktop + mobile → see packages/accounts-view/AGENTS.md
+│   ├── code-viewer/             # `@pragma-sh/code-viewer` shared CodeMirror theme/grammars/unified diff + read-only web-view document → see packages/code-viewer/AGENTS.md
+│   ├── fanout-view/             # `@pragma-sh/fanout-view` fanout view model (relations, labels, pairing) shared by desktop + mobile → see packages/fanout-view/AGENTS.md
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── jev/                     # `bun run jev` drives the running dev app (DOM, input, screenshots, Jev agent) → see packages/jev/AGENTS.md
@@ -124,6 +127,7 @@ than no guide.
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
 │   ├── scratchpad-viewer/       # read-only scratchpad web-view document → see packages/scratchpad-viewer/AGENTS.md
+│   ├── terminal-viewer/         # `@pragma-sh/terminal-viewer` self-contained xterm document + bridge protocol → see packages/terminal-viewer/AGENTS.md
 │   ├── plugin/                  # `@pragma-sh/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── plugin-registry/         # official npm list + generated manifest lock → see packages/plugin-registry/AGENTS.md
 │   ├── automations/             # `@pragma-sh/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
@@ -248,6 +252,10 @@ than no guide.
   embed → `packages/scratchpad-viewer` (`@pragma-sh/scratchpad-viewer`), which
   re-exports the contract. The desktop, the SDK, and the mobile client all import
   it — do not re-implement frontmatter parsing or comment serialization.
+- How a client presents the host's accounts (provider/account grouping, who can
+  switch to what, usage-limit validation and formatting, the polling store) →
+  `packages/accounts-view` (`@pragma-sh/accounts-view`), shared by the desktop
+  and Pragma Go. Binding resolution stays on the host.
 - Anything a client does _with_ a scratchpad over the gateway (comment on one,
   attach an agent, prompt the attached agent) → `client.scratchpads` in
   `packages/sdk`, not a per-client reimplementation.
@@ -262,7 +270,21 @@ than no guide.
   rules (selector resolution, branch naming, status roll-up, scratchpad
   promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
   (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
-  callers of the same `fanouts` RPC — never a second implementation.
+  callers of the same `fanouts` RPC — never a second implementation. Pragma Go is
+  a fourth, through the SDK. How a client _presents_ a fanout (which worktrees
+  are attempts, member labels, status wording, pairing scratchpads and changed
+  files across attempts) → `packages/fanout-view` (`@pragma-sh/fanout-view`),
+  shared by the desktop and Pragma Go.
+- Reading code anywhere other than a desktop editor tab (a phone, the browser
+  build) → `packages/code-viewer` (`@pragma-sh/code-viewer`): a self-contained
+  read-only CodeMirror document for web views, built from the same theme,
+  grammar loader, and unified diff the desktop editor imports from its
+  `./codemirror` entry. Never a second highlighter or diff renderer.
+- A terminal rendered anywhere other than the desktop (a phone web view, the
+  browser build) → `packages/terminal-viewer` (`@pragma-sh/terminal-viewer`): one
+  self-contained xterm document plus the message protocol a native client drives
+  it with. Never a second VT implementation, and never `@xterm/addon-attach` —
+  it assumes a WebSocket, and the transport here is the authenticated gateway.
 - Anything that drives or inspects the running dev app for verification (DOM snapshots,
   clicks, typing into a terminal, window screenshots, the Jev agent loop) → `packages/jev`
   (`bun run jev`), over the debug-only dev bridge in `src-tauri/src/dev_bridge.rs`. It is

@@ -153,15 +153,18 @@ impl GatewayClient {
     }
 
     /// Attaches to a session event stream. A `Some` size resizes the PTY to
-    /// the attacher's viewport; `None` observes without resizing.
+    /// the attacher's viewport; `None` observes without resizing. A `Some`
+    /// cursor resumes output delivery from that absolute byte offset instead
+    /// of replaying the whole retained scrollback.
     pub fn attach_stream(
         &self,
         session_id: String,
         size: Option<(u16, u16)>,
+        cursor: Option<u64>,
     ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
-            .attach_stream(session_id, size, None)
+            .attach_stream(session_id, size, cursor)
             .map_err(GatewayError::from)
     }
 

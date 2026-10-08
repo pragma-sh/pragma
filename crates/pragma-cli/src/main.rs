@@ -21,12 +21,16 @@ mod fanout;
 mod output;
 mod scrollback;
 mod server;
+mod session_cli;
 mod whiteboard;
 
 use cli::{AgentCommand, Cli, ScratchpadCommand, TabCommand, TopCommand};
 use server::CliError;
 
 fn main() -> ExitCode {
+    if let Some(code) = session_cli::delegate() {
+        return code;
+    }
     let cli = Cli::parse();
     let out = output::Output {
         format: cli.format(),

@@ -22,6 +22,7 @@ export {
 } from "./usage-limits";
 
 const INTERJECT_SUBMIT_DELAY_MS = 200;
+const PREFILL_SUBMIT_DELAY_MS = 500;
 const baseWatcher = createTuiWatcher({
   agent: "codex",
   handleDecisions: false,
@@ -101,6 +102,9 @@ export const codexAgentPlugin: PluginDefinition = definePlugin({
       prefillDelayMs: 4000,
       prefillMode: "plain",
       prefillSubmit: "\r",
+      // Codex 0.160 treats a fast burst of keystrokes as a paste and turns an
+      // Enter inside it into a newline, so the submit must arrive on its own.
+      prefillSubmitDelayMs: PREFILL_SUBMIT_DELAY_MS,
       models: async (ctx) => parseCodexModels(await execFirst(ctx, "codex debug models")),
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         load: async (ctx) =>

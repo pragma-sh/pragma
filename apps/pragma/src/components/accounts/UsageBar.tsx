@@ -1,4 +1,4 @@
-import type { ProviderView } from "@/lib/accounts";
+import type { ProviderView } from "@pragma-sh/accounts-view";
 import { usageToneClass } from "@/lib/usage-limits";
 import { cn } from "@/lib/utils";
 

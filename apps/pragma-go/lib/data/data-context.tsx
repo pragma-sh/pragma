@@ -1,5 +1,4 @@
 import type { AgentReportPayload, Tab } from "@pragma-sh/constants";
-import { PragmaGatewayError } from "@pragma-sh/sdk";
 import {
   createContext,
   useCallback,
@@ -12,20 +11,18 @@ import {
 
 import { statusForTabs } from "../agent-status";
 import { useConnection } from "../connection-context";
-import type { AgentStatus, AgentTab, InboxItem, Project, Worktree } from "../types";
+import { reportUnauthorized } from "../report-unauthorized";
+import type { AgentStatus, AgentTab, InboxItem, Project, TerminalTab, Worktree } from "../types";
 import { buildWorktreeTree, type WorktreeNode } from "../worktree-tree";
 import { MOCK_AGENT_TABS, MOCK_INBOX, MOCK_PROJECTS, MOCK_WORKTREES } from "./fixtures";
 import {
   agentTabsBySnapshot,
+  terminalTabsBySnapshot,
   inboxFromStatuses,
   markTabStatusesSeen,
   parseAgentStatuses,
 } from "./workspace-map";
-
-const RECONNECT_INITIAL_MS = 500;
-const RECONNECT_MAX_MS = 10_000;
-/** A connection that lived this long counts as healthy: reset the backoff. */
-const RECONNECT_HEALTHY_MS = 30_000;
+import { subscriptionLoop } from "./subscription-loop";
 
 /** How the user resolved an inbox item. */
 export type InboxResolution =
@@ -37,6 +34,8 @@ interface DataContextValue {
   projects: Project[];
   worktrees: Worktree[];
   agentTabs: Record<string, AgentTab[]>;
+  /** Ordinary terminals (shells, script runs) per worktree; never agent sessions. */
+  terminalTabs: Record<string, TerminalTab[]>;
   inbox: InboxItem[];
   /** Resolve and remove an inbox item; publishes the verdict when paired. */
   resolveInboxItem: (id: string, resolution: InboxResolution) => void;
@@ -44,8 +43,12 @@ interface DataContextValue {
   markAgentSeen: (tabId: string) => void;
   /** End an agent's PTY and remove it from mobile navigation. */
   clearAgent: (tabId: string) => Promise<void>;
-  /** Rename an agent's workspace tab. */
-  renameAgent: (tabId: string, title: string) => Promise<void>;
+  /** Rename a workspace tab — an agent session or an ordinary terminal. */
+  renameTab: (tabId: string, title: string) => Promise<void>;
+  /** Open a host-owned terminal in a worktree and return its tab id. */
+  openTerminal: (worktreeId: string) => Promise<string>;
+  /** Close a terminal tab and end its process, on every device showing it. */
+  closeTerminal: (tabId: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -66,55 +69,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const { client, status: connectionStatus, handleUnauthorized } = useConnection();
   const paired = connectionStatus === "paired" && !!client;
   const { snapshot, statuses, setStatuses } = useSubscriptionData(client, handleUnauthorized);
-  const {
-    dismissed,
-    hiddenTabIds,
-    renamedTitles,
-    setDismissed,
-    setHiddenTabIds,
-    setRenamedTitles,
-  } = useAgentPresentation(client);
-  const visibleStatuses = useMemo(
-    () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
-    [hiddenTabIds, statuses],
-  );
+  const presentation = useAgentPresentation(client);
+  const view = useWorkspaceView(paired, snapshot, statuses, presentation);
+  const actions = useTabActions(client, paired, handleUnauthorized, presentation);
 
-  const projects = useMemo<Project[]>(
-    () => (paired ? (snapshot?.projects ?? []) : MOCK_PROJECTS),
-    [paired, snapshot],
-  );
-  const worktrees = useMemo<Worktree[]>(
-    () => (paired ? (snapshot?.worktrees ?? []) : MOCK_WORKTREES),
-    [paired, snapshot],
-  );
-
-  const agentTabs = useMemo<Record<string, AgentTab[]>>(() => {
-    const tabs = paired
-      ? agentTabsBySnapshot(snapshot?.tabs ?? [], visibleStatuses)
-      : MOCK_AGENT_TABS;
-    return Object.fromEntries(
-      Object.entries(tabs).map(([worktreeId, entries]) => [
-        worktreeId,
-        entries
-          .filter((entry) => !hiddenTabIds.has(entry.id))
-          .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
-      ]),
-    );
-  }, [hiddenTabIds, paired, renamedTitles, snapshot, visibleStatuses]);
-
-  const derivedInbox = useMemo<InboxItem[]>(
-    () =>
-      paired
-        ? inboxFromStatuses(visibleStatuses, projects, worktrees, snapshot?.tabs ?? [])
-        : MOCK_INBOX,
-    [paired, visibleStatuses, projects, worktrees, snapshot],
-  );
-
-  const inbox = useMemo(
-    () => derivedInbox.filter((item) => !dismissed.has(item.id)),
-    [derivedInbox, dismissed],
-  );
-
+  const { setDismissed } = presentation;
+  const { derivedInbox } = view;
   const resolveInboxItem = useCallback(
     (id: string, resolution: InboxResolution) => {
       setDismissed((prev) => new Set(prev).add(id));
@@ -130,23 +90,143 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setStatuses((previous) => markTabStatusesSeen(previous, tabId));
       if (!paired || !client) return;
       void client.agents.markAgentsSeen({ tabId }).catch((error: unknown) => {
-        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        reportUnauthorized(error, handleUnauthorized);
       });
     },
     [client, handleUnauthorized, paired, setStatuses],
   );
 
+  const { projects, worktrees, agentTabs, terminalTabs, inbox } = view;
+  const { clearAgent, renameTab, openTerminal, closeTerminal } = actions;
+  const value = useMemo<DataContextValue>(
+    () => ({
+      projects,
+      worktrees,
+      agentTabs,
+      terminalTabs,
+      inbox,
+      resolveInboxItem,
+      markAgentSeen,
+      clearAgent,
+      renameTab,
+      openTerminal,
+      closeTerminal,
+    }),
+    [
+      projects,
+      worktrees,
+      agentTabs,
+      terminalTabs,
+      inbox,
+      resolveInboxItem,
+      markAgentSeen,
+      clearAgent,
+      renameTab,
+      openTerminal,
+      closeTerminal,
+    ],
+  );
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+}
+
+type Presentation = ReturnType<typeof useAgentPresentation>;
+
+/**
+ * The view models every screen reads: the live snapshot when paired, the
+ * fixtures otherwise, with locally hidden and renamed tabs applied on top.
+ */
+function useWorkspaceView(
+  paired: boolean,
+  snapshot: LiveSnapshot | null,
+  statuses: AgentReportPayload[],
+  { dismissed, hiddenTabIds, renamedTitles }: Presentation,
+) {
+  const visibleStatuses = useMemo(
+    () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
+    [hiddenTabIds, statuses],
+  );
+  const tabs = snapshot?.tabs;
+
+  const projects = useMemo<Project[]>(
+    () => (paired ? (snapshot?.projects ?? []) : MOCK_PROJECTS),
+    [paired, snapshot],
+  );
+  const worktrees = useMemo<Worktree[]>(
+    () => (paired ? (snapshot?.worktrees ?? []) : MOCK_WORKTREES),
+    [paired, snapshot],
+  );
+
+  const agentTabs = useMemo<Record<string, AgentTab[]>>(
+    () =>
+      presentTabs(
+        paired ? agentTabsBySnapshot(tabs ?? [], visibleStatuses) : MOCK_AGENT_TABS,
+        hiddenTabIds,
+        renamedTitles,
+      ),
+    [hiddenTabIds, paired, renamedTitles, tabs, visibleStatuses],
+  );
+
+  // Unpaired, the fixtures carry agent sessions only: an invented shell would
+  // imply a terminal the demo cannot attach to.
+  const terminalTabs = useMemo<Record<string, TerminalTab[]>>(
+    () =>
+      presentTabs(
+        paired ? terminalTabsBySnapshot(tabs ?? [], statuses) : {},
+        hiddenTabIds,
+        renamedTitles,
+      ),
+    [hiddenTabIds, paired, renamedTitles, tabs, statuses],
+  );
+
+  const derivedInbox = useMemo<InboxItem[]>(
+    () =>
+      paired ? inboxFromStatuses(visibleStatuses, projects, worktrees, tabs ?? []) : MOCK_INBOX,
+    [paired, visibleStatuses, projects, worktrees, tabs],
+  );
+
+  const inbox = useMemo(
+    () => derivedInbox.filter((item) => !dismissed.has(item.id)),
+    [derivedInbox, dismissed],
+  );
+
+  return { projects, worktrees, agentTabs, terminalTabs, derivedInbox, inbox };
+}
+
+/** Drops locally hidden tabs and applies local renames, per worktree. */
+function presentTabs<T extends { id: string; title: string }>(
+  byWorktree: Record<string, T[]>,
+  hiddenTabIds: ReadonlySet<string>,
+  renamedTitles: Record<string, string>,
+): Record<string, T[]> {
+  return Object.fromEntries(
+    Object.entries(byWorktree).map(([worktreeId, entries]) => [
+      worktreeId,
+      entries
+        .filter((entry) => !hiddenTabIds.has(entry.id))
+        .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
+    ]),
+  );
+}
+
+/** Tab mutations: each acts on the host when paired and updates the local view. */
+function useTabActions(
+  client: Client | null,
+  paired: boolean,
+  handleUnauthorized: () => void,
+  { setHiddenTabIds, setRenamedTitles }: Presentation,
+) {
   const clearAgent = useCallback(
     async (tabId: string) => {
       await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
         activeClient.sessions.kill(tabId),
       );
-      setHiddenTabIds((previous) => new Set(previous).add(tabId));
+      setHiddenTabIds((previous) => withId(previous, tabId));
     },
     [client, handleUnauthorized, paired, setHiddenTabIds],
   );
 
-  const renameAgent = useCallback(
+  const renameTab = useCallback(
     async (tabId: string, title: string) => {
       await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
         activeClient.sessions.rename(tabId, title),
@@ -156,30 +236,48 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [client, handleUnauthorized, paired, setRenamedTitles],
   );
 
-  const value = useMemo<DataContextValue>(
-    () => ({
-      projects,
-      worktrees,
-      agentTabs,
-      inbox,
-      resolveInboxItem,
-      markAgentSeen,
-      clearAgent,
-      renameAgent,
-    }),
-    [
-      projects,
-      worktrees,
-      agentTabs,
-      inbox,
-      resolveInboxItem,
-      markAgentSeen,
-      clearAgent,
-      renameAgent,
-    ],
+  const openTerminal = useCallback(
+    async (worktreeId: string) => {
+      if (!paired || !client) throw new Error("Not connected to a host");
+      // A fresh request id per tap, so a retry inside this call is idempotent
+      // while a deliberate second tap still opens a second terminal.
+      const tab = await client.tabs.openTerminal({
+        worktreeId,
+        requestId: `${worktreeId}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+      });
+      return tab.id;
+    },
+    [client, paired],
   );
 
-  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+  const closeTerminal = useCallback(
+    async (tabId: string) => {
+      // Hide it locally first: the snapshot that drops the row arrives a beat
+      // later, and a row that lingers after an explicit close looks broken.
+      setHiddenTabIds((previous) => withId(previous, tabId));
+      try {
+        await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
+          activeClient.tabs.close(tabId),
+        );
+      } catch (error: unknown) {
+        setHiddenTabIds((previous) => withoutId(previous, tabId));
+        throw error;
+      }
+    },
+    [client, handleUnauthorized, paired, setHiddenTabIds],
+  );
+
+  return { clearAgent, renameTab, openTerminal, closeTerminal };
+}
+
+function withId(ids: ReadonlySet<string>, id: string): Set<string> {
+  return new Set(ids).add(id);
+}
+
+function withoutId(ids: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(ids);
+  next.delete(id);
+  return next;
 }
 
 type Client = NonNullable<ReturnType<typeof useConnection>["client"]>;
@@ -306,14 +404,6 @@ async function runSessionAction(
   }
 }
 
-function isUnauthorized(error: unknown): boolean {
-  return error instanceof PragmaGatewayError && error.httpStatus === 401;
-}
-
-function reportUnauthorized(error: unknown, onUnauthorized: () => void): void {
-  if (isUnauthorized(error)) onUnauthorized();
-}
-
 /** Runs the workspace snapshot subscription with capped-backoff reconnect. */
 function runWorkspaceSubscription(
   client: Client,
@@ -346,64 +436,6 @@ function runAgentStatusSubscription(
       onStatuses(parseAgentStatuses(event.payload));
     }
   });
-}
-
-/** Retries `body` with exponential backoff until the signal aborts. */
-async function subscriptionLoop(
-  signal: AbortSignal,
-  onUnauthorized: () => void,
-  body: (onDelivered: () => void) => Promise<void>,
-): Promise<void> {
-  let backoff = RECONNECT_INITIAL_MS;
-  while (!signal.aborted) {
-    const result = await runSubscription(body);
-    if (result === "unauthorized") {
-      onUnauthorized();
-      return;
-    }
-    if (signal.aborted) return;
-    backoff = reconnectDelay(backoff, result);
-    // oxlint-disable-next-line no-await-in-loop -- backoff between reconnects.
-    await delay(backoff, signal);
-    backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
-  }
-}
-
-async function runSubscription(
-  body: (onDelivered: () => void) => Promise<void>,
-): Promise<{ startedAt: number; delivered: boolean } | "unauthorized"> {
-  const startedAt = Date.now();
-  let delivered = false;
-  try {
-    // oxlint-disable-next-line no-await-in-loop -- sequential reconnect attempts.
-    await body(() => {
-      delivered = true;
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) return "unauthorized";
-  }
-  return { startedAt, delivered };
-}
-
-function reconnectDelay(
-  backoff: number,
-  result: { startedAt: number; delivered: boolean },
-): number {
-  // Streams routinely die after tunnel idle. A connection that delivered data —
-  // or simply lived a long time — is healthy, so reconnect promptly instead of
-  // carrying a large backoff across its lifetime.
-  if (result.delivered || Date.now() - result.startedAt >= RECONNECT_HEALTHY_MS) {
-    return RECONNECT_INITIAL_MS;
-  }
-  return backoff;
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, ms));
-  const aborted = new Promise<void>((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
-  return Promise.race([timeout, aborted]);
 }
 
 function useData(): DataContextValue {
@@ -505,10 +537,10 @@ export function useAgentTab(tabId: string): AgentTab | undefined {
 /** Actions affecting one agent session. */
 export function useAgentActions(): Pick<
   DataContextValue,
-  "markAgentSeen" | "clearAgent" | "renameAgent"
+  "markAgentSeen" | "clearAgent" | "renameTab"
 > {
-  const { markAgentSeen, clearAgent, renameAgent } = useData();
-  return { markAgentSeen, clearAgent, renameAgent };
+  const { markAgentSeen, clearAgent, renameTab } = useData();
+  return { markAgentSeen, clearAgent, renameTab };
 }
 
 /** Aggregate agent status for a worktree AND everything nested beneath it. */
@@ -559,4 +591,31 @@ function subtreeStatus(
   agentTabs: Record<string, AgentTab[]>,
 ): AgentStatus | null {
   return statusForTabs(collectTabs(node, agentTabs));
+}
+
+/** Ordinary terminals (shells, script runs) hosted by a worktree. */
+export function useTerminalTabs(worktreeId: string): TerminalTab[] {
+  const { terminalTabs } = useData();
+  return terminalTabs[worktreeId] ?? [];
+}
+
+/** A single terminal tab by id, across all worktrees. */
+export function useTerminalTab(tabId: string): TerminalTab | undefined {
+  const { terminalTabs } = useData();
+  return useMemo(() => {
+    for (const tabs of Object.values(terminalTabs)) {
+      const found = tabs.find((tab) => tab.id === tabId);
+      if (found) return found;
+    }
+    return undefined;
+  }, [terminalTabs, tabId]);
+}
+
+/** Actions on a worktree's ordinary terminals. */
+export function useTerminalActions(): Pick<
+  DataContextValue,
+  "openTerminal" | "closeTerminal" | "renameTab"
+> {
+  const { openTerminal, closeTerminal, renameTab } = useData();
+  return { openTerminal, closeTerminal, renameTab };
 }

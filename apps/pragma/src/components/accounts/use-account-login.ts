@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AccountLogin, AccountLoginSession } from "@pragma-sh/constants";
 
-import type { HarnessView } from "@/lib/accounts";
+import type { HarnessView } from "@pragma-sh/accounts-view";
 import { errorMessage } from "@/lib/errors";
 import { browserOpenExternal } from "@/lib/tauri";
-import type { ProjectAccounts } from "@/state/accounts-store";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
 
 const POLL_MS = 1000;
 

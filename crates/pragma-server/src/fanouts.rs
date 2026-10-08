@@ -1130,6 +1130,12 @@ impl FanoutStore {
             fanout.winning_member_id = Some(winner_id.clone());
             fanout.finalize_stage = Some(stage);
             fanout.status = status;
+            // A retried pick that gets here has resolved whatever halted the
+            // last attempt; keeping that failure would report a finished
+            // fanout as broken.
+            if completed {
+                fanout.failure = None;
+            }
             for member in &mut fanout.members {
                 if member.id == winner_id {
                     member.status = FanoutMemberStatus::Selected;

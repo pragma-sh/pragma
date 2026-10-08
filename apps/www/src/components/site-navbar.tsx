@@ -20,10 +20,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { compareDetailRoute, COMPETITORS } from "@/lib/compare-data";
-import { appName, blogRoute, compareRoute, docsRoute, pluginsRoute, repoUrl } from "@/lib/shared";
+import {
+  appName,
+  blogRoute,
+  compareRoute,
+  docsRoute,
+  mobileRoute,
+  pluginsRoute,
+  repoUrl,
+} from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
+  { label: "Mobile", href: mobileRoute },
   { label: "Plugins", href: pluginsRoute },
   { label: "Blog", href: blogRoute },
   { label: "Docs", href: docsRoute },

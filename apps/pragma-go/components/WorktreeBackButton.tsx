@@ -10,17 +10,21 @@ import { worktreeLabel } from "@/lib/worktree-tree";
  * Header back control for root-stack screens pushed from a worktree.
  *
  * Expo Router would otherwise label the previous root route `(tabs)`; this
- * shows the worktree being returned to instead.
+ * shows the worktree being returned to instead — or `label`, when the screen
+ * was opened from somewhere other than the worktree (a fanout says "Fanout").
  */
 export function WorktreeBackButton({
   color,
+  label: override,
   worktreeId,
 }: {
   color: ColorValue;
+  /** Replaces the worktree's name, for a screen pushed from elsewhere. */
+  label?: string;
   worktreeId: string;
 }) {
   const worktree = useWorktree(worktreeId);
-  const label = worktree ? worktreeLabel(worktree) : "Back";
+  const label = override || (worktree ? worktreeLabel(worktree) : "Back");
   return (
     <Pressable
       accessibilityLabel={`Back to ${label}`}

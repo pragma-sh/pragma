@@ -5,13 +5,13 @@ import {
   type ScratchpadViewerMessage,
 } from "@pragma-sh/scratchpad-viewer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, useColorScheme } from "react-native";
+import { View } from "react-native";
 
 import { ScratchpadLoading } from "@/components/scratchpad/ScratchpadLoading";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
-import { useHostThemeOverrides } from "@/lib/theme-context";
+import { useViewerTheme } from "@/lib/theme-context";
 import { respondToViewer } from "@/lib/viewer-response";
 
 import type { ScratchpadWebViewProps } from "./ScratchpadWebView";
@@ -31,9 +31,7 @@ type PromptAgentMessage = Extract<ScratchpadViewerMessage, { type: "promptAgent"
 export function ScratchpadWebView(props: ScratchpadWebViewProps) {
   const { source, comments, commentMode } = props;
   const frame = useRef<HTMLIFrameElement | null>(null);
-  const scheme = useColorScheme() === "dark" ? "dark" : "light";
-  const overrides = useHostThemeOverrides();
-  const themeCss = useMemo(() => scratchpadThemeCss(overrides), [overrides]);
+  const { scheme, themeCss } = useViewerTheme(scratchpadThemeCss);
   const html = useMemo(
     () => buildScratchpadViewerHtml({ source, mode: scheme, themeCss }),
     [scheme, source, themeCss],

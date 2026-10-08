@@ -1,9 +1,11 @@
 //! Persistent remote-access tunnel supervisor.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -17,6 +19,7 @@ use pragma_constants::CONSTANTS;
 use pragma_platform::power::SleepInhibitor;
 
 const PORT_PLACEHOLDER: &str = "{port}";
+const FORWARD_START_TIMEOUT: Duration = Duration::from_secs(20);
 const KEEP_AWAKE_REASON: &str = "Pragma remote access is on; sleep would interrupt pairing";
 
 #[derive(Debug, Error)]
@@ -52,6 +55,7 @@ pub struct TunnelRegistry {
     server_dir: PathBuf,
     status: Arc<Mutex<TunnelStatus>>,
     child: Mutex<Option<Child>>,
+    forwarded: Mutex<HashMap<String, Child>>,
     /// Held while remote access is on and `gateway.keepAwake` allows it.
     keep_awake: Arc<Mutex<Option<SleepInhibitor>>>,
     generation: Arc<AtomicU64>,
@@ -63,6 +67,7 @@ impl TunnelRegistry {
             server_dir,
             status: Arc::new(Mutex::new(TunnelStatus::Idle)),
             child: Mutex::new(None),
+            forwarded: Mutex::new(HashMap::new()),
             keep_awake: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
         });
@@ -95,6 +100,20 @@ impl TunnelRegistry {
                 self.status_json()
             }
             Some("status") => self.status_json(),
+            Some("forward") => {
+                let id = payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty() && id.len() <= 512)
+                    .ok_or_else(|| TunnelError::Message("forward id is required".to_string()))?;
+                let port = payload
+                    .get("port")
+                    .and_then(Value::as_u64)
+                    .and_then(|port| u16::try_from(port).ok())
+                    .filter(|port| *port > 0)
+                    .ok_or_else(|| TunnelError::Message("forward port is invalid".to_string()))?;
+                Ok(json!({ "url": self.start_forward(id, port)? }))
+            }
             Some("syncKeepAwake") => {
                 self.sync_keep_awake();
                 self.status_json()
@@ -113,40 +132,14 @@ impl TunnelRegistry {
 
     fn start(&self) -> Result<(), TunnelError> {
         self.stop();
-        let config = Self::read_config()?;
         let port = self.gateway_port()?;
-        let pattern = Regex::new(
-            config
-                .url_pattern
-                .as_deref()
-                .unwrap_or(&CONSTANTS.tunnel.default_url_pattern),
-        )
-        .map_err(|error| TunnelError::Message(format!("invalid tunnel urlPattern: {error}")))?;
-        let command = config
-            .command
-            .unwrap_or_else(|| CONSTANTS.tunnel.default_command.clone())
-            .replace(PORT_PLACEHOLDER, &port.to_string());
-        let mut parts = command.split_whitespace();
-        let program = parts
-            .next()
-            .ok_or_else(|| TunnelError::Message("tunnel command is empty".to_string()))?;
         self.set_status(TunnelStatus::Starting);
-        let child = pragma_core::process_env::command(program)
-            .args(parts)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match child {
-            Ok(child) => child,
+        let (mut child, pattern) = match Self::spawn(port) {
+            Ok(spawned) => spawned,
             Err(error) => {
-                let message = if error.kind() == std::io::ErrorKind::NotFound {
-                    format!("failed to start tunnel: `{program}` not found on PATH")
-                } else {
-                    format!("failed to start tunnel: {error}")
-                };
+                let message = error.to_string();
                 self.set_status(TunnelStatus::Error(message.clone()));
-                return Err(TunnelError::Message(message));
+                return Err(error);
             }
         };
         let generation = self.generation.load(Ordering::SeqCst);
@@ -162,6 +155,78 @@ impl TunnelRegistry {
             .map_err(|error| TunnelError::Message(error.to_string()))? = Some(child);
         self.sync_keep_awake();
         Ok(())
+    }
+
+    fn start_forward(&self, id: &str, port: u16) -> Result<String, TunnelError> {
+        let (mut child, pattern) = Self::spawn(port)?;
+        let (sender, receiver) = mpsc::channel();
+        if let Some(stdout) = child.stdout.take() {
+            spawn_forward_scanner(stdout, pattern.clone(), sender.clone());
+        }
+        if let Some(stderr) = child.stderr.take() {
+            spawn_forward_scanner(stderr, pattern, sender.clone());
+        }
+        drop(sender);
+
+        let mut forwards = self
+            .forwarded
+            .lock()
+            .map_err(|error| TunnelError::Message(error.to_string()))?;
+        if let Some(mut previous) = forwards.insert(id.to_string(), child) {
+            let _ = previous.kill();
+            let _ = previous.wait();
+        }
+        drop(forwards);
+
+        match receiver.recv_timeout(FORWARD_START_TIMEOUT) {
+            Ok(url) => Ok(url),
+            Err(error) => {
+                if let Ok(mut forwards) = self.forwarded.lock() {
+                    if let Some(mut child) = forwards.remove(id) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                }
+                Err(TunnelError::Message(format!(
+                    "forwarding tunnel did not publish a URL: {error}"
+                )))
+            }
+        }
+    }
+
+    fn spawn(port: u16) -> Result<(Child, Regex), TunnelError> {
+        let config = Self::read_config()?;
+        let pattern = Regex::new(
+            config
+                .url_pattern
+                .as_deref()
+                .unwrap_or(&CONSTANTS.tunnel.default_url_pattern),
+        )
+        .map_err(|error| TunnelError::Message(format!("invalid tunnel urlPattern: {error}")))?;
+        let command = config
+            .command
+            .unwrap_or_else(|| CONSTANTS.tunnel.default_command.clone())
+            .replace(PORT_PLACEHOLDER, &port.to_string());
+        let mut parts = command.split_whitespace();
+        let program = parts
+            .next()
+            .ok_or_else(|| TunnelError::Message("tunnel command is empty".to_string()))?;
+        let child = pragma_core::process_env::command(program)
+            .args(parts)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    TunnelError::Message(format!(
+                        "failed to start tunnel: `{program}` not found on PATH"
+                    ))
+                } else {
+                    TunnelError::Message(format!("failed to start tunnel: {error}"))
+                }
+            })?;
+        Ok((child, pattern))
     }
 
     /// Takes or releases the sleep inhibitor to match the running tunnel and
@@ -271,6 +336,20 @@ impl TunnelRegistry {
         std::fs::write(path, serde_json::to_vec_pretty(&value)?)?;
         Ok(())
     }
+}
+
+fn spawn_forward_scanner<R: Read + Send + 'static>(
+    reader: R,
+    pattern: Regex,
+    sender: mpsc::Sender<String>,
+) {
+    thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            if let Some(url) = extract_url(&pattern, &line) {
+                let _ = sender.send(url);
+            }
+        }
+    });
 }
 
 fn config_path() -> PathBuf {

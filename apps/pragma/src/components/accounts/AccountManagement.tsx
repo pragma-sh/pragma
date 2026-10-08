@@ -4,9 +4,9 @@ import { Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
-import type { AccountView, ProviderView } from "@/lib/accounts";
+import type { AccountView, ProviderView } from "@pragma-sh/accounts-view";
 import { errorMessage } from "@/lib/errors";
-import type { ProjectAccounts } from "@/state/accounts-store";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
 
 /** A Settings account's name: plain text until clicked, then an inline rename field. */
 export function AccountName({ account, store }: { account: AccountView; store: ProjectAccounts }) {

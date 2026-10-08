@@ -1,12 +1,15 @@
 mod accounts;
 mod agent_options;
+mod ai;
 mod automations;
 mod fanout_host;
 mod fanouts;
+mod github;
 mod plugins_host;
 mod ports;
 mod registry;
 mod session;
+mod sidecar;
 mod tunnel;
 mod watchers;
 
@@ -169,6 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let core = Arc::new(Core::new(&paths.dir)?);
     start_watcher_reconciler(&registry);
+    start_viewport_lease_sweeper(&registry);
     start_account_token_sync(&registry);
     start_dropped_files_sweeper();
     loop {
@@ -209,6 +213,28 @@ fn start_watcher_reconciler(registry: &Arc<Registry>) {
     thread::spawn(move || loop {
         registry.reconcile_watchers();
         thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
+}
+
+/// Restores a terminal's grid when the client that borrowed it goes away.
+///
+/// A phone holding a viewport lease can vanish without warning — the tunnel
+/// drops, iOS suspends the app mid-frame, the user force-quits — and none of
+/// those run any client-side cleanup. Only a timer on the host can hand the
+/// desktop's terminal back to its own size.
+fn start_viewport_lease_sweeper(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    let interval = Duration::from_millis(
+        u64::try_from(
+            pragma_constants::CONSTANTS
+                .terminal_viewport
+                .sweep_interval_ms,
+        )
+        .unwrap_or(5_000),
+    );
+    thread::spawn(move || loop {
+        registry.sweep_viewport_leases();
+        thread::sleep(interval);
     });
 }
 
@@ -332,6 +358,10 @@ fn handle_client_request(
     closed: &Arc<AtomicBool>,
 ) {
     let is_control = matches!(request.kind, RequestKind::Control);
+    // An RPC caller reads until the `Rpc` frame carrying its request id and
+    // ignores everything else, so a failure answered with a plain `Response`
+    // frame is not an error to it — it is silence, and it waits forever.
+    let is_rpc = matches!(request.kind, RequestKind::Rpc);
     let request_id = request.request_id.clone();
     let (response, rpc_response, event_stream, control_rx) =
         match handle_request(request, registry, core) {
@@ -356,6 +386,21 @@ fn handle_client_request(
                 }
                 return;
             }
+            Err(error) if is_rpc => (
+                None,
+                Some(RpcResponseFrame {
+                    request_id: request_id.clone(),
+                    ok: false,
+                    payload: None,
+                    error: Some(RpcError {
+                        code: pragma_constants::ProtocolErrorCode::InvalidPayload,
+                        message: error.to_string(),
+                        details: None,
+                    }),
+                }),
+                None,
+                None,
+            ),
             Err(error) => (
                 Some(ResponseFrame {
                     request_id: request_id.clone(),
@@ -658,6 +703,234 @@ fn handle_tabs_rpc(
         pragma_core::tabs::TabsRequest::ListAgents { tab_ids } => registry
             .tab_agent_metadata(&tab_ids)
             .and_then(|tabs| serde_json::to_value(tabs).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::OpenTerminal {
+            worktree_id,
+            request_id,
+            title,
+        } => registry
+            .open_terminal_tab(&worktree_id, &request_id, title.as_deref())
+            .map_err(|error| error.to_string())
+            .and_then(|tab| serde_json::to_value(tab).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::Close { tab_id } => registry
+            .close_tab(&tab_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::tabs::TabsRequest::ListManaged { worktree_ids } => registry
+            .managed_tabs_for(&worktree_ids)
+            .and_then(|tabs| Ok((tabs, registry.closed_tab_ids()?)))
+            .map_err(|error| error.to_string())
+            .and_then(|(tabs, closed_tab_ids)| {
+                serde_json::to_value(pragma_core::tabs::ManagedTabsResult {
+                    tabs,
+                    closed_tab_ids,
+                })
+                .map_err(|error| error.to_string())
+            }),
+    };
+    Ok(match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    })
+}
+
+/// Serves the `sessions` RPC domain: session liveness and viewport ownership.
+///
+/// These live on the server rather than in `pragma-core` because they are
+/// facts about running PTYs, which only exist here.
+fn handle_sessions_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let request = serde_json::from_value::<pragma_core::sessions::SessionsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    let result = match request {
+        pragma_core::sessions::SessionsRequest::Info { session_id } => registry
+            .session_info(&session_id)
+            .map_err(|error| error.to_string())
+            .and_then(|info| serde_json::to_value(info).map_err(|error| error.to_string())),
+        pragma_core::sessions::SessionsRequest::AcquireViewport {
+            session_id,
+            cols,
+            rows,
+        } => registry
+            .acquire_viewport(&session_id, cols, rows)
+            .map_err(|error| error.to_string())
+            .and_then(|lease| serde_json::to_value(lease).map_err(|error| error.to_string())),
+        pragma_core::sessions::SessionsRequest::RenewViewport {
+            session_id,
+            lease_id,
+        } => registry
+            .renew_viewport(&session_id, &lease_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::sessions::SessionsRequest::ReleaseViewport {
+            session_id,
+            lease_id,
+        } => registry
+            .release_viewport(&session_id, &lease_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::sessions::SessionsRequest::Resize {
+            session_id,
+            cols,
+            rows,
+            lease_id,
+        } => registry
+            .resize_with_lease(&session_id, cols, rows, lease_id.as_deref())
+            .map_err(|error| error.to_string())
+            .map(|applied| serde_json::json!({ "applied": applied })),
+    };
+    Ok(match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    })
+}
+
+/// Routes the RPC domains `pragma-server` answers itself, rather than through
+/// `pragma-core`: these are all facts about live PTYs and the tabs around them,
+/// which only exist where the sessions do.
+fn handle_server_owned_rpc(
+    request_id: &str,
+    rpc: &pragma_protocol::RpcRequest,
+    registry: &Registry,
+) -> Option<Result<RpcResponseFrame, HandledRequestError>> {
+    match rpc.method {
+        ProtocolRpcMethod::Sessions => Some(handle_sessions_rpc(
+            request_id.to_string(),
+            rpc.payload.clone(),
+            registry,
+        )),
+        ProtocolRpcMethod::Scripts => Some(handle_scripts_rpc(
+            request_id.to_string(),
+            rpc.payload.clone(),
+            registry,
+        )),
+        ProtocolRpcMethod::Github => Some(Ok(handle_github_rpc(
+            request_id.to_string(),
+            &rpc.payload,
+            registry,
+        ))),
+        ProtocolRpcMethod::Accounts => Some(Ok(rpc_response(
+            request_id.to_string(),
+            registry.handle_accounts_rpc(rpc.payload.clone()),
+        ))),
+        ProtocolRpcMethod::Ai => Some(Ok(rpc_response(
+            request_id.to_string(),
+            registry
+                .handle_ai_rpc(&rpc.payload)
+                .map_err(|error| error.to_string()),
+        ))),
+        _ => None,
+    }
+}
+
+/// Wraps a domain handler's result in the response frame shape.
+fn rpc_response(request_id: String, result: Result<serde_json::Value, String>) -> RpcResponseFrame {
+    match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    }
+}
+
+/// Serves the `github` RPC domain: the host's credential and what it can do.
+fn handle_github_rpc(
+    request_id: String,
+    payload: &serde_json::Value,
+    registry: &Registry,
+) -> RpcResponseFrame {
+    match registry.handle_github_rpc(payload) {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(error) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message: error.to_string(),
+                details: None,
+            }),
+        },
+    }
+}
+
+/// Serves the `scripts` RPC domain: a project's named run scripts, and the runs
+/// they start.
+///
+/// On the host rather than in the desktop's React state, so a phone can start a
+/// dev server with no desktop window open — and so the "already running" answer
+/// is the same one on every device.
+fn handle_scripts_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let request = serde_json::from_value::<pragma_core::scripts::ScriptsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    let result = match request {
+        pragma_core::scripts::ScriptsRequest::List { worktree_id } => registry
+            .list_scripts(&worktree_id)
+            .map_err(|error| error.to_string())
+            .and_then(|listing| serde_json::to_value(listing).map_err(|error| error.to_string())),
+        pragma_core::scripts::ScriptsRequest::Run {
+            worktree_id,
+            name,
+            request_id: run_request_id,
+        } => registry
+            .run_script(&worktree_id, &name, &run_request_id)
+            .map_err(|error| error.to_string())
+            .and_then(|run| serde_json::to_value(run).map_err(|error| error.to_string())),
+        pragma_core::scripts::ScriptsRequest::Stop { run_id } => registry
+            .stop_script(&run_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
     };
     Ok(match result {
         Ok(payload) => RpcResponseFrame {
@@ -762,8 +1035,8 @@ fn handle_rpc_request(
     if matches!(rpc.method, ProtocolRpcMethod::Fanouts) {
         return Ok(handle_fanout_rpc(request_id, rpc.payload, registry));
     }
-    if matches!(rpc.method, ProtocolRpcMethod::Accounts) {
-        return Ok(handle_accounts_rpc(request_id, rpc.payload, registry));
+    if let Some(response) = handle_server_owned_rpc(&request_id, &rpc, registry) {
+        return response;
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {
@@ -812,32 +1085,6 @@ fn spawn_request(
         event_stream: Some(EventStream { scrollback, rx }),
         control_rx: None,
     })
-}
-
-/// Answers one `accounts` RPC from the host account providers.
-fn handle_accounts_rpc(
-    request_id: String,
-    payload: serde_json::Value,
-    registry: &Registry,
-) -> RpcResponseFrame {
-    match registry.handle_accounts_rpc(payload) {
-        Ok(payload) => RpcResponseFrame {
-            request_id,
-            ok: true,
-            payload: Some(payload),
-            error: None,
-        },
-        Err(message) => RpcResponseFrame {
-            request_id,
-            ok: false,
-            payload: None,
-            error: Some(RpcError {
-                code: pragma_constants::ProtocolErrorCode::Internal,
-                message,
-                details: None,
-            }),
-        },
-    }
 }
 
 fn handle_control_request(

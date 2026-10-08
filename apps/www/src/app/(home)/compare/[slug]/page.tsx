@@ -5,15 +5,7 @@ import { notFound } from "next/navigation";
 
 import { BrandIcon } from "@/components/brand-icon";
 import { DownloadButton } from "@/components/download-button";
-import { SupportCell } from "@/components/compare/support-cell";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ComparisonTable } from "@/components/compare/comparison-table";
 import { COMPETITORS, FOOTNOTE, getCompetitor, ROWS } from "@/lib/compare-data";
 import { appName, compareRoute } from "@/lib/shared";
 
@@ -93,35 +85,12 @@ export default async function CompareDetailPage(props: PageProps<"/compare/[slug
             {appName} vs {competitor.name}, capability by capability
           </h2>
           <div className="border-border bg-card mt-8 overflow-x-auto rounded-xl border">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[46%] min-w-64">Capability</TableHead>
-                  <TableHead className="text-foreground text-center font-medium">
-                    {appName}
-                  </TableHead>
-                  <TableHead className="text-center">{competitor.name}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ROWS.map((row) => (
-                  <TableRow key={row.feature}>
-                    <TableCell className="align-top">
-                      <span className="text-foreground font-medium">{row.feature}</span>
-                      <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
-                        {row.detail}
-                      </span>
-                    </TableCell>
-                    <TableCell className="bg-foreground/[0.04] text-center align-middle">
-                      <SupportCell value={row.pragma} highlight />
-                    </TableCell>
-                    <TableCell className="text-center align-middle">
-                      <SupportCell value={row[competitor.key]} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ComparisonTable
+              rows={ROWS}
+              pragmaLabel={appName}
+              columns={[{ label: competitor.name, key: competitor.key }]}
+              capabilityClassName="w-[46%] min-w-64"
+            />
           </div>
           <p className="text-muted-foreground mt-4 text-xs">{FOOTNOTE}</p>
         </div>

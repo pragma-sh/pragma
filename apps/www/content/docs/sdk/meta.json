@@ -11,6 +11,7 @@
     "fanouts",
     "scratchpads",
     "whiteboards",
+    "host-actions",
     "workspace"
   ]
 }

@@ -74,3 +74,28 @@ export function buildLaunchPayload(state: LaunchFormState, context: LaunchContex
     payload: { ...base, worktreeId: context.worktreeId, newWorktree: null },
   };
 }
+
+/** The "Run in" choices: the current worktree, a new branch, or a fanout. */
+export type RunIn = "existing" | "new" | "fanout";
+
+/** Which "Run in" tab a form state shows. */
+export function runInFor(target: LaunchTarget, fanout: boolean): RunIn {
+  return fanout ? "fanout" : target.kind;
+}
+
+/**
+ * The target after switching "Run in" tabs. A fanout always branches its own
+ * coordination parent, so it shares the new-branch fields, and a branch name
+ * already typed survives moving between "New branch" and "Fan out".
+ */
+export function targetForRunIn(next: string, current: LaunchTarget): LaunchTarget {
+  if (next === "existing") return { kind: "existing" };
+  return { kind: "new", branch: newBranchFields(current).branch, title: "" };
+}
+
+/** The branch and title a target carries, empty when it runs in place. */
+export function newBranchFields(target: LaunchTarget): { branch: string; title: string } {
+  return target.kind === "new"
+    ? { branch: target.branch, title: target.title }
+    : { branch: "", title: "" };
+}

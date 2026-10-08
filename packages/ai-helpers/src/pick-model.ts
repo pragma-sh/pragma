@@ -17,6 +17,17 @@ export interface SelectModelOptions {
   insights?: ModelInsights;
   /** Injected clock for the recency filter. */
   now?: Date;
+  /**
+   * Providers the user deliberately signed in to (`AuthStorage.list()`).
+   *
+   * pi also counts a provider as usable when its API-key environment variable
+   * happens to be set, and an ambient key is nobody's decision: a stale
+   * `OPENCODE_API_KEY` left in a shell profile makes every free model of that
+   * provider look available, out-rank the paid ones, and fail the run with
+   * `401 Invalid API key`. Stored credentials therefore sort ahead of
+   * environment-only ones; the latter are still tried, just last.
+   */
+  credentialedProviders?: readonly string[];
 }
 
 /** A pool member paired with whatever modelgrep knows about it. */
@@ -351,7 +362,23 @@ export function selectModelCandidates(
   if (affordable.length === 0) return [];
 
   const pool = kind === "fast" ? applyIntelligenceFloor(affordable) : affordable;
-  return rank(pool, metricFor(kind, pool));
+  return preferCredentialed(rank(pool, metricFor(kind, pool)), options.credentialedProviders);
+}
+
+/**
+ * Stable-partition ranked models so providers with stored credentials come
+ * first. A no-op when nothing is stored, or when no candidate belongs to a
+ * stored provider — in either case the ranking is all the information there is.
+ */
+function preferCredentialed(
+  models: Model<Api>[],
+  credentialedProviders: readonly string[] | undefined,
+): Model<Api>[] {
+  if (!credentialedProviders || credentialedProviders.length === 0) return models;
+  const credentialed = new Set(credentialedProviders);
+  const stored = models.filter((model) => credentialed.has(model.provider));
+  if (stored.length === 0 || stored.length === models.length) return models;
+  return [...stored, ...models.filter((model) => !credentialed.has(model.provider))];
 }
 
 /**
@@ -375,5 +402,8 @@ export function pickModel(
   kind: ModelKind,
   options: { authStorage: AuthStorage; registry: ModelRegistry } & SelectModelOptions,
 ): Model<Api> | undefined {
-  return selectModel(kind, options.registry.getAvailable(), options);
+  return selectModel(kind, options.registry.getAvailable(), {
+    ...options,
+    credentialedProviders: options.credentialedProviders ?? options.authStorage.list(),
+  });
 }
