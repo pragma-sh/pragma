@@ -218,7 +218,8 @@ than no guide.
   mode** — picking an agent, model, and reasoning effort for a launch — is built on it
   in `packages/ai-helpers/src/auto-select.ts` (run by the `pragma-ai auto-select`
   sidecar command), fed by model benchmarks (`model-insights.ts`), Terminal-Bench harness
-  results (`harness-insights.ts`), and `automode.md` (`automode.ts`, global
+  results (`harness-insights.ts`), each agent's account usage limits (sent by the desktop from
+  its accounts store), and `automode.md` (`automode.ts`, global
   `~/.pragma/automode.md` overridden by `<project>/.pragma/automode.md`). The key lives in
   `apps/pragma/src-tauri/src/system1.rs` (owner-only `SecretFile`, like the GitHub token)
   and never crosses IPC back to the webview. The **Auto** row is part of

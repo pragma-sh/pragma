@@ -65,6 +65,7 @@ Pragma makes **one** request per pick. In it, the model sees:
 | Where it runs      | Project, worktree, and branch.                                                                                                  |
 | Harness benchmarks | [Terminal-Bench](https://www.tbench.ai) results per agent × model: accuracy, minutes per task, tokens and cost per solved task. |
 | Model benchmarks   | The same catalog Pragma's own AI helpers use (modelgrep / Artificial Analysis): intelligence, coding, speed, latency, price.    |
+| Usage limits       | For each agent, how much of every limit is used on the account it would launch with, and when each resets.                      |
 | Your preferences   | `automode.md`, project over global (below).                                                                                     |
 
 Alongside "which agent?", the same request asks "which model?" once for **every** candidate
@@ -72,6 +73,12 @@ agent, plus how hard the task is. All of these questions are evaluated in parall
 model answer for the winning agent costs no second round-trip. Task difficulty then maps
 onto that model's reasoning levels: a trivial change gets the lowest effort, and very hard
 work gets the highest.
+
+Usage limits come from the same accounts as the toolbar's
+[Account providers](/docs/user-guide/account-providers) menu. An agent whose subscription is nearly used up
+is steered away from — unless its limit resets soon — and when two agents are otherwise
+close, the one with more headroom wins. Auto never waits on a slow usage check: an account
+whose usage has not loaded yet is reported as unknown, and the pick goes ahead.
 
 Benchmark data is cached for a day under `~/.pragma/cache/`. If the leaderboards cannot be
 reached, Auto still works from your preferences and whatever data is cached.
