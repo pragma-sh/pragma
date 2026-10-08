@@ -110,15 +110,27 @@ function handleReport(
   }
   if (!shouldAlertForStatus(payload)) return;
   latchAlertedStatus(payload);
-  const location = tab.location;
   void alertAgent(payload, {
-    projectId: location.kind === "worktree" ? tab.projectId : undefined,
     onGoTo,
     goToLabel: "Go to tab",
+    ...describeMiniAgentLocation(tab),
+  });
+}
+
+/** Resolves notification context without mixing location rules into status transitions. */
+function describeMiniAgentLocation(tab: MiniTab) {
+  const location = tab.location;
+  if (location.kind === "home") {
+    return {
+      location: { projectName: null, worktreeName: null, tabName: tabTitle(tab) },
+    };
+  }
+  return {
+    projectId: tab.projectId,
     location: {
-      projectName: location.kind === "worktree" ? location.projectName : null,
-      worktreeName: location.kind === "worktree" ? location.worktreeName : null,
+      projectName: location.projectName,
+      worktreeName: location.worktreeName,
       tabName: tabTitle(tab),
     },
-  });
+  };
 }

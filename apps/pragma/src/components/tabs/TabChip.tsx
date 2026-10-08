@@ -26,7 +26,7 @@ import { useTabAgentStatus } from "@/state/agent-status-store";
  * it there. Callers include the current tab ids in the id, which prevents a
  * close from animating the highlight onto the fallback tab.
  */
-export const ACTIVE_TAB_LAYOUT_ID = "terminal-tab-active";
+const ACTIVE_TAB_LAYOUT_ID = "terminal-tab-active";
 
 /** The layout id for a strip showing `tabs` (see {@link ACTIVE_TAB_LAYOUT_ID}). */
 export function activeTabLayoutIdFor(tabs: readonly Tab[]): string {

@@ -63,18 +63,53 @@ export function MiniWindow({
   /** Asks for a fresh project list (a tab's context menu just opened). */
   onCatalogStale: () => void;
 }) {
-  const [state, dispatch] = useReducer(miniTabsReducer, initialMiniTabsState);
   const homeDir = useHomeDir();
-  const { tabs, activeTabId } = state;
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
-  const tabsRef = useRef(tabs);
-  tabsRef.current = tabs;
-
-  const activateTab = useCallback((tabId: string) => dispatch({ type: "activate", tabId }), []);
+  const { tabs, activeTabId, dispatch, openTab, closeTab, relocateTab, launchAgent } =
+    useMiniTabs(homeDir);
+  const activateTab = useCallback(
+    (tabId: string) => dispatch({ type: "activate", tabId }),
+    [dispatch],
+  );
   useMiniAgentStatus(tabs, activeTabId, activateTab);
 
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeProjectId = activeTab?.location.kind === "worktree" ? activeTab.projectId : null;
   useEffect(() => onActiveProjectChange(activeProjectId), [activeProjectId, onActiveProjectChange]);
+
+  useInitialMiniTab(homeDir, openTab);
+  useTabLifecycle(tabs, dispatch, closeTab);
+  useEffect(() => {
+    if (activeTabId) terminalManager.focus(activeTabId);
+  }, [activeTabId]);
+  useMiniTabShortcuts(tabs, activeTabId, activeProjectId, dispatch, openTab, closeTab);
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="app-content bg-canvas text-foreground flex h-screen flex-col overflow-hidden">
+        <MiniTitleBar
+          activeTabId={activeTabId}
+          catalog={catalog}
+          dispatch={dispatch}
+          homeDir={homeDir}
+          onClose={closeTab}
+          onCatalogStale={onCatalogStale}
+          onLaunchAgent={launchAgent}
+          onNewTab={() => void openTab()}
+          onRelocate={relocateTab}
+          tabs={tabs}
+        />
+        <MiniTerminals activeTabId={activeTabId} tabs={tabs} />
+      </div>
+    </TooltipProvider>
+  );
+}
+
+/** Owns transient tab state and the session side effects of tab mutations. */
+function useMiniTabs(homeDir: string | null) {
+  const [state, dispatch] = useReducer(miniTabsReducer, initialMiniTabsState);
+  const { tabs } = state;
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
 
   const openTab = useCallback((): MiniTab | null => {
     if (!homeDir) return null;
@@ -107,7 +142,24 @@ export function MiniWindow({
     [openTab],
   );
 
-  // The first tab, as soon as the home directory is known.
+  return { ...state, dispatch, openTab, closeTab, relocateTab, launchAgent };
+}
+
+/** Keeps each terminal mounted while revealing only the selected tab. */
+function MiniTerminals({ tabs, activeTabId }: { tabs: MiniTab[]; activeTabId: string | null }) {
+  return (
+    <section aria-label="Terminal" className="bg-canvas relative min-h-0 flex-1">
+      {tabs.map((tab) => (
+        <div className={cn("absolute inset-0", tab.id !== activeTabId && "invisible")} key={tab.id}>
+          <TerminalView active={tab.id === activeTabId} cwd={tab.cwd} tab={tab} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** Opens the first tab once the home directory is available, including under StrictMode. */
+function useInitialMiniTab(homeDir: string | null, openTab: () => MiniTab | null): void {
   const opened = useRef(false);
   useEffect(() => {
     if (homeDir && !opened.current) {
@@ -115,13 +167,19 @@ export function MiniWindow({
       openTab();
     }
   }, [homeDir, openTab]);
+}
 
-  useTabLifecycle(tabs, dispatch, closeTab);
-
-  useEffect(() => {
-    if (activeTabId) terminalManager.focus(activeTabId);
-  }, [activeTabId]);
-
+/** Routes native menu actions and keyboard shortcuts to this window's current tabs. */
+function useMiniTabShortcuts(
+  tabs: MiniTab[],
+  activeTabId: string | null,
+  activeProjectId: string | null,
+  dispatch: (action: Parameters<typeof miniTabsReducer>[1]) => void,
+  openTab: () => MiniTab | null,
+  closeTab: (tabId: string) => void,
+): void {
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const activeIdRef = useRef(activeTabId);
   activeIdRef.current = activeTabId;
   useEffect(() => {
@@ -162,35 +220,6 @@ export function MiniWindow({
     onOpenCommandMode: noop,
     onOpenSettings: noop,
   });
-
-  return (
-    <TooltipProvider delayDuration={300}>
-      <div className="app-content bg-canvas text-foreground flex h-screen flex-col overflow-hidden">
-        <MiniTitleBar
-          activeTabId={activeTabId}
-          catalog={catalog}
-          dispatch={dispatch}
-          homeDir={homeDir}
-          onClose={closeTab}
-          onCatalogStale={onCatalogStale}
-          onLaunchAgent={launchAgent}
-          onNewTab={() => void openTab()}
-          onRelocate={relocateTab}
-          tabs={tabs}
-        />
-        <section aria-label="Terminal" className="bg-canvas relative min-h-0 flex-1">
-          {tabs.map((tab) => (
-            <div
-              className={cn("absolute inset-0", tab.id !== activeTabId && "invisible")}
-              key={tab.id}
-            >
-              <TerminalView active={tab.id === activeTabId} cwd={tab.cwd} tab={tab} />
-            </div>
-          ))}
-        </section>
-      </div>
-    </TooltipProvider>
-  );
 }
 
 /**

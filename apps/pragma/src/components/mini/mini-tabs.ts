@@ -45,7 +45,7 @@ export function worktreeLocation(project: Project, worktree: Worktree): MiniLoca
 }
 
 /** Short label for a location, used as a fresh tab's title. */
-export function locationLabel(location: MiniLocation): string | null {
+function locationLabel(location: MiniLocation): string | null {
   return location.kind === "home" ? null : `${location.projectName} · ${location.worktreeName}`;
 }
 
