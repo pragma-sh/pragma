@@ -175,6 +175,14 @@ export const AUTO_SELECT = {
   maxHarnessRowsPerAgent: 6,
   /** Below this agent-choice confidence the UI flags the pick as a guess. */
   lowConfidence: 0.35,
+  /** Usage categories shown per provider account, headline limit first. */
+  maxUsageLimitsPerProvider: 4,
+  /**
+   * Headroom tiers by the most-used finite limit (percent): at or above
+   * `exhaustedPct` the account is effectively out, `lowPct` is a long task's
+   * worth from it, and below `somePct` there is plenty.
+   */
+  usageHeadroom: { exhaustedPct: 95, lowPct: 80, somePct: 50 },
 } as const;
 
 /** Knobs for AI merge-conflict resolution (see `merge-conflicts.ts`). */

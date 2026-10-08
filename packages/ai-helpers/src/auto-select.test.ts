@@ -6,6 +6,7 @@ import {
   type AutoSelectInsights,
   type AutoSelectRequest,
   harnessMatchesAgent,
+  headroom,
   parseAutoSelectRequest,
   reasoningForDifficulty,
   rowMatchesModel,
@@ -153,7 +154,7 @@ describe("autoSelect", () => {
       lowConfidence: false,
       difficulty: 0.75,
       reason: "Claude Code 70% · Opus 90% · hard task → High",
-      sources: { modelBenchmarks: true, harnessBenchmarks: true },
+      sources: { modelBenchmarks: true, harnessBenchmarks: true, usageLimits: false },
     });
     expect(double.calls).toHaveLength(1);
     // Only agents with a real model choice get a model question.
@@ -200,6 +201,72 @@ describe("autoSelect", () => {
     expect(modelCriteria.opus.benchmarks.coding_index).toBe(70);
     expect(modelCriteria.opus.result_in_this_harness.accuracy_pct).toBe(55);
     expect(modelCriteria.haiku.benchmarks).toBe("No benchmark data.");
+  });
+
+  it("gives the System 1 model each agent's usage limits", async () => {
+    const double = jev(() => ({
+      agent: choice("codex", { "claude-code": 0.2, codex: 0.8 }),
+      model_0: choice("haiku", { opus: 0.3, haiku: 0.7 }),
+      difficulty: score(2),
+    }));
+    const base = request();
+    const [claude, codex, cursor] = base.agents;
+    const result = await autoSelect(
+      request({
+        agents: [
+          {
+            ...claude!,
+            usage: [
+              {
+                provider: "anthropic",
+                title: "Anthropic",
+                status: "ready",
+                limits: [
+                  { title: "Weekly", percentUsed: 40, resetsInMs: 3 * 86_400_000, primary: false },
+                  { title: "Session", percentUsed: 97.4, resetsInMs: 5_400_000, primary: true },
+                  { title: "Extra", percentUsed: null, resetsInMs: null, primary: false },
+                ],
+              },
+            ],
+          },
+          {
+            ...codex!,
+            usage: [
+              {
+                provider: "openai",
+                title: "OpenAI",
+                status: "unavailable",
+                message: "Sign in to Codex",
+                limits: [],
+              },
+            ],
+          },
+          cursor!,
+        ],
+      }),
+      { loadInsights: async () => INSIGHTS, fetch: double.fetch },
+    );
+    expect(result.sources.usageLimits).toBe(true);
+    const { questions } = double.calls[0]!;
+    const agentCriteria = (questions.agent as { criteria: Record<string, any> }).criteria;
+    expect(agentCriteria["claude-code"].usage_limits).toEqual([
+      {
+        provider: "Anthropic",
+        headroom: "exhausted",
+        limits: [
+          { name: "Session", used_pct: 97, resets_in_hours: 1.5 },
+          { name: "Weekly", used_pct: 40, resets_in_hours: 72 },
+          { name: "Extra", used_pct: "unlimited" },
+        ],
+      },
+    ]);
+    expect(agentCriteria.codex.usage_limits).toEqual([
+      { provider: "OpenAI", headroom: "unknown", note: "Sign in to Codex" },
+    ]);
+    expect(agentCriteria.cursor).not.toHaveProperty("usage_limits");
+    const modelInstructions = (questions.model_0 as { instructions: Record<string, unknown> })
+      .instructions;
+    expect(modelInstructions.usage_limits).toEqual(agentCriteria["claude-code"].usage_limits);
   });
 
   it("applies automode.md filters before asking and skips the agent question for one survivor", async () => {
@@ -255,7 +322,11 @@ describe("autoSelect", () => {
       loadInsights: async () => ({ models: new Map(), harness: [] }),
       fetch: double.fetch,
     });
-    expect(result.sources).toEqual({ modelBenchmarks: false, harnessBenchmarks: false });
+    expect(result.sources).toEqual({
+      modelBenchmarks: false,
+      harnessBenchmarks: false,
+      usageLimits: false,
+    });
     expect((double.calls[0]!.state as { task: string }).task).toMatch(/No prompt was written/);
   });
 });
@@ -303,6 +374,29 @@ describe("matching", () => {
     );
     const astra = { id: "openai/gpt-6-astra", name: "GPT-6 Astra", reasoning: [] };
     expect(rowMatchesModel(harnessRow({}), astra)).toBe(true);
+  });
+});
+
+const usageAt = (percents: (number | null)[], status: "ready" | "unknown" = "ready") => ({
+  provider: "p",
+  title: "P",
+  status,
+  limits: percents.map((percentUsed, index) => ({
+    title: `l${index}`,
+    percentUsed,
+    resetsInMs: null,
+    primary: index === 0,
+  })),
+});
+
+describe("headroom", () => {
+  it("tiers by the most-used finite limit", () => {
+    expect(headroom(usageAt([10, 30]))).toBe("plenty");
+    expect(headroom(usageAt([10, 60]))).toBe("some");
+    expect(headroom(usageAt([85, 10]))).toBe("low");
+    expect(headroom(usageAt([95]))).toBe("exhausted");
+    expect(headroom(usageAt([null]))).toBe("plenty");
+    expect(headroom(usageAt([99], "unknown"))).toBe("unknown");
   });
 });
 

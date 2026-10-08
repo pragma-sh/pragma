@@ -126,6 +126,13 @@ agent CLI, one of that agent's models, and a reasoning effort — with a System 
   each model option carries modelgrep scores and, when the leaderboard ran it, its result
   inside that harness. Models are capped at `AUTO_SELECT.maxModelsPerAgent`, keeping
   benchmarked models first, because a choice accepts at most 255 options.
+- **Usage limits are evidence, not a filter.** Each agent may carry `usage` — one entry
+  per provider account it launches with, built by the desktop from its accounts store
+  (`autoSelectUsage` in `apps/pragma/src/lib/accounts.ts`). It reaches the model as
+  `usage_limits` on the agent option and in that agent's model question, with a
+  `headroom` tier (`headroom()`, thresholds in `AUTO_SELECT.usageHeadroom`). The desktop
+  sends whatever usage is cached and never waits on a provider CLI, so `unknown` is normal.
+  Do not turn an exhausted account into a hard exclusion here: a limit may reset in minutes.
 - **Matching is fuzzy on purpose.** `harnessMatchesAgent` compares compacted names or ids
   (`Grok Build` ~ `grok`); `rowMatchesModel` compares `insightKey`s of the model's
   `canonicalId`, id, and name and allows a suffix match (`claudefable51` ~ `fable51`).
