@@ -4,6 +4,7 @@ import type { AccountLogin, AccountProviderInfo, AccountsListResult } from "@pra
 import type { UsageLimitsResult } from "@pragma-sh/plugin";
 
 import {
+  autoSelectUsage,
   buildProviderViews,
   chipHarnesses,
   globalHarnessView,
@@ -416,5 +417,56 @@ describe("signed-out providers", () => {
       "anthropic",
       "openrouter",
     ]);
+  });
+});
+
+describe("autoSelectUsage", () => {
+  it("reports the bound account's limits with resets re-based on now", () => {
+    const usage = new Map<string, UsageLimitsResult>([
+      [
+        "anthropic:work",
+        {
+          status: "ready",
+          observedAt: 1_000,
+          limits: [
+            { id: "five-hour", title: "5-hour", used: 82, limit: 100, resetsInMs: 60_000 },
+            { id: "extra", title: "Extra", used: 4, limit: null },
+          ],
+        },
+      ],
+    ]);
+    expect(autoSelectUsage({ list, usage }, "pragma.claude-code", 21_000)).toEqual([
+      {
+        provider: "anthropic",
+        title: "Anthropic",
+        status: "ready",
+        limits: [
+          { title: "5-hour", percentUsed: 82, resetsInMs: 40_000, primary: true },
+          { title: "Extra", percentUsed: null, resetsInMs: null, primary: false },
+        ],
+      },
+    ]);
+  });
+
+  it("marks unloaded and unavailable usage, and skips other harnesses", () => {
+    const usage = new Map<string, UsageLimitsResult>([
+      [
+        "anthropic:home",
+        { status: "unavailable", reason: "authentication-required", message: "Sign in" },
+      ],
+    ]);
+    expect(autoSelectUsage({ list, usage: new Map() }, "pragma.claude-code")).toEqual([
+      { provider: "anthropic", title: "Anthropic", status: "unknown", limits: [] },
+    ]);
+    expect(autoSelectUsage({ list, usage }, "pragma.opencode")).toEqual([
+      {
+        provider: "anthropic",
+        title: "Anthropic",
+        status: "unavailable",
+        message: "Sign in",
+        limits: [],
+      },
+    ]);
+    expect(autoSelectUsage({ list, usage }, "pragma.cursor")).toEqual([]);
   });
 });

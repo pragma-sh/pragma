@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { toast } from "sonner";
 
+import { autoSelectUsage, type AccountsSnapshot } from "@/lib/accounts";
 import { validateModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -12,6 +13,7 @@ import {
   type AutoSelectInput,
   type AutoSelection,
 } from "@/lib/tauri";
+import { projectAccountsSnapshot } from "@/state/accounts-store";
 
 /**
  * How long to wait for every agent's model list before asking anyway. A model
@@ -21,6 +23,12 @@ import {
 const AUTO_SELECT_MODEL_WAIT_MS = 2_500;
 /** How often a submit re-checks whether the model lists have arrived. */
 const MODEL_POLL_MS = 50;
+/**
+ * How long a submit waits for the project's account list when nothing has
+ * loaded it yet. Usage limits are evidence, not a gate: past this, Auto
+ * decides without them.
+ */
+const ACCOUNTS_WAIT_MS = 1_500;
 
 /** What auto mode is deciding for: the prompt plus where the launch will run. */
 export interface AutoSelectTarget {
@@ -115,11 +123,15 @@ export function useAutoSubmit(submit: () => unknown): AutoSubmit {
   return { registry, resolving, active: registered > 0, submit: run };
 }
 
-/** Builds the IPC request from the loaded agents and their model lists. */
+/**
+ * Builds the IPC request from the loaded agents, their model lists, and — when
+ * the project's accounts are known — the usage limits each agent launches with.
+ */
 export function buildAutoSelectInput(
   target: AutoSelectTarget,
   agents: readonly AgentConfig[],
   modelsByAgent: Record<string, AgentModel[] | undefined>,
+  accounts: AccountsSnapshot | null = null,
 ): AutoSelectInput {
   return {
     projectId: target.projectId ?? null,
@@ -133,6 +145,7 @@ export function buildAutoSelectInput(
       id: agent.id,
       name: agent.name,
       models: modelsByAgent[agent.id] ?? [],
+      ...(accounts ? { usage: autoSelectUsage(accounts, agent.id) } : {}),
     })),
   };
 }
@@ -186,6 +199,16 @@ function useModelsSettled(
   return timedOut || allModelsLoaded(agents, modelsByAgent);
 }
 
+/** The project's accounts for a pick; an unreachable host means "no usage data", never a failed pick. */
+async function accountsForAutoSelect(projectId: string | null): Promise<AccountsSnapshot | null> {
+  try {
+    return await projectAccountsSnapshot(projectId, ACCOUNTS_WAIT_MS);
+  } catch (cause) {
+    console.warn("auto mode: account usage unavailable", cause);
+    return null;
+  }
+}
+
 /** Resolves once `check` holds, or once `deadline` (epoch ms) passes regardless. */
 async function waitUntil(check: () => boolean, deadline: number): Promise<void> {
   if (check() || Date.now() >= deadline) return;
@@ -221,9 +244,12 @@ export function useAutoAgentSelection({
   latest.current = { settled, target, agents, modelsByAgent, onResolved };
 
   const resolve = useCallback(async () => {
-    await waitUntil(() => latest.current.settled, Date.now() + AUTO_SELECT_MODEL_WAIT_MS);
+    const [accounts] = await Promise.all([
+      accountsForAutoSelect(latest.current.target.projectId ?? null),
+      waitUntil(() => latest.current.settled, Date.now() + AUTO_SELECT_MODEL_WAIT_MS),
+    ]);
     const { target: current, agents: list, modelsByAgent: models } = latest.current;
-    const result = await system1AutoSelect(buildAutoSelectInput(current, list, models));
+    const result = await system1AutoSelect(buildAutoSelectInput(current, list, models, accounts));
     const launch = autoSelectionToLaunch(result, latest.current.modelsByAgent);
     latest.current.onResolved(launch.agentId, launch.selection);
   }, []);

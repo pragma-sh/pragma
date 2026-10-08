@@ -63,7 +63,7 @@ function selection(overrides: Partial<AutoSelection> = {}): AutoSelection {
     modelProbabilities: {},
     reason: "Claude Code 80% · Opus · hard task → High",
     warnings: [],
-    sources: { modelBenchmarks: true, harnessBenchmarks: true },
+    sources: { modelBenchmarks: true, harnessBenchmarks: true, usageLimits: false },
     ...overrides,
   };
 }

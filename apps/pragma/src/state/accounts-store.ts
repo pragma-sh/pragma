@@ -9,6 +9,7 @@ import {
 import type { UsageLimitsResult } from "@pragma-sh/plugin";
 import type { AccountsApi } from "@pragma-sh/sdk";
 
+import type { AccountsSnapshot } from "@/lib/accounts";
 import { errorMessage } from "@/lib/errors";
 import { accountsApi } from "@/lib/tauri";
 import { validateUsageLimitsResult } from "@/lib/usage-limits";
@@ -232,6 +233,24 @@ function projectAccounts(projectId: string | null): ProjectAccounts {
     stores.set(key, store);
   }
   return store;
+}
+
+/**
+ * The project's accounts and cached usage, for a one-off read outside React
+ * (auto mode). When nothing has loaded the account list yet it is loaded, for
+ * at most `waitMs`; usage is never awaited — a provider CLI can take seconds,
+ * and accounts whose usage has not arrived are simply reported as unknown.
+ */
+export async function projectAccountsSnapshot(
+  projectId: string | null,
+  waitMs: number,
+): Promise<AccountsSnapshot | null> {
+  const store = projectAccounts(projectId);
+  if (store.getSnapshot().list === null) {
+    await Promise.race([store.reload(), new Promise((resolve) => setTimeout(resolve, waitMs))]);
+  }
+  const { list, usage } = store.getSnapshot();
+  return list ? { list, usage } : null;
 }
 
 /** Subscribes to a project's accounts; polling runs while anything subscribes. */

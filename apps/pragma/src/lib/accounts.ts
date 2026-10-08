@@ -7,6 +7,7 @@ import type {
 } from "@pragma-sh/constants";
 import type { UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin";
 
+import type { AutoSelectProviderUsage } from "@/lib/tauri";
 import { percentUsed, primaryLimit } from "@/lib/usage-limits";
 
 /** One harness that can use a provider, and the account it uses right now. */
@@ -390,4 +391,45 @@ function worstPercent(accounts: AccountView[]): number | null {
     .map((account) => account.primaryPercent)
     .filter((percent): percent is number => percent !== null);
   return percents.length > 0 ? Math.max(...percents) : null;
+}
+
+/**
+ * What auto mode tells System 1 about one harness's limits: the usage of every
+ * account it launches with right now, one entry per provider. Reset countdowns
+ * are re-based on `now`, since the snapshot may be minutes old.
+ */
+export function autoSelectUsage(
+  snapshot: AccountsSnapshot,
+  agentId: string,
+  now: number = Date.now(),
+): AutoSelectProviderUsage[] {
+  const { list, usage } = snapshot;
+  return list.effective.flatMap((binding): AutoSelectProviderUsage[] => {
+    if (binding.agentId !== agentId || binding.accountKey === null) return [];
+    const info =
+      list.providers.find(
+        (candidate) =>
+          candidate.provider === binding.provider && candidate.agentIds.includes(agentId),
+      ) ?? list.providers.find((candidate) => candidate.provider === binding.provider);
+    const base = { provider: binding.provider, title: info?.title ?? binding.provider };
+    const result = usage.get(binding.accountKey);
+    if (!result) return [{ ...base, status: "unknown", limits: [] }];
+    if (result.status === "unavailable") {
+      return [{ ...base, status: "unavailable", message: result.message, limits: [] }];
+    }
+    const elapsed = Math.max(0, now - result.observedAt);
+    return [
+      {
+        ...base,
+        status: "ready",
+        limits: result.limits.map((limit) => ({
+          title: limit.title,
+          percentUsed: percentUsed(limit),
+          resetsInMs:
+            limit.resetsInMs === undefined ? null : Math.max(0, limit.resetsInMs - elapsed),
+          primary: limit.id === info?.primaryLimitId,
+        })),
+      },
+    ];
+  });
 }
