@@ -65,6 +65,20 @@ function mergedOverrides(
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { selectedProjectId } = useWorkspace();
+  return <ThemeScopeProvider projectId={selectedProjectId}>{children}</ThemeScopeProvider>;
+}
+
+/**
+ * {@link ThemeProvider} keyed on an explicit project, for a window without a
+ * workspace (a Pragma Mini window themes itself after its active tab's project).
+ */
+export function ThemeScopeProvider({
+  projectId: selectedProjectId,
+  children,
+}: {
+  projectId: string | null;
+  children: ReactNode;
+}) {
   const [global, setGlobal] = useState<ThemeFile | null>(null);
   const [project, setProject] = useState<ThemeFile | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ConfigScope, string>>>({});

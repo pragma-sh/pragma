@@ -2,7 +2,7 @@ import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react"
 import { toast } from "sonner";
 
 import { PragmaClient } from "@pragma-sh/sdk";
-import type { Tab, Worktree } from "@pragma-sh/constants";
+import type { Project, Tab, Worktree } from "@pragma-sh/constants";
 
 import { PLUGIN_DEEP_LINK_EVENT, type PluginDeepLinkDetail } from "@/lib/deep-link";
 import { onAgentReport, readPluginManifests, gatewayConnectionInfo } from "@/lib/tauri";
@@ -52,8 +52,31 @@ export function PluginProvider(props: { children: ReactNode }): ReactNode {
   );
 }
 
-function usePluginRuntimeSynchronization(workspace: ReturnType<typeof useWorkspace>): void {
-  const { projects, projectTabs, selectedProjectId, worktrees, openPluginWebView } = workspace;
+/**
+ * What the plugin runtime is synchronised against: the known projects, the
+ * active one, its terminal sessions, and where a plugin web view opens. The
+ * workspace supplies it in the main window; a Pragma Mini window supplies its
+ * own (no plugin web views, the active tab's project).
+ */
+export interface PluginRuntimeScope {
+  projects: ReadonlyArray<Project>;
+  projectTabs: Tab[];
+  selectedProjectId: string | null;
+  worktrees: Record<string, Worktree[]>;
+  openPluginWebView: NonNullable<Parameters<typeof setPluginWebViewOpener>[0]>;
+}
+
+/** Plugin runtime for a window without a workspace (a Pragma Mini window). */
+export function PluginRuntimeProvider(props: {
+  scope: PluginRuntimeScope;
+  children: ReactNode;
+}): ReactNode {
+  usePluginRuntimeSynchronization(props.scope);
+  return props.children;
+}
+
+function usePluginRuntimeSynchronization(scope: PluginRuntimeScope): void {
+  const { projects, projectTabs, selectedProjectId, worktrees, openPluginWebView } = scope;
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedPath = selectedProject?.path ?? null;
   const selectedWorktrees = selectedProjectId

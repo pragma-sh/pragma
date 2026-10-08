@@ -22,7 +22,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
-import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AccountProvidersMenu } from "@/components/accounts/AccountProvidersMenu";
 import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
@@ -49,7 +48,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useConfirmClose, useConfirmCloseTabs } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
-import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import {
+  ActiveTabHighlight,
+  activeTabLayoutIdFor,
+  TabAgentDot,
+  TabChip,
+  tabEntryClassName,
+} from "@/components/tabs/TabChip";
 import { TabRenameInput } from "@/components/tabs/TabRenameInput";
 import { type TabRenameApi, useTabRename } from "@/components/tabs/use-tab-rename";
 import { ShortcutHint } from "@/components/ShortcutHint";
@@ -75,7 +81,6 @@ import {
   usePluginTopperItems,
   type VisiblePluginContribution,
 } from "@/plugins/rendering";
-import { useTabAgentStatus } from "@/state/agent-status-store";
 import { useKanban } from "@/state/kanban-context";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import {
@@ -387,33 +392,6 @@ function computeScriptButtonDisabled(button: ScriptButtonInfo, workspace: Worksp
 }
 
 /**
- * The single highlight that marks the active tab. It is one element shared
- * across the current tab set via `layoutId`, so activating another tab slides
- * it there. Adding or removing a tab changes the id, preventing a close from
- * animating the highlight onto the fallback tab.
- */
-const ACTIVE_TAB_LAYOUT_ID = "terminal-tab-active";
-
-function ActiveTabHighlight({ layoutId }: { layoutId: string }) {
-  return (
-    <motion.span
-      aria-hidden
-      className="absolute inset-0 rounded-md border border-border bg-elevated"
-      layoutId={layoutId}
-      transition={motionTransition.indicator}
-    />
-  );
-}
-
-/** Shared chrome for a top-bar entry: fixed metrics plus the active/idle colouring. */
-function tabEntryClassName(active: boolean): string {
-  return cn(
-    "group relative mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border border-transparent px-2 text-sm",
-    active ? "text-foreground" : "text-muted-foreground hover:bg-muted",
-  );
-}
-
-/**
  * The "parent" entry shown in the top bar for a collapsed split. Its X closes
  * the whole split — every tab in every pane — because the split's panes are not
  * individually reachable from this strip. It carries the split accent so it
@@ -501,7 +479,6 @@ function SplitParentTab({
 }
 
 /** One regular top-bar tab: drag handle, rename input, close button, context menu. */
-// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePrSubmit); not extractable logic.
 function TerminalTabItem({
   tab,
   active,
@@ -523,8 +500,6 @@ function TerminalTabItem({
   setActiveTab: (id: string) => void;
   shortcutHint: string | null;
 }) {
-  const displayTitle = tabTitle(tab);
-  const isRenaming = tab.id === rename.renamingTabId;
   const handleDragStart = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
       event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
@@ -534,62 +509,19 @@ function TerminalTabItem({
     [beginTabDrag, tab.id],
   );
   return (
-    <ContextMenu key={tab.id}>
-      <ContextMenuTrigger asChild>
-        {/* The HTML5 drag handlers stay on a plain wrapper: a motion component
-            replaces `onDragStart`/`onDragEnd` with its own pan-gesture
-            signatures, which are not the native DragEvent this uses. */}
-        <div className="shrink-0" draggable onDragStart={handleDragStart} onDragEnd={endTabDrag}>
-          <motion.div
-            animate="visible"
-            className={tabEntryClassName(active)}
-            exit="exit"
-            initial="hidden"
-            transition={motionTransition.fast}
-            variants={tabItemVariants}
-          >
-            {active ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
-            {isRenaming ? (
-              <TabRenameInput className="text-sm" rename={rename} />
-            ) : (
-              <button
-                className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  if (tab.kind === "terminal") terminalManager.focus(tab.id);
-                }}
-                onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
-              >
-                <TabIcon tab={tab} />
-                <TabAgentDot tabId={tab.id} />
-                <ShortcutHint value={shortcutHint} />
-                <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
-              </button>
-            )}
-            <TabDirtyDot tabId={tab.id} />
-            <IconTooltip label="Close tab">
-              <button
-                aria-label="Close tab"
-                className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
-                onClick={() => requestClose(tab)}
-              >
-                <X className="size-3" />
-              </button>
-            </IconTooltip>
-          </motion.div>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={() => rename.startRenameFromMenu(tab.id, displayTitle)}>
-          <Pencil />
-          Rename
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => requestClose(tab)}>
-          <X />
-          Close
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <TabChip
+      active={active}
+      activeTabLayoutId={activeTabLayoutId}
+      drag={{ onDragStart: handleDragStart, onDragEnd: endTabDrag }}
+      onClose={() => requestClose(tab)}
+      onSelect={() => {
+        setActiveTab(tab.id);
+        if (tab.kind === "terminal") terminalManager.focus(tab.id);
+      }}
+      rename={rename}
+      shortcutHint={shortcutHint}
+      tab={tab}
+    />
   );
 }
 
@@ -946,7 +878,7 @@ function TerminalTabStrip({
   workspace: ReturnType<typeof useWorkspace>;
 }) {
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
-  const activeTabLayoutId = `${ACTIVE_TAB_LAYOUT_ID}:${topTabs.map((tab) => tab.id).join(",")}`;
+  const activeTabLayoutId = activeTabLayoutIdFor(topTabs);
   return (
     <div className="bg-canvas flex h-11 items-center">
       <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
@@ -994,9 +926,4 @@ function TerminalTabStrip({
       />
     </div>
   );
-}
-
-function TabAgentDot({ tabId }: { tabId: string }) {
-  // `relative` keeps the dot above the absolutely-positioned active highlight.
-  return <AgentStatusDot className="relative" status={useTabAgentStatus(tabId)} />;
 }

@@ -22,6 +22,16 @@ export type TabRenameApi = {
  */
 export function useTabRename(): TabRenameApi {
   const workspace = useWorkspace();
+  return useTabRenameState(workspace.renameTerminalTab);
+}
+
+/**
+ * The rename state machine with the commit supplied by the caller, for a strip
+ * whose tabs are not workspace tabs (a Pragma Mini window's).
+ */
+export function useTabRenameState(
+  onRename: (tabId: string, title: string) => void | Promise<unknown>,
+): TabRenameApi {
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,10 +57,10 @@ export function useTabRename(): TabRenameApi {
   );
   const commitRename = useCallback(() => {
     if (renamingTabId && renameValue.trim()) {
-      void workspace.renameTerminalTab(renamingTabId, renameValue.trim());
+      void onRename(renamingTabId, renameValue.trim());
     }
     setRenamingTabId(null);
-  }, [renamingTabId, renameValue, workspace]);
+  }, [renamingTabId, renameValue, onRename]);
   const cancelRename = useCallback(() => setRenamingTabId(null), []);
   return {
     renamingTabId,
