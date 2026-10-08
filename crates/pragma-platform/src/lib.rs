@@ -6,10 +6,12 @@
 //! so a platform gap is a missing implementation in one crate rather than a
 //! guarantee that silently evaporates somewhere in the tree.
 //!
-//! Eight seams live here:
+//! Ten seams live here:
 //!
 //! - [`disk`] — how many bytes a file occupies on disk, and which hard-linked
 //!   entries share one copy of the data.
+//! - [`dock`] — the "New Pragma Mini Window" entry on the app's dock or
+//!   taskbar icon.
 //! - [`install`] — replacing the installed desktop app with a downloaded build
 //!   and relaunching it.
 //! - [`ipc`] — the local socket the server binds and clients connect to.
@@ -22,6 +24,7 @@
 //! - [`wsl`] — enumerating the WSL distributions a machine has installed.
 
 pub mod disk;
+pub mod dock;
 pub mod install;
 pub mod ipc;
 pub mod path;

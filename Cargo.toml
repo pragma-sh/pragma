@@ -38,7 +38,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Consistent lint policy across the whole Rust workspace.
 # Crates opt in with `[lints] workspace = true`.
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny`, not `forbid`, so exactly one module can opt out with a documented
+# `#[allow(unsafe_code)]`: `pragma-platform`'s `dock` seam, which has no safe
+# binding (an Objective-C runtime method on macOS, COM on Windows). Any other
+# `allow(unsafe_code)` needs the same justification and owner sign-off.
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
