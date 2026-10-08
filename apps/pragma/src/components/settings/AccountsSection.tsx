@@ -17,9 +17,10 @@ import {
 } from "@/components/accounts/ProviderSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";
-import { globalHarnessView, shownProviders, type ProviderView } from "@/lib/accounts";
+import { globalHarnessView, shownProviders, type ProviderView } from "@pragma-sh/accounts-view";
 import type { ConfigScope } from "@/lib/tauri";
-import { useProjectAccounts, type ProjectAccounts } from "@/state/accounts-store";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
+import { useProjectAccounts } from "@/state/accounts-store";
 
 /**
  * Settings › Account providers: a card per provider listing its accounts (each

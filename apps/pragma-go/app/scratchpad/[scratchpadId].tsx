@@ -4,7 +4,6 @@ import {
   unresolvedCommentsPrompt,
 } from "@pragma-sh/scratchpad-viewer";
 import type { ScratchpadBlock, ScratchpadFile } from "@pragma-sh/sdk";
-import { PragmaGatewayError } from "@pragma-sh/sdk";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, View, type ColorValue } from "react-native";
@@ -19,13 +18,12 @@ import { ScratchpadWebView } from "@/components/scratchpad/ScratchpadWebView";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { hapticImpact, hapticSelection, hapticSuccess, hapticWarning } from "@/lib/haptics";
-import { useConnection } from "@/lib/connection-context";
 import { useScratchpadAgent } from "@/lib/use-scratchpad-agent";
 import { useScratchpadComments } from "@/lib/use-scratchpad-comments";
 import { useScratchpad } from "@/lib/use-scratchpads";
 import { errorText } from "@/lib/utils";
 import { useThemeColors } from "@/lib/theme";
-import { getWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
+import { useWhiteboardSnapshotLoader } from "@/lib/use-whiteboard-snapshot";
 
 /**
  * One scratchpad, read-only, with a touch comment layer.
@@ -37,8 +35,10 @@ import { getWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
  * "Resolve comments" button sends.
  */
 export default function ScratchpadScreen() {
-  const { worktreeId, filePath, title } = useLocalSearchParams<{
+  const { backLabel, worktreeId, filePath, title } = useLocalSearchParams<{
     scratchpadId: string;
+    /** Back-button text when opened from somewhere other than the worktree. */
+    backLabel?: string;
     worktreeId: string;
     filePath: string;
     title: string;
@@ -53,12 +53,17 @@ export default function ScratchpadScreen() {
           title: scratchpad?.title ?? title,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+            <WorktreeBackButton
+              color={tintColor ?? foreground}
+              label={backLabel}
+              worktreeId={worktreeId}
+            />
           ),
         }}
       />
       {scratchpad ? (
         <ScratchpadContent
+          backLabel={backLabel}
           onReload={reload}
           root={root}
           scratchpad={scratchpad}
@@ -84,11 +89,13 @@ function ScratchpadPlaceholder({ loading }: { loading: boolean }) {
 }
 
 function ScratchpadContent({
+  backLabel,
   onReload,
   root,
   scratchpad,
   worktreeId,
 }: {
+  backLabel: string | undefined;
   onReload: () => void;
   root: string | undefined;
   scratchpad: ScratchpadFile;
@@ -96,26 +103,13 @@ function ScratchpadContent({
 }) {
   const insets = useSafeAreaInsets();
   const { foreground } = useThemeColors();
-  const { client, handleUnauthorized } = useConnection();
   const { add, comments, loaded, save } = useScratchpadComments(root, scratchpad.filePath);
   const agent = useScratchpadAgent(scratchpad, worktreeId, root, onReload);
   const [commentMode, setCommentMode] = useState(false);
   const [picked, setPicked] = useState<ScratchpadBlock | null>(null);
   const [sending, setSending] = useState(false);
 
-  const loadWhiteboardSnapshot = useCallback(
-    // fallow-ignore-next-line complexity -- gateway request must preserve the 401 unpair side effect while rethrowing every host failure to the viewer.
-    async (id: string, knownVersion?: number, dark?: boolean) => {
-      if (!client) throw new Error("Host is unavailable");
-      try {
-        return await getWhiteboardSnapshot(client.whiteboards, worktreeId, id, knownVersion, dark);
-      } catch (cause) {
-        if (cause instanceof PragmaGatewayError && cause.httpStatus === 401) handleUnauthorized();
-        throw cause;
-      }
-    },
-    [client, handleUnauthorized, worktreeId],
-  );
+  const loadWhiteboardSnapshot = useWhiteboardSnapshotLoader(worktreeId);
 
   const open = unresolvedComments(comments);
 
@@ -178,7 +172,11 @@ function ScratchpadContent({
           headerRight: renderCommentModeButton,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+            <WorktreeBackButton
+              color={tintColor ?? foreground}
+              label={backLabel}
+              worktreeId={worktreeId}
+            />
           ),
         }}
       />

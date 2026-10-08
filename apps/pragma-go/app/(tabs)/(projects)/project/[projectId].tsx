@@ -5,9 +5,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LaunchAgentButton } from "@/components/LaunchAgentButton";
 import { LaunchSheet } from "@/components/LaunchSheet";
-import { NavGroup } from "@/components/NavRow";
 import { Text } from "@/components/ui/text";
-import { WorktreeNavRow } from "@/components/WorktreeNavRow";
+import { WorktreeGroup } from "@/components/WorktreeGroup";
 import { useProject, useProjectRootPath, useWorktreeTree } from "@/lib/data/data-context";
 import { hapticImpact } from "@/lib/haptics";
 import type { Project, Worktree } from "@/lib/types";
@@ -88,11 +87,7 @@ function WorktreeList({ insetBottom, roots }: { insetBottom: number; roots: Work
       {roots.length === 0 ? (
         <Text className="px-4 py-6 text-muted-foreground">No worktrees loaded.</Text>
       ) : (
-        <NavGroup title="Worktrees">
-          {roots.map((node) => (
-            <WorktreeNavRow key={node.worktree.id} worktree={node.worktree} />
-          ))}
-        </NavGroup>
+        <WorktreeGroup nodes={roots} title="Worktrees" />
       )}
     </ScrollView>
   );

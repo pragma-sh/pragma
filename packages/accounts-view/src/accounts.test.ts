@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { AccountLogin, AccountProviderInfo, AccountsListResult } from "@pragma-sh/constants";
-import type { UsageLimitsResult } from "@pragma-sh/plugin";
+import type {
+  AccountLogin,
+  AccountProviderInfo,
+  AccountsListResult,
+  UsageLimitsResult,
+} from "@pragma-sh/constants";
 
 import {
   buildProviderViews,

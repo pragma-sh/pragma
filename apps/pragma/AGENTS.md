@@ -822,9 +822,11 @@ cross-project rows from older builds.
 The toolbar's `components/accounts/AccountProvidersMenu.tsx` replaced the usage-limits
 popover. All state is host-owned and read through `accounts_rpc` (routed to the project's
 host) into `state/accounts-store.ts`, one shared store per project that polls usage once per
-account while subscribed. `lib/accounts.ts` turns the host's list into provider → account
-views; binding resolution stays on the host (`effective`, `loginKeys`) — never re-derive it
-here. Every agent launch passes the bound accounts' env to its PTY spawn: `startAgentInTab`
+account while subscribed. The store itself (`ProjectAccounts`), the provider → account views,
+and the usage-limit helpers live in `@pragma-sh/accounts-view`, shared with Pragma Go —
+`state/accounts-store.ts` only keys stores by project and adapts them to React, and
+`lib/usage-limits.ts` only maps severity onto Tailwind classes. Binding resolution stays on
+the host (`effective`, `loginKeys`) — never re-derive it here. Every agent launch passes the bound accounts' env to its PTY spawn: `startAgentInTab`
 through `terminalManager.setSpawnEnv`, background launches directly; `resolveAgentLaunchEnv`
 never blocks a launch for more than 5 s. Settings → Account Providers
 (`components/settings/AccountsSection.tsx`) renders the menu's own

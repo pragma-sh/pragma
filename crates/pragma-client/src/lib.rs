@@ -675,6 +675,17 @@ impl PragmaClient {
                         ))
                     });
                 }
+                // A server that rejected the frame before it reached RPC
+                // dispatch answers with a plain `Response`. Ignoring it here
+                // is what turns a rejected request into a hang, so a failed
+                // response for this request id ends the wait.
+                ServerFrame::Response(response)
+                    if !response.ok && response.request_id == request.request_id =>
+                {
+                    return Ok(Err(ClientError::Server(response.error.unwrap_or_else(
+                        || "server rejected the rpc request".to_string(),
+                    ))));
+                }
                 ServerFrame::Hello(_)
                 | ServerFrame::Response(_)
                 | ServerFrame::Event(_)

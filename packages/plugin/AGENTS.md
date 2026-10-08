@@ -17,7 +17,7 @@ packages/plugin/
 ├── src/contributions.ts # UI slot, Settings page, web view, and command contribution helpers
 ├── src/accounts.ts      # defineAccounts, ACCOUNT_PROVIDERS, legacy-usage adapter (resolveAccountProviders)
 ├── src/account-identity.ts # Canonical identity per well-known provider + credential-store readers
-├── src/usage-limits.ts  # Usage-limit shapes + deprecated defineUsageLimitProvider
+├── src/usage-limits.ts  # Re-exports the usage-limit wire shapes from constants + deprecated defineUsageLimitProvider
 ├── src/theme.ts         # Selectable Theme-settings declarations
 ├── src/hooks.ts         # Hook delegates onto __PRAGMA__.hooks
 ├── src/storage.ts       # Plugin-scoped durable JSON-storage type

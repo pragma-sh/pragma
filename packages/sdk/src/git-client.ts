@@ -21,6 +21,32 @@ export class GitClient {
     return this.rpc("worktreeChanges", payload);
   }
 
+  /**
+   * Everything that changed between an exact `base` commit and the worktree's
+   * current state: `base..HEAD` as committed, plus staged and unstaged. No
+   * merge-base step — the base is the immutable point the caller captured, such
+   * as a fanout's `baseCommit`.
+   */
+  changesSinceCommit(payload: { root: string; base: string }): Promise<WorktreeChanges> {
+    return this.rpc("changesSinceCommit", payload);
+  }
+
+  /**
+   * Old/new text for one file between an exact `base` commit and the
+   * worktree's on-disk content (not `HEAD`), so uncommitted work shows too.
+   */
+  baseFileDiff(payload: {
+    root: string;
+    base: string;
+    path: string;
+    oldPath?: string | null;
+  }): Promise<FileDiff> {
+    // `GitRequest` variants deserialize their fields in snake_case: the enum
+    // renames only its `op` tag, so `oldPath` would be silently dropped.
+    const { oldPath, ...rest } = payload;
+    return this.rpc("baseFileDiff", { ...rest, old_path: oldPath ?? null });
+  }
+
   mergedStatus(payload: { items: MergedStatusItem[] }): Promise<Record<string, boolean>> {
     return this.rpc("mergedStatus", payload);
   }

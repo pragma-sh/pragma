@@ -1290,7 +1290,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
-    app.manage(github::TokenStore::new(&data_dir));
+    let tokens = github::TokenStore::new(&data_dir);
+    app.manage(tokens.clone());
     app.manage(system1::System1KeyStore::new(&data_dir));
     let resource_dir = app.path().resource_dir().ok();
     let pty = PtyClient::new(app_data_dir, channel, resource_dir);
@@ -1324,6 +1325,11 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if mini_window::wants_mini(std::env::args()) {
         mini_window::open_in_background(app.handle());
     }
+    // The GitHub token now belongs to the host, so a phone can open a pull
+    // request with no desktop window running. A token this app stored before
+    // that move is handed over once, in the background: it needs the server to
+    // be up, and nothing on screen depends on the result.
+    migrate_github_token_in_background(tokens, pty.clone());
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
     fanouts::start_for(app.handle().clone(), pty.clone());
@@ -1661,4 +1667,16 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+/// Hands a legacy desktop-stored GitHub token to the host, once.
+///
+/// On a worker thread because it waits for the server: a migration is not worth
+/// delaying the window for, and a failure only means the user signs in again.
+fn migrate_github_token_in_background(tokens: github::TokenStore, pty: PtyClient) {
+    std::thread::spawn(move || {
+        if let Err(error) = tokens.migrate_to_host(&pty) {
+            log::warn!("failed to migrate GitHub token to the host: {error}");
+        }
+    });
 }

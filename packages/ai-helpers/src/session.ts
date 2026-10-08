@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { type ModelKind, RUN_FALLBACK } from "./constants.ts";
+import type { AiFeatureContext } from "./feature-context.ts";
 import { loadModelInsights, type ModelInsights } from "./model-insights.ts";
 import { pickModel, selectModelCandidates } from "./pick-model.ts";
 import { type AttemptFailure, describeFailure, NoWorkingModelError } from "./run-failure.ts";
@@ -148,12 +149,16 @@ export async function createPragmaSession(
  * The user's available models for a tier, best first, ranked with modelgrep
  * insights. Throws when the tier has no model at all.
  */
-export async function loadModelCandidates(
+async function loadModelCandidates(
   kind: ModelKind,
   registry: ModelRegistry,
+  credentialedProviders?: readonly string[],
 ): Promise<Model<Api>[]> {
   const insights = await loadModelInsights();
-  const candidates = selectModelCandidates(kind, registry.getAvailable(), { insights });
+  const candidates = selectModelCandidates(kind, registry.getAvailable(), {
+    insights,
+    credentialedProviders,
+  });
   if (candidates.length === 0) {
     throw new Error(`No ${kind} model is available. Sign in to a provider that offers one.`);
   }
@@ -161,13 +166,9 @@ export async function loadModelCandidates(
 }
 
 /** Options for {@link runPromptWithFallback} — one feature's whole model setup. */
-export interface RunPromptWithFallbackOptions {
+export interface RunPromptWithFallbackOptions extends AiFeatureContext {
   /** Tier to select candidates from. */
   modelKind: ModelKind;
-  /** Working directory — drives AGENTS.md discovery, skills, and tool scope. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
   /** Selective tool allowlist; omitted means pi's defaults. */
   tools?: string[];
 }
@@ -215,7 +216,11 @@ export async function runPromptWithFallback<T>(
   prompt: string,
   parse: (raw: string) => T,
 ): Promise<T> {
-  const candidates = await loadModelCandidates(options.modelKind, options.registry);
+  const candidates = await loadModelCandidates(
+    options.modelKind,
+    options.registry,
+    options.authStorage.list(),
+  );
 
   const failures: AttemptFailure[] = [];
   const retiredProviders = new Set<string>();
@@ -376,15 +381,11 @@ export async function runPromptStreamingWithFallback(
   onDelta: (delta: string) => void,
   onReset?: () => void,
 ): Promise<string> {
-  const insights = await loadModelInsights();
-  const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
-    insights,
-  });
-  if (candidates.length === 0) {
-    throw new Error(
-      `No ${options.modelKind} model is available. Sign in to a provider that offers one.`,
-    );
-  }
+  const candidates = await loadModelCandidates(
+    options.modelKind,
+    options.registry,
+    options.authStorage.list(),
+  );
 
   const failures: AttemptFailure[] = [];
   const retiredProviders = new Set<string>();

@@ -1,43 +1,25 @@
+import type {
+  UsageLimit,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+} from "@pragma-sh/constants";
+
 import type { PluginIcon } from "./contributions";
 import type { PluginContext } from "./types";
 
-/** One finite or unlimited usage category reported by a provider. */
-export interface UsageLimit {
-  id: string;
-  title: string;
-  used: number;
-  /** A null limit represents unlimited usage. */
-  limit: number | null;
-  /** Milliseconds until this category resets, measured from `observedAt`. */
-  resetsInMs?: number;
-}
-
-/** A successful provider snapshot. */
-export interface UsageLimitsReady {
-  status: "ready";
-  /** Unix time in milliseconds when the provider observed these values. */
-  observedAt: number;
-  /** Optional collapsed-row metric derived separately from the detailed limits. */
-  summary?: UsageLimit;
-  limits: UsageLimit[];
-}
-
-/** Why a provider cannot currently report usage limits. */
-export type UsageLimitsUnavailableReason =
-  | "not-configured"
-  | "authentication-required"
-  | "unsupported"
-  | "error";
-
-/** A provider state that requires user or platform action before loading. */
-export interface UsageLimitsUnavailable {
-  status: "unavailable";
-  reason: UsageLimitsUnavailableReason;
-  message: string;
-}
-
-/** Result returned by a usage-limit provider. Unexpected failures should throw. */
-export type UsageLimitsResult = UsageLimitsReady | UsageLimitsUnavailable;
+// The usage-limit result shapes are wire types: the host validates and caches
+// them, and desktop, mobile, and web all render the same JSON. They therefore
+// live in `@pragma-sh/constants` and are only re-exported here, so plugin authors
+// import one name and no second definition can drift from it.
+export type {
+  UsageLimit,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+};
 
 /**
  * Exit status a provider's shell wrapper uses to report that the agent CLI is

@@ -65,6 +65,14 @@ from the desktop.
   - **Device history:** `clientFor()` also sends installation id, platform, display
     label, and app version headers. Installation id has its own SecureStore key so
     unpairing does not create a new device in desktop gateway history.
+- **Agent view surfaces** (`components/chat/AgentViewTabs.tsx`): an agent tab _is_ a
+  terminal session on the host, so its chat screen carries a Chat/Terminal tab
+  switcher rather than pushing a second route — a pushed terminal would put the same
+  session in the back stack twice. The terminal pane is mounted on first use and then
+  kept mounted, hidden but **laid out**: unmounting throws away xterm's screen and
+  forces a full replay per switch, and a collapsed layout makes the fit addon measure a
+  zero-column grid. Switching away only sets `attached={false}`, which releases the
+  viewport lease so the desktop keeps its own grid.
 - **Chat** (`chat/[tabId].tsx`): `lib/use-agent-connection.ts` opens a duplex
   `client.agents.connect()` on screen focus and closes on blur, folding events
   into the **pure** `lib/transcript-store.ts` (upsert-by-id, ts ordering,
@@ -102,7 +110,9 @@ from the desktop.
   `resolveInboxItem` publishes the decision/answer
   through the client. Opening a completed chat marks its done status seen locally and
   on the host. Long-press agent-row action sheets rename through `client.sessions.rename()`
-  or kill the matching PTY, then hide cleared rows locally.
+  or kill the matching PTY, then hide cleared rows locally. The rename dialog itself is
+  `components/RenameTabSheet.tsx`, shared with terminals — a tab is a tab, and one
+  rename operation should not have two dialogs.
 - **Launch** (`components/LaunchSheet.tsx`, from the worktree header "+"): agent
   picker fed by the host catalog (`lib/use-catalog.ts`), `client.agents.launch()`
   with the payload shaped by the pure `lib/launch-form.ts`. Existing-worktree
@@ -132,9 +142,148 @@ from the desktop.
   (`+N` when there are more) directly above the composer, tapping through to the
   scratchpad screen. It sits **inside** the chat's `KeyboardAvoidingView`, which is what
   keeps the keyboard from covering it — do not hoist it above that subtree.
+- **Fanouts** (`lib/fanouts-context.tsx`, `app/fanout/[fanoutId].tsx`): one app-wide
+  `client.fanouts.subscribe()` — the host has no list action; the stream's snapshot is the
+  list — owned by `FanoutsProvider`. The launch sheet's **Fan out** mode builds the create
+  request with the pure `lib/fanout-form.ts` (always a `new` coordination parent, as on the
+  desktop). Worktree lists go through `components/WorktreeGroup.tsx`, which drops attempt
+  worktrees of _active_ fanouts and shows one fanout row after the parent — the desktop's
+  rule, from `@pragma-sh/fanout-view`; attempts of finished fanouts are plain rows again.
+  The compare view is an attempt **pager**, not the desktop's grid: per attempt the
+  host's escape-stripped output tail (`fanouts.read`, polled only while that page is in
+  view), its scratchpads, and `git.changesSinceCommit` against `baseCommit`. Every
+  destructive or disruptive action (`pick`, `retry`, `cancel`) confirms in
+  `lib/use-fanout-actions.ts` — the SDK leaves confirming to the caller — and errors
+  show the host's `FanoutFailure` message (`fanoutFailureMessage`).
+- **Code viewing** (`components/code/`, `app/file/[worktreeId].tsx`,
+  `app/diff/[worktreeId].tsx`): read-only, rendered by `@pragma-sh/code-viewer`'s
+  self-contained CodeMirror document in a web view (sandboxed iframe on web). The content
+  is baked into the document when it is built, so nothing streams in and nothing writes
+  back. Files come from `fs.readFile` (binary/truncated reported, never rendered); diffs
+  from `git.baseFileDiff`. The worktree screen ends with `components/FileExplorer.tsx`, a
+  lazy tree over `fs.listDir` (pure flattening in `lib/file-tree.ts`) with no create,
+  rename, move, or delete.
 - **New worktree** (`components/NewWorktreeSheet.tsx`, from project/chat header "+"):
   agent picker uses same host catalog as launch. Submission uses the same headless-capable
   `client.agents.launch()` control route as existing-worktree launches.
+
+## Terminals
+
+A terminal screen (`app/terminal/[tabId].tsx`) attaches to a session the host is
+already running — it never starts a shell. Leaving detaches; ending a session is
+the explicit close on its row.
+
+- The renderer is `@pragma-sh/terminal-viewer`, embedded through the
+  `TerminalWebView` platform twins (native web view / sandboxed iframe on web).
+  Output goes straight into xterm through the bridge and **never** through React
+  state.
+- `use-terminal-session.ts` borrows the PTY grid with a viewport lease rather
+  than resizing a shared session outright, resumes from its last byte cursor
+  after a dropped tunnel, and never retries an input whose delivery was
+  ambiguous — a resent keystroke can run a command twice.
+- Terminals are shells and script runs only. Agent sessions live under Agents
+  with their own chat surface; listing a session in both places would give it two
+  close buttons. The agent's raw TUI is reached from inside its chat screen, via
+  the Chat/Terminal tab switcher, not from a second row.
+- **`components/terminal/TerminalSurface.tsx` is the one attached-terminal
+  surface** (status line + renderer + key bar), used by the terminal screen and
+  by the agent view's Terminal tab. Add terminal behaviour there, not in a
+  screen, or the two drift.
+- **Renderer commands are gated on the document's `ready` message**
+  (`lib/terminal-command-queue.ts`, used by both `TerminalWebView` twins).
+  `injectJavaScript` and `postMessage` are both dropped by a document that has
+  not loaded, and attaching replays the session's whole retained scrollback
+  immediately — the web view loses that race. A shell you type into repaints and
+  hides it; a script's terminal, which nobody types into, just stays black. Never
+  push a command straight at the renderer without the queue.
+- **No white flash on the way in**, from two separate causes. React Navigation's
+  default scene background is white whatever the app's theme is, so the root
+  `Stack` sets `contentStyle`; and a web view shows the platform's own white
+  surface until its first paint, so the container is painted
+  `terminalBackgroundColor(...)` (from `@pragma-sh/terminal-viewer`, the same
+  resolution the document uses) and the view itself is transparent until the
+  document reports `ready`. Measured: 12 frames at 254.8/255 before, none after.
+- A terminal row's long press opens the same shape of action sheet an agent row
+  does — Rename, then the destructive action. Both rename over the `tabRename`
+  control, which the desktop serves, so renaming needs Pragma open on the
+  computer; the host-owned tab it names is already in the desktop database
+  because `reconcile_managed_tabs` adopted it.
+- Full-screen routes (terminal, chat, scratchpad) set `headerBackTitle`
+  explicitly in `app/_layout.tsx`. The tab navigator beneath them has no header,
+  so iOS otherwise labels the back button with the route's own name — literally
+  "(tabs)".
+
+## Project scripts
+
+`components/ScriptsMenuButton.tsx` (the worktree header's play control) reads
+`client.scripts.*` through `lib/use-scripts.ts`. The host owns the run, so
+"already going" is its answer rather than a guess assembled from open tabs.
+
+- **Starting a script does not navigate.** A dev server is started and left
+  running; jumping into its terminal takes the user off the worktree they were
+  in. The run's terminals appear as rows in the worktree's Terminals section,
+  one per command, and are opened when the output is actually wanted.
+- **Stop lives in the same menu.** Once a script is running, its entry becomes
+  `Stop <name>` — start and stop are one control, as on the desktop, not a start
+  button plus a hunt for the right terminal row.
+- The list is re-read on focus and after every start or stop, because a run
+  started from the desktop is just as real as one started here.
+
+## Port forwarding and design mode
+
+The worktree screen polls `client.ports.list([worktreeId])` while focused and shows
+listeners immediately below Terminals, labeled with the owning process. A tap confirms
+before publishing anything, then `client.ports.forward({ projectId, port })` starts the
+host's configured tunnel and opens its returned URL with the platform browser. Forwarded
+HTML gets a capability-scoped draggable paintbrush: tap it to pick elements, stage prompts,
+choose a catalog agent, and launch the existing headless agent flow. Capability arrives in
+URL fragment and is stripped before application scripts run; paired gateway bearer token
+never enters forwarded page.
+
+## Commit & PR
+
+`components/CommitAndPrSheet.tsx` over `lib/use-commit-and-pr.ts` runs the
+desktop's order: commit everything into logical commits, review the pull request
+text, then publish. The run belongs to the host, so leaving the screen never
+cancels it.
+
+- **The flow is blocked when the host has no GitHub token.** It ends in a push
+  and a pull request, so without one the only thing it can produce is commits the
+  user never asked for. `githubReady` gates the header action and the sheet's
+  first step; `null` means "not answered yet" and blocks nothing, because an
+  unreachable host is not a signed-out one.
+- **A clean worktree blocks it too**, the desktop's other condition: there is no
+  plan to make, and starting one spends a model call to say so. `hasChanges`
+  comes from `client.git.worktreeChanges` and is read on focus plus whenever a
+  run changes stage — the run is what makes the worktree clean. It is never
+  polled on a timer.
+- **The base branch is chosen, not assumed.** The picker lists
+  `client.github.branches`, minus the worktree's own head, and starts on the
+  repository default. Leaving it alone sends no base at all and the host resolves
+  the default, so a publish never waits on that list loading.
+
+## Accounts
+
+The home screen's `components/AccountsSection.tsx` over `lib/use-accounts.ts`
+shows the host's account providers: each account's usage, and which account
+each harness launches with. It replaced the old usage-limits cards when the
+desktop moved to account providers.
+
+- **The model is the desktop's.** `ProjectAccounts` (polling, per-account
+  backoff, usage validation) and the provider → account views come from
+  `@pragma-sh/accounts-view`, so a phone and a desktop never disagree about which
+  accounts exist or which one a harness can switch to. Never re-derive bindings
+  here; the host resolves them.
+- **Switching is global.** The home screen has no project in view, so
+  `setBinding` writes the "all projects" binding; a project override set on the
+  desktop keeps winning inside that project. Running agents keep the account they
+  launched with.
+- **Unusable accounts stay in the menu, disabled, with the reason**
+  (`lib/account-switch.ts`). Signing in to a new account runs a login command in
+  a hidden terminal on the host and is driven from the desktop for now.
+- The store polls only while the screen is focused and the app is active.
+- Shared code that runs here must not call `Array.prototype.toSorted`: Hermes
+  does not provide it yet.
 
 ## Stack
 
@@ -184,18 +333,27 @@ app/
   (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable (iPad support is off — see App Store builds)
   (tabs)/_layout.web.tsx          # JS Projects + Inbox + Settings bottom tabs; wide routes also show a sidebar
   (tabs)/(projects)/              # Stack: drill-down
-    index.tsx                     #   all projects
+    index.tsx                     #   all projects + the host's accounts
     project/[projectId].tsx       #   project → root worktree(s)
     worktree/[worktreeId].tsx     #   nested worktrees + agent tabs (header + launches agent)
   chat/[tabId].tsx                # full-screen live agent chat (outside tabs)
   scratchpad/[scratchpadId].tsx   # read-only scratchpad web view + touch comments
+  fanout/[fanoutId].tsx           # fanout compare view: attempt pager + follow-up composer
+  file/[worktreeId].tsx           # read-only file viewer (?path=)
+  diff/[worktreeId].tsx           # read-only base-commit diff (?path=&base=)
   (tabs)/inbox/                   # Stack: swipeable event cards
   (tabs)/settings/                # Stack: host connection — heartbeat probe + unpair
 components/
   AppShell.web                    # web-only contextual wide sidebar around root screens
   ui/*                            # React Native Reusables primitives
   scratchpad/                     # ScratchpadWebView, ScratchpadLoading, CommentComposerSheet, AttachAgentDrawer
-  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill
+  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill, AgentViewTabs
+  terminal/                       # TerminalSurface (shared attached terminal), TerminalWebView twins, TerminalKeyBar
+  code/                           # CodeWebView twins (code-viewer document) + CodeScreen frame
+  fanout/                         # AttemptPage, FanoutComposer
+  WorktreeGroup                   # worktree list with fanout rows folded in; FanoutMembershipGroup
+  FanoutAttemptRows               # launch sheet's per-attempt pickers
+  FileExplorer                    # worktree file tree (read-only) at the bottom of a worktree
   AgentIcon                       # plugin agent icon fetched by hash (SVG/raster, cached)
   LaunchSheet                     # launch a new agent session (catalog-fed picker)
   LaunchAgentButton               # project/worktree header-right "+" → Launch sheet
@@ -211,11 +369,17 @@ lib/
   transcript-store.ts            # pure: event fold → rows + attention (Vitest)
   pairing.ts                     # pure: QR/manual validation + protocol check (Vitest)
   launch-form.ts                 # pure: launch payload shaping (Vitest)
+  fanout-form.ts                 # pure: fanout create request + failure wording (Vitest)
+  fanout-status.ts               # pure: attempt/fanout status → status dot (Vitest)
+  fanouts-context.tsx            # the one fanouts subscription + grouping hooks
+  use-fanout-actions.ts          # pick/retry/cancel/send with confirmations
+  file-tree.ts                   # pure: file explorer flattening (Vitest)
+  use-host-value.ts              # one keyed host read with reload; 401 → connection
   use-catalog.ts                 # cached host agent catalog
   use-scratchpads.ts             # a worktree's managed scratchpads, re-read on demand
   use-scratchpad-comments.ts     # the desktop's sibling comment file, read + serialized writes
   scratchpad-agent.ts            # pure: attached-tab resolution, tab → scratchpads, row label (Vitest)
-  data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest)
+  data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest) + subscription-loop (shared reconnect)
   types.ts                       # re-exports @pragma-sh/constants domain types + view shapes
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop
   agent-status.ts                # status rollup priority
@@ -311,6 +475,10 @@ implemented in `lib/widgets/`:
 
 ## Rules
 
+- **No Reanimated `entering`/`exiting` animations inside `BottomSheet`.** On iOS the
+  entering animation never completes inside the sheet's modal, so the view is laid out
+  (it is in the accessibility tree) but stays fully transparent. The launch sheet's
+  branch field was invisible this way for a release before Fan out exposed it.
 - **One source of truth for the domain.** `Project`, `Worktree`, `AgentStatus`, and
   `AgentAttentionKind` are imported (type-only) from `@pragma-sh/constants`; wire event
   types (`AgentStreamEvent`, `AgentMessage`, `AgentReportPayload`, …) come from

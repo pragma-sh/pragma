@@ -3,8 +3,8 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { UsageBar } from "@/components/accounts/UsageBar";
-import type { AccountView } from "@/lib/accounts";
-import { formatDuration, percentUsed, usagePercentLabel } from "@/lib/usage-limits";
+import type { AccountView } from "@pragma-sh/accounts-view";
+import { formatDuration, percentUsed, usagePercentLabel } from "@pragma-sh/accounts-view";
 import { cn } from "@/lib/utils";
 
 /**

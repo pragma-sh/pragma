@@ -1,21 +1,10 @@
 /// <reference types="node" />
 
-import { spawnSync } from "node:child_process";
+import { runBunup } from "../../../scripts/package-build.ts";
 
-const result = spawnSync(
-  process.execPath,
+runBunup(
+  ["src/index.ts", "src/ui.tsx", "src/primitives.tsx"],
   [
-    "x",
-    "bunup",
-    "src/index.ts",
-    "src/ui.tsx",
-    "src/primitives.tsx",
-    "--format",
-    "esm,cjs",
-    "--target",
-    "browser",
-    "--dts",
-    "--no-splitting",
     // No `--packages bundle`: consumers (the desktop app's Vite build) resolve
     // `@pragma-sh/sdk` themselves, so inlining it here would ship a second copy of
     // the SDK — and a second set of its module-level singletons — into the app
@@ -31,12 +20,4 @@ const result = spawnSync(
     "--external",
     "react/jsx-dev-runtime",
   ],
-  {
-    cwd: process.cwd(),
-    env: { ...process.env, NODE_ENV: "production" },
-    stdio: "inherit",
-  },
 );
-
-if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);

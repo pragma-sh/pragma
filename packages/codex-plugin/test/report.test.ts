@@ -541,6 +541,67 @@ fi
     );
   });
 
+  it("reports a code-mode question from an exec custom tool call (Codex 0.153+)", async () => {
+    const current = transcript();
+    run("started", { stdin: current.input });
+    const args = {
+      questions: [
+        { id: "color", question: "Which color?", options: [{ label: "Red" }, { label: "Blue" }] },
+      ],
+    };
+    appendFileSync(
+      current.path,
+      `${JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "call-code-mode",
+          input: `const r = await tools.request_user_input(${JSON.stringify(args)});\ntext(JSON.stringify(r));\n`,
+        },
+      })}\n`,
+    );
+    await waitFor(() => reports().at(-1)?.includes(" attention ") ?? false);
+    expect(reports().at(-1)).toBe(
+      'agent report --agent codex attention --kind question --question Which color? --options [{"label":"Red"},{"label":"Blue"}] --request-id call-code-mode',
+    );
+
+    appendFileSync(
+      current.path,
+      `${JSON.stringify({
+        type: "response_item",
+        payload: { type: "custom_tool_call_output", call_id: "call-code-mode", output: [] },
+      })}\n`,
+    );
+    await waitFor(() => reports().at(-1) === "agent report --agent codex started");
+  });
+
+  it("streams item_completed AgentMessage records (Codex 0.153+)", async () => {
+    const current = transcript();
+    run("started", { stdin: current.input });
+    appendFileSync(
+      current.path,
+      `${JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          item: {
+            type: "AgentMessage",
+            content: [{ type: "Text", text: "Reading the **app**." }],
+            phase: "commentary",
+          },
+        },
+      })}\n`,
+    );
+    await waitFor(() => messages().some((message) => message.role === "assistant"));
+    expect(messages().find((message) => message.role === "assistant")).toEqual(
+      expect.objectContaining({
+        id: "codex-turn-1-assistant-000",
+        text: "Reading the **app**.",
+      }),
+    );
+  });
+
   it("abort watcher clears current turn", async () => {
     const current = transcript();
     run("started", { stdin: current.input });

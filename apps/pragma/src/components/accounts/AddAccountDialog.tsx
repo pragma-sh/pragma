@@ -19,11 +19,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import type { HarnessView, ProviderView } from "@/lib/accounts";
+import type { HarnessView, ProviderView } from "@pragma-sh/accounts-view";
 import { errorMessage } from "@/lib/errors";
 import { browserOpenExternal } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import type { ProjectAccounts } from "@/state/accounts-store";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
 
 /** Which harness a sign-in is for, when the caller already knows. */
 export interface AddAccountTarget {

@@ -15,7 +15,7 @@ import {
   unassignedHarnesses,
   type HarnessView,
   type ProviderView,
-} from "@/lib/accounts";
+} from "@pragma-sh/accounts-view";
 import { browserOpenExternal } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 

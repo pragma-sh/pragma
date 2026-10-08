@@ -67,6 +67,15 @@ Two things that break the tarball if changed carelessly:
 - `gateway.discoveryFile` / `gateway.tokenHeader` — local HTTP gateway discovery file
   name and bearer auth header. The gateway port is intentionally runtime-assigned and
   must not be added as a constant.
+- `welcome.located` / `welcome.generic` — heading copy for the no-tabs welcome surfaces,
+  with the pure formatter in `src/welcome.ts`. Two authored lists, not one list with the
+  location clause cut out: the desktop workspace knows which worktree is selected, the
+  mobile all-projects home does not.
+- `UsageLimit*` — the wire shapes of a usage reading (`AccountUsageEntry.result` carries
+  one). `@pragma-sh/plugin` re-exports these types rather than defining its own, and
+  `src/usage-limits.ts` holds the pure presentation helpers (percentage, severity, reset
+  countdown) shared by desktop and mobile. Refresh cadence is the host's, under
+  `accounts.*`.
 - `onboarding.*` — first-run flow values: `mediaBaseUrl` for the streamed preview clips,
   and `skill.id` / `skill.targets[]` (`id`, home-relative `directory`, button `label`) for
   the global skill directories the skills step installs into. Rust resolves `directory`

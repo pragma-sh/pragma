@@ -5,11 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::ai::{AiError, AiHost, CommitAndDraftRequest};
+use crate::github::GithubHost;
 use pragma_constants::{
-    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, ShellProfile, Tab,
-    TabKind, Worktree,
+    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, SessionInfo,
+    ShellProfile, Tab, TabKind, ViewportLease, Worktree, CONSTANTS,
 };
 use pragma_core::git::GitRequest;
+use pragma_core::scripts::{ScriptListResult, ScriptListing, ScriptRun};
 use pragma_core::tabs::TabAgentMetadata;
 use pragma_core::watcher::WorktreeWatcher;
 use pragma_platform::ipc::LocalStream;
@@ -41,6 +44,8 @@ pub enum RegistryError {
     Watcher(String),
     #[error("port inspection failed: {0}")]
     Ports(String),
+    #[error("project scripts: {0}")]
+    Scripts(String),
     #[error("lock poisoned")]
     LockPoisoned,
 }
@@ -55,6 +60,14 @@ pub type ControllerWriter = Arc<Mutex<LocalStream>>;
 /// Persisted so controller-free (headless) agent launches keep working after
 /// the server restarts while the desktop app stays closed.
 const WORKSPACE_SNAPSHOT_FILE: &str = "workspace.json";
+
+/// Terminal tabs this host created itself, and the ones it has closed. Kept
+/// beside the socket so a phone-opened terminal survives a server restart, and
+/// a phone-closed one is not resurrected by a stale desktop publish.
+const MANAGED_TABS_FILE: &str = "managed-tabs.json";
+/// How many closed-tab ids to remember. A tombstone only has to outlive the
+/// stale snapshot that would resurrect its tab, which is one desktop publish.
+const TOMBSTONE_LIMIT: usize = 512;
 
 const AGENT_DECISION_REPLAY_WINDOW: Duration = Duration::from_secs(5);
 const AGENT_DECISION_REPLAY_LIMIT: usize = 64;
@@ -103,6 +116,18 @@ pub struct Registry {
     /// the snapshot and fans a full-snapshot `Delta` to all live subscribers; v1
     /// keeps deltas trivial (every delta is a full replacement).
     workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
+    /// Terminal tabs the host created, and the ids of tabs clients have closed.
+    managed_tabs: Mutex<ManagedTabs>,
+    /// The host's GitHub credential and the operations that use it.
+    github: GithubHost,
+    /// AI jobs, and the sidecar that runs them.
+    ai: Arc<AiHost>,
+    /// One lock per project, so an AI commit started from a phone and one
+    /// started from the desktop cannot stage against each other's index.
+    git_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Live script runs by run id. Not persisted: a run is its terminals, and
+    /// those do not survive a server restart either.
+    script_runs: Mutex<HashMap<String, ScriptRun>>,
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
     tunnel: Arc<TunnelRegistry>,
@@ -309,6 +334,47 @@ struct WorktreeFileWatch {
     _watcher: WorktreeWatcher,
 }
 
+/// Host-created terminal tabs plus the ids of tabs a client has closed.
+///
+/// The desktop's `SQLite` rows remain the source of truth for tabs *it* made;
+/// this is the other half, the tabs the host owns. Both halves have to be
+/// authoritative for the sessions they created, or a desktop publish that
+/// happened not to know about a phone-opened tab would erase it — and a
+/// publish written before a phone closed one would bring it back.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedTabs {
+    #[serde(default)]
+    tabs: Vec<Tab>,
+    /// Closed tab ids, newest last.
+    #[serde(default)]
+    tombstones: Vec<String>,
+    /// Client request id to the tab it created, so a retried open — a double
+    /// tap, or a retry after a lost response — returns the same tab instead of
+    /// opening a second shell.
+    #[serde(default)]
+    requests: HashMap<String, String>,
+}
+
+/// Reads the managed-tab store, or an empty one when absent or unreadable.
+fn load_managed_tabs(server_dir: &Path) -> ManagedTabs {
+    std::fs::read_to_string(server_dir.join(MANAGED_TABS_FILE))
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+/// Persists the managed-tab store. Best-effort: a failed write costs a
+/// phone-opened terminal its durability across a server restart.
+fn persist_managed_tabs(server_dir: &Path, managed: &ManagedTabs) {
+    let Ok(contents) = serde_json::to_string(managed) else {
+        return;
+    };
+    if let Err(error) = std::fs::write(server_dir.join(MANAGED_TABS_FILE), contents) {
+        eprintln!("failed to persist managed tabs: {error}");
+    }
+}
+
 fn prune_agent_decisions(decisions: &mut Vec<RecentAgentDecision>) {
     decisions.retain(|entry| entry.recorded_at.elapsed() <= AGENT_DECISION_REPLAY_WINDOW);
 }
@@ -332,6 +398,11 @@ impl Registry {
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
+            managed_tabs: Mutex::new(load_managed_tabs(&server_dir)),
+            github: GithubHost::new(&server_dir),
+            ai: Arc::new(AiHost::new(&server_dir)),
+            git_locks: Mutex::new(HashMap::new()),
+            script_runs: Mutex::new(HashMap::new()),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
             plugins: PluginsRegistry::new(server_dir.clone()),
@@ -384,6 +455,138 @@ impl Registry {
         self.plugins.handle_rpc(payload)
     }
 
+    /// Serves the `github` RPC domain. The token stays on the host; the answers
+    /// carry pull requests and logins, never credentials.
+    pub fn handle_github_rpc(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, crate::github::GithubError> {
+        self.github.handle_rpc(payload)
+    }
+
+    /// Serves the `ai` RPC domain: model availability, and the commit-and-draft
+    /// job a client starts and then polls.
+    pub fn handle_ai_rpc(&self, payload: &serde_json::Value) -> Result<serde_json::Value, AiError> {
+        let action = payload
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        match action {
+            "status" => Ok(AiHost::status()),
+            "commitAndDraftPullRequest" => self.start_commit_and_draft(payload),
+            "generateCommitMessage" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::commit_message(Path::new(&worktree.path))
+            }
+            "generatePullRequestDraft" => {
+                let (worktree, parent) = self.ai_worktree(payload)?;
+                AiHost::pull_request_draft(
+                    Path::new(&worktree.path),
+                    parent
+                        .as_ref()
+                        .map_or("main", |parent| parent.branch.as_str()),
+                    parent
+                        .as_ref()
+                        .map(|parent| Path::new(parent.path.as_str())),
+                )
+            }
+            "inlineEdit" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::inline_edit(Path::new(&worktree.path), payload)
+            }
+            "ask" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::ask(Path::new(&worktree.path), payload)
+            }
+            "getRun" => {
+                let job_id = required_field(payload, "runId")?;
+                let job = self.ai.job(&job_id)?;
+                serde_json::to_value(job).map_err(|error| AiError::Operation(error.to_string()))
+            }
+            "cancelRun" => {
+                let job_id = required_field(payload, "runId")?;
+                self.ai.cancel(&job_id)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            other => Err(AiError::InvalidRequest(format!(
+                "unknown ai action: {other}"
+            ))),
+        }
+    }
+
+    /// The worktree an AI request names, and the worktree it branched from.
+    fn ai_worktree(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<(Worktree, Option<Worktree>), AiError> {
+        let worktree_id = required_field(payload, "worktreeId")?;
+        self.worktree_with_parent(&worktree_id)
+            .map_err(AiError::Operation)
+    }
+
+    /// Resolves what the job needs — the worktree, its parent branch, the
+    /// project's lock — and hands it to the AI host.
+    fn start_commit_and_draft(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, AiError> {
+        let worktree_id = required_field(payload, "worktreeId")?;
+        let request_id = required_field(payload, "requestId")?;
+        let (worktree, parent) = self
+            .worktree_with_parent(&worktree_id)
+            .map_err(AiError::Operation)?;
+        let project_lock = self.git_lock(&worktree.project_id)?;
+        let job = self.ai.start_commit_and_draft(CommitAndDraftRequest {
+            worktree_id,
+            request_id,
+            root: PathBuf::from(&worktree.path),
+            parent_branch: parent
+                .as_ref()
+                .map_or_else(|| "main".to_string(), |parent| parent.branch.clone()),
+            parent_path: parent.as_ref().map(|parent| PathBuf::from(&parent.path)),
+            project_lock,
+        })?;
+        serde_json::to_value(job).map_err(|error| AiError::Operation(error.to_string()))
+    }
+
+    /// A worktree and the worktree it branched from, when it has one.
+    fn worktree_with_parent(
+        &self,
+        worktree_id: &str,
+    ) -> Result<(Worktree, Option<Worktree>), String> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?;
+        let snapshot = workspace
+            .as_ref()
+            .ok_or_else(|| "no workspace snapshot yet".to_string())?;
+        let worktree = snapshot
+            .worktrees
+            .iter()
+            .find(|worktree| worktree.id == worktree_id)
+            .cloned()
+            .ok_or_else(|| format!("worktree not found: {worktree_id}"))?;
+        let parent = worktree.parent_id.as_ref().and_then(|parent_id| {
+            snapshot
+                .worktrees
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
+                .cloned()
+        });
+        Ok((worktree, parent))
+    }
+
+    /// The lock guarding git operations in one project.
+    pub fn git_lock(&self, project_id: &str) -> Result<Arc<Mutex<()>>, AiError> {
+        let mut locks = self.git_locks.lock().map_err(|_| AiError::LockPoisoned)?;
+        Ok(Arc::clone(
+            locks
+                .entry(project_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        ))
+    }
+
     pub fn handle_automation_rpc(
         &self,
         payload: serde_json::Value,
@@ -433,6 +636,9 @@ impl Registry {
     /// (the delta is the whole snapshot); row-level deltas are a later
     /// optimization. Mirrors `broadcast_agent`: dead subscribers are pruned.
     pub fn publish_workspace(&self, mut snapshot: WorkspaceSnapshot) {
+        // Host-owned tabs are re-asserted before the snapshot is adopted, not
+        // after: what is stored and what is broadcast must be the same thing.
+        self.apply_managed_tabs(&mut snapshot);
         let payload = if let Ok(mut guard) = self.workspace.lock() {
             if let Some(current) = guard.as_ref() {
                 preserve_daemon_tab_metadata(current, &mut snapshot);
@@ -485,6 +691,344 @@ impl Registry {
             payload,
         });
         Ok(result)
+    }
+
+    /// Opens a terminal tab and its PTY, owned by this host.
+    ///
+    /// Idempotent per `request_id`: a double tap on a phone, or a retry after a
+    /// lost response, returns the tab already created rather than opening a
+    /// second shell. The shell is left to the server to resolve, so a
+    /// phone-opened terminal follows the project's configured default.
+    pub fn open_terminal_tab(
+        &self,
+        worktree_id: &str,
+        request_id: &str,
+        title: Option<&str>,
+    ) -> Result<Tab, RegistryError> {
+        if let Some(existing) = self.tab_for_request(request_id)? {
+            return Ok(existing);
+        }
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        self.spawn(
+            tab_id.clone(),
+            worktree_id.to_string(),
+            cwd,
+            AGENT_SESSION_COLS,
+            AGENT_SESSION_ROWS,
+            None,
+        )?;
+        let tab = Tab {
+            id: tab_id.clone(),
+            project_id,
+            worktree_id: worktree_id.to_string(),
+            kind: TabKind::Terminal,
+            title: title.map(str::to_string),
+            url: None,
+            file_path: None,
+            diff_side: None,
+            diff_commit: None,
+            pr_number: None,
+            plugin_id: None,
+            plugin_view_id: None,
+            plugin_payload: None,
+            plugin_dedupe_key: None,
+            whiteboard_id: None,
+            agent_id: None,
+            fanout_id: None,
+            fanout_member_id: None,
+            user_renamed: title.is_some(),
+            shell: None,
+            order_index: 0,
+            created_at: now_timestamp(),
+        };
+        {
+            let mut managed = self
+                .managed_tabs
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            managed.tabs.push(tab.clone());
+            managed.requests.insert(request_id.to_string(), tab_id);
+            managed.tombstones.retain(|id| id != &tab.id);
+            persist_managed_tabs(&self.server_dir, &managed);
+        }
+        let mirrored = tab.clone();
+        if let Err(error) = self.mutate_workspace(|snapshot| {
+            snapshot.tabs.push(Tab {
+                order_index: next_order_index(snapshot, &mirrored.worktree_id),
+                ..mirrored
+            });
+            Ok(())
+        }) {
+            // The snapshot only exists once a desktop has published one; the
+            // tab and its PTY are real either way, and `managed_tabs` is what
+            // makes them visible to the next publish.
+            eprintln!("open terminal: failed to mirror tab: {error}");
+        }
+        Ok(tab)
+    }
+
+    /// Closes a tab: ends its PTY and stops it being a tab anywhere.
+    ///
+    /// This is a cross-device effect by design — the desktop loses the tab too
+    /// — so the tombstone matters as much as the removal: a desktop snapshot
+    /// composed before the close must not bring the tab back.
+    pub fn close_tab(&self, tab_id: &str) -> Result<(), RegistryError> {
+        // A tab whose shell already exited is still closable: the row is what
+        // the user is removing.
+        match self.kill(tab_id) {
+            Ok(()) | Err(RegistryError::NotFound(_)) => {}
+            Err(error) => return Err(error),
+        }
+        {
+            let mut managed = self
+                .managed_tabs
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            managed.tabs.retain(|tab| tab.id != tab_id);
+            managed.requests.retain(|_, id| id != tab_id);
+            managed.tombstones.retain(|id| id != tab_id);
+            managed.tombstones.push(tab_id.to_string());
+            let overflow = managed.tombstones.len().saturating_sub(TOMBSTONE_LIMIT);
+            managed.tombstones.drain(..overflow);
+            persist_managed_tabs(&self.server_dir, &managed);
+        }
+        let _ = self.mutate_workspace(|snapshot| {
+            snapshot.tabs.retain(|tab| tab.id != tab_id);
+            Ok(())
+        });
+        Ok(())
+    }
+
+    /// The host-owned tabs for the given worktrees, for a desktop adopting them.
+    pub fn managed_tabs_for(&self, worktree_ids: &[String]) -> Result<Vec<Tab>, RegistryError> {
+        Ok(self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .tabs
+            .iter()
+            .filter(|tab| worktree_ids.iter().any(|id| id == &tab.worktree_id))
+            .cloned()
+            .collect())
+    }
+
+    /// Ids of tabs closed through this host, for a desktop pruning its own rows.
+    pub fn closed_tab_ids(&self) -> Result<Vec<String>, RegistryError> {
+        Ok(self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .tombstones
+            .clone())
+    }
+
+    fn tab_for_request(&self, request_id: &str) -> Result<Option<Tab>, RegistryError> {
+        let managed = self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let Some(tab_id) = managed.requests.get(request_id) else {
+            return Ok(None);
+        };
+        Ok(managed.tabs.iter().find(|tab| &tab.id == tab_id).cloned())
+    }
+
+    /// The project and absolute path a worktree row names.
+    fn worktree_location(&self, worktree_id: &str) -> Result<(String, String), RegistryError> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        workspace
+            .as_ref()
+            .and_then(|snapshot| {
+                snapshot
+                    .worktrees
+                    .iter()
+                    .find(|worktree| worktree.id == worktree_id)
+            })
+            .map(|worktree| (worktree.project_id.clone(), worktree.path.clone()))
+            .ok_or_else(|| RegistryError::NotFound(worktree_id.to_string()))
+    }
+
+    /// Lists a project's named run scripts, and which are running here.
+    ///
+    /// The config is read from the *project root*, never from the worktree the
+    /// script will run in: a child worktree is a checkout that may predate the
+    /// script being added, and running a stale copy of one is worse than
+    /// running none.
+    pub fn list_scripts(&self, worktree_id: &str) -> Result<ScriptListResult, RegistryError> {
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let root = self.project_root(&project_id).unwrap_or(cwd);
+        let config = match read_project_scripts(&root) {
+            Ok(config) => config,
+            Err(error) => {
+                // A malformed config is shown as the error it is. An empty list
+                // would claim the project has no scripts, which is a different
+                // thing and hides the typo that caused this.
+                return Ok(ScriptListResult {
+                    scripts: Vec::new(),
+                    error: Some(error),
+                });
+            }
+        };
+        let runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let scripts = config
+            .run_scripts
+            .iter()
+            .map(|(name, definition)| ScriptListing {
+                name: name.clone(),
+                icon: definition.icon.clone(),
+                command_count: pragma_core::scripts::flatten_commands(&definition.command)
+                    .map_or(0, |commands| commands.len()),
+                run: runs
+                    .values()
+                    .find(|run| run.worktree_id == worktree_id && &run.name == name)
+                    .cloned(),
+            })
+            .collect();
+        Ok(ScriptListResult {
+            scripts,
+            error: None,
+        })
+    }
+
+    /// Starts a named script in a worktree, or returns the run already going.
+    ///
+    /// One run per script per worktree: a second tap while a dev server is
+    /// already up should show it, not start a second one fighting for the same
+    /// port. `request_id` covers the narrower case of the *same* tap arriving
+    /// twice after a retry.
+    pub fn run_script(
+        &self,
+        worktree_id: &str,
+        name: &str,
+        request_id: &str,
+    ) -> Result<ScriptRun, RegistryError> {
+        if let Some(existing) = self.existing_run(worktree_id, name)? {
+            return Ok(existing);
+        }
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let root = self.project_root(&project_id).unwrap_or(cwd);
+        let config = read_project_scripts(&root).map_err(RegistryError::Scripts)?;
+        let definition = config
+            .run_scripts
+            .get(name)
+            .ok_or_else(|| RegistryError::NotFound(format!("script `{name}`")))?;
+        let commands = pragma_core::scripts::flatten_commands(&definition.command)
+            .map_err(|error| RegistryError::Scripts(error.to_string()))?;
+        if commands.is_empty() {
+            return Err(RegistryError::Scripts(format!(
+                "script `{name}` has no commands"
+            )));
+        }
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let mut tab_ids = Vec::with_capacity(commands.len());
+        for (index, command) in commands.iter().enumerate() {
+            // One tab per command, titled by the script: on a phone these are
+            // rows to pick between, and on the desktop they are the panes the
+            // script's split tree arranges.
+            let tab = self.open_terminal_tab(
+                worktree_id,
+                &format!("{request_id}:{index}"),
+                Some(&script_tab_title(name, index, commands.len())),
+            )?;
+            // The command is typed into the live shell rather than replacing
+            // it, so the terminal survives the command exiting and shows why.
+            if let Err(error) = self.write(&tab.id, &format!("{command}\r")) {
+                eprintln!("script {name}: failed to send command {index}: {error}");
+            }
+            tab_ids.push(tab.id);
+        }
+        let run = ScriptRun {
+            run_id: run_id.clone(),
+            worktree_id: worktree_id.to_string(),
+            name: name.to_string(),
+            tab_ids,
+        };
+        let mut runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        runs.insert(run_id, run.clone());
+        Ok(run)
+    }
+
+    /// Ends a run and closes the terminals it opened. Idempotent.
+    pub fn stop_script(&self, run_id: &str) -> Result<(), RegistryError> {
+        let run = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .remove(run_id);
+        let Some(run) = run else {
+            return Ok(());
+        };
+        for tab_id in &run.tab_ids {
+            if let Err(error) = self.close_tab(tab_id) {
+                eprintln!(
+                    "stop script {}: failed to close {tab_id}: {error}",
+                    run.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The run already going for this script in this worktree, if any.
+    ///
+    /// A run whose terminals have all been closed — from the desktop, or by the
+    /// user closing the last row — is not a run any more, so it is forgotten
+    /// here rather than blocking a fresh start forever.
+    fn existing_run(
+        &self,
+        worktree_id: &str,
+        name: &str,
+    ) -> Result<Option<ScriptRun>, RegistryError> {
+        let live: std::collections::HashSet<String> = self
+            .sessions
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .keys()
+            .cloned()
+            .collect();
+        let mut runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        runs.retain(|_, run| run.tab_ids.iter().any(|tab_id| live.contains(tab_id)));
+        Ok(runs
+            .values()
+            .find(|run| run.worktree_id == worktree_id && run.name == name)
+            .cloned())
+    }
+
+    /// Re-asserts host-owned tabs over a snapshot the desktop just published.
+    ///
+    /// The desktop publishes its own durable rows, which know nothing about a
+    /// tab a phone opened a moment ago and may still carry one a phone just
+    /// closed. Neither is a conflict to resolve: for tabs the host created,
+    /// the host is authoritative.
+    fn apply_managed_tabs(&self, snapshot: &mut WorkspaceSnapshot) {
+        let Ok(managed) = self.managed_tabs.lock() else {
+            return;
+        };
+        snapshot
+            .tabs
+            .retain(|tab| !managed.tombstones.iter().any(|id| id == &tab.id));
+        for tab in &managed.tabs {
+            if snapshot.tabs.iter().any(|existing| existing.id == tab.id) {
+                continue;
+            }
+            snapshot.tabs.push(Tab {
+                order_index: next_order_index(snapshot, &tab.worktree_id),
+                ..tab.clone()
+            });
+        }
     }
 
     /// Persists a launched agent's identity and default title on its owning host.
@@ -1146,7 +1690,6 @@ impl Registry {
     }
 
     /// Spawns a session with no extra environment.
-    #[cfg(test)]
     pub fn spawn(
         &self,
         session_id: String,
@@ -1283,6 +1826,88 @@ impl Registry {
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), RegistryError> {
         self.session(session_id)?.resize(cols, rows)?;
         Ok(())
+    }
+
+    /// Resizes on behalf of a viewport-lease holder. Without a matching lease
+    /// the size is only remembered, so a background layout observer on one
+    /// device cannot fight the device the user is actually typing on.
+    pub fn resize_with_lease(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        lease_id: Option<&str>,
+    ) -> Result<bool, RegistryError> {
+        Ok(self
+            .session(session_id)?
+            .resize_with_lease(cols, rows, lease_id)?)
+    }
+
+    /// Reports a session's grid, liveness, and whether its viewport is leased.
+    pub fn session_info(&self, session_id: &str) -> Result<SessionInfo, RegistryError> {
+        let session = self.session(session_id)?;
+        let viewport = session.viewport_info();
+        Ok(SessionInfo {
+            session_id: session_id.to_string(),
+            cols: i64::from(viewport.cols),
+            rows: i64::from(viewport.rows),
+            alive: !session.has_exited(),
+            leased: viewport.leased,
+            generation: i64::try_from(viewport.generation).unwrap_or(i64::MAX),
+        })
+    }
+
+    /// Grants temporary exclusive ownership of a session's grid.
+    pub fn acquire_viewport(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<ViewportLease, RegistryError> {
+        let ttl = lease_ttl();
+        let grant = self
+            .session(session_id)?
+            .acquire_viewport(cols, rows, ttl)?;
+        Ok(ViewportLease {
+            lease_id: grant.lease_id,
+            session_id: session_id.to_string(),
+            cols: i64::from(grant.cols),
+            rows: i64::from(grant.rows),
+            previous_cols: Some(i64::from(grant.previous_cols)),
+            previous_rows: Some(i64::from(grant.previous_rows)),
+            generation: i64::try_from(grant.generation).unwrap_or(i64::MAX),
+            expires_in_ms: i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX),
+        })
+    }
+
+    /// Extends a held viewport lease.
+    pub fn renew_viewport(&self, session_id: &str, lease_id: &str) -> Result<(), RegistryError> {
+        self.session(session_id)?
+            .renew_viewport(lease_id, lease_ttl())?;
+        Ok(())
+    }
+
+    /// Hands a viewport back and restores the size its owner last wanted.
+    pub fn release_viewport(&self, session_id: &str, lease_id: &str) -> Result<(), RegistryError> {
+        self.session(session_id)?.release_viewport(lease_id)?;
+        Ok(())
+    }
+
+    /// Expires leases whose holder stopped renewing.
+    ///
+    /// This runs on a timer rather than lazily, because the client that would
+    /// have triggered a lazy check is precisely the one that disappeared: a
+    /// backgrounded phone would otherwise leave the desktop's terminal stuck at
+    /// a phone-sized grid indefinitely.
+    pub fn sweep_viewport_leases(&self) -> usize {
+        let Ok(sessions) = self.sessions.lock() else {
+            return 0;
+        };
+        let sessions: Vec<Arc<Session>> = sessions.values().cloned().collect();
+        sessions
+            .iter()
+            .filter(|session| session.expire_viewport_if_due())
+            .count()
     }
 
     pub fn kill(&self, session_id: &str) -> Result<(), RegistryError> {
@@ -1939,6 +2564,56 @@ impl Default for Registry {
             PathBuf::new(),
         )
     }
+}
+
+/// How long a viewport lease lives without renewal.
+fn lease_ttl() -> Duration {
+    Duration::from_millis(u64::try_from(CONSTANTS.terminal_viewport.lease_ms).unwrap_or(0))
+}
+
+/// The next order index for a worktree's tabs in a snapshot.
+fn next_order_index(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> i64 {
+    snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.worktree_id == worktree_id)
+        .map(|tab| tab.order_index)
+        .max()
+        .map_or(0, |max| max + 1)
+}
+
+/// Reads and validates a project's `.pragma/scripts.json`.
+///
+/// A missing file is an empty config, not an error: most projects have no
+/// scripts. A file that exists but does not parse *is* an error, because the
+/// user wrote something and it is not doing what they meant.
+fn read_project_scripts(root: &str) -> Result<pragma_core::scripts::ProjectScripts, String> {
+    let path = Path::new(root).join(CONSTANTS.scripts.config_path.as_str());
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(pragma_core::scripts::ProjectScripts::default())
+        }
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    pragma_core::scripts::parse_config(&raw, &path).map_err(|error| error.to_string())
+}
+
+/// The title of one of a script run's terminals.
+fn script_tab_title(name: &str, index: usize, total: usize) -> String {
+    if total <= 1 {
+        return name.to_string();
+    }
+    format!("{name} {}/{total}", index + 1)
+}
+
+/// Reads a required string field from an RPC payload.
+fn required_field(payload: &serde_json::Value, key: &str) -> Result<String, AiError> {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| AiError::InvalidRequest(format!("{key} is required")))
 }
 
 #[cfg(test)]
@@ -2994,5 +3669,290 @@ mod tests {
             .controller_writer()
             .expect("controller_writer")
             .is_some());
+    }
+
+    /// Opens a real shell in a real directory, the way a phone tap would.
+    fn open_terminal(registry: &Registry, dir: &std::path::Path, request_id: &str) -> Tab {
+        registry.publish_workspace(snapshot_with_project(&dir.to_string_lossy()));
+        registry
+            .open_terminal_tab("worktree-main", request_id, None)
+            .expect("a worktree with a path opens a terminal")
+    }
+
+    #[test]
+    fn opening_a_terminal_twice_with_one_request_id_opens_one_shell() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let first = open_terminal(&registry, dir.path(), "request-1");
+
+        // The retry a flaky tunnel produces, or a double tap.
+        let second = registry
+            .open_terminal_tab("worktree-main", "request-1", None)
+            .expect("a repeated request returns the tab it already made");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(
+            registry
+                .managed_tabs_for(&["worktree-main".to_string()])
+                .expect("managed tabs")
+                .len(),
+            1
+        );
+        registry.close_tab(&first.id).expect("close");
+    }
+
+    #[test]
+    fn a_host_opened_tab_survives_a_desktop_republish() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+
+        // The desktop publishes its own rows, which know nothing about it.
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let (snapshot, _rx) = registry.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        assert_eq!(payload["tabs"][0]["id"], tab.id.as_str());
+        registry.close_tab(&tab.id).expect("close");
+    }
+
+    #[test]
+    fn a_closed_tab_is_not_resurrected_by_a_stale_publish() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+        registry.close_tab(&tab.id).expect("close");
+
+        // A snapshot the desktop composed before the close still carries it.
+        let mut stale = snapshot_with_project(&dir.path().to_string_lossy());
+        stale.tabs.push(Tab { ..tab.clone() });
+        registry.publish_workspace(stale);
+
+        let (snapshot, _rx) = registry.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        assert_eq!(
+            payload["tabs"].as_array().map(Vec::len),
+            Some(0),
+            "a tab closed on one device stays closed"
+        );
+        assert!(registry
+            .closed_tab_ids()
+            .expect("tombstones")
+            .contains(&tab.id));
+    }
+
+    #[test]
+    fn closing_a_tab_twice_is_not_an_error() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+
+        registry.close_tab(&tab.id).expect("first close");
+        registry
+            .close_tab(&tab.id)
+            .expect("a retried close is idempotent, not a failure");
+
+        assert_eq!(
+            registry
+                .closed_tab_ids()
+                .expect("tombstones")
+                .iter()
+                .filter(|id| *id == &tab.id)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn host_opened_tabs_survive_a_server_restart() {
+        let dir = tempdir().expect("tempdir");
+        let tab = {
+            let registry = registry_in(dir.path());
+            let tab = open_terminal(&registry, dir.path(), "request-1");
+            tab
+        };
+
+        let reloaded = registry_in(dir.path());
+
+        let managed = reloaded
+            .managed_tabs_for(&["worktree-main".to_string()])
+            .expect("managed tabs");
+        assert_eq!(managed.len(), 1);
+        assert_eq!(managed[0].id, tab.id);
+    }
+
+    #[test]
+    fn opening_a_terminal_in_an_unknown_worktree_fails_instead_of_guessing() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let result = registry.open_terminal_tab("worktree-missing", "request-1", None);
+
+        assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+    }
+
+    /// Writes a `.pragma/scripts.json` into a project root the registry knows.
+    fn with_scripts(dir: &std::path::Path, body: &str) -> Registry {
+        let registry = registry_in(dir);
+        std::fs::create_dir_all(dir.join(".pragma")).expect("create config dir");
+        std::fs::write(dir.join(".pragma/scripts.json"), body).expect("write config");
+        registry.publish_workspace(snapshot_with_project(&dir.to_string_lossy()));
+        registry
+    }
+
+    #[test]
+    fn lists_a_projects_named_scripts_with_their_command_counts() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":[{"left":"a","right":"b"}]},"test":{"command":["c"]}}}"#,
+        );
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        assert_eq!(
+            listing
+                .scripts
+                .iter()
+                .map(|script| (script.name.as_str(), script.command_count))
+                .collect::<Vec<_>>(),
+            [("dev", 2), ("test", 1)]
+        );
+        assert!(listing.scripts.iter().all(|script| script.run.is_none()));
+        assert!(listing.error.is_none());
+    }
+
+    #[test]
+    fn a_malformed_config_is_an_error_not_an_empty_list() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(dir.path(), "{ not json");
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        // "No scripts" and "your config has a typo" are different answers, and
+        // showing the first for the second hides the mistake.
+        assert!(listing.scripts.is_empty());
+        assert!(listing.error.is_some());
+    }
+
+    #[test]
+    fn a_project_with_no_config_simply_has_no_scripts() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        assert!(listing.scripts.is_empty());
+        assert!(listing.error.is_none());
+    }
+
+    #[test]
+    fn a_multi_command_script_opens_one_terminal_per_command() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":[{"left":"echo a","right":"echo b"}]}}}"#,
+        );
+
+        let run = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("run");
+
+        assert_eq!(run.tab_ids.len(), 2);
+        let titles: Vec<String> = registry
+            .managed_tabs_for(&["worktree-main".to_string()])
+            .expect("managed tabs")
+            .into_iter()
+            .filter_map(|tab| tab.title)
+            .collect();
+        assert_eq!(titles, ["dev 1/2", "dev 2/2"]);
+        registry.stop_script(&run.run_id).expect("stop");
+    }
+
+    #[test]
+    fn running_a_script_that_is_already_going_shows_the_same_run() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+        let first = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("first run");
+
+        // A different request id: a deliberate second tap, not a retry. One dev
+        // server is still the right answer.
+        let second = registry
+            .run_script("worktree-main", "dev", "request-2")
+            .expect("second run");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            registry
+                .list_scripts("worktree-main")
+                .expect("list")
+                .scripts[0]
+                .run
+                .as_ref()
+                .map(|run| run.run_id.clone()),
+            Some(first.run_id.clone())
+        );
+        registry.stop_script(&first.run_id).expect("stop");
+    }
+
+    #[test]
+    fn stopping_a_run_closes_its_terminals_and_frees_the_name() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+        let run = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("run");
+
+        registry.stop_script(&run.run_id).expect("stop");
+        registry
+            .stop_script(&run.run_id)
+            .expect("a repeated stop is idempotent");
+
+        assert!(registry
+            .list_scripts("worktree-main")
+            .expect("list")
+            .scripts[0]
+            .run
+            .is_none());
+        let restarted = registry
+            .run_script("worktree-main", "dev", "request-3")
+            .expect("the name is free again");
+        assert_ne!(restarted.run_id, run.run_id);
+        registry.stop_script(&restarted.run_id).expect("stop");
+    }
+
+    #[test]
+    fn running_an_unknown_script_fails_instead_of_opening_a_bare_shell() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+
+        let result = registry.run_script("worktree-main", "missing", "request-1");
+
+        assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+        assert_eq!(
+            registry
+                .managed_tabs_for(&["worktree-main".to_string()])
+                .expect("managed tabs"),
+            [] as [pragma_constants::Tab; 0]
+        );
     }
 }

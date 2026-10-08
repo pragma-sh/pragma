@@ -7,11 +7,11 @@ import {
   type ScratchpadViewerMessage,
 } from "@pragma-sh/scratchpad-viewer";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, useColorScheme } from "react-native";
+import { View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { ScratchpadLoading } from "@/components/scratchpad/ScratchpadLoading";
-import { useHostThemeOverrides } from "@/lib/theme-context";
+import { useViewerTheme } from "@/lib/theme-context";
 import { respondToViewer } from "@/lib/viewer-response";
 import type { ScratchpadWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
 
@@ -53,9 +53,7 @@ export interface ScratchpadWebViewProps {
 export function ScratchpadWebView(props: ScratchpadWebViewProps) {
   const { source, comments, commentMode } = props;
   const webView = useRef<WebView>(null);
-  const scheme = useColorScheme() === "dark" ? "dark" : "light";
-  const overrides = useHostThemeOverrides();
-  const themeCss = useMemo(() => scratchpadThemeCss(overrides), [overrides]);
+  const { scheme, themeCss } = useViewerTheme(scratchpadThemeCss);
   const html = useMemo(
     () => buildScratchpadViewerHtml({ source, mode: scheme, themeCss }),
     [scheme, source, themeCss],

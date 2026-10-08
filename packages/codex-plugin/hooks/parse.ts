@@ -48,10 +48,33 @@ function sentCount(path: string): number {
   }
 }
 
+/**
+ * Completed assistant text from one rollout record. Codex 0.153+ records an
+ * `item_completed` event whose item is an `AgentMessage` (text in `content[]`);
+ * earlier versions wrote a flat `agent_message` event instead.
+ */
 function assistantText(item: Record<string, unknown>): string | undefined {
+  if (item.type !== "event_msg") return undefined;
   const payload = object(item.payload);
-  if (item.type !== "event_msg" || payload.type !== "agent_message") return undefined;
-  return nonblankText(payload.message);
+  return payload.type === "agent_message"
+    ? nonblankText(payload.message)
+    : completedMessageText(payload);
+}
+
+/** Text of a Codex 0.153+ `item_completed` event carrying an `AgentMessage`. */
+function completedMessageText(payload: Record<string, unknown>): string | undefined {
+  const completed = object(payload.item);
+  if (payload.type !== "item_completed" || completed.type !== "AgentMessage") return undefined;
+  return nonblankText(contentText(completed.content));
+}
+
+/** The concatenated text parts of an `AgentMessage`'s `content[]`. */
+function contentText(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => object(part).text)
+    .filter((text): text is string => typeof text === "string")
+    .join("");
 }
 
 function nonblankText(value: unknown): string | undefined {

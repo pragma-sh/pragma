@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { privacyRoute } from "@/lib/legal";
 import { supportRoute } from "@/lib/support";
-import { appName, blogRoute, compareRoute, docsRoute, gitConfig } from "@/lib/shared";
+import { appName, blogRoute, compareRoute, docsRoute, gitConfig, mobileRoute } from "@/lib/shared";
 
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 
@@ -14,7 +14,7 @@ const COLUMNS = [
       { label: "Agent board", href: "#board" },
       { label: "Fan out", href: "#fanout" },
       { label: "Pull requests", href: "#github" },
-      { label: "Pragma Go", href: "#go" },
+      { label: "Pragma Go", href: mobileRoute },
       { label: "Pragma vs Competitors", href: compareRoute },
     ],
   },

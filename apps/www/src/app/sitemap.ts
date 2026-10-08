@@ -8,6 +8,7 @@ import {
   compareRoute,
   docsRoute,
   downloadsRoute,
+  mobileRoute,
   pluginsRoute,
   siteUrl,
 } from "@/lib/shared";
@@ -20,7 +21,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     Promise.resolve(source.getPages()),
   ]);
 
-  const staticRoutes = ["/", downloadsRoute, pluginsRoute, compareRoute, docsRoute, blogRoute];
+  const staticRoutes = [
+    "/",
+    mobileRoute,
+    downloadsRoute,
+    pluginsRoute,
+    compareRoute,
+    docsRoute,
+    blogRoute,
+  ];
   const blogRoutes = getBlogPosts().map((post) => post.url);
   const compareRoutes = COMPETITORS.map((competitor) => compareDetailRoute(competitor.slug));
   const pluginRoutes = plugins.map((plugin) => pluginDetailUrl(plugin.package));

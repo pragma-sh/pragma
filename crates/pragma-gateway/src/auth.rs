@@ -86,14 +86,17 @@ pub fn write_discovery(path: &Path, discovery: &GatewayDiscovery) -> GatewayResu
 /// serve this app again (clients reject the mismatched discovery file), so it
 /// is terminated and replaced instead of refused — otherwise a leftover
 /// gateway from a previous app version deadlocks every future gateway start.
-pub fn remove_stale_or_refuse(path: &Path, protocol_version: &str) -> GatewayResult<()> {
+///
+/// Returns the port the replaced gateway was serving, so its successor can
+/// take the same one (see `bind::bind_server`).
+pub fn remove_stale_or_refuse(path: &Path, protocol_version: &str) -> GatewayResult<Option<u16>> {
     if !path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let Ok(discovery) = read_discovery(path) else {
         // Unreadable discovery data cannot identify a live gateway; treat as stale.
         fs::remove_file(path)?;
-        return Ok(());
+        return Ok(None);
     };
     if health_probe(discovery.port) {
         if discovery.protocol_version == protocol_version {
@@ -105,7 +108,7 @@ pub fn remove_stale_or_refuse(path: &Path, protocol_version: &str) -> GatewayRes
         kill_stale_gateway(discovery.pid);
     }
     fs::remove_file(path)?;
-    Ok(())
+    Ok(Some(discovery.port))
 }
 
 /// Kills a superseded gateway process, but only after confirming the pid still
@@ -203,10 +206,11 @@ mod tests {
         let (port, handle) = fake_live_gateway();
         write_discovery(&path, &discovery(port, "9")).expect("write discovery");
 
-        remove_stale_or_refuse(&path, "11").expect("takeover");
+        let previous = remove_stale_or_refuse(&path, "11").expect("takeover");
 
         handle.join().expect("responder");
         assert!(!path.exists());
+        assert_eq!(previous, Some(port), "the successor inherits the port");
     }
 
     #[test]
@@ -221,9 +225,14 @@ mod tests {
             .port();
         write_discovery(&path, &discovery(port, "11")).expect("write discovery");
 
-        remove_stale_or_refuse(&path, "11").expect("stale removal");
+        let previous = remove_stale_or_refuse(&path, "11").expect("stale removal");
 
         assert!(!path.exists());
+        assert_eq!(
+            previous,
+            Some(port),
+            "a crashed gateway's port is reused too"
+        );
     }
 
     #[test]
@@ -232,9 +241,10 @@ mod tests {
         let path = dir.path().join("gateway.json");
         fs::write(&path, "not json").expect("write");
 
-        remove_stale_or_refuse(&path, "11").expect("corrupt removal");
+        let previous = remove_stale_or_refuse(&path, "11").expect("corrupt removal");
 
         assert!(!path.exists());
+        assert_eq!(previous, None);
     }
 
     #[test]

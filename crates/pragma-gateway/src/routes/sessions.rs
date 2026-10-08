@@ -84,9 +84,17 @@ pub fn events(request: Request, state: &AppState, matched: &RouteMatch) -> Gatew
         .query
         .get("rows")
         .and_then(|value| value.parse::<u16>().ok());
+    // A reconnecting client sends the last byte cursor it accepted, so the
+    // server replays only what it missed. Without one the server replays its
+    // whole retained scrollback, which a fresh renderer needs and a resuming
+    // one must not be sent twice.
+    let cursor = matched
+        .query
+        .get("cursor")
+        .and_then(|value| value.parse::<u64>().ok());
     let stream = state
         .client
-        .attach_stream(session_id.clone(), cols.zip(rows))?;
+        .attach_stream(session_id.clone(), cols.zip(rows), cursor)?;
     drop_pending_spawn_stream(state, &session_id);
     stream_ndjson_response(request, stream)
 }

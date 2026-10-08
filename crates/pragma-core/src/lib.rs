@@ -12,6 +12,7 @@ use thiserror::Error;
 use pragma_constants::ProtocolRpcMethod;
 
 pub mod accounts;
+pub mod ai;
 pub mod cancel;
 pub mod exec;
 pub mod fanout;
@@ -22,6 +23,8 @@ pub mod prelaunch;
 pub mod process_env;
 pub mod rpc;
 pub mod scratchpads;
+pub mod scripts;
+pub mod sessions;
 pub mod storage;
 mod storage_tree;
 pub mod tabs;
@@ -107,6 +110,12 @@ impl Core {
             // Owned by `pragma-server`'s `FanoutRegistry`, which holds the
             // durable record and the PTY/watcher lifetimes fanout needs.
             | ProtocolRpcMethod::Fanouts
+            // Owned by `pragma-server`'s session map: PTY liveness and the
+            // viewport lease only mean anything where the PTYs actually live.
+            | ProtocolRpcMethod::Sessions
+            // Owned by `pragma-server`: running a script means owning the
+            // terminals it runs in, and the record of which run they belong to.
+            | ProtocolRpcMethod::Scripts
             // Owned by `pragma-server`, which runs plugin account callbacks in the
             // plugins sidecar and hosts the hidden login terminals.
             | ProtocolRpcMethod::Accounts

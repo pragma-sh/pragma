@@ -18,8 +18,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::Worktree;
+use pragma_constants::{ProtocolRpcMethod, Worktree};
 use pragma_core::git::{GitRequest, HeadlessWorktree};
+use pragma_core::tabs::{ManagedTabsResult, TabsRequest};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
@@ -149,6 +150,62 @@ pub(crate) fn publish_now(app: &AppHandle) -> AppResult<()> {
 pub(crate) fn adopt_fanout_workspace(db: &Db, hosts: &Hosts) {
     adopt_headless_worktrees(db, hosts);
     adopt_fanout_tabs(db, hosts);
+    reconcile_managed_tabs(db, hosts);
+}
+
+/// Reconciles this database against the tabs the host owns.
+///
+/// Both stores are authoritative, for different rows. A terminal opened from a
+/// phone exists as a live PTY on the host before any desktop row names it, so
+/// it is adopted here under the host's own id — minting a new one would open a
+/// second shell beside the running one. A tab closed from a phone is gone on
+/// the host, so a local row still naming it is stale and is deleted rather than
+/// republished, which is what would otherwise resurrect it.
+fn reconcile_managed_tabs(db: &Db, hosts: &Hosts) {
+    let Ok(projects) = db.list_projects() else {
+        return;
+    };
+    for project in &projects {
+        let Ok(client) = hosts.for_project(db, &project.id) else {
+            continue;
+        };
+        let Ok(worktrees) = db.list_worktrees(&project.id) else {
+            continue;
+        };
+        let worktree_ids: Vec<String> = worktrees.into_iter().map(|worktree| worktree.id).collect();
+        if worktree_ids.is_empty() {
+            continue;
+        }
+        let request = TabsRequest::ListManaged { worktree_ids };
+        let Ok(payload) = serde_json::to_value(request) else {
+            continue;
+        };
+        let Ok(value) = client.rpc(ProtocolRpcMethod::Tabs, payload) else {
+            continue;
+        };
+        let Ok(managed) = serde_json::from_value::<ManagedTabsResult>(value) else {
+            continue;
+        };
+        for tab in managed.tabs {
+            if let Err(error) = db.adopt_host_tab(
+                &tab.id,
+                &project.id,
+                &tab.worktree_id,
+                tab.title.clone(),
+                tab.agent_id.as_deref(),
+            ) {
+                log::warn!("failed to adopt host tab {}: {error}", tab.id);
+            }
+        }
+        for tab_id in managed.closed_tab_ids {
+            if db.tab(&tab_id).is_err() {
+                continue;
+            }
+            if let Err(error) = db.delete_tab(&tab_id) {
+                log::warn!("failed to drop closed tab {tab_id}: {error}");
+            }
+        }
+    }
 }
 
 fn empty_snapshot() -> pragma_protocol::WorkspaceSnapshot {

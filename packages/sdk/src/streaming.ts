@@ -12,7 +12,11 @@ export async function* ndjsonStream<T>(
   const decoder = new TextDecoder();
   let buffered = "";
   const onAbort = (): void => {
-    void reader.cancel();
+    // Cancelling an already-aborted reader rejects on some runtimes (Expo's
+    // streaming fetch among them). Unhandled, that surfaces as a red-box
+    // "possible unhandled promise rejection" the moment a caller navigates
+    // away from a live stream — a caller that did nothing wrong.
+    void reader.cancel().catch(() => undefined);
   };
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
