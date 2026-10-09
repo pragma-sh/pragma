@@ -45,3 +45,7 @@ build, ci, chore, revert. Scope = package/app name (`pragma`, `constants`, `ci`)
   `bun run --filter pragma sidecar:server` + cargo check + fallow audit.
 
 If a hook blocks you, fix the underlying issue — don't bypass with `--no-verify`.
+
+macOS CI cleans `v8`'s release artifacts after Rust cache restore with
+`cargo clean --package v8 --release`: the cache can retain its build-script
+fingerprint while pruning the native archive. Keep that recovery before the build.

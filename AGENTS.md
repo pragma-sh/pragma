@@ -598,6 +598,10 @@ TypeScript checks, the Rust checks, the Linux app build) lives in
 `.rwx/ci.yml`, and the
 macOS and Windows builds plus the Windows Rust suite stay in
 `.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
+The macOS build cleans only `v8`'s release artifacts after restoring the Rust cache:
+rust-cache can prune `target/release/gn_out`'s native archive while retaining its
+build-script fingerprint, leaving `rusty_v8` missing. Keep that targeted clean so the
+build script downloads the archive again without discarding the other cached crates.
 RWX is a task DAG, not a job list: tasks with no `use:` run in parallel, caching is
 content-based (no cache actions — add a `filter:` to keep a task's cache key off files
 it doesn't read), and the default task timeout is **10 minutes**, so any long task needs

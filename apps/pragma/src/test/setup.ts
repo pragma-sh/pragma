@@ -1,7 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup, configure } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
+
+// Window-scoped listeners need a native window in production. In jsdom, forward
+// them to the event API so each suite's existing event mock still owns delivery.
+vi.mock("@tauri-apps/api/webviewWindow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tauri-apps/api/webviewWindow")>();
+  const { listen } = await import("@tauri-apps/api/event");
+  return { ...actual, getCurrentWebviewWindow: () => ({ listen }) };
+});
 
 // `waitFor`'s 1s default is a wall clock, not a work budget: the files that
 // mount CodeMirror (diff/review/editor surfaces) render far slower than that
