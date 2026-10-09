@@ -234,9 +234,10 @@ export default function HomePage() {
               and the worktree you are in.
             </FeaturePoint>
             <FeaturePoint title="Jev picks, tracks, and merges.">
-              Connect TypeSafe's Jev and Auto picks the agent, model, and effort for each launch,
-              every agent shows what it is doing and how far it has got, and merge conflicts resolve
-              themselves, with uncertain files double-checked by your built-in AI.
+              Connect TypeSafe's Jev and Auto picks the agent, model, and effort for each launch —
+              steering clear of a subscription that is nearly used up — every agent shows what it is
+              doing and how far it has got, and merge conflicts resolve themselves, with uncertain
+              files double-checked by your built-in AI.
             </FeaturePoint>
           </>
         }
@@ -370,8 +371,8 @@ export default function HomePage() {
               configure, with a bearer token you can regenerate.
             </FeaturePoint>
             <FeaturePoint title="Do real work.">
-              Create worktrees, launch agents, watch running sessions, answer approvals and
-              questions, and read scratchpads.
+              Create worktrees, launch agents, type into live terminals, run project scripts, answer
+              approvals and questions, and commit and open the pull request.
             </FeaturePoint>
             <FeaturePoint title="Your plugins come along.">
               Custom agents and their icons resolve on the phone exactly as they do on the desktop.

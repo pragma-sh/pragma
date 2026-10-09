@@ -14,6 +14,10 @@ export const downloadsRoute = "/downloads";
 export const pluginsRoute = "/plugins";
 export const compareRoute = "/compare";
 export const blogRoute = "/blog";
+/** The blog's RSS 2.0 feed, advertised from every page's metadata. */
+export const blogFeedRoute = `${blogRoute}/rss.xml`;
+/** One-line blog summary shared by the index page and the feed channel. */
+export const blogDescription = "Ideas, updates, and notes from the Pragma team.";
 /** The Pragma Go landing page — linked from the home page's mobile section, the nav, and the footer. */
 export const mobileRoute = "/mobile";
 
@@ -32,6 +36,12 @@ export const gitConfig = {
 
 /** Public source repository. */
 export const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
+
+/** Community Discord server invite. */
+export const discordUrl = "https://discord.gg/cGzZE2wSG";
+
+/** Pragma's YouTube channel. */
+export const youtubeUrl = "https://www.youtube.com/@pragma-sh";
 
 /** Latest desktop release and platform-specific downloads. */
 export const downloadUrl = `${repoUrl}/releases/latest`;

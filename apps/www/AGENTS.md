@@ -87,6 +87,7 @@ apps/www/
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── blog.ts          # Fumadocs blog collection with required frontmatter schema
         ├── blog-utils.ts    # date formatting, newest-first sort, and tag labels
+        ├── blog-feed.ts     # RSS 2.0 document behind /blog/rss.xml (pure, tested)
         ├── storage-cover.ts # layout of the Storage treemap blog cover (@pragma-sh/treemap)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
         ├── compare-data.ts  # the desktop orchestrator matrix behind /compare and the landing table
@@ -154,7 +155,10 @@ apps/www/
   code-drawn `/og/blog/*` route) and descriptive `alt`; an optional `video`
   has a public HTTPS `src`, required local `poster` (the reduced-motion fallback) and required WebVTT `captions`, and takes over the featured
   media while the cover remains the social image. The index sorts newest
-  first and features that entry; `/blog/[slug]` pre-renders each file. A Markdown
+  first and features that entry; `/blog/[slug]` pre-renders each file, and
+  `/blog/rss.xml` lists every post (title, description, date, tags), advertised by the
+  root layout's `alternates.types` — a page that sets its own `alternates` drops that
+  link, so add `types` there too if a page needs it. A Markdown
   image in a post body is imported by Fumadocs as an object, so the article renders it
   with Fumadocs' `img` (a `next/image`); a bare `<img>` would get `src="[object Object]"`. See
   `README.md` for a copy-ready post.

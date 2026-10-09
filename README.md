@@ -25,6 +25,10 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="https://pragma-app.sh/plugins">Plugins</a>
   &nbsp;·&nbsp;
   <a href="./CONTRIBUTING.md">Contributing</a>
+  &nbsp;·&nbsp;
+  <a href="https://discord.gg/cGzZE2wSG">Discord</a>
+  &nbsp;·&nbsp;
+  <a href="https://www.youtube.com/@pragma-sh">YouTube</a>
 </p>
 
 <p>
@@ -185,6 +189,8 @@ The [Android install guide](https://pragma-app.sh/docs/user-guide/mobile#android
 | [Automations](https://pragma-app.sh/docs/automations)       | Run scheduled and event-driven host tasks              |
 | [Architecture wiki](https://pragma-app.sh/docs/wiki)        | Desktop, server, gateway, and protocol layers          |
 | [Issue tracker](https://github.com/pragma-sh/pragma/issues) | Report bugs and request features                       |
+| [Discord](https://discord.gg/cGzZE2wSG)                     | Chat with the team and other Pragma users              |
+| [YouTube](https://www.youtube.com/@pragma-sh)               | Demos, walkthroughs, and release videos                |
 
 ## Build From Source
 

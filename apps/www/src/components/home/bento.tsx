@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AppWindow,
   Bell,
   Bot,
   Braces,
@@ -102,25 +103,32 @@ const ITEMS: readonly BentoItem[] = [
     span: "sm:col-span-12 lg:col-span-3",
   },
   {
-    icon: Bell,
-    title: "Agent alerts",
+    icon: AppWindow,
+    title: "Pragma Mini",
     description:
-      "A chime, a system notification, and a status dot the moment an agent finishes or needs a decision — with your own sound clips per project.",
-    span: "sm:col-span-6 lg:col-span-4",
-  },
-  {
-    icon: Keyboard,
-    title: "Keybindings",
-    description:
-      "Every action is rebindable per platform, globally or per project, validated on write so a bad chord can never lock you out.",
-    span: "sm:col-span-6 lg:col-span-4",
+      "A lightweight terminal window from the dock or taskbar, with Pragma's tabs and agent launcher. Tabs start in your home directory and move into any worktree when the work outgrows them.",
+    span: "sm:col-span-6 lg:col-span-7",
   },
   {
     icon: HardDrive,
     title: "Storage manager",
     description:
       "A treemap of what every project and worktree costs on disk, measured on the host that owns it. Delete gitignored build output and dependencies in a click, or get a reminder to check.",
-    span: "sm:col-span-12 lg:col-span-4",
+    span: "sm:col-span-6 lg:col-span-5",
+  },
+  {
+    icon: Bell,
+    title: "Agent alerts",
+    description:
+      "A chime, a system notification, and a status dot the moment an agent finishes or needs a decision — with your own sound clips per project.",
+    span: "sm:col-span-6 lg:col-span-6",
+  },
+  {
+    icon: Keyboard,
+    title: "Keybindings",
+    description:
+      "Every action is rebindable per platform, globally or per project, validated on write so a bad chord can never lock you out.",
+    span: "sm:col-span-6 lg:col-span-6",
   },
 ];
 
