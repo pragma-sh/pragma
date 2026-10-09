@@ -5,11 +5,12 @@ import Link from "next/link";
 import { BlogTags } from "@/components/blog-tags";
 import { getBlogPosts } from "@/lib/blog";
 import { blogDate } from "@/lib/blog-utils";
+import { blogDescription } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Blog",
-  description: "Ideas, updates, and notes from the Pragma team.",
+  description: blogDescription,
 };
 
 type Post = ReturnType<typeof getBlogPosts>[number];

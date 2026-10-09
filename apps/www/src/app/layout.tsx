@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import { RootProvider } from "fumadocs-ui/provider/next";
 
-import { appDescription, appName, siteUrl } from "@/lib/shared";
+import { appDescription, appName, blogFeedRoute, siteUrl } from "@/lib/shared";
 
 import "./global.css";
 
@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   description: appDescription,
   // `app/icon.ts` supplies the brand-generated favicon; keep the larger raster for Apple touch.
   icons: { apple: "/icon.png" },
+  // Feed autodiscovery. A page that sets its own `alternates` replaces this whole object.
+  alternates: {
+    types: { "application/rss+xml": [{ url: blogFeedRoute, title: `${appName} Blog` }] },
+  },
   openGraph: {
     type: "website",
     siteName: appName,
