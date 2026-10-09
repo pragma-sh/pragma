@@ -24,11 +24,13 @@ use `pragma-dev-<hash>`.
 | `fanouts.json`           | Durable fanout records (0600, atomic writes).                         |
 | `whiteboards.db`         | Worktree-scoped Excalidraw boards (SQLite; scenes stored losslessly). |
 | `automations-state.json` | Per-content-hash trust verdicts for automations.                      |
+| `github-token`           | The host's GitHub token (owner-only). Never returned over the wire.   |
 | `bin/pragma-cli`         | Dev-channel CLI install target.                                       |
 
 The desktop keeps its own SQLite state (kanban cards, settings, split layouts, worktree
-rows, selection) in the app data directory, beside the two owner-only credential files it
-holds itself: `github-token` and `system1-key` (the System 1 API key) — tab _agent metadata_ lives in the server's
+rows, selection) in the app data directory, beside the one owner-only credential file it
+holds itself: `system1-key` (the System 1 API key). The GitHub token moved to the server
+directory above so a phone can publish a pull request with no desktop window open. Tab _agent metadata_ lives in the server's
 `workspace.json`, everything else client-side.
 
 ## `~/.pragma/`
