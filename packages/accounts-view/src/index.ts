@@ -1,4 +1,5 @@
 export {
+  autoSelectUsage,
   borrowedSignInLabel,
   buildProviderViews,
   canSignInAnother,
@@ -12,6 +13,8 @@ export {
   unassignedHarnesses,
   type AccountView,
   type AccountsSnapshot,
+  type AutoSelectProviderUsage,
+  type AutoSelectUsageLimit,
   type HarnessAccountChoice,
   type HarnessView,
   type ProviderView,

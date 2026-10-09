@@ -16,6 +16,9 @@
  * - each model option — modelgrep benchmarks (intelligence, coding, speed,
  *   latency, price) and, when the leaderboard ran it, that model's result
  *   inside this harness.
+ * - each agent's usage limits — for every provider account the harness
+ *   launches with, how much of each limit is used and when it resets, plus a
+ *   headroom tier, so a nearly exhausted subscription is steered away from.
  *
  * The `automode.md` include/exclude filters are applied here, in code, before
  * anything is sent: a hard rule is never left to a classifier's judgement.
@@ -66,11 +69,36 @@ export interface AutoSelectModel {
   reasoning: AutoSelectReasoning[];
 }
 
+/** One usage category of a provider account, as the desktop last observed it. */
+export interface AutoSelectUsageLimit {
+  title: string;
+  /** 0–100; `null` for an unlimited category. */
+  percentUsed: number | null;
+  /** Milliseconds until it resets, measured from when the request was built. */
+  resetsInMs: number | null;
+  /** The provider's headline limit (its collapsed-row metric). */
+  primary: boolean;
+}
+
+/** Usage of the account one agent launches with for one provider. */
+export interface AutoSelectProviderUsage {
+  /** Well-known provider key, e.g. `anthropic`. */
+  provider: string;
+  title: string;
+  /** `unknown` when the desktop has not loaded this account's usage yet. */
+  status: "ready" | "unavailable" | "unknown";
+  /** Why usage is unavailable (signed out, unsupported, …). */
+  message?: string | null;
+  limits: AutoSelectUsageLimit[];
+}
+
 /** A launchable agent and the models it offers. */
 export interface AutoSelectAgent {
   id: string;
   name: string;
   models: AutoSelectModel[];
+  /** Usage limits per provider account the agent launches with; empty when none report. */
+  usage?: AutoSelectProviderUsage[];
 }
 
 /** Everything one auto-select call needs; the Rust bridge assembles it. */
@@ -117,7 +145,7 @@ export interface AutoSelectResult {
   /** Problems in `automode.md` the user should fix. */
   warnings: string[];
   /** Which benchmark feeds contributed. */
-  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean };
+  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean; usageLimits: boolean };
 }
 
 /** Auto mode could not run (as opposed to the System 1 request failing). */
@@ -323,9 +351,11 @@ function agentCriterion(
   allStats: readonly AgentHarnessStats[],
 ): Record<string, unknown> {
   const stats = agentStats(rows);
+  const usage = agentUsage(agent);
   return {
     name: agent.name,
     models: agent.models.slice(0, 12).map((model) => model.name),
+    ...(usage ? { usage_limits: usage } : {}),
     harness_benchmarks: stats
       ? {
           source: HARNESS_INSIGHTS.sourceLabel,
@@ -400,6 +430,63 @@ function modelCriterion(entry: ProfiledModel): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Usage limits
+// ---------------------------------------------------------------------------
+
+/** How much room an account has left before a limit stops the agent. */
+export type Headroom = "plenty" | "some" | "low" | "exhausted" | "unknown";
+
+/** Headroom from the most-used finite limit; unlimited categories never constrain. */
+export function headroom(usage: AutoSelectProviderUsage): Headroom {
+  if (usage.status !== "ready") return "unknown";
+  const percents = usage.limits
+    .map((limit) => limit.percentUsed)
+    .filter((used): used is number => used !== null);
+  if (percents.length === 0) return "plenty";
+  const worst = Math.max(...percents);
+  const { exhaustedPct, lowPct, somePct } = AUTO_SELECT.usageHeadroom;
+  if (worst >= exhaustedPct) return "exhausted";
+  if (worst >= lowPct) return "low";
+  if (worst >= somePct) return "some";
+  return "plenty";
+}
+
+function usageLimitSummary(limit: AutoSelectUsageLimit): Record<string, unknown> {
+  return {
+    name: limit.title,
+    used_pct: limit.percentUsed === null ? "unlimited" : Math.round(limit.percentUsed),
+    ...(limit.resetsInMs === null ? {} : { resets_in_hours: round(limit.resetsInMs / 3.6e6) }),
+  };
+}
+
+/** What the System 1 model sees of one provider account's usage. */
+function providerUsageSummary(usage: AutoSelectProviderUsage): Record<string, unknown> {
+  return {
+    provider: usage.title,
+    headroom: headroom(usage),
+    ...(usage.status === "ready"
+      ? {
+          limits: usage.limits
+            .toSorted((a, b) => Number(b.primary) - Number(a.primary))
+            .slice(0, AUTO_SELECT.maxUsageLimitsPerProvider)
+            .map(usageLimitSummary),
+        }
+      : {
+          note:
+            usage.status === "unknown"
+              ? "Usage not loaded yet."
+              : truncate(usage.message ?? "Usage unavailable.", 160),
+        }),
+  };
+}
+
+/** An agent's usage across its provider accounts, or `null` when none report. */
+function agentUsage(agent: AutoSelectAgent): Record<string, unknown>[] | null {
+  const usage = agent.usage ?? [];
+  return usage.length > 0 ? usage.map(providerUsageSummary) : null;
+}
+
+// ---------------------------------------------------------------------------
 // Request
 // ---------------------------------------------------------------------------
 
@@ -426,10 +513,10 @@ function buildState(
 }
 
 const AGENT_INSTRUCTIONS =
-  "Which coding-agent harness should run the `task`? Apply `user_preferences` first. Otherwise match the task to the harness: favour benchmark accuracy for hard or high-stakes work, speed for small or mechanical changes, and token efficiency when accuracy is close.";
+  "Which coding-agent harness should run the `task`? Apply `user_preferences` first. Avoid a harness whose `usage_limits` headroom is `exhausted` unless that limit resets within the hour, and prefer one with more headroom when the choice is otherwise close; a `low` headroom matters most for long or hard tasks. Otherwise match the task to the harness: favour benchmark accuracy for hard or high-stakes work, speed for small or mechanical changes, and token efficiency when accuracy is close.";
 
 const MODEL_INSTRUCTIONS =
-  "Which model should `agent` use for the `task`? Apply `user_preferences` first. Otherwise favour capability (coding and intelligence) for hard work, fast and inexpensive models for small or mechanical work, and the harness result when one is shown.";
+  "Which model should `agent` use for the `task`? Apply `user_preferences` first. When `usage_limits` shows little headroom on a provider, prefer a lighter model or one from a provider with more headroom. Otherwise favour capability (coding and intelligence) for hard work, fast and inexpensive models for small or mechanical work, and the harness result when one is shown.";
 
 /** One planned question per agent that has a real model choice. */
 interface ModelQuestionPlan {
@@ -477,9 +564,14 @@ function buildPlan(agents: readonly AutoSelectAgent[], insights: AutoSelectInsig
     if (models.length < 2) return;
     const questionId = `model_${index}`;
     modelQuestions.push({ questionId, agent, models });
+    const usage = agentUsage(agent);
     questions[questionId] = {
       type: "choice",
-      instructions: { question: MODEL_INSTRUCTIONS, agent: agent.name },
+      instructions: {
+        question: MODEL_INSTRUCTIONS,
+        agent: agent.name,
+        ...(usage ? { usage_limits: usage } : {}),
+      },
       criteria: Object.fromEntries(models.map((entry) => [entry.model.id, modelCriterion(entry)])),
     } satisfies ChoiceQuestion;
   });
@@ -636,6 +728,7 @@ export async function autoSelect(
     sources: {
       modelBenchmarks: insights.models.size > 0,
       harnessBenchmarks: insights.harness.length > 0,
+      usageLimits: agents.some((candidate) => (candidate.usage ?? []).length > 0),
     },
   };
 }

@@ -67,7 +67,44 @@ pub struct AutoSelectModel {
     reasoning: Vec<AutoSelectReasoning>,
 }
 
-/// One launchable agent and its models.
+/// One usage category of a provider account, as the frontend last observed it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSelectUsageLimit {
+    title: String,
+    /// 0-100; `None` for an unlimited category.
+    #[serde(default)]
+    percent_used: Option<f64>,
+    /// Milliseconds until it resets.
+    #[serde(default)]
+    resets_in_ms: Option<f64>,
+    #[serde(default)]
+    primary: bool,
+}
+
+/// Whether an account's usage was loaded.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AutoSelectUsageStatus {
+    Ready,
+    Unavailable,
+    Unknown,
+}
+
+/// Usage of the account an agent launches with for one provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSelectProviderUsage {
+    provider: String,
+    title: String,
+    status: AutoSelectUsageStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(default)]
+    limits: Vec<AutoSelectUsageLimit>,
+}
+
+/// One launchable agent, its models, and the usage of the accounts it launches with.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoSelectAgent {
@@ -75,6 +112,8 @@ pub struct AutoSelectAgent {
     name: String,
     #[serde(default)]
     models: Vec<AutoSelectModel>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    usage: Vec<AutoSelectProviderUsage>,
 }
 
 /// Where the launch will run, as shown to the System 1 model.
@@ -120,12 +159,14 @@ pub struct AutoSelection {
     sources: AutoSelectionSources,
 }
 
-/// Which benchmark feeds contributed to an [`AutoSelection`].
+/// Which evidence contributed to an [`AutoSelection`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoSelectionSources {
     model_benchmarks: bool,
     harness_benchmarks: bool,
+    #[serde(default)]
+    usage_limits: bool,
 }
 
 /// Effective base URL and model: the configured value when non-blank, else the default.
@@ -692,5 +733,26 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(estimate.activity, "coding");
+    }
+
+    #[test]
+    fn auto_select_agent_usage_passes_through_to_the_sidecar() {
+        let usage = json!([{
+            "provider": "anthropic",
+            "title": "Anthropic",
+            "status": "ready",
+            "limits": [{ "title": "Session", "percentUsed": 82.5, "resetsInMs": 3_600_000.0, "primary": true }],
+        }]);
+        let agent: AutoSelectAgent = serde_json::from_value(json!({
+            "id": "claude-code",
+            "name": "Claude Code",
+            "usage": usage,
+        }))
+        .unwrap();
+        assert_eq!(serde_json::to_value(&agent).unwrap()["usage"], usage);
+
+        let bare: AutoSelectAgent =
+            serde_json::from_value(json!({ "id": "codex", "name": "Codex" })).unwrap();
+        assert!(serde_json::to_value(&bare).unwrap().get("usage").is_none());
     }
 }

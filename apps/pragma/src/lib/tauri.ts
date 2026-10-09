@@ -1,3 +1,4 @@
+import type { AutoSelectProviderUsage } from "@pragma-sh/accounts-view";
 import type {
   AgentProgressEstimate,
   Fanout,
@@ -1982,6 +1983,8 @@ export interface AutoSelectAgentInput {
   id: string;
   name: string;
   models: AgentModel[];
+  /** Usage of every provider account the agent launches with. */
+  usage?: AutoSelectProviderUsage[];
 }
 
 /** An auto-mode request: pick among `agents` for `prompt`. */
@@ -2009,7 +2012,7 @@ export interface AutoSelection {
   reason: string;
   /** Problems reading or parsing `automode.md`. */
   warnings: string[];
-  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean };
+  sources: { modelBenchmarks: boolean; harnessBenchmarks: boolean; usageLimits: boolean };
 }
 
 /** Reads global or project `.pragma/automode.md`; a missing file has empty contents. */
