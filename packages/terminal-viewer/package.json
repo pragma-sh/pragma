@@ -1,0 +1,40 @@
+{
+  "name": "@pragma-sh/terminal-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-safe terminal renderer: one self-contained HTML document running xterm.js, plus the message protocol a native client drives it with.",
+  "license": "AGPL-3.0-only",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "generate": "bun scripts/build.ts --runtime-only",
+    "pretypecheck": "bun scripts/build.ts --runtime-only",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "bun scripts/build.ts --runtime-only",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "6.1.0-beta.292",
+    "bunup": "^0.16.32",
+    "esbuild": "^0.25.12",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

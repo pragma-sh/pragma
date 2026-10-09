@@ -55,6 +55,20 @@ export type {
   FanoutSubscriptionPayload,
   ExcalidrawScene,
   KanbanPromptCard,
+  OpenPort,
+  PortForwardRequest,
+  PortForwardResult,
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  SessionInfo,
+  Tab,
+  TabKind,
+  UsageLimit,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+  ViewportLease,
   Whiteboard,
   WhiteboardCreateInput,
   WhiteboardEditInput,
@@ -64,7 +78,29 @@ export type {
 } from "@pragma-sh/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export {
+  AiClient,
+  type AiJob,
+  type AiJobStage,
+  type AiStatus,
+  type CommitAndDraftOptions,
+} from "./ai-client";
+export {
+  GitHubClient,
+  type GitHubBranches,
+  type GitHubStatus,
+  type PublishPullRequestOptions,
+} from "./github-client";
+export {
+  ScriptsClient,
+  type RunScriptOptions,
+  type ScriptList,
+  type ScriptListing,
+  type ScriptRun,
+} from "./scripts-client";
+export { TabsClient, type ManagedTabs, type OpenTerminalOptions } from "./tabs-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
+export { PortsClient, type ForwardPortOptions, type ListOpenPortsOptions } from "./ports-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
 export {
   WhiteboardsClient,

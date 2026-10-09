@@ -24,7 +24,7 @@ use crate::ssh_host;
 
 /// Re-validates a worktree-relative path against escaping the worktree, returning
 /// the resolved absolute path. Used by callers that still touch the local disk
-/// directly (PR diffs, AI helpers); the core RPC path validates host-side.
+/// directly (scratchpads); the core RPC path validates host-side.
 pub(crate) fn resolve_in_worktree(root: &Path, relative: &str) -> AppResult<PathBuf> {
     pragma_core::fs::resolve_in_worktree(root, relative)
         .map_err(|error| AppError::InvalidInput(error.to_string()))

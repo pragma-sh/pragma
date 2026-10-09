@@ -140,6 +140,8 @@ export type {
   PaletteSearchMatch,
   PaletteSearchResponse,
   OpenPort,
+  PortForwardRequest,
+  PortForwardResult,
   ProjectIcon,
   KanbanPromptStatus,
   KanbanCompletedAction,
@@ -189,6 +191,18 @@ export type {
   AgentStartupInput,
   CatalogAgent,
   AgentCatalog,
+  GitHubPublishRequest,
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  SessionInfo,
+  TerminalViewportPolicy,
+  UsageLimit,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+  ViewportLease,
+  Welcome,
   WorkspaceSnapshot,
   AgentSessionLaunchPayload,
   NewWorktreeSpec,
@@ -204,3 +218,12 @@ export type {
 export const constants = values as Constants;
 
 export default constants;
+
+export {
+  formatWelcomeHeading,
+  pickWelcomeHeading,
+  welcomeHeadingText,
+  welcomeLocation,
+  type WelcomeHeadingKind,
+  type WelcomeHeadingParts,
+} from "./welcome";

@@ -34,6 +34,11 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   prebundled browser runtimes. Desktop previews share its frame scope; exports stub
   SDK host calls, disable only built-in agent-send/decision buttons, add a Created with
   Pragma watermark, and are saved by the host's `scratchpads::ExportHtml` operation.
+- `packages/code-viewer/` — `@pragma-sh/code-viewer`, the shared CodeMirror theme, grammar
+  loader, and unified diff (`./codemirror`, used by the desktop editor) plus a
+  self-contained read-only document Pragma Go embeds in a web view.
+- `packages/fanout-view/` — `@pragma-sh/fanout-view`, the fanout view model (attempt
+  grouping, labels, status wording, cross-attempt pairing) shared by desktop and mobile.
 - `packages/plugin/` — `@pragma-sh/plugin`, the public TS API/runtime stub for pure Pragma
   plugins loaded from `.pragma/config.json`.
 - `packages/automations/` — `@pragma-sh/automations`, the authoring API plus
@@ -61,6 +66,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma-sh/sdk`)                                 |
 | Scratchpad runtime or first-party MDX component  | `packages/scratchpad` (`@pragma-sh/scratchpad`)                   |
 | Public Pragma plugin authoring API               | `packages/plugin` (`@pragma-sh/plugin`)                           |
+| Read-only code/diff rendering off the desktop    | `packages/code-viewer` (`@pragma-sh/code-viewer`)                 |
+| How a client presents fanouts                    | `packages/fanout-view` (`@pragma-sh/fanout-view`)                 |
 | Automation authoring API / host sidecar          | `packages/automations` (`@pragma-sh/automations`)                 |
 | Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                                   |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)                       |

@@ -1,0 +1,293 @@
+import { AskQuestion } from "@pragma/scratchpad/ui";
+import { Card, Badge } from "@pragma/scratchpad/ui/primitives";
+
+# Mobile Companion Expansion
+
+<Badge tone="warning">Discussion draft. No implementation authorized.</Badge>
+
+Welcome, usage limits, project scripts, commit and PR, linked pull requests, and real terminal sessions. Repository audit: September 7, 2026. API names marked **proposed** are design sketches, not shipped methods.
+
+<Card>
+
+## Recommendation
+
+Keep the native mobile navigation and existing host/gateway/SDK architecture. Reuse the desktop's data and operations, not its React components. The substantial work is moving remaining desktop-owned workflows to the persistent host and completing terminal lifecycle APIs. No new cloud service, second terminal server, or collaborative editing system needed.
+
+The host must remain running and reachable; closing the desktop window can be supported, but a sleeping/offline computer cannot run these actions.
+
+</Card>
+
+## UI Proposal
+
+### Home
+
+Replace the large **Projects** text with the desktop welcome wording. Keep the project rows, order, paths, status dots, and count first. Add **Usage limits** cards immediately below the project section. Keep Projects as the navigation-tab label for now; this is the paired home screen, not another onboarding flow.
+
+- One stable greeting per visit, not a rotating banner.
+- Compact provider cards: icon/name, main usage bar, used/remaining label, reset countdown, and expandable secondary windows.
+- One column on phones; responsive grid on wide web layouts. No forced horizontal carousel.
+- Preserve last-good readings with an updated/stale label. Unknown or unavailable is never displayed as zero usage.
+- Refresh on focus and pull-to-refresh; stop polling in background. Respect provider refresh limits and coalesce duplicate requests with desktop.
+- Hide the section when no provider exists; distinguish that from providers failing or needing sign-in.
+
+**Greeting detail:** desktop currently uses five variations such as "What should we build in [location]?", not time-of-day greetings. All-projects home has no selected location. Recommend shared location-less variants such as "What should we build?", rather than pretending one project is selected or using string replacement to cut out grammar.
+
+Move copy into `@pragma/constants`, with a shared pure formatter export used by both clients. Preserve desktop's location-highlighted variant. Existing copy and helpers are currently desktop-local in `apps/pragma/src/lib/welcome-headings.ts:11`; generic fallback is inline in `WelcomeScreen.tsx:33`.
+
+### Worktree
+
+Header right, left to right: **Commit & PR | Play scripts | existing +**. Native symbols through `IconSymbol`, native menus through `components/ui/menu-view`, and accessible labels with proper touch targets. Keep long worktree titles truncatable so three controls never collide.
+
+The current + opens **Launch agent**, including a New branch path. Preserve that behavior; it is not exclusively a new-worktree button today.
+
+<Card>
+
+**Proposed section order**
+
+1. Linked pull request, when present: `#123 Fix session reconnect` and lifecycle badge.
+2. Worktrees, existing child list unchanged.
+3. Terminals, immediately below worktrees, with section-level **New terminal**.
+4. Agents, existing chat navigation unchanged.
+5. Scratchpads, existing rows unchanged.
+
+Illustrative PR number/title only. No real PR is being created.
+
+</Card>
+
+Project-root screens should offer the same actions for their resolved main worktree, never whichever worktree happens to be selected on desktop. Leaf worktrees still show Terminals even with no children. Recompute empty states across all visible sections.
+
+### Scripts Menu
+
+- Play opens the native dropdown listing named `runScripts` from the project's `.pragma/scripts.json`.
+- Read configuration from the project root, execute commands in the chosen worktree. Do not read a stale child checkout's scripts file.
+- No configured scripts: disabled "No project scripts" item. Invalid configuration: show the error, not an empty list.
+- Selecting a script starts or focuses its existing run, then opens its first terminal. Multiple commands become individually selectable terminal rows on mobile; do not build split panes for phone v1.
+- Preserve desktop's command grouping/split metadata so desktop can render the same run appropriately. Do not steal desktop focus.
+- Display running state and offer Open/Stop for an active run; deduplicate rapid taps by worktree and script name on the host.
+- Setup/teardown lifecycle hooks are not menu actions. No scripts editor in this feature.
+
+### Commit & PR
+
+Match the desktop sidebar flow: **commit all dirty changes into logical commits, then draft PR title/body for review**. The sidebar button does not itself publish a PR. Desktop board completion has a different, automatic commit/push/create flow.
+
+1. Tap the native button; show scope and confirmation that all dirty files will be committed, including untracked files selected by the existing workflow.
+2. Host runs commit planning and commits. Mobile shows durable progress, and can leave the screen without cancelling the job.
+3. Show editable title/body, base branch, and draft/ready choice. Label the final action **Push & create PR**.
+4. Final explicit submission pushes and creates the PR; success shows the linked-PR row. Existing PRs must be detected and reused or handled explicitly, never duplicated.
+
+Unavailable AI, missing GitHub auth, no parent branch, no changes, dirty/conflicting repository state, hook rejection, push failure, and GitHub failure need specific states. A clean branch with unpublished commits should still have a separate create/draft-PR path; don't require a pointless new commit.
+
+Commit and publish are separate effects. A failure after commits must report which commits already exist and retry the failed stage, not regenerate/recommit everything. Returning from GitHub should refresh PR status.
+
+### Linked PR
+
+Use canonical `https://github.com/owner/repo/pull/number` with `Linking.openURL`, not an embedded browser or an invented `github://` scheme. iOS Universal Links and Android App Links let the OS open GitHub when eligible, otherwise the browser. Installed-app status alone cannot guarantee routing: OS preferences, GitHub's associations, and enterprise domains matter. Test installed/uninstalled and disabled-link preferences on real devices.
+
+Fetch number, title, URL, and lifecycle from the host. Existing `Tab.prNumber` describes PR-review tabs, not a complete worktree-to-PR association. Resolve through repository plus exact head branch, retaining base/fork identity and an explicit link when necessary. PRs made outside Pragma must also appear.
+
+### Terminal Screen
+
+Full-screen `terminal/[tabId]` route outside the bottom tabs, matching chat/scratchpad navigation. Title and connection state above the terminal. Tap a terminal row to attach to that exact host session, not create a new shell.
+
+- Rows use desktop tab titles, show running/exited/unavailable state, and have an independent X control.
+- X closes the shared tab and ends its process on the host. Confirm this cross-device effect, especially for script or agent sessions. Back navigation only detaches.
+- **New terminal** creates a managed tab and PTY in this worktree using the host's configured default shell. Desktop sees the same ID; no duplicate on retry.
+- Recommend ordinary shell/script tabs in Terminals, with **Open terminal** from agent-row actions for raw agent TUI access. Showing every terminal-kind tab, including agents, is also possible but duplicates sessions across two sections; decision below.
+- "Active" should mean open/live sessions, not only desktop's currently selected tab. Keep an exited state long enough to explain what happened; never silently respawn a killed session.
+
+Keyboard accessory: **Esc, Ctrl-C, Tab, sticky Ctrl, arrows, hide keyboard**. Secondary horizontally scrollable keys: Ctrl-D, Ctrl-Z, Ctrl-L, Home/End, PgUp/PgDn, Paste, and soft newline. Ctrl-D can end the shell, so do not put it beside the primary interrupt target. Paste honors bracketed-paste mode; preview multiline paste instead of silently submitting commands. Never simulate local echo for passwords or full-screen TUIs.
+
+Use `GlassSurface` on supported iOS, solid high-contrast fallback elsewhere. Accessory stays above the keyboard, and the terminal fits the remaining space after keyboard/accessory/safe-area changes. Support hardware keyboards, IME/composition, selection/copy, and a reachable scroll-to-bottom action.
+
+## What Already Exists
+
+| Capability                    | Shipped surface                                                            | Missing work                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Greetings                     | Desktop-only `welcome-headings.ts` and `WelcomeScreen`                     | Shared copy/formatter and location-less variants                                           |
+| Usage limits                  | `client.rpc("plugins", { action: "usageLimits" })`, optional `pluginId`    | Typed wrapper; scope/metadata/cache consistency                                            |
+| Workspace/tab synchronization | `client.workspace.subscribe()`                                             | Mobile terminal view model and authoritative managed-tab mutation lifecycle                |
+| Terminal I/O                  | `sessions.spawn`, `attach`, `write`, `resize`, `kill`, `rename`            | Managed open/close, liveness/size info, viewport lease, cursor reconnect                   |
+| Scripts                       | Desktop parser, planner, and run lifecycle; SDK filesystem/exec primitives | Typed list/run/stop backed by host-owned script orchestration                              |
+| Git                           | `git.worktreeChanges`, staging, `commitStaged`, repo info, push/sync       | AI-assisted workflow, PR API queries/mutations                                             |
+| Built-in AI                   | `pragma-ai` commit-message, commit-plan, pull-request, inline-edit, ask    | Host operation API plus typed SDK; not presently a generic SDK namespace                   |
+| Arbitrary agent prompts       | `agents.launch` and `agents.connect().send`                                | Nothing for prompting an existing coding agent; distinct from built-in AI helper execution |
+| GitHub PR summary/create      | Desktop `lib/github.ts`                                                    | Host implementation and typed SDK; existing GitHub sidecar is only a small scaffold        |
+
+Usage RPC is reachable through the existing SDK escape hatch; a new underlying usage service is not required from scratch. However, the current response only carries plugin/provider IDs, title, and result. Per-request project scope, icon metadata, primary-limit selection, and refresh policy need a deliberate contract before claiming desktop parity. Desktop currently invokes provider loaders in its own plugin runtime; the host also has a loader. Prefer one host cache/validation path, with provider-specific logic staying inside plugins.
+
+## Proposed SDK Surface
+
+Names are provisional. Keep typed namespaces over the existing authenticated gateway, and shared TS/Rust wire types in `@pragma/constants`. Don't expose raw sidecar commands as the public API.
+
+```ts
+// Proposed additions, not usable APIs yet.
+client.usageLimits.get({ projectId? });
+client.scripts.list({ worktreeId });
+client.scripts.run({ worktreeId, name, requestId });
+client.scripts.stop({ runId });
+
+client.tabs.openTerminal({ worktreeId, requestId });
+client.tabs.close({ tabId, requestId });
+client.sessions.info(sessionId);
+client.sessions.acquireViewport(sessionId, { cols, rows });
+client.sessions.renewViewport(sessionId, { leaseId });
+client.sessions.releaseViewport(sessionId, { leaseId });
+// Extend existing attach/resize with cursor/lease options.
+
+client.ai.status();
+client.ai.generateCommitMessage({ worktreeId });
+client.ai.generateCommitPlan({ worktreeId });
+client.ai.generatePullRequestDraft({ worktreeId });
+client.ai.inlineEdit({ worktreeId, document, instruction });
+client.ai.ask({ worktreeId, prompt, signal });
+client.ai.commitAndDraftPullRequest({ worktreeId, requestId });
+client.ai.getRun({ runId });
+client.ai.subscribeRun({ runId, signal });
+client.ai.cancelRun({ runId });
+
+client.github.pullRequestForWorktree({ worktreeId });
+client.github.publishPullRequest({ worktreeId, title, body, base, draft, requestId });
+```
+
+Expose all built-in helpers eventually, but first migrate the commit/draft path and read-only `ask`. Custom prompts should use the existing read-only ask tool policy by default. Writable arbitrary prompts already fit `agents.launch/connect`; adding a second unrestricted AI agent runtime is unnecessary for this release. AI/provider credentials and GitHub tokens remain on the host, never returned to the phone or renderer.
+
+Read-only streaming requests can cancel on disconnect. Mutating jobs must outlive mobile requests, expose stage/result/error, prevent duplicate effects with idempotency keys, and report interrupted state after host restart. Cancellation does not undo commits or pushes. Recheck branch/HEAD and changed-file scope before applying an AI-generated plan, and use shared project git locks across desktop/mobile entry points.
+
+## Architecture Decisions
+
+<Card>
+
+**Target flow:** mobile or desktop -> typed client adapter -> gateway/native host RPC -> persistent `pragma-server` -> core git/scripts rules, PTYs, and AI/GitHub sidecars.
+
+The gateway remains an auth/transport translator. The SDK stays portable fetch/NDJSON. Mobile renders and requests actions; it does not parse scripts into shell runs, hold GitHub credentials, or orchestrate commits and pushes independently.
+
+</Card>
+
+| Change                                    | Size                       | Why                                                                                  |
+| ----------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------ |
+| Shared greetings                          | Small                      | Copy currently lives in desktop                                                      |
+| Typed usage API                           | Small to medium            | Host loader exists; metadata/scope/polling need alignment                            |
+| Host-managed terminal tab lifecycle       | Substantial                | Raw PTY spawn/kill does not guarantee durable desktop-visible tab creation/deletion  |
+| Host scripts runner                       | Substantial                | Run dedupe, grouping, cleanup, and split plan currently live in desktop React        |
+| Host AI/GitHub operations                 | Substantial                | Worktree-scoped AI is desktop-local today; GitHub API calls also live in desktop     |
+| Terminal viewport lease and cursor parity | Medium                     | Existing I/O works; safe ownership and reconnect semantics are missing from SDK path |
+| Mobile terminal renderer                  | Medium, device spike first | WebView already installed, but terminal keyboard/touch behavior needs proof          |
+
+Migrate only terminal metadata and these workflows, not every desktop DB domain at once. Nevertheless, one authoritative tab store/tombstone policy is essential: a stale desktop workspace publication must not resurrect a phone-closed tab or erase a phone-created one. Existing headless agent adoption provides a starting pattern, not complete ordinary-terminal lifecycle coverage.
+
+If faster delivery matters more than headless operation, a temporary desktop-controller endpoint can reuse existing actions. It must explicitly show "Open Pragma on your computer" when unavailable. Recommendation: avoid making that the permanent mobile contract; it fails exactly when the desktop window is closed.
+
+**Multiple hosts:** the phone connects to one gateway and its owning server. Desktop publishes project snapshots per owning host. Do not assume one paired gateway automatically aggregates every SSH/WSL host shown on desktop. Scope v1 to worktrees served by the paired host, or explicitly design host routing/pairing separately. Preserve existing WSL limitations rather than treating them as solved by mobile UI.
+
+## Terminal Rendering Choice
+
+**Recommend `@xterm/xterm` + `@xterm/addon-fit` inside the already-installed `react-native-webview`.** Reuse the desktop-aligned xterm/addon versions. Try the WebGL addon on real devices, with explicit context-loss recovery/fallback. WebView is not proven faster than native; the advantages are established terminal emulation, compatibility, and reuse.
+
+Use a small browser-safe `@pragma/terminal-viewer` package for the bundled document, renderer protocol, and reusable terminal behavior. Mobile wraps it with native navigation/keyboard controls; its `.web.tsx` twin uses the browser renderer without importing native WebView modules. Extract desktop-neutral pieces where reused, not the entire Tauri-dependent terminal manager.
+
+Alternative: a native VT engine with a React Native bridge. Better native input/accessory integration is possible, but introduces engine bindings, rendering/selection work, platform maintenance, and separate behavior from desktop. A package that merely prints ANSI-colored lines is not an adequate substitute for cursor-addressed/full-screen terminals. No native alternative selected without a comparative spike.
+
+- Bundle renderer JS/CSS/font locally, not from a CDN. Keep gateway credentials in the RN SDK layer.
+- Batch raw output into a bounded bridge queue, write directly into xterm, and acknowledge parser completion. Never put terminal output in React state.
+- Keep bytes intact through decoding; handle UTF-8 split across output chunks. Bound scrollback, queued bytes, and renderer write sizes as desktop does.
+- Keep ordered input writes with bounded batching; never replay an ambiguously delivered command after disconnect. Input is not an idempotent operation.
+- Preserve NDJSON/fetch transport. `@xterm/addon-attach` assumes WebSockets, so do not use it here.
+- Only one mobile session owns input/viewport at a time; no collaborative text merge. Terminal output may still be observed by desktop/watchers.
+- Block renderer navigation and arbitrary bridge messages. Open allowed terminal links externally on user action; no automatic clipboard/URL actions from terminal escape output.
+
+**Keyboard spike:** RN `InputAccessoryView` is iOS-only and associates with RN `TextInput`, not automatically xterm's HTML textarea. First validate xterm/WebView input with a native keyboard-following toolbar. If necessary, evaluate an RN input proxy with `InputAccessoryView`; it must preserve composition, backspace, paste, and hardware-key semantics. Do not promise a drop-in accessory binding. Full-screen terminal route avoids the documented bottom-tab interaction, but real-device testing remains required.
+
+## Resize And Reconnect
+
+The terminal **PTY grid**, not the macOS/Windows window, changes size. Existing sessions expose resize, but no SDK method currently returns the previous grid or grants temporary ownership.
+
+1. On focus, request a host-owned viewport lease. Host atomically captures the prior desktop/effective grid and returns current size, session generation, and lease ID.
+2. Attach and fit to phone viewport. Debounced keyboard/orientation/font changes resize only with the current lease.
+3. While leased, reject or defer desktop auto-fit requests so background resize observers do not fight the phone. Retain the latest desired desktop dimensions for return.
+4. On blur/back/background, release the lease and detach output. Restore the latest desktop desired grid, otherwise the captured original. Do not kill the shell.
+5. On network loss, app termination, or missing heartbeat, host lease expiry restores dimensions. Stale releases cannot undo a newer lease. Desktop can explicitly reclaim control on return.
+
+This is a small ownership mechanism, not multi-user collaboration. A JS `finally` calling resize is insufficient because iOS can suspend the app before it runs. Host enforcement must cover native desktop resize requests as well as gateway requests.
+
+**Reconnect gap:** server already supports byte-cursor replay/reset. Gateway serializes replay events, but its attach path passes no resume cursor; SDK `SessionEvent` omits replay and `StreamOptions` only contains `signal`. Extend the gateway and SDK to carry cursor/reset semantics before building mobile reconnect. Keep xterm state for an ordinary reconnect, replay only missing bytes, and reset only when the retained server buffer no longer covers the cursor. A fresh renderer cannot use an old cursor without its matching parser state.
+
+For new terminals with no desktop viewport yet, return to the host default until desktop supplies one. For an exited or replaced session, do not resize or resurrect it. Test replay during a resize and full-screen application redraw; historical bytes are not a magical exact screen snapshot at a different grid size.
+
+## Delivery Order And Acceptance
+
+1. **Home and usage:** extract greetings; typed usage wrapper; scope/metadata decisions; cards with loading/stale/unavailable tests.
+2. **Terminal foundation plus device spike:** authoritative managed open/close, lease, cursor replay, xterm keyboard/touch validation. Test ordinary shell, vim/tmux, and an agent TUI on actual iOS/Android plus web.
+3. **Terminals UI and scripts:** row list, add/close, host script list/run/stop, multi-command grouping, desktop adoption and cleanup tests.
+4. **AI/GitHub host services:** migrate existing behavior; durable commit/draft and publish stages; PR lookup and explicit publication review.
+5. **Broader helper SDK:** remaining built-ins and read-only arbitrary ask, without making those prerequisites for welcome cards.
+
+Acceptance matrix: desktop open/closed/restarting; mobile back/background/force-kill; tunnel drop/reconnect; duplicate taps; desktop resize during a mobile lease; terminal exit/close from either device; stale workspace publish; interrupted commit after some commits; push succeeds but GitHub response is lost; existing external PR; malformed scripts; provider failure; IME/emoji/paste/hardware keyboard; light/dark and large text. Never auto-retry mutations unless deduplication establishes what already happened.
+
+Feature work should update the relevant AGENTS/skills alongside implementation. Some high-level skill descriptions still call mobile fixture-only or SDK a CLI wrapper; current child guides and source prove those descriptions stale. No guide/code changes made in this planning pass.
+
+## Decisions To Discuss
+
+<AskQuestion
+  question="Should these mobile actions work with the desktop window closed, as long as the host is running?"
+  type="options"
+  options={[
+    { label: "Yes, host-owned from the start (recommended)" },
+    { label: "Desktop-open first version is acceptable" },
+  ]}
+  allowOpenResponse
+/>
+
+<AskQuestion
+  question="What should Commit & PR do before publication?"
+  type="options"
+  options={[
+    { label: "Commit, then review PR text before publishing (desktop sidebar parity)" },
+    { label: "One confirmation, then commit, push, and publish automatically" },
+  ]}
+  allowOpenResponse
+/>
+
+<AskQuestion
+  question="Which sessions belong in the Terminals section?"
+  type="options"
+  options={[
+    { label: "Shells/scripts; agent rows offer Open terminal (recommended)" },
+    { label: "All terminal tabs, including those also listed under Agents" },
+  ]}
+  allowOpenResponse
+/>
+
+<AskQuestion
+  question="Home has no selected project. Which shared greeting should it use?"
+  type="options"
+  options={[
+    { label: "Location-less desktop variants (recommended)" },
+    { label: "Exact desktop templates with a generic location like Pragma" },
+  ]}
+  allowOpenResponse
+/>
+
+## Evidence
+
+<details>
+<summary>Repository anchors and external references</summary>
+
+- Mobile home: `apps/pragma-go/app/(tabs)/(projects)/index.tsx:24-35`.
+- Worktree header/section order: `apps/pragma-go/app/(tabs)/(projects)/worktree/[worktreeId].tsx:35-114`.
+- Greetings: `apps/pragma/src/lib/welcome-headings.ts:11-61`; fallback `components/workspace/WelcomeScreen.tsx:33`.
+- Desktop usage loading/polling: `apps/pragma/src/components/usage-limits/UsageLimitsPopover.tsx:55-148`.
+- Existing host usage RPC: `crates/pragma-server/src/plugins_host.rs:484-515`; response loader `packages/plugins-host/src/usage-limits.ts:7-49`.
+- SDK namespace inventory: `packages/sdk/src/client.ts:22-54`; terminal methods `sessions-client.ts:16-78`; stream types `types/sessions.ts:14-22`.
+- Gateway raw spawn/kill and viewport queries: `crates/pragma-gateway/src/routes/sessions.rs:44-125`; resume omission `src/client.rs:155-165`.
+- Gateway managed control allowlist excludes tab open/close: `crates/pragma-gateway/src/routes/control.rs:28-35`.
+- Script config/parser: `apps/pragma/src-tauri/src/scripts.rs:52-100`; pure split planner `apps/pragma/src/lib/scripts.ts:21-43`; desktop run orchestration `state/workspace-context.tsx:3668-3763`.
+- Commit/draft sidebar behavior: `apps/pragma/src/components/right-sidebar/RightSidebar.tsx:106-129`; local-only commit orchestration `apps/pragma/src-tauri/src/ai.rs:458-529`.
+- Existing AI commands: `packages/ai-helpers/src/cli.ts:10-20`; GitHub sidecar scaffold `packages/github-helpers/src/index.ts:3-12`.
+- Git SDK capabilities: `packages/sdk/src/git-client.ts:17-94`. Reserved AI/GitHub domains are not implementations: `crates/pragma-core/src/lib.rs:72-97`.
+- [xterm upstream: renderer, supported browsers, addons](https://github.com/xtermjs/xterm.js#readme). Browser compatibility is not a mobile input guarantee.
+- [RN InputAccessoryView: TextInput association and known limitations](https://reactnative.dev/docs/inputaccessoryview).
+- [RN Linking: standard HTTPS Universal Links/App Links](https://reactnative.dev/docs/linking).
+
+Subagent research was attempted but blocked by usage/model configuration errors. Findings above came from direct source inspection; terminal/device behavior is a proposed validation plan, not a tested implementation.
+
+</details>

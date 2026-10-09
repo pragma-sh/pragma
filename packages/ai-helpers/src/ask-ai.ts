@@ -1,7 +1,6 @@
-import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import { INLINE_EDIT_TOOLS } from "./inline-edit.ts";
 import { type AskAiPromptContext, type AskAiWorktreeRef, buildAskAiPrompt } from "./prompts.ts";
+import { type AiFeatureContext, featureRunOptions } from "./feature-context.ts";
 import { runPromptStreamingWithFallback } from "./session.ts";
 
 /**
@@ -13,15 +12,13 @@ export const ASK_AI_TOOLS = INLINE_EDIT_TOOLS;
 export type { AskAiPromptContext, AskAiWorktreeRef };
 
 /** Options for {@link streamAskAi}. */
-export interface StreamAskAiOptions extends AskAiPromptContext {
+export interface StreamAskAiOptions extends AskAiPromptContext, AiFeatureContext {
   /**
    * Working directory for the agent session. Prefer the project's main
    * worktree root so nested checkout paths stay reachable; the prompt still
    * names every worktree path explicitly.
    */
   cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
   /** Called for each assistant text delta as it streams. */
   onDelta: (delta: string) => void;
   /** Called when a model retry or failed attempt should clear streamed text. */
@@ -46,13 +43,7 @@ export function streamAskAi(options: StreamAskAiOptions): Promise<string> {
   }
 
   return runPromptStreamingWithFallback(
-    {
-      modelKind: "standard",
-      cwd: options.cwd,
-      authStorage: options.authStorage,
-      registry: options.registry,
-      tools: ASK_AI_TOOLS,
-    },
+    featureRunOptions(options, "standard", ASK_AI_TOOLS),
     buildAskAiPrompt(options),
     options.onDelta,
     options.onReset,

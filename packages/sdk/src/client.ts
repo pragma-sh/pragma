@@ -2,17 +2,22 @@ import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma-sh/const
 
 import { AccountsClient } from "./accounts-client";
 import { AgentsClient } from "./agents-client";
+import { AiClient } from "./ai-client";
 import { AssetsClient } from "./assets-client";
 import { EventsClient } from "./events-client";
 import { ExecClient } from "./exec-client";
 import { FanoutsClient } from "./fanouts-client";
 import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
+import { GitHubClient } from "./github-client";
 import { HealthClient } from "./health-client";
+import { PortsClient } from "./ports-client";
 import { PushClient } from "./push-client";
 import { routes } from "./routes";
 import { ScratchpadsClient } from "./scratchpads-client";
+import { ScriptsClient } from "./scripts-client";
 import { SessionsClient } from "./sessions-client";
+import { TabsClient } from "./tabs-client";
 import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
 import type { PragmaClientConfig } from "./transport";
@@ -35,7 +40,12 @@ export class PragmaClient {
   readonly push: PushClient;
   readonly theme: ThemeClient;
   readonly health: HealthClient;
+  readonly ports: PortsClient;
   readonly scratchpads: ScratchpadsClient;
+  readonly ai: AiClient;
+  readonly github: GitHubClient;
+  readonly scripts: ScriptsClient;
+  readonly tabs: TabsClient;
   /** Durable Excalidraw whiteboards. */
   readonly whiteboards: WhiteboardsClient;
 
@@ -55,8 +65,13 @@ export class PragmaClient {
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
-    this.accounts = new AccountsClient(this.transport);
+    this.ports = new PortsClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
+    this.ai = new AiClient(this.transport);
+    this.github = new GitHubClient(this.transport);
+    this.scripts = new ScriptsClient(this.transport);
+    this.tabs = new TabsClient(this.transport);
+    this.accounts = new AccountsClient(this.transport);
     this.whiteboards = new WhiteboardsClient(this.transport);
   }
 

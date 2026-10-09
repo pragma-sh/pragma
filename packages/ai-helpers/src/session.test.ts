@@ -187,7 +187,7 @@ function candidate(provider: string, id: string, outcome: { reply?: string; fail
 const fallbackOptions = {
   modelKind: "standard" as const,
   cwd: "/repo",
-  authStorage: {} as AuthStorage,
+  authStorage: { list: () => ["opencode-go"] } as unknown as AuthStorage,
   registry: { getAvailable: vi.fn(() => []) } as unknown as ModelRegistry,
 };
 

@@ -32,6 +32,22 @@ describe("rpc namespace clients", () => {
     expect(JSON.parse(body)).toEqual({ op: "isDirty", root: "/repo" });
   });
 
+  it("maps base-commit comparisons with the host's snake_case fields", async () => {
+    const bodies: unknown[] = [];
+    const client = clientWithFetch(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ committed: [], staged: [], unstaged: [] });
+    });
+
+    await client.git.changesSinceCommit({ root: "/repo", base: "abc123" });
+    await client.git.baseFileDiff({ root: "/repo", base: "abc123", path: "b.ts", oldPath: "a.ts" });
+
+    expect(bodies).toEqual([
+      { op: "changesSinceCommit", root: "/repo", base: "abc123" },
+      { op: "baseFileDiff", root: "/repo", base: "abc123", path: "b.ts", old_path: "a.ts" },
+    ]);
+  });
+
   it("maps exec operations", async () => {
     let body = "";
     const client = clientWithFetch(async (_input, init) => {
@@ -47,6 +63,41 @@ describe("rpc namespace clients", () => {
       env: [],
       maxConcurrent: 1,
     });
+  });
+
+  it("lists and forwards terminal-owned ports", async () => {
+    const calls: Array<{ input: string; body: unknown }> = [];
+    const client = clientWithFetch(async (input, init) => {
+      calls.push({ input, body: JSON.parse(String(init?.body)) });
+      return Response.json(input.endsWith("/forward") ? { url: "https://preview.test" } : []);
+    });
+    const port = {
+      port: 5173,
+      process: "vite",
+      pid: 42,
+      tabId: "tab-1",
+      worktreeId: "wt-1",
+    };
+
+    await client.ports.list(["wt-1"]);
+    await client.ports.forward({ projectId: "project-1", port });
+
+    expect(calls).toEqual([
+      {
+        input: "http://127.0.0.1:1/v1/rpc/ports",
+        body: { worktreeIds: ["wt-1"] },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/ports/forward",
+        body: {
+          projectId: "project-1",
+          worktreeId: "wt-1",
+          tabId: "tab-1",
+          pid: 42,
+          port: 5173,
+        },
+      },
+    ]);
   });
 
   it("maps whiteboard operations and decodes rendered PNG bytes", async () => {

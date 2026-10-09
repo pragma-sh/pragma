@@ -7,8 +7,8 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `scratchpads`, and
-`whiteboards`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `ports`, `scratchpads`,
+`whiteboards`, and `accounts`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 `client.createBoardDraft({ prompt, worktreeId, agentId, modelId?, reasoningId? })`
 creates a draft card through the running desktop controller.
@@ -94,6 +94,53 @@ the user has not themed.
 `gatewayVersion`). That route is unauthenticated, so it distinguishes an unreachable
 host from a rejected token — which is what the mobile client's Settings heartbeat uses.
 
+## Host-owned terminals, scripts, and accounts
+
+These namespaces exist because the _host_ owns the thing, not the client:
+
+- `client.tabs` — `openTerminal` / `close` / `listManaged`. A tab opened here
+  belongs to the host: it survives the desktop republishing its own rows, it
+  survives a server restart, and closing it ends the process everywhere. Opens
+  take a caller-generated `requestId` and are idempotent under it.
+- `client.scripts` — `list` / `run` / `stop` for `.pragma/scripts.json`. One run
+  per script per worktree, decided by the host, so "already running" is the same
+  answer on every device.
+- `client.sessions` viewport methods — `info`, `acquireViewport`,
+  `renewViewport`, `releaseViewport`, `resizeLeased`. A session's PTY grid is
+  shared, so a small client _borrows_ it: renew while showing the terminal,
+  release on the way out, and if the client vanishes the host expires the lease
+  and restores the previous size. `attach` also takes `cursor`, which resumes
+  from the last byte this renderer accepted instead of replaying everything.
+- `client.accounts` — the host's account providers: `list` (providers, logins,
+  bindings, live sessions), `usage` (limits loaded once per account), and
+  `setBinding` to switch which account a harness launches with, globally or for
+  one project. Sign-in runs in a hidden terminal on the host (`beginLogin` …
+  `completeLogin`), so a phone can add an account without a desktop window.
+- `client.ports` — `list(worktreeIds)` returns only listeners descended from those
+  worktrees' live terminal shells; `forward({ projectId, port })` revalidates the exact
+  listener, exposes an injected design proxy with the configured tunnel command, and
+  returns its public browser URL.
+
+## AI and GitHub
+
+`client.ai` and `client.github` reach host-owned operations. Two rules shape them:
+
+- **Committing is a job, not a call.** `commitAndDraftPullRequest` returns
+  immediately; poll `getRun`. It is idempotent per `requestId` — reuse the id
+  when retrying, because starting twice would commit the same work under two
+  sets of messages. `cancelRun` stops the next step and never un-commits.
+- **Publishing is separate from committing**, because a commit is local and a
+  publish is not. `github.publish` pushes and creates, idempotent per
+  `requestId`; `github.pullRequest` finds an existing one, including one opened
+  outside Pragma, and reports merged separately from closed. `github.branches`
+  lists what a pull request can merge into, with the repository default and the
+  worktree's own head branch, so a client can offer a base without its own
+  GitHub API code.
+
+There is deliberately **no method that returns the GitHub token**: this
+namespace is reachable from a paired phone. `ai.ask` is read-only by
+construction; anything that should change files goes through `agents.launch`,
+where the user sees and approves what it does.
 `client.whiteboards` provides typed `create`, `get`, `list`, `search`, `edit`, `delete`,
 and `view` calls over the host's `whiteboards` RPC. CRUD methods use the shared
 `@pragma-sh/constants` whiteboard contract. `search` sends the same `list` action with a

@@ -4,11 +4,12 @@ import type {
   AccountLogin,
   AccountProviderInfo,
   AccountsListResult,
+  UsageLimit,
+  UsageLimitsResult,
 } from "@pragma-sh/constants";
-import type { UsageLimit, UsageLimitsResult } from "@pragma-sh/plugin";
 
-import type { AutoSelectProviderUsage } from "@/lib/tauri";
-import { percentUsed, primaryLimit } from "@/lib/usage-limits";
+import type { AutoSelectProviderUsage } from "@pragma-sh/ai-helpers";
+import { percentUsed, primaryLimit } from "./usage";
 
 /** One harness that can use a provider, and the account it uses right now. */
 export interface HarnessView {
@@ -144,9 +145,13 @@ export function harnessAccountChoices(
   harness: HarnessView,
 ): HarnessAccountChoice[] {
   const order = { ready: 0, signIn: 1, unavailable: 2 } as const;
-  return provider.accounts
-    .map((account) => accountChoice(account, harness, provider.title))
-    .toSorted((a, b) => order[a.status] - order[b.status]);
+  const choices = provider.accounts.map((account) =>
+    accountChoice(account, harness, provider.title),
+  );
+  // Pragma Go runs this on Hermes, which does not yet provide
+  // Array.prototype.toSorted; `map` already returned a fresh array.
+  // oxlint-disable-next-line unicorn/no-array-sort
+  return choices.sort((a, b) => order[a.status] - order[b.status]);
 }
 
 /**
@@ -336,8 +341,10 @@ function accountViews(
       primaryPercent: primary ? percentUsed(primary) : null,
     };
   });
-  // Accounts in use first, then by label, so the row order is stable.
-  return accounts.toSorted(
+  // Accounts in use first, then by label, so the row order is stable. Not
+  // `toSorted`: Hermes (Pragma Go) lacks it, and `accounts` is already fresh.
+  // oxlint-disable-next-line unicorn/no-array-sort
+  return accounts.sort(
     (a, b) =>
       Number(b.usedBy.length > 0) - Number(a.usedBy.length > 0) || a.label.localeCompare(b.label),
   );

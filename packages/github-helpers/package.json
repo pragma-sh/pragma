@@ -22,6 +22,8 @@
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-github"
   },
   "dependencies": {
+    "@pragma-sh/constants": "workspace:*",
+    "@pragma-sh/sidecar-kit": "workspace:*",
     "octokit": "^5.0.5"
   },
   "devDependencies": {

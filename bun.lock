@@ -14,6 +14,7 @@
         "@remotion/google-fonts": "4.0.520",
         "@remotion/media": "4.0.520",
         "@tailwindcss/typography": "^0.5.20",
+        "esbuild": "^0.25.12",
         "fallow": "^2.102.0",
         "husky": "^9.1.7",
         "json-schema-to-typescript": "^15.0.4",
@@ -28,7 +29,7 @@
     },
     "apps/pragma": {
       "name": "pragma",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
         "@codemirror/language": "^6.12.3",
         "@codemirror/language-data": "^6.5.2",
@@ -54,7 +55,10 @@
         "@iconify/react": "^6.0.2",
         "@lezer/highlight": "^1.2.3",
         "@mdx-js/mdx": "^3.1.1",
+        "@pragma-sh/accounts-view": "workspace:*",
+        "@pragma-sh/code-viewer": "workspace:*",
         "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/fanout-view": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/plugin-registry": "workspace:*",
         "@pragma-sh/scratchpad": "workspace:*",
@@ -142,10 +146,14 @@
       "dependencies": {
         "@expo/metro-runtime": "~57.0.8",
         "@expo/ui": "~57.0.8",
+        "@pragma-sh/accounts-view": "workspace:*",
         "@pragma-sh/brand": "workspace:*",
+        "@pragma-sh/code-viewer": "workspace:*",
         "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/fanout-view": "workspace:*",
         "@pragma-sh/scratchpad-viewer": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",
+        "@pragma-sh/terminal-viewer": "workspace:*",
         "@react-native-menu/menu": "^2.0.0",
         "@rn-primitives/portal": "^1.5.2",
         "@rn-primitives/radio-group": "^1.5.2",
@@ -155,6 +163,7 @@
         "culori": "^4.0.2",
         "expo": "^57.0.2",
         "expo-camera": "~57.0.0",
+        "expo-clipboard": "^57.0.1",
         "expo-constants": "~57.0.3",
         "expo-dev-client": "^57.0.14",
         "expo-glass-effect": "~57.0.0",
@@ -202,7 +211,7 @@
     },
     "apps/www": {
       "name": "www",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "dependencies": {
         "@pragma-sh/brand": "workspace:*",
         "@pragma-sh/plugin-registry": "workspace:*",
@@ -239,9 +248,21 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/accounts-view": {
+      "name": "@pragma-sh/accounts-view",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/ai-helpers": {
       "name": "@pragma-sh/ai-helpers",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-ai": "./src/cli.ts",
       },
@@ -260,7 +281,7 @@
     },
     "packages/automations": {
       "name": "@pragma-sh/automations",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-automations": "src/cli.ts",
       },
@@ -275,7 +296,7 @@
     },
     "packages/bench": {
       "name": "@pragma-sh/bench",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -290,7 +311,7 @@
     },
     "packages/claude-code-plugin": {
       "name": "@pragma-sh/claude-code-plugin",
-      "version": "1.0.3",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -300,9 +321,28 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/code-viewer": {
+      "name": "@pragma-sh/code-viewer",
+      "version": "0.0.0",
+      "dependencies": {
+        "@codemirror/language": "^6.12.3",
+        "@codemirror/language-data": "^6.5.2",
+        "@codemirror/merge": "^6.12.2",
+        "@codemirror/state": "^6.6.0",
+        "@codemirror/view": "^6.43.1",
+        "@lezer/highlight": "^1.2.3",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
+        "esbuild": "^0.25.12",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/codex-plugin": {
       "name": "@pragma-sh/codex-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -314,7 +354,7 @@
     },
     "packages/constants": {
       "name": "@pragma-sh/constants",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "devDependencies": {
         "json-schema-to-typescript": "^15.0.4",
         "typescript": "^6.0.3",
@@ -323,7 +363,7 @@
     },
     "packages/create-pragma-plugin": {
       "name": "create-pragma-plugin",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "create-pragma-plugin": "./dist/cli.js",
       },
@@ -336,7 +376,7 @@
     },
     "packages/cursor-plugin": {
       "name": "@pragma-sh/cursor-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -348,7 +388,7 @@
     },
     "packages/dev-test-plugin": {
       "name": "@pragma-sh/dev-test-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "dependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
@@ -368,9 +408,20 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/fanout-view": {
+      "name": "@pragma-sh/fanout-view",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pragma-sh/constants": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/github-copilot-cli-plugin": {
       "name": "@pragma-sh/github-copilot-cli-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -382,11 +433,13 @@
     },
     "packages/github-helpers": {
       "name": "@pragma-sh/github-helpers",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-github": "./src/cli.ts",
       },
       "dependencies": {
+        "@pragma-sh/constants": "workspace:*",
+        "@pragma-sh/sidecar-kit": "workspace:*",
         "octokit": "^5.0.5",
       },
       "devDependencies": {
@@ -397,7 +450,7 @@
     },
     "packages/grok-plugin": {
       "name": "@pragma-sh/grok-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -424,7 +477,7 @@
     },
     "packages/junie-plugin": {
       "name": "@pragma-sh/junie-plugin",
-      "version": "1.0.3",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -436,7 +489,7 @@
     },
     "packages/kimi-plugin": {
       "name": "@pragma-sh/kimi-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -448,7 +501,7 @@
     },
     "packages/opencode-plugin": {
       "name": "@pragma-sh/opencode-plugin",
-      "version": "1.0.3",
+      "version": "1.1.1",
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
         "@pragma-sh/plugin": "workspace:*",
@@ -462,7 +515,7 @@
     },
     "packages/pi-plugin": {
       "name": "@pragma-sh/pi-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "0.80.10",
         "@pragma-sh/plugin": "workspace:*",
@@ -479,10 +532,10 @@
     },
     "packages/plugin": {
       "name": "@pragma-sh/plugin",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
-        "@pragma-sh/constants": "^1.1.0",
-        "@pragma-sh/sdk": "^1.1.0",
+        "@pragma-sh/constants": "^1.2.0",
+        "@pragma-sh/sdk": "^1.2.0",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -512,7 +565,7 @@
     },
     "packages/plugins-host": {
       "name": "@pragma-sh/plugins-host",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-plugins": "./src/cli.ts",
       },
@@ -530,7 +583,7 @@
     },
     "packages/prime-agent-plugin": {
       "name": "@pragma-sh/prime-agent-plugin",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "devDependencies": {
         "@pragma-sh/pi-plugin": "workspace:*",
         "@types/node": "^24.12.3",
@@ -540,9 +593,9 @@
     },
     "packages/scratchpad": {
       "name": "@pragma-sh/scratchpad",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
-        "@pragma-sh/sdk": "^1.1.0",
+        "@pragma-sh/sdk": "^1.2.0",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
@@ -558,9 +611,9 @@
     },
     "packages/scratchpad-contract": {
       "name": "@pragma-sh/scratchpad-contract",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
-        "@pragma-sh/constants": "^1.1.0",
+        "@pragma-sh/constants": "^1.2.0",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
@@ -569,10 +622,10 @@
     },
     "packages/scratchpad-viewer": {
       "name": "@pragma-sh/scratchpad-viewer",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
-        "@pragma-sh/constants": "^1.1.0",
-        "@pragma-sh/scratchpad-contract": "^1.1.0",
+        "@pragma-sh/constants": "^1.2.0",
+        "@pragma-sh/scratchpad-contract": "^1.2.0",
       },
       "devDependencies": {
         "@mdx-js/mdx": "^3.1.1",
@@ -592,7 +645,7 @@
     },
     "packages/sdk": {
       "name": "@pragma-sh/sdk",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/scratchpad-contract": "workspace:*",
@@ -604,7 +657,7 @@
     },
     "packages/sidecar-kit": {
       "name": "@pragma-sh/sidecar-kit",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
@@ -620,6 +673,20 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/terminal-viewer": {
+      "name": "@pragma-sh/terminal-viewer",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/addon-web-links": "^0.12.0",
+        "@xterm/xterm": "6.1.0-beta.292",
+        "bunup": "^0.16.32",
+        "esbuild": "^0.25.12",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/treemap": {
       "name": "@pragma-sh/treemap",
       "version": "0.1.0",
@@ -630,7 +697,7 @@
     },
     "packages/watcher": {
       "name": "@pragma-sh/watcher",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "bin": {
         "pragma-watch": "./src/cli.ts",
       },
@@ -645,7 +712,7 @@
     },
     "packages/watcher-kit": {
       "name": "@pragma-sh/watcher-kit",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/sdk": "workspace:*",
@@ -1742,6 +1809,8 @@
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.78.0", "", { "os": "win32", "cpu": "x64" }, "sha512-Sb5ocmLSuYeOuXd+CFOToGKp/gjXUEWDnvIGwhnh8aq8wY4TMmEnKnvbogSW7RdMZv77JSARduS7/gv+khYEjA=="],
 
+    "@pragma-sh/accounts-view": ["@pragma-sh/accounts-view@workspace:packages/accounts-view"],
+
     "@pragma-sh/ai-helpers": ["@pragma-sh/ai-helpers@workspace:packages/ai-helpers"],
 
     "@pragma-sh/automations": ["@pragma-sh/automations@workspace:packages/automations"],
@@ -1752,6 +1821,8 @@
 
     "@pragma-sh/claude-code-plugin": ["@pragma-sh/claude-code-plugin@workspace:packages/claude-code-plugin"],
 
+    "@pragma-sh/code-viewer": ["@pragma-sh/code-viewer@workspace:packages/code-viewer"],
+
     "@pragma-sh/codex-plugin": ["@pragma-sh/codex-plugin@workspace:packages/codex-plugin"],
 
     "@pragma-sh/constants": ["@pragma-sh/constants@workspace:packages/constants"],
@@ -1759,6 +1830,8 @@
     "@pragma-sh/cursor-plugin": ["@pragma-sh/cursor-plugin@workspace:packages/cursor-plugin"],
 
     "@pragma-sh/dev-test-plugin": ["@pragma-sh/dev-test-plugin@workspace:packages/dev-test-plugin"],
+
+    "@pragma-sh/fanout-view": ["@pragma-sh/fanout-view@workspace:packages/fanout-view"],
 
     "@pragma-sh/github-copilot-cli-plugin": ["@pragma-sh/github-copilot-cli-plugin@workspace:packages/github-copilot-cli-plugin"],
 
@@ -1795,6 +1868,8 @@
     "@pragma-sh/sidecar-kit": ["@pragma-sh/sidecar-kit@workspace:packages/sidecar-kit"],
 
     "@pragma-sh/system1": ["@pragma-sh/system1@workspace:packages/system1"],
+
+    "@pragma-sh/terminal-viewer": ["@pragma-sh/terminal-viewer@workspace:packages/terminal-viewer"],
 
     "@pragma-sh/treemap": ["@pragma-sh/treemap@workspace:packages/treemap"],
 
@@ -3307,6 +3382,8 @@
     "expo-asset": ["expo-asset@57.0.15", "", { "dependencies": { "@expo/image-utils": "^0.11.5", "expo-constants": "~57.0.15" }, "peerDependencies": { "expo": "*", "react": "*", "react-native": "*" } }, "sha512-ZoiUftQb1Nn1jvL6l1kZoUXvgRCx57tMQYxSsp+g4ZvY+jgVWp/THruXOtPtZVdC/WWZxPUTct53bfAm2EPDAQ=="],
 
     "expo-camera": ["expo-camera@57.0.4", "", { "dependencies": { "barcode-detector": "^3.0.0" }, "peerDependencies": { "expo": "*", "react": "*", "react-native": "*", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-MqbbQ63O+cA8JbK3lfFHiD0f2jv8jB+EG/ILK6f5xnOPV9IR37yaG5+lGtRZNoOeYBzGypyOi17USItleMyuGw=="],
+
+    "expo-clipboard": ["expo-clipboard@57.0.2", "", { "peerDependencies": { "expo": "*", "react": "*", "react-native": "*" } }, "sha512-VB4Au8X/RbvJKUtJk+87vdtveWSNEa5RzY3ooeO6VNF7Rd49RbQXZOu3/TfEW9p7mU8TCfyTvjyCiAUwSoSJ4w=="],
 
     "expo-constants": ["expo-constants@57.0.15", "", { "dependencies": { "@expo/env": "~2.4.2" }, "peerDependencies": { "expo": "*", "react-native": "*" } }, "sha512-rLME1H/K+/uFMR/jEpe/p1nribvCEZZmQegzqxu/R1HTyvYweq4E+B38zB0baie+SEwmeIPLaM4KLVMnejhm5A=="],
 

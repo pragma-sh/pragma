@@ -18,6 +18,52 @@ scrollback, raw output, and agent-status strengths.
 - Supervising persisted remote-access tunnels so mobile connectivity survives desktop
   client exits and restarts.
 
+## GitHub and AI on the host
+
+The GitHub token lives in this server's directory, beside the socket — not in
+the desktop's app data — because that is what lets a phone open a pull request
+with no desktop window running. Owner-only permissions come from
+`pragma_platform::perms`, so Windows gets a real ACL.
+
+**The `github` RPC domain has no action that returns the token, and must not
+grow one:** the gateway proxies that domain to paired phones. The desktop, which
+still needs it for its own Octokit calls, reads the host's file directly — a
+local read that is not reachable over the wire.
+
+`branches` answers what a pull request from a worktree could merge into: the
+remote's branch names, the repository default, and the worktree's own head. A
+client picking a merge target needs all three, and none of them are worth a
+second GitHub implementation per client.
+
+AI commits are **jobs**, in `ai.rs`. They outlive the request that started them,
+record their stage after every step, and are idempotent per caller request id.
+A job still marked running when the server starts is reported as `interrupted`,
+because that is what it was — and it keeps its commit count, since those commits
+are real. Cancelling stops the next step and never un-commits anything. Both the
+desktop and the phone call this same RPC, which is also what makes the
+per-project git lock mean something: two locks would exclude nothing.
+
+## Host-owned tabs, viewports, and script runs
+
+Three things the server owns outright, because a phone must work with the
+desktop window closed:
+
+- **Managed tabs** (`managed-tabs.json` beside the socket). The desktop's SQLite
+  rows stay authoritative for tabs _it_ made; for tabs the host made, the host
+  wins, so a publish that knows nothing about a just-opened terminal cannot
+  erase it. A closed tab leaves a **tombstone**, so a snapshot composed before
+  the close cannot resurrect it. Opens are idempotent per client `requestId`.
+- **Viewport leases** (`session.rs`). A session's grid is shared; a client that
+  needs a different size takes a lease, and everyone else's resize is recorded
+  as the size to restore rather than applied. Expiry is swept **on a timer**,
+  never lazily: the client that would trigger a lazy check is the one that
+  vanished, and a suspended phone would otherwise leave a desktop terminal stuck
+  at phone size. A stale release is ignored, never allowed to resize out from
+  under a newer holder.
+- **Script runs**. One run per script per worktree, with the config read from
+  the _project root_ — a child worktree's checkout may predate the script. The
+  contract itself lives in `pragma_core::scripts`, shared with the desktop.
+
 ## Remote access tunnel
 
 `tunnel.rs` owns ngrok/cloudflared process lifetime. Desktop controls it through
@@ -25,6 +71,9 @@ scrollback, raw output, and agent-status strengths.
 `~/.pragma/config.json` while preserving command overrides and unrelated config. On server
 startup, enabled tunnels restart against gateway discovery beside `daemon.sock`. Tunnel
 process therefore follows persistent server lifetime, not Tauri client lifetime.
+The gateway also asks this registry to expose a short-lived design proxy for a verified
+terminal-owned port. Those forwards reuse the exact configured command and URL matcher;
+starting the same forward again replaces its prior tunnel process.
 
 ## Plugin catalog host
 

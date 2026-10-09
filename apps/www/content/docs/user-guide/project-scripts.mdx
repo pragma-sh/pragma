@@ -53,5 +53,12 @@ Shift+Enter closes it.
   as soon as the file is saved — no restart needed.
 </Callout>
 
+The host owns each run, not the window that started it: there is **one run per script per
+worktree**, so pressing Run while the dev server is already up shows that run instead of
+starting a second one fighting for the same port. The config is always read from the project
+root, never from the worktree the script runs in. The same scripts can be started and stopped
+from [Pragma Go](/docs/user-guide/mobile#project-scripts-and-ports), with no desktop window
+open.
+
 A typical split: `run` on the left, the agent terminal in the middle,
 [browser](/docs/user-guide/browser) pointed at the dev server on the right.

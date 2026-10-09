@@ -7,8 +7,10 @@ description: Use when working on apps/pragma-go — the Expo (SDK 57) client for
 
 `apps/pragma-go` is an Expo SDK 57 app that mirrors the desktop sidebar's
 worktree navigation and turns agent approvals/questions into a swipeable inbox.
-**Front-end only** today — data comes from `lib/data/fixtures.ts` behind
-`lib/data/data-context.tsx`. See `apps/pragma-go/AGENTS.md` for the full map.
+Paired with a host over `@pragma-sh/sdk`, it streams live workspace data, agent
+chat, and fanouts; `lib/data/fixtures.ts` behind `lib/data/data-context.tsx` is
+only the unpaired dev fallback so every screen still renders. See
+`apps/pragma-go/AGENTS.md` for the full map.
 
 ## Non-negotiables
 
@@ -108,7 +110,21 @@ prebuild, so adding or renaming one needs `expo run:ios`, not just a Metro reloa
 - `supportedFamilies` is native: after editing it in `app.json`, `bun run prebuild` and
   reinstall the dev client. Layout edits alone need no rebuild.
 
+## Fanouts and code viewing
+
+- Fanouts come from one `FanoutsProvider` subscription (`lib/fanouts-context.tsx`); list
+  worktrees through `components/WorktreeGroup.tsx` so active attempts fold into a fanout row.
+  Presentation helpers come from `@pragma-sh/fanout-view` — never re-derive them here.
+- `pick`, `retry`, and `cancel` confirm in `lib/use-fanout-actions.ts`; the SDK does not.
+- Files and diffs render read-only through `components/code/CodeWebView` (twins) over
+  `@pragma-sh/code-viewer`'s document. Content is baked in at build time; there is no
+  command channel and no edit path.
+
 ## Gotchas
+
+- **No Reanimated `entering`/`exiting` inside `BottomSheet`** — on iOS the animation never
+  completes in the sheet's modal and the view stays transparent (but still in the
+  accessibility tree).
 
 - **Bun linker must be hoisted.** Root `bunfig.toml` sets `[install] linker = "hoisted"`.
   Bun's default isolated linker hides Expo's Babel plugins from Node resolution and Metro

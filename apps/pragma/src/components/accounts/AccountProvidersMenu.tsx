@@ -17,9 +17,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useAgentsList } from "@/hooks/use-agents-list";
-import { buildProviderViews, inUseProviders, switchScope, type HarnessView } from "@/lib/accounts";
+import {
+  buildProviderViews,
+  inUseProviders,
+  switchScope,
+  type HarnessView,
+} from "@pragma-sh/accounts-view";
 import { errorMessage } from "@/lib/errors";
-import { useProjectAccounts, type ProjectAccounts } from "@/state/accounts-store";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
+import { useProjectAccounts } from "@/state/accounts-store";
 
 /**
  * The toolbar's Account providers menu: every account the project's host knows

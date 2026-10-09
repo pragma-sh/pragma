@@ -200,6 +200,15 @@ Three rules make this hold up over time:
   **Unlike the percentile cuts, the ceiling is hard** — it is a budget, never
   relaxed to keep the pool non-empty, so a user whose only models cost more than
   Opus gets an explicit "no model available" rather than a surprise bill.
+- **Stored credentials out-rank ambient ones.** pi counts a provider as usable
+  when its API-key environment variable happens to be set, and an ambient key is
+  nobody's decision. A stale `OPENCODE_API_KEY` in a shell profile added 44 free
+  opencode Zen models to the pool, which then out-ranked every paid one on price
+  and failed the whole run with `401 Invalid API key` — on the phone only, since
+  the desktop app is launched from Finder and never saw the variable. So
+  `selectModelCandidates` takes `credentialedProviders` (`AuthStorage.list()`)
+  and stable-partitions the ranked list: signed-in providers first, ambient ones
+  still tried, just last. Pass it wherever a registry pool is ranked.
 - **Ranking bands, then recency.** Normalized scores are grouped into bands
   `tieBand` wide, grown down from the leader (not a fixed grid, which would split
   0.999 from 1.0). Inside a band, newer wins, then cheaper, then larger context,
@@ -207,7 +216,14 @@ Three rules make this hold up over time:
 
 ### Falling back when a model fails
 
-`runPromptWithFallback` (used by `inline-edit`) walks the ranked candidates
+**Every feature falls back through this one path.** `commit-message`,
+`commit-plan`, `pull-request`, `inline-edit`, and `ask-ai` all call
+`runPromptWithFallback` (or its streaming twin). They each used to carry their
+own loop that walked the whole catalog and threw the _last_ error, which is how
+one rejected key turned into ~50 serial 401s and an error naming a model the
+user had never chosen. Do not reintroduce a local loop.
+
+`runPromptWithFallback` walks the ranked candidates
 serially until one answers. Selection only knows what a provider _offers_, never
 what it will _serve_ — a rejected key, an exhausted subscription, or a plan that
 does not include the model all look identical until the request is made. Two

@@ -1,22 +1,17 @@
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CreatePragmaSessionOptions } from "./session.ts";
+import type { RunPromptWithFallbackOptions } from "./session.ts";
 
 const mocks = vi.hoisted(() => ({
-  createPragmaSession: vi.fn(async (_options: unknown) => ({
-    session: {
-      dispose: vi.fn(),
-    },
-  })),
-  runPromptToText: vi.fn(async () => "fix: update commit generation"),
-  selectModelCandidates: vi.fn((_kind: string) => [{ id: "fast-model" }]),
+  runPromptWithFallback: vi.fn(
+    async (_options: unknown, _prompt: string, parse: (raw: string) => unknown) =>
+      parse("fix: update commit generation"),
+  ),
 }));
 
 vi.mock("./session.ts", () => ({
-  loadModelCandidates: async (kind: string) => mocks.selectModelCandidates(kind),
-  createPragmaSession: mocks.createPragmaSession,
-  runPromptToText: mocks.runPromptToText,
+  runPromptWithFallback: mocks.runPromptWithFallback,
 }));
 
 import { generateCommitMessage } from "./commit-message.ts";
@@ -26,19 +21,20 @@ describe("generateCommitMessage", () => {
     vi.clearAllMocks();
   });
 
-  it("leaves tools enabled so the prompt can inspect repository convention", async () => {
-    await generateCommitMessage({
+  it("uses a fast model and leaves tools enabled to inspect repository convention", async () => {
+    const message = await generateCommitMessage({
       stagedDiff: "diff --git a/x b/x",
       cwd: "/repo",
       authStorage: {} as AuthStorage,
       registry: { getAvailable: vi.fn(() => []) } as unknown as ModelRegistry,
     });
 
-    const options = mocks.createPragmaSession.mock.calls[0]?.[0] as
-      | CreatePragmaSessionOptions
+    expect(message).toBe("fix: update commit generation");
+    const options = mocks.runPromptWithFallback.mock.calls[0]?.[0] as
+      | RunPromptWithFallbackOptions
       | undefined;
     expect(options).toBeDefined();
-    expect(options).not.toHaveProperty("noTools");
+    expect(options?.modelKind).toBe("fast");
     expect(options).not.toHaveProperty("tools");
   });
 });

@@ -1,11 +1,10 @@
-import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import {
   buildInlineEditPrompt,
   cleanInlineEditDraft,
   type InlineEditDraft,
   type InlineEditPromptContext,
 } from "./prompts.ts";
+import { type AiFeatureContext, featureRunOptions } from "./feature-context.ts";
 import { runPromptWithFallback } from "./session.ts";
 
 /**
@@ -17,12 +16,7 @@ import { runPromptWithFallback } from "./session.ts";
 export const INLINE_EDIT_TOOLS = ["read", "grep", "find", "ls"];
 
 /** Options for {@link generateInlineEdit}. */
-export interface GenerateInlineEditOptions extends InlineEditPromptContext {
-  /** Worktree root — the codebase the read-only tools may search. */
-  cwd: string;
-  authStorage: AuthStorage;
-  registry: ModelRegistry;
-}
+export interface GenerateInlineEditOptions extends InlineEditPromptContext, AiFeatureContext {}
 
 /** Raised when the user submitted an empty instruction. */
 export class NoInstructionError extends Error {
@@ -44,13 +38,7 @@ export function generateInlineEdit(options: GenerateInlineEditOptions): Promise<
   }
 
   return runPromptWithFallback(
-    {
-      modelKind: "standard",
-      cwd: options.cwd,
-      authStorage: options.authStorage,
-      registry: options.registry,
-      tools: INLINE_EDIT_TOOLS,
-    },
+    featureRunOptions(options, "standard", INLINE_EDIT_TOOLS),
     buildInlineEditPrompt(options),
     cleanInlineEditDraft,
   );

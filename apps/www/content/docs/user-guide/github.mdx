@@ -10,7 +10,11 @@ description: Sign in once, then open, review, and fix pull requests beside the w
 Settings → **GitHub**, or the first time you open a PR view. Pragma uses the OAuth
 **device flow** — a browser opens at `github.com/login/device` with a code — requesting
 the `repo` scope only. If you already use the `gh` CLI, Pragma can adopt its token
-instead. The token is stored in a `0600` file; nothing else reads it.
+instead. The token belongs to the host: it is stored in an owner-only file (`0600` on
+macOS and Linux, an owner-only ACL on Windows) beside the host server, so
+[Pragma Go](/docs/user-guide/mobile#commit--pr) can look up and publish pull requests even
+with no desktop window open. Nothing a paired phone can call ever returns the token itself.
+A token stored by an older Pragma is moved there once, on first launch.
 
 ## Creating a pull request
 

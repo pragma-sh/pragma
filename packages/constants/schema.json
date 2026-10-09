@@ -29,6 +29,8 @@
     "fanout",
     "updates",
     "onboarding",
+    "welcome",
+    "terminalViewport",
     "storage",
     "projects",
     "accounts",
@@ -107,6 +109,12 @@
     "onboarding": {
       "$ref": "#/definitions/Onboarding"
     },
+    "welcome": {
+      "$ref": "#/definitions/Welcome"
+    },
+    "terminalViewport": {
+      "$ref": "#/definitions/TerminalViewportPolicy"
+    },
     "storage": {
       "$ref": "#/definitions/StorageDefaults"
     },
@@ -121,6 +129,296 @@
     }
   },
   "definitions": {
+    "GitHubPullRequestState": {
+      "title": "GitHubPullRequestState",
+      "type": "string",
+      "description": "A pull request's lifecycle. `draft` is an open pull request GitHub marks as not ready; `merged` is distinct from `closed` because a merged branch is finished, not abandoned.",
+      "enum": ["draft", "open", "merged", "closed"]
+    },
+    "GitHubPullRequest": {
+      "title": "GitHubPullRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The pull request associated with a worktree's branch, found by repository plus exact head branch — which is what makes one opened outside Pragma appear.",
+      "required": ["number", "title", "url", "state", "headBranch", "baseBranch"],
+      "properties": {
+        "number": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "description": "Canonical `https://github.com/owner/repo/pull/number`, as GitHub reports it. Clients open it with the platform link handler so the OS can route it to the GitHub app; there is no `github://` scheme to invent."
+        },
+        "state": {
+          "$ref": "#/definitions/GitHubPullRequestState"
+        },
+        "headBranch": {
+          "type": "string"
+        },
+        "baseBranch": {
+          "type": "string"
+        }
+      }
+    },
+    "GitHubPublishRequest": {
+      "title": "GitHubPublishRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An explicit request to push a branch and create its pull request. Separate from committing on purpose: a commit is local and a publish is not, and the user reviews the text in between.",
+      "required": ["worktreeId", "title", "body", "draft", "requestId"],
+      "properties": {
+        "worktreeId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "base": {
+          "type": ["string", "null"],
+          "description": "Base branch. Null falls back to the parent worktree's branch, then the repository default."
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "requestId": {
+          "type": "string",
+          "description": "Caller-generated id. Pushing succeeds and the create response is lost often enough that a blind retry would open a second pull request; the host replays the first result instead."
+        }
+      }
+    },
+    "TerminalViewportPolicy": {
+      "title": "TerminalViewportPolicy",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bounds for temporary exclusive ownership of a session's PTY grid. A second client (a phone) attaching to a session the desktop is already showing has to resize the shared PTY to its own much smaller viewport; a lease makes that ownership explicit and, crucially, time-bounded — iOS can suspend an app before any client-side cleanup runs, so the host, not the client, is what restores the desktop's size.",
+      "required": ["leaseMs", "renewIntervalMs", "sweepIntervalMs"],
+      "properties": {
+        "leaseMs": {
+          "type": "integer",
+          "description": "How long a viewport lease survives without renewal before the host expires it and restores the previous grid."
+        },
+        "renewIntervalMs": {
+          "type": "integer",
+          "description": "How often a holder should renew. Comfortably shorter than `leaseMs`, so one missed renewal on a flaky tunnel does not drop the lease."
+        },
+        "sweepIntervalMs": {
+          "type": "integer",
+          "description": "How often the host sweeps for expired leases. Expiry cannot wait for the next request: the client that would have made it is the one that vanished."
+        }
+      }
+    },
+    "SessionInfo": {
+      "title": "SessionInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a client needs to know before attaching to a session it does not own.",
+      "required": ["sessionId", "cols", "rows", "alive", "leased", "generation"],
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "alive": {
+          "type": "boolean",
+          "description": "The shell is still running. An exited session is never resized or respawned."
+        },
+        "leased": {
+          "type": "boolean",
+          "description": "Another client currently owns the viewport."
+        },
+        "generation": {
+          "type": "integer",
+          "description": "Incremented on every lease grant. A release naming an older generation is stale and must not undo a newer lease."
+        }
+      }
+    },
+    "ViewportLease": {
+      "title": "ViewportLease",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A granted viewport lease. The holder resizes with `leaseId`; everyone else's resize is recorded as a desired size and applied when the lease ends. `previousCols`/`previousRows` are the grid captured at acquisition, restored on release unless a newer desired size arrived meanwhile.",
+      "required": ["leaseId", "sessionId", "cols", "rows", "generation", "expiresInMs"],
+      "properties": {
+        "leaseId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        },
+        "previousCols": {
+          "type": "integer"
+        },
+        "previousRows": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "expiresInMs": {
+          "type": "integer",
+          "description": "Milliseconds until the host expires this lease without a renewal."
+        }
+      }
+    },
+    "UsageLimit": {
+      "title": "UsageLimit",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One finite or unlimited usage category reported by a provider.",
+      "required": ["id", "title", "used", "limit"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "used": {
+          "type": "number",
+          "minimum": 0
+        },
+        "limit": {
+          "type": ["number", "null"],
+          "description": "A null limit represents unlimited usage."
+        },
+        "resetsInMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Milliseconds until this category resets, measured from `observedAt`."
+        }
+      }
+    },
+    "UsageLimitsUnavailableReason": {
+      "title": "UsageLimitsUnavailableReason",
+      "type": "string",
+      "description": "Why a provider cannot currently report usage limits. Distinct from a load failure: these are states the user or platform must resolve.",
+      "enum": ["not-configured", "authentication-required", "unsupported", "error"]
+    },
+    "UsageLimitsReady": {
+      "title": "UsageLimitsReady",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A successful provider snapshot. `summary` is an optional collapsed-row metric derived separately from the detailed limits.",
+      "required": ["status", "observedAt", "limits"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "ready"
+        },
+        "observedAt": {
+          "type": "number",
+          "description": "Unix time in milliseconds when the provider observed these values."
+        },
+        "summary": {
+          "$ref": "#/definitions/UsageLimit"
+        },
+        "limits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UsageLimit"
+          }
+        }
+      }
+    },
+    "UsageLimitsUnavailable": {
+      "title": "UsageLimitsUnavailable",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A provider state that requires user or platform action before loading.",
+      "required": ["status", "reason", "message"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "reason": {
+          "$ref": "#/definitions/UsageLimitsUnavailableReason"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "UsageLimitsResult": {
+      "title": "UsageLimitsResult",
+      "description": "Result returned by a usage-limit provider, discriminated by `status`.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageLimitsReady"
+        },
+        {
+          "$ref": "#/definitions/UsageLimitsUnavailable"
+        }
+      ]
+    },
+    "AgentIcon": {
+      "title": "AgentIcon",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "mime"],
+      "description": "Reference to a plugin-contributed agent icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
+      "properties": {
+        "hash": {
+          "type": "string",
+          "description": "Lowercase-hex sha256 of the icon bytes; also the ETag and cache key."
+        },
+        "mime": {
+          "type": "string",
+          "description": "Icon MIME type (e.g. `image/svg+xml`)."
+        }
+      }
+    },
+    "Welcome": {
+      "title": "Welcome",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Heading copy for the no-tabs welcome surfaces. Shared because both the desktop workspace and the mobile home screen render it; the mobile all-projects home has no selected location, so the located and generic wordings are two authored lists rather than one list with the location clause cut out.",
+      "required": ["locationPlaceholder", "located", "generic"],
+      "properties": {
+        "locationPlaceholder": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token inside each `located` heading that is replaced by the `PROJECT/WORKTREE` label. Split on rather than substituted, so the location can be rendered as its own highlighted element."
+        },
+        "located": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Headings for a surface that knows which project/worktree is selected. Every entry must contain `locationPlaceholder` exactly once."
+        },
+        "generic": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Headings for a surface with no selected location, such as the mobile all-projects home. Authored to parallel `located` index for index, never derived from it by string surgery."
+        }
+      }
+    },
     "ProtocolRpcMethod": {
       "title": "ProtocolRpcMethod",
       "description": "Top-level request/response RPC domains served by pragma-server over the Unix-socket frame protocol.",
@@ -145,6 +443,8 @@
         "whiteboards",
         "wsl",
         "fanouts",
+        "sessions",
+        "scripts",
         "accounts"
       ]
     },
@@ -331,7 +631,7 @@
     },
     "FanoutMemberSelector": {
       "title": "FanoutMemberSelector",
-      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid \u2014 sampling one model twice is a supported use.",
+      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid — sampling one model twice is a supported use.",
       "type": "object",
       "additionalProperties": false,
       "required": ["selector"],
@@ -389,7 +689,7 @@
         },
         "runtimeAgentId": {
           "type": "string",
-          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site \u2014 the host resolves it from the plugin's watcher metadata."
+          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site — the host resolves it from the plugin's watcher metadata."
         },
         "modelId": {
           "type": ["string", "null"]
@@ -795,7 +1095,7 @@
     },
     "FanoutMemberRequest": {
       "title": "FanoutMemberRequest",
-      "description": "Addresses one member of one fanout \u2014 used by retry and pick.",
+      "description": "Addresses one member of one fanout — used by retry and pick.",
       "type": "object",
       "additionalProperties": false,
       "required": ["memberId"],
@@ -1157,7 +1457,7 @@
       "properties": {
         "oauthClientId": {
           "type": "string",
-          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret \u2014 a distributed desktop app can't keep one secret."
+          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret — a distributed desktop app can't keep one secret."
         },
         "scopes": {
           "type": "array",
@@ -1332,7 +1632,7 @@
       "title": "BranchSyncStatus",
       "type": "object",
       "additionalProperties": false,
-      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch \u2014 the create-PR pre-flight.",
+      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch — the create-PR pre-flight.",
       "required": ["branch", "ahead", "behind", "hasUpstream"],
       "properties": {
         "branch": {
@@ -1380,7 +1680,7 @@
         },
         "parentBranch": {
           "type": ["string", "null"],
-          "description": "The branch of the worktree's parent worktree \u2014 the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
+          "description": "The branch of the worktree's parent worktree — the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
         }
       }
     },
@@ -1529,7 +1829,7 @@
       "properties": {
         "fileName": {
           "type": "string",
-          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme \u2014 the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
+          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme — the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
         },
         "modes": {
           "type": "array",
@@ -1561,7 +1861,7 @@
       "properties": {
         "apiVersion": {
           "type": "string",
-          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value \u2014 a client that never launches cannot be updated first."
+          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value — a client that never launches cannot be updated first."
         },
         "discoveryFile": {
           "type": "string",
@@ -1655,7 +1955,7 @@
         "presenceTtlMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed \u2014 the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
+          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed — the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
         },
         "tokenPrefixes": {
           "type": "array",
@@ -1680,7 +1980,7 @@
         },
         "defaultUrlPattern": {
           "type": "string",
-          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://\u2026\"` log and plain `https://\u2026` URLs (e.g. cloudflared)."
+          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://…\"` log and plain `https://…` URLs (e.g. cloudflared)."
         }
       }
     },
@@ -1854,7 +2154,7 @@
         },
         "unknownLocation": {
           "type": "string",
-          "description": "Body used when neither the project nor the worktree could be resolved \u2014 a report can arrive for a worktree the client has not loaded yet."
+          "description": "Body used when neither the project nor the worktree could be resolved — a report can arrive for a worktree the client has not loaded yet."
         }
       }
     },
@@ -1978,7 +2278,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["isWindows", "distros"],
-      "description": "Result of probing WSL availability on the host that owns a worktree \u2014 the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
+      "description": "Result of probing WSL availability on the host that owns a worktree — the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
       "properties": {
         "isWindows": {
           "type": "boolean",
@@ -2072,23 +2372,6 @@
         "canonicalId": {
           "type": "string",
           "description": "Optional provider-qualified model id (for example `anthropic/claude-sonnet-5-5`) used to match an alias such as `sonnet` against public benchmark catalogs. Auto mode falls back to `id` when absent."
-        }
-      }
-    },
-    "AgentIcon": {
-      "title": "AgentIcon",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["hash", "mime"],
-      "description": "Reference to a plugin-contributed agent icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
-      "properties": {
-        "hash": {
-          "type": "string",
-          "description": "Lowercase-hex sha256 of the icon bytes; also the ETag and cache key."
-        },
-        "mime": {
-          "type": "string",
-          "description": "Icon MIME type (e.g. `image/svg+xml`)."
         }
       }
     },
@@ -2835,6 +3118,45 @@
           "type": "string"
         },
         "worktreeId": {
+          "type": "string"
+        }
+      }
+    },
+    "PortForwardRequest": {
+      "title": "PortForwardRequest",
+      "description": "Identifies one currently open terminal-owned port to expose through the configured remote-access tunnel.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "worktreeId", "tabId", "pid", "port"],
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "PortForwardResult": {
+      "title": "PortForwardResult",
+      "description": "Public browser URL for a forwarded terminal-owned port.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": {
           "type": "string"
         }
       }
@@ -3642,7 +3964,7 @@
         },
         "diffCommit": {
           "type": ["string", "null"],
-          "description": "Commit hash a commit-scoped diff tab shows (first parent \u2192 commit); null for range diffs and non-diff tabs."
+          "description": "Commit hash a commit-scoped diff tab shows (first parent → commit); null for range diffs and non-diff tabs."
         },
         "prNumber": {
           "type": ["integer", "null"],
@@ -3721,7 +4043,7 @@
     },
     "DiffSide": {
       "title": "DiffSide",
-      "description": "Which axis of change a diff/listing record refers to. committed (base branch \u2192 HEAD), staged (HEAD \u2192 index), and unstaged (index \u2192 working tree) are the three listing axes. worktree (base branch \u2192 working tree) is the unified review side every Changes-sidebar click opens \u2014 it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
+      "description": "Which axis of change a diff/listing record refers to. committed (base branch → HEAD), staged (HEAD → index), and unstaged (index → working tree) are the three listing axes. worktree (base branch → working tree) is the unified review side every Changes-sidebar click opens — it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
       "type": "string",
       "enum": ["committed", "staged", "unstaged", "worktree"]
     },
@@ -4091,7 +4413,7 @@
         },
         "branchName": {
           "type": "string",
-          "description": "Branch the card targets \u2014 an existing project worktree branch or a new one to create."
+          "description": "Branch the card targets — an existing project worktree branch or a new one to create."
         },
         "prompt": {
           "type": "string"
@@ -4576,7 +4898,7 @@
       "title": "StorageDefaults",
       "type": "object",
       "additionalProperties": false,
-      "description": "Shipped defaults for the Settings \u2192 Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
+      "description": "Shipped defaults for the Settings → Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
       "required": [
         "largeFileMinBytes",
         "largeFileLimit",

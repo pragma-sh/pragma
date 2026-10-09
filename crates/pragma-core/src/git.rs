@@ -2082,6 +2082,33 @@ fn default_branch(root: &Path) -> String {
     .unwrap_or_else(|| "main".to_string())
 }
 
+/// Runs a git command in `root` and returns its trimmed stdout.
+///
+/// Public so `pragma_core::ai` can build the context an AI commit plan needs
+/// without a second git runner: one place decides how git is invoked, which is
+/// also the place that knows about Windows path handling.
+pub fn stdout_in(root: &Path, args: &[&str]) -> CoreResult<String> {
+    git_stdout(root, args)
+}
+
+/// Runs a git command and returns its raw stdout bytes.
+///
+/// Bytes, not text: `-z`-separated path lists are not guaranteed UTF-8, and a
+/// lossy conversion before splitting would corrupt a filename rather than a
+/// display string.
+pub fn stdout_bytes_in(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
+    run_git(root, args)
+}
+
+/// Runs a git command, returning `None` when it fails rather than erroring.
+///
+/// For probes whose failure is an answer — "this ref does not exist here" — not
+/// a fault.
+#[must_use]
+pub fn stdout_optional_in(root: &Path, args: &[&str]) -> Option<String> {
+    git_stdout(root, args).ok()
+}
+
 pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
     Ok(String::from_utf8_lossy(&run_git(root, args)?)
         .trim()

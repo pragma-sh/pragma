@@ -30,6 +30,7 @@ use pragma_constants::CONSTANTS;
 use serde_json::Value;
 
 use crate::plugins_host::{PluginsRegistry, WatcherSpec};
+use crate::sidecar::{sidecar_executable, workspace_root};
 
 /// How often the live watcher set is reconciled against live agent sessions.
 pub const RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
@@ -339,21 +340,6 @@ fn watcher_command() -> Command {
     } else {
         pragma_platform::process::command(sidecar_executable("pragma-watch"))
     }
-}
-
-fn sidecar_executable(name: &str) -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join(name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf()
 }
 
 #[cfg(test)]

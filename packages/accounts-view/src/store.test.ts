@@ -3,9 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountsListResult } from "@pragma-sh/constants";
 import type { AccountsApi } from "@pragma-sh/sdk";
 
-vi.mock("@/lib/tauri", () => ({ accountsApi: vi.fn() }));
-
-import { ProjectAccounts } from "./accounts-store";
+import { ProjectAccounts } from "./store";
 
 const list: AccountsListResult = {
   providers: [

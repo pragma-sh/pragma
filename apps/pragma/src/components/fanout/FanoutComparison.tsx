@@ -6,6 +6,7 @@ import { PickImplementationDialog } from "@/components/fanout/PickImplementation
 import { TerminalView } from "@/components/terminal/TerminalView";
 import { Button } from "@/components/ui/button";
 import {
+  changedPaths,
   MIN_COLUMN_WIDTH,
   memberLabel,
   memberTooltip,
@@ -15,7 +16,6 @@ import {
   unionChangedPaths,
   type ScratchpadRow,
 } from "@/lib/fanout";
-import type { WorktreeChanges } from "@pragma-sh/constants";
 import { listScratchpadFiles, openScratchpadTab, worktreeChangesSince } from "@/lib/tauri";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -475,10 +475,4 @@ function CodeSection({
           })}
     </section>
   );
-}
-
-/** Every path a worktree touched, committed, staged, or unstaged. */
-function changedPaths(changes: WorktreeChanges | null): string[] {
-  if (!changes) return [];
-  return [...changes.committed, ...changes.staged, ...changes.unstaged].map((file) => file.path);
 }

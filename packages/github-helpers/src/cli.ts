@@ -1,5 +1,15 @@
-/** `pragma-github` host-side sidecar. */
+/**
+ * `pragma-github` host-side sidecar.
+ *
+ * The token never reaches a client: `pragma-server` holds it, exports it into
+ * this process's environment, and proxies the result. Every command reads it
+ * from the environment rather than an argument, so it cannot end up in a
+ * process listing.
+ */
+import { readStdin } from "@pragma-sh/sidecar-kit";
+
 import { viewerLogin } from "./index.ts";
+import { findPullRequest, listBranches, publishPullRequest } from "./pull-requests.ts";
 
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -37,9 +47,64 @@ async function runViewer(args: string[]): Promise<number> {
   return 0;
 }
 
+/** Looks up the pull request for a head branch, open, merged, or closed. */
+async function runPullRequest(args: string[]): Promise<number> {
+  const pullRequest = await findPullRequest(tokenFromEnvironment(), {
+    owner: required(args, "owner"),
+    repo: required(args, "repo"),
+    head: required(args, "head"),
+    baseUrl: flag(args, "base-url"),
+  });
+  emit({ type: "result", pullRequest });
+  return 0;
+}
+
+/** Lists the repository's branches, for the base-branch picker. */
+async function runBranches(args: string[]): Promise<number> {
+  const branches = await listBranches(tokenFromEnvironment(), {
+    owner: required(args, "owner"),
+    repo: required(args, "repo"),
+    baseUrl: flag(args, "base-url"),
+  });
+  emit({ type: "result", branches });
+  return 0;
+}
+
+/**
+ * Creates a pull request. The title and body arrive on stdin rather than as
+ * arguments: a PR body is long, multi-line, and not something to put in a
+ * process listing.
+ */
+async function runCreatePullRequest(args: string[]): Promise<number> {
+  const input = JSON.parse(await readStdin()) as {
+    owner: string;
+    repo: string;
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+    draft: boolean;
+  };
+  const pullRequest = await publishPullRequest(tokenFromEnvironment(), {
+    ...input,
+    baseUrl: flag(args, "base-url"),
+  });
+  emit({ type: "result", pullRequest });
+  return 0;
+}
+
+function required(args: string[], name: string): string {
+  const value = flag(args, name);
+  if (!value) throw new Error(`missing --${name}`);
+  return value;
+}
+
 const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   status: runStatus,
   viewer: runViewer,
+  "pull-request": runPullRequest,
+  branches: runBranches,
+  "create-pull-request": runCreatePullRequest,
 };
 
 async function main(): Promise<number> {

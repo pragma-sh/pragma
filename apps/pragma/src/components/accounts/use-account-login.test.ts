@@ -2,8 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useAccountLogin } from "@/components/accounts/use-account-login";
-import type { HarnessView } from "@/lib/accounts";
-import type { ProjectAccounts } from "@/state/accounts-store";
+import type { HarnessView } from "@pragma-sh/accounts-view";
+import type { ProjectAccounts } from "@pragma-sh/accounts-view";
 
 vi.mock("@/lib/tauri", () => ({ browserOpenExternal: vi.fn() }));
 

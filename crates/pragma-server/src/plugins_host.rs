@@ -22,6 +22,7 @@ use std::time::Duration;
 #[cfg(not(test))]
 use std::time::Instant;
 
+use crate::sidecar::{sidecar_executable, workspace_root};
 use base64::Engine;
 use pragma_constants::CONSTANTS;
 use serde::{Deserialize, Serialize};
@@ -756,21 +757,6 @@ fn sidecar_command() -> Command {
     } else {
         pragma_platform::process::command(sidecar_executable(SIDECAR_NAME))
     }
-}
-
-fn sidecar_executable(name: &str) -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join(name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf()
 }
 
 #[cfg(test)]

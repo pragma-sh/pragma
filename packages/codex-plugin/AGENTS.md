@@ -66,8 +66,10 @@ chat consumers and `agent verify` cannot observe real parallel activity.
 
 ## Assistant message streaming
 
-Codex records one unescaped `event_msg`/`agent_message` rollout line per completed
-assistant message, containing the raw Markdown source. The same turn-scoped watcher that
+Codex records one rollout line per completed assistant message, containing the raw
+Markdown source. Since 0.153 that line is `event_msg`/`item_completed` with an
+`item.type: "AgentMessage"` whose text is in `item.content[].text`; older versions wrote a
+flat `event_msg`/`agent_message`. `parse.ts` reads both (re-verified on 0.160.0, 2026-10-05). The same turn-scoped watcher that
 detects aborts syncs those lines every poll (`sync_messages`), so interim replies reach
 Pragma chat consumers (mobile) while the turn is still running instead of one bubble after
 `Stop`. Message ids are `codex-<turn>-assistant-<index>` with a zero-padded index (same-poll
@@ -119,6 +121,12 @@ are suppressed to preserve its attention. Each verdict releases the lock and res
 running only if its turn still owns the active marker; a late decision after abort must
 not revive the old turn. Locks are scoped by turn so an old waiter cannot block a new one.
 
+**Code mode (0.153+).** Codex now runs every tool through one `custom_tool_call` named
+`exec` whose JavaScript `input` calls `tools.<name>({...})`, resolved by a matching
+`custom_tool_call_output`. `questions.ts` finds `tools.request_user_input(` in that input,
+parses the argument object (JSON, with a bare-key fallback), and keys the request by the
+call's `call_id`. The legacy `function_call` shape is still read.
+
 Codex 0.144.4 has no `request_user_input` hook. The turn-scoped transcript does record a
 `response_item` function call before Codex shows its question UI, followed by a matching
 `function_call_output` after resolution. The same offset-scoped watcher used for aborts parses
@@ -130,6 +138,10 @@ wizard answers them on one line and the watcher applies each answer to its nativ
 in order. Both shapes require `pragma-cli` and the
 server to carry the `questions` attention field. This transcript shape is not a stable Codex
 API and must be reverified on every tested-version bump.
+
+Prefill waits `PREFILL_SUBMIT_DELAY_MS` before its Enter: Codex 0.160 reads a fast burst of
+keystrokes as a paste and turns an Enter inside it into a newline, which left the prompt
+typed but never submitted.
 
 Launcher passes `--enable default_mode_request_user_input`; without it, Codex 0.144.4 only
 offers the tool in Plan mode and verification prompts cannot create question reports. Watcher
@@ -224,6 +236,14 @@ For local verification, register this package's absolute path in global
 `~/.pragma/config.json`. An absolute path ensures desktop plugin discovery and the host
 catalog resolve the same directory. Package metadata points Pragma to
 `dist/pragma-plugin.mjs`.
+
+**Pragma accounts get their own `CODEX_HOME`, and nothing installs the plugin there.**
+A project bound to a Pragma-added OpenAI login launches Codex with
+`CODEX_HOME=~/.pragma/accounts/openai/<id>`, which has its own `config.toml` and plugin
+cache, so the hooks installed into `~/.codex` never load and the session reports nothing
+(stuck `running`, no questions, no messages). Until account homes inherit the plugin, run
+`CODEX_HOME=<account home> sh scripts/install-local.sh` and copy the
+`[hooks.state."pragma-codex@pragma:…"]` trust entries from `~/.codex/config.toml`.
 
 **Both installs go stale independently after an edit.** The Codex side is a copy:
 `codex plugin add` snapshots this package into `~/.codex/plugins/cache/pragma/...`, so

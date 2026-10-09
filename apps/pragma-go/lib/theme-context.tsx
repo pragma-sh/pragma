@@ -131,3 +131,22 @@ async function fetchTheme(client: PragmaClient, root: string | null): Promise<Ho
 export function useHostThemeOverrides(): ThemeOverrides {
   return useContext(ThemeContext).overrides;
 }
+
+/** What a generated viewer document (terminal, scratchpad) is themed with. */
+export interface ViewerTheme {
+  scheme: "light" | "dark";
+  overrides: ThemeOverrides;
+  /** The viewer's own CSS for those overrides. */
+  themeCss: string;
+}
+
+/**
+ * The device scheme and host overrides, with the viewer CSS built from them.
+ * `toCss` must be stable (a module-level function), or the CSS rebuilds every render.
+ */
+export function useViewerTheme(toCss: (overrides: ThemeOverrides) => string): ViewerTheme {
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const overrides = useHostThemeOverrides();
+  const themeCss = useMemo(() => toCss(overrides), [overrides, toCss]);
+  return { scheme, overrides, themeCss };
+}
