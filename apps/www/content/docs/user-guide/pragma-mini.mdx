@@ -1,0 +1,57 @@
+---
+title: Pragma Mini
+description: A lightweight terminal window with Pragma's tabs and agent launcher, which opens in your home directory and moves into any project worktree.
+---
+
+Pragma Mini is a plain terminal window for the work that does not belong to a
+project yet: a quick command, a one-off agent, a look around your machine. It keeps
+Pragma's tab strip and agent launcher and drops everything else.
+
+On macOS, the tab strip uses the native transparency and blur effect, while the
+terminal stays opaque for readability. In fullscreen, the strip becomes solid.
+
+## Opening a mini window
+
+- **Menu bar**: File → **New Pragma Mini Window** (<Keys mac="⌘⇧N" other="Ctrl+⇧N" />).
+  On Linux and Windows it is in the **Pragma** menu.
+- **Dock / taskbar**: right-click Pragma's icon and choose **New Pragma Mini Window**
+  (the macOS dock menu, the Windows jump list, or the Linux desktop action).
+
+Open as many as you like. Each one is independent of the main window and of the others.
+
+## Tabs and agents
+
+Every new tab — the **+** button, <Keys mac="⌘T" other="Ctrl+T" />, or a launched agent —
+opens a shell in your **home directory**. The agent launcher to the left of the tabs is the
+same one the main window shows, pins included; agents report their status on their tab
+just as they do in a worktree, and a finished or waiting agent alerts you when its tab is
+not in front.
+
+Choose **Go to tab** in the in-window alert to select the agent's tab. On macOS,
+clicking its system notification brings the Mini window forward and selects that
+same tab, including tabs in your home directory.
+
+Tab shortcuts work as in the main window: <Keys mac="⌘W" other="Ctrl+W" /> closes a tab,
+
+<Keys mac="Ctrl+Tab" other="Alt+Tab" /> cycles, and
+<Keys mac="Alt+⇧1…9" other="Alt+⇧1…9" /> jumps to a tab. Double-click a tab (or right-click →
+**Rename**) to rename it. Closing the last tab closes the window.
+
+## Moving a tab into a project
+
+Right-click any tab → **Open in Project**, pick a project, then a worktree. The tab's
+shell restarts in that worktree's checkout, so it lands on the worktree's branch with a
+clean shell. Choose **Home Directory** to move it back. A check marks where the tab is now.
+
+Remote projects work the same way: the shell restarts on the project's host.
+
+<Callout title="Moving restarts the shell">
+  Moving a tab ends whatever was running in it, including an agent. Start the agent again once the
+  tab is in the worktree, or open a new tab for it.
+</Callout>
+
+## What a mini window does not keep
+
+Mini windows are scratch space. Their tabs are not saved: closing the window (or quitting
+Pragma) ends its shells, and a mini window is not reopened at the next launch. For work
+you want to come back to, use a worktree in the main window.

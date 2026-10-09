@@ -6075,11 +6075,15 @@ dependencies = [
 name = "pragma-platform"
 version = "1.2.1"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "pragma-constants",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.19",
  "uds_windows",
+ "windows 0.61.3",
 ]
 
 [[package]]

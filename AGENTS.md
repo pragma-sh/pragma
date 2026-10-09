@@ -179,6 +179,15 @@ than no guide.
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
   belong in `@pragma-sh/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
   so Rust and TS agree, never hard-coded in one language.
+- **Pragma Mini** windows (lightweight terminal windows, File → New Pragma Mini Window or
+  the dock/taskbar icon menu) are the same frontend bundle rendering
+  `apps/pragma/src/components/mini` when the window label starts with
+  `constants.miniWindow.labelPrefix`. Native side: `src-tauri/src/mini_window.rs`
+  (window creation, menu-event routing to the focused window, `--mini` relaunch argv);
+  the icon menu is the `dock` seam in `pragma-platform`. Mini tabs are not persisted:
+  a home-directory tab uses the `homeWorktreeId` sentinel (routed to the local host),
+  and re-homing a tab into a worktree restarts its shell there under a fresh
+  `mini-` session id, which the main window ignores for agent status.
 - First-run onboarding is **one** flow (`apps/pragma/src/components/onboarding`), not a
   stack of setup modals: a progress-bar dialog whose every step is skippable, followed by
   a `data-tour`-anchored guided tour. Adding first-run behaviour means adding a step there.
@@ -437,7 +446,7 @@ Shared rules:
 
 - **Strictness is on, everywhere.** TS runs in `strict` mode with
   `noUncheckedIndexedAccess`, `noUnusedLocals/Parameters`, etc. Rust runs clippy
-  `all` + `pedantic` as `-D warnings` and `unsafe_code = "forbid"`. Treat warnings as
+  `all` + `pedantic` as `-D warnings` and `unsafe_code = "deny"`. Treat warnings as
   errors. Don't silence a lint without a comment explaining why.
 - **Errors are values, surfaced explicitly.** TS: prefer returning/throwing typed
   errors and narrowing with `instanceof`; never swallow. Rust: return `Result`, use
@@ -589,6 +598,10 @@ TypeScript checks, the Rust checks, the Linux app build) lives in
 `.rwx/ci.yml`, and the
 macOS and Windows builds plus the Windows Rust suite stay in
 `.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
+The macOS build cleans only `v8`'s release artifacts after restoring the Rust cache:
+rust-cache can prune `target/release/gn_out`'s native archive while retaining its
+build-script fingerprint, leaving `rusty_v8` missing. Keep that targeted clean so the
+build script downloads the archive again without discarding the other cached crates.
 RWX is a task DAG, not a job list: tasks with no `use:` run in parallel, caching is
 content-based (no cache actions — add a `filter:` to keep a task's cache key off files
 it doesn't read), and the default task timeout is **10 minutes**, so any long task needs
@@ -697,20 +710,27 @@ becomes a real support burden, the place to fix it is a probe in `pragma-platfor
 **Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
 pattern is how a security guarantee quietly disappears — it is exactly what let the
 GitHub token be written world-readable on Windows. Platform differences belong in
-`crates/pragma-platform`, which owns nine seams and has a real implementation for each
+`crates/pragma-platform`, which owns ten seams and has a real implementation for each
 on every target:
 
-| Seam      | What it owns                                                                 |
-| --------- | ---------------------------------------------------------------------------- |
-| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows             |
-| `path`    | Canonical paths external programs accept (no Windows `\\?\` verbatim prefix) |
-| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows     |
-| `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning  |
-| `shell`   | Which shell a PTY launches, and its interactive arguments                    |
-| `wsl`     | Enumerating installed WSL distributions (empty, never an error, off Windows) |
-| `power`   | Holding the system awake (a helper child that dies with its owner)           |
-| `install` | Replacing the installed app with a verified update and relaunching it        |
-| `disk`    | Bytes a file occupies on disk and hard-link identity (storage accounting)    |
+| Seam      | What it owns                                                                       |
+| --------- | ---------------------------------------------------------------------------------- |
+| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows                   |
+| `path`    | Canonical paths external programs accept (no Windows `\\?\` verbatim prefix)       |
+| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows           |
+| `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning        |
+| `shell`   | Which shell a PTY launches, and its interactive arguments                          |
+| `wsl`     | Enumerating installed WSL distributions (empty, never an error, off Windows)       |
+| `power`   | Holding the system awake (a helper child that dies with its owner)                 |
+| `install` | Replacing the installed app with a verified update and relaunching it              |
+| `disk`    | Bytes a file occupies on disk and hard-link identity (storage accounting)          |
+| `dock`    | The dock / taskbar icon menu: macOS dock menu, Windows jump list, Linux `.desktop` |
+
+**`unsafe` is denied workspace-wide, with exactly one documented exception:** the `dock`
+seam, which has no safe binding (an Objective-C method added to tao's app delegate on
+macOS, COM on Windows). The workspace lint is `deny` rather than `forbid` only so that one
+module can carry `#[allow(unsafe_code)]`. Do not add another without the owner's sign-off
+and a `// SAFETY:` comment on every block.
 
 Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:
 

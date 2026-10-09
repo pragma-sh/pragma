@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use pragma_client::router::RouterDb;
+use pragma_constants::CONSTANTS;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -93,6 +94,11 @@ impl Hosts {
 
     /// Resolves the host id for a worktree (via its project).
     pub fn host_id_for_worktree(&self, db: &Db, worktree_id: &str) -> AppResult<String> {
+        // A Pragma Mini tab outside any project runs in the local home
+        // directory; it has no worktree row to look up.
+        if worktree_id == CONSTANTS.mini_window.home_worktree_id.as_str() {
+            return Ok(LOCAL_HOST.to_string());
+        }
         let worktree = db.worktree(worktree_id)?;
         let project = db.project(&worktree.project_id)?;
         Ok(self.host_id_for_project_path(&project.path))

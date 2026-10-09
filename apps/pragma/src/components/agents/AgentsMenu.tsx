@@ -19,15 +19,9 @@ import { type AgentConfig } from "@/lib/tauri";
 import { isAgentPinned, toggleAgentPin, useAgentPins } from "@/state/agent-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
-/** Dropdown and pinned chips for launching configured external agents. */
+/** Workspace toolbar agent launcher: each launch opens a new terminal tab in the worktree. */
 export function AgentsMenu() {
   const workspace = useWorkspace();
-  const pins = useAgentPins();
-  const agents = useAgentsList();
-  const [open, setOpen] = useState(false);
-  useSuppressNativeOverlayWhile(open);
-
-  const pinnedAgents = useMemo(() => agents.filter((agent) => pins.has(agent.id)), [agents, pins]);
 
   async function launch(agent: AgentConfig) {
     const tab = await workspace.createTerminalTab();
@@ -38,6 +32,29 @@ export function AgentsMenu() {
     startAgentInTab(tab.id, agent);
   }
 
+  return <AgentLauncher disabled={!workspace.selectedWorktree} onLaunch={launch} />;
+}
+
+/**
+ * Dropdown and pinned chips for launching configured external agents. The
+ * caller decides where a launch lands (the workspace opens a worktree tab, a
+ * Pragma Mini window opens a tab of its own).
+ */
+export function AgentLauncher({
+  disabled,
+  onLaunch,
+}: {
+  disabled: boolean;
+  onLaunch: (agent: AgentConfig) => void | Promise<void>;
+}) {
+  const pins = useAgentPins();
+  const agents = useAgentsList();
+  const [open, setOpen] = useState(false);
+  useSuppressNativeOverlayWhile(open);
+
+  const pinnedAgents = useMemo(() => agents.filter((agent) => pins.has(agent.id)), [agents, pins]);
+  const launch = (agent: AgentConfig) => void onLaunch(agent);
+
   return (
     <div className="flex min-w-0 items-center gap-1">
       {pinnedAgents.length > 0 ? (
@@ -46,12 +63,12 @@ export function AgentsMenu() {
             <IconButton
               aria-label={`Launch ${agent.name}`}
               className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-              disabled={!workspace.selectedWorktree}
+              disabled={disabled}
               key={agent.id}
               label={agent.name}
               size="icon"
               variant="ghost"
-              onClick={() => void launch(agent)}
+              onClick={() => launch(agent)}
             >
               <AgentIcon agent={agent} />
             </IconButton>
@@ -60,12 +77,7 @@ export function AgentsMenu() {
       ) : null}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button
-            className="text-foreground"
-            disabled={!workspace.selectedWorktree}
-            size="sm"
-            variant="outline"
-          >
+          <Button className="text-foreground" disabled={disabled} size="sm" variant="outline">
             <span>Open agent</span>
             <ChevronDown className="size-3 opacity-70" />
           </Button>
@@ -76,11 +88,7 @@ export function AgentsMenu() {
             <DropdownMenuItem disabled>No agents configured</DropdownMenuItem>
           ) : (
             agents.map((agent) => (
-              <DropdownMenuItem
-                className="gap-2"
-                key={agent.id}
-                onSelect={() => void launch(agent)}
-              >
+              <DropdownMenuItem className="gap-2" key={agent.id} onSelect={() => launch(agent)}>
                 <AgentIcon agent={agent} />
                 <span className="min-w-0 flex-1 truncate">{agent.name}</span>
                 <IconTooltip label={isAgentPinned(agent.id) ? "Unpin" : "Pin"}>

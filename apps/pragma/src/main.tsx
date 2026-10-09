@@ -9,7 +9,12 @@ import { isMacPlatform } from "@/lib/platform";
 import "@/plugins/bootstrap-bridge";
 import "@/lib/brand-icons";
 import "./index.css";
+import { MiniApp } from "@/components/mini/MiniApp";
+import { isMiniWindowLabel } from "@/lib/mini-window";
 import App from "./App.tsx";
+
+/** A Pragma Mini window runs the same bundle and renders its own lean root. */
+const isMiniWindow = isMiniWindowLabel(getCurrentWindow().label);
 
 // macOS gets a native NSVisualEffectView behind the window plus inset traffic
 // lights (see src-tauri/window_chrome.rs). The `.vibrancy` class lets the project
@@ -45,12 +50,15 @@ if (isMacPlatform()) {
 primeNotificationPermission();
 
 // Let the gateway know when this window is in front, so a paired phone is not
-// pushed an alert the user is already reading here.
-startGatewayPresenceReporting();
+// pushed an alert the user is already reading here. The main window speaks for
+// the app; a mini window reporting its own focus would contradict it.
+if (!isMiniWindow) {
+  startGatewayPresenceReporting();
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {isMiniWindow ? <MiniApp /> : <App />}
     <Toaster />
   </StrictMode>,
 );

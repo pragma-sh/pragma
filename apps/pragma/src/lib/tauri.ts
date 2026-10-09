@@ -48,6 +48,7 @@ import type {
 import { AccountsApi, type AccountLaunchEnv, type AccountsRequest } from "@pragma-sh/sdk";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 
 export type { OpenPort, ShellProfile, WslDistroList } from "@pragma-sh/constants";
@@ -300,7 +301,7 @@ export function onAgentSessionLaunch(
 
 /** Destination emitted when the user clicks a native agent notification. */
 export interface AgentNotificationClick {
-  projectId: string;
+  projectId: string | null;
   worktreeId: string;
   tabId: string;
 }
@@ -309,7 +310,7 @@ export interface AgentNotificationClick {
 export function showAgentNotification(
   title: string,
   body: string,
-  projectId: string,
+  projectId: string | null,
   worktreeId: string,
   tabId: string,
 ): Promise<boolean> {
@@ -320,8 +321,9 @@ export function showAgentNotification(
 export function onAgentNotificationClick(
   handler: (payload: AgentNotificationClick) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentNotificationClick>("pragma:agent-notification-clicked", (event) =>
-    handler(event.payload),
+  return getCurrentWebviewWindow().listen<AgentNotificationClick>(
+    "pragma:agent-notification-clicked",
+    (event) => handler(event.payload),
   );
 }
 
@@ -1700,9 +1702,15 @@ export function writeTheme(
   return invoke("write_theme", { scope, projectId: projectId ?? null, contents });
 }
 
-/** Subscribes to native menubar actions. */
+/**
+ * Subscribes to native menubar actions addressed to **this** window. Rust sends
+ * each action to one window (the focused mini window for its tab actions, the
+ * main window otherwise), so a global listener would act in every window.
+ */
 export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
-  return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
+  return getCurrentWebviewWindow().listen<MenuAction>("pragma:menu", (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Subscribes to incoming `pragma://` deep links; the payload is the raw URL. */

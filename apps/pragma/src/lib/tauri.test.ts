@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn();
+const windowListenMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
@@ -9,6 +10,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({ listen: windowListenMock }),
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import {
@@ -40,6 +44,7 @@ import {
   markAgentsSeen,
   mergeWorktreeToParent,
   openWorktree,
+  onAgentNotificationClick,
   paletteSearch,
   pathExists,
   ptyAttach,
@@ -55,6 +60,7 @@ import {
   setTabTitle,
   setWorktreeHidden,
   stageAll,
+  showAgentNotification,
   stageFile,
   stopWatchingWorktreeFiles,
   touchWorktreeMru,
@@ -71,6 +77,25 @@ import {
 } from "./tauri";
 
 describe("stream IPC wrappers", () => {
+  it("sends home-tab notifications with a nullable project and listens only on this window", async () => {
+    await showAgentNotification("Finished", "Home tab", null, "mini-home", "mini-tab");
+    expect(invokeMock).toHaveBeenCalledWith("show_agent_notification", {
+      title: "Finished",
+      body: "Home tab",
+      projectId: null,
+      worktreeId: "mini-home",
+      tabId: "mini-tab",
+    });
+    const handler = vi.fn();
+    onAgentNotificationClick(handler);
+    expect(windowListenMock).toHaveBeenCalledWith(
+      "pragma:agent-notification-clicked",
+      expect.any(Function),
+    );
+    const payload = { projectId: null, worktreeId: "mini-home", tabId: "mini-tab" };
+    windowListenMock.mock.calls.at(-1)?.[1]({ payload });
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
   it("passes standalone exports through the typed host adapter", async () => {
     invokeMock.mockResolvedValue(".pragma/scratchpads/exports/plan.html");
     expect(await exportScratchpadHtml("wt-1", "Plan", "<!doctype html>")).toBe(

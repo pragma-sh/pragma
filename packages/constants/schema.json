@@ -7,6 +7,7 @@
   "required": [
     "app",
     "window",
+    "miniWindow",
     "editorLaunchers",
     "scripts",
     "agents",
@@ -42,6 +43,9 @@
     },
     "window": {
       "$ref": "#/definitions/WindowDefaults"
+    },
+    "miniWindow": {
+      "$ref": "#/definitions/MiniWindow"
     },
     "editorLaunchers": {
       "$ref": "#/definitions/EditorLaunchers"
@@ -2612,6 +2616,66 @@
         "version": {
           "type": "string",
           "description": "Semantic version string."
+        }
+      }
+    },
+    "MiniWindow": {
+      "title": "MiniWindow",
+      "description": "Pragma Mini: a lightweight terminal window whose tabs open in the home directory and can be re-homed into any project worktree.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelPrefix",
+        "sessionIdPrefix",
+        "homeWorktreeId",
+        "launchArg",
+        "menuTitle",
+        "defaultWidth",
+        "defaultHeight",
+        "minWidth",
+        "minHeight"
+      ],
+      "properties": {
+        "labelPrefix": {
+          "description": "Prefix of every mini window's Tauri label; the frontend renders the mini UI when its window label starts with it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sessionIdPrefix": {
+          "description": "Prefix of every mini tab's PTY session id, so the main window can ignore agent reports that belong to a mini window.",
+          "type": "string",
+          "minLength": 1
+        },
+        "homeWorktreeId": {
+          "description": "Sentinel worktree id for a mini tab that is not in a project; the desktop routes it to the local host.",
+          "type": "string",
+          "minLength": 1
+        },
+        "launchArg": {
+          "description": "Command-line argument (Windows jump list, Linux desktop action) that asks the running app for a new mini window.",
+          "type": "string",
+          "minLength": 1
+        },
+        "menuTitle": {
+          "description": "Label of the menu-bar, dock-menu, jump-list, and desktop-action entry.",
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "defaultHeight": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minHeight": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     },

@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
-  "windows": ["main"],
+  "description": "enables the default permissions for the main window and every Pragma Mini window (`constants.miniWindow.labelPrefix`)",
+  "windows": ["main", "mini-*"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-close",
     "core:window:allow-toggle-maximize",
     "dialog:allow-open",
     "dialog:allow-save",

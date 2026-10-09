@@ -8,6 +8,7 @@
     "quick-start",
     "core-model",
     "worktrees",
+    "pragma-mini",
     "agent-board",
     "prompt-context",
     "browser",

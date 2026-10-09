@@ -14,23 +14,44 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The nine seams
+## The ten seams
 
-| Module    | Unix                                  | Windows                                                    |
-| --------- | ------------------------------------- | ---------------------------------------------------------- |
-| `ipc`     | `std::os::unix::net`                  | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
-| `path`    | `std::fs::canonicalize`               | …then strip the `\\?\` verbatim prefix                     |
-| `perms`   | `chmod` `0600`/`0700`                 | `icacls /inheritance:r /grant:r <user>:(F)`                |
-| `process` | `sysinfo`, `kill`, `pkill`, `ps`      | `sysinfo`, `taskkill`, `tasklist`                          |
-| `shell`   | `$SHELL`, else the constants default  | probe `pwsh.exe` then `powershell.exe`                     |
-| `wsl`     | no distributions, ever                | parse `wsl.exe --list --verbose`                           |
-| `install` | `hdiutil`/`ditto` swap; `pkexec` pkg  | NSIS `-setup.exe /S` via PowerShell helper                 |
-| `power`   | `caffeinate` / `systemd-inhibit`      | PowerShell `SetThreadExecutionState`                       |
-| `disk`    | `st_blocks * 512`; `(dev, ino)` dedup | apparent `len()`; no link identity (stable `std` has none) |
+| Module    | Unix                                                                          | Windows                                                    |
+| --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `ipc`     | `std::os::unix::net`                                                          | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
+| `path`    | `std::fs::canonicalize`                                                       | …then strip the `\\?\` verbatim prefix                     |
+| `perms`   | `chmod` `0600`/`0700`                                                         | `icacls /inheritance:r /grant:r <user>:(F)`                |
+| `process` | `sysinfo`, `kill`, `pkill`, `ps`                                              | `sysinfo`, `taskkill`, `tasklist`                          |
+| `shell`   | `$SHELL`, else the constants default                                          | probe `pwsh.exe` then `powershell.exe`                     |
+| `wsl`     | no distributions, ever                                                        | parse `wsl.exe --list --verbose`                           |
+| `install` | `hdiutil`/`ditto` swap; `pkexec` pkg                                          | NSIS `-setup.exe /S` via PowerShell helper                 |
+| `power`   | `caffeinate` / `systemd-inhibit`                                              | PowerShell `SetThreadExecutionState`                       |
+| `disk`    | `st_blocks * 512`; `(dev, ino)` dedup                                         | apparent `len()`; no link identity (stable `std` has none) |
+| `dock`    | macOS: `applicationDockMenu:` on tao's delegate; Linux: `.desktop` `Actions=` | jump-list tasks (`ICustomDestinationList`)                 |
+
+### `dock` — the only `unsafe` in the workspace
+
+The icon menu has no safe binding on either platform that needs runtime code, so this is
+the one module allowed `#[allow(unsafe_code)]` (the workspace lint is `deny`, not
+`forbid`, for exactly this reason). Every block carries a `// SAFETY:` comment.
+
+- **macOS**: tao owns the `NSApplicationDelegate` and does not implement
+  `applicationDockMenu:`, so `install` adds it (and one action method its items target)
+  with `class_addMethod`, which never replaces a method tao already defines. It must run
+  on the main thread after the delegate exists — the desktop calls it on
+  `RunEvent::Ready`. Selection calls the handler with the action's `arg`.
+- **Windows**: the jump list's Tasks relaunch the exe with `arg`; the single-instance
+  plugin forwards that argv to the running app. COM runs on a thread of its own so the
+  apartment is ours rather than whatever the webview initialised.
+- **Linux**: actions cannot be added at runtime. They are `Actions=` in the bundle's
+  `.desktop` template (`apps/pragma/src-tauri/linux/pragma.desktop`, wired as
+  `bundle.linux.{deb,rpm}.desktopTemplate`), so `install` returns
+  `DockInstall::DesktopEntry` — an explicit answer, not a no-op. That template is a copy
+  of tauri-bundler's default plus the action; keep it in step with upstream.
 
 ### `power` — a helper process, never FFI
 
-`unsafe` is forbidden, so `SleepInhibitor` holds the OS request in a child process that
+`unsafe` is denied, so `SleepInhibitor` holds the OS request in a child process that
 is killed on drop and also watches the spawning pid, so a crashed server cannot pin the
 machine awake. Lid close: Linux inhibits `handle-lid-switch`; macOS cannot without root
 (`pmset disablesleep`); Windows would mean rewriting the power plan's `LIDACTION`, which
@@ -76,7 +97,7 @@ Windows named pipes have **no read timeout and no socket-style `shutdown`**. Thi
 depends on both: the server wakes a reader blocked on a socket by shutting that socket
 down from another thread (`pragma-server/src/main.rs`, `gateway/http/response.rs`,
 `src-tauri/src/pty.rs`). Emulating that over pipes means overlapped I/O plus `CancelIoEx`,
-which needs `unsafe` — forbidden workspace-wide — for no behavioural gain on a
+which needs `unsafe` — denied workspace-wide — for no behavioural gain on a
 local-only transport. `AF_UNIX` keeps `set_read_timeout`, `try_clone`, `shutdown`, and
 `pair` working identically, so call sites are the same on every platform.
 
@@ -92,7 +113,7 @@ Consequences worth knowing:
 
 ### `perms` — `icacls`, not the Win32 API
 
-`unsafe_code = "forbid"` is set workspace-wide and every Rust binding to the Windows
+`unsafe_code = "deny"` is set workspace-wide and every Rust binding to the Windows
 security APIs needs `unsafe`. `icacls` is the in-box tool for the job, and the call is
 **checked** — a failure returns `Err` rather than leaving a secret readable.
 `create_private_file` applies the restriction to the _empty_ file before returning the

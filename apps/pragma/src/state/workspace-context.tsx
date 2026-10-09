@@ -11,6 +11,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { isMiniSessionId } from "@/lib/mini-window";
 import { useRequiredContext } from "@/lib/context";
 
 import { constants } from "@pragma-sh/constants";
@@ -2654,6 +2655,8 @@ function useAgentStatusListeners(
       return undefined;
     });
     void onAgentReport((payload) => {
+      // A Pragma Mini window shows, clears, and alerts for its own tabs.
+      if (isMiniSessionId(payload.tabId)) return;
       reportCtx.applySessionName(payload);
       if (!payload.status) {
         // A status-less report (session-name only) carries no indicator change.
@@ -2672,6 +2675,7 @@ function useAgentStatusListeners(
       return undefined;
     });
     void onAgentMessage((payload) => {
+      if (isMiniSessionId(payload.tabId)) return;
       applyAgentMessage(payload);
     }).then((unlisten) => {
       if (cancelled) {
@@ -2694,7 +2698,9 @@ function useAgentStatusListeners(
       return undefined;
     });
     void onAgentNotificationClick((payload) => {
-      void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
+      if (payload.projectId) {
+        void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
+      }
     }).then((unlisten) => {
       if (cancelled) {
         unlisten();
