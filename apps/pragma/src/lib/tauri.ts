@@ -1,3 +1,4 @@
+import type { AutoSelectProviderUsage } from "@pragma-sh/accounts-view";
 import type {
   AgentProgressEstimate,
   Fanout,
@@ -1970,27 +1971,6 @@ export function system1Check(
 }
 
 /** One launch candidate offered to auto mode. */
-/** One usage category of a provider account, as auto mode reports it. */
-export interface AutoSelectUsageLimit {
-  title: string;
-  /** 0-100; `null` for an unlimited category. */
-  percentUsed: number | null;
-  /** Milliseconds until it resets, from when the request was built. */
-  resetsInMs: number | null;
-  /** The provider's headline limit. */
-  primary: boolean;
-}
-
-/** Usage of the account an agent launches with for one provider. */
-export interface AutoSelectProviderUsage {
-  provider: string;
-  title: string;
-  /** `unknown` when usage for the account has not loaded yet. */
-  status: "ready" | "unavailable" | "unknown";
-  message?: string | null;
-  limits: AutoSelectUsageLimit[];
-}
-
 export interface AutoSelectAgentInput {
   id: string;
   name: string;

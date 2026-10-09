@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { toast } from "sonner";
 
-import { autoSelectUsage, type AccountsSnapshot } from "@/lib/accounts";
+import { autoSelectUsage, type AccountsSnapshot } from "@pragma-sh/accounts-view";
+
 import { validateModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
 import {

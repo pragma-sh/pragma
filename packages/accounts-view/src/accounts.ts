@@ -8,8 +8,30 @@ import type {
   UsageLimitsResult,
 } from "@pragma-sh/constants";
 
-import type { AutoSelectProviderUsage } from "@pragma-sh/ai-helpers";
 import { percentUsed, primaryLimit } from "./usage";
+
+/** One usage category of a provider account, as auto mode reports it. */
+export interface AutoSelectUsageLimit {
+  title: string;
+  /** 0–100; `null` for an unlimited category. */
+  percentUsed: number | null;
+  /** Milliseconds until it resets, measured from when the request was built. */
+  resetsInMs: number | null;
+  /** The provider's headline limit (its collapsed-row metric). */
+  primary: boolean;
+}
+
+/** Usage of the account one agent launches with for one provider. */
+export interface AutoSelectProviderUsage {
+  /** Well-known provider key, e.g. `anthropic`. */
+  provider: string;
+  title: string;
+  /** `unknown` when the client has not loaded this account's usage yet. */
+  status: "ready" | "unavailable" | "unknown";
+  /** Why usage is unavailable (signed out, unsupported, …). */
+  message?: string | null;
+  limits: AutoSelectUsageLimit[];
+}
 
 /** One harness that can use a provider, and the account it uses right now. */
 export interface HarnessView {
