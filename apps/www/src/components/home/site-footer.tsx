@@ -2,9 +2,16 @@ import Link from "next/link";
 
 import { privacyRoute } from "@/lib/legal";
 import { supportRoute } from "@/lib/support";
-import { appName, blogRoute, compareRoute, docsRoute, gitConfig, mobileRoute } from "@/lib/shared";
-
-const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
+import {
+  appName,
+  blogRoute,
+  compareRoute,
+  discordUrl,
+  docsRoute,
+  mobileRoute,
+  repoUrl,
+  youtubeUrl,
+} from "@/lib/shared";
 
 const COLUMNS = [
   {
@@ -34,6 +41,8 @@ const COLUMNS = [
       { label: "Blog", href: blogRoute },
       { label: "Support", href: supportRoute },
       { label: "GitHub", href: repoUrl },
+      { label: "Discord", href: discordUrl },
+      { label: "YouTube", href: youtubeUrl },
       { label: "Issues", href: `${repoUrl}/issues` },
       { label: "Privacy", href: privacyRoute },
       { label: "License (AGPL-3.0)", href: `${repoUrl}/blob/main/LICENSE` },

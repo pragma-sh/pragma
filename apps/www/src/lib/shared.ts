@@ -37,6 +37,12 @@ export const gitConfig = {
 /** Public source repository. */
 export const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 
+/** Community Discord server invite. */
+export const discordUrl = "https://discord.gg/cGzZE2wSG";
+
+/** Pragma's YouTube channel. */
+export const youtubeUrl = "https://www.youtube.com/@pragma-sh";
+
 /** Latest desktop release and platform-specific downloads. */
 export const downloadUrl = `${repoUrl}/releases/latest`;
 
