@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.3.0...scratchpad-viewer-v1.4.0) (2026-10-10)
+
+
+### Miscellaneous Chores
+
+* **scratchpad-viewer:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.3.0 to ^1.4.0
+    * @pragma-sh/scratchpad-contract bumped from ^1.3.0 to ^1.4.0
+  * devDependencies
+    * @pragma-sh/scratchpad bumped to 1.4.0
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.2.1...scratchpad-viewer-v1.3.0) (2026-10-10)
 
 

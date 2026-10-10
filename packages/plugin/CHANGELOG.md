@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.3.0...plugin-v1.4.0) (2026-10-10)
+
+
+### Miscellaneous Chores
+
+* **plugin:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.3.0 to ^1.4.0
+    * @pragma-sh/sdk bumped from ^1.3.0 to ^1.4.0
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.2.1...plugin-v1.3.0) (2026-10-10)
 
 
