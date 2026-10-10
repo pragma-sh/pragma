@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.2.1...scratchpad-viewer-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.2.1 to ^1.3.0
+    * @pragma-sh/scratchpad-contract bumped from ^1.2.1 to ^1.3.0
+  * devDependencies
+    * @pragma-sh/scratchpad bumped to 1.3.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/scratchpad-viewer-v1.2.0...scratchpad-viewer-v1.2.1) (2026-10-04)
 
 

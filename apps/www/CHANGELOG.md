@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/www-v1.2.0...www-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+* **pragma:** add Pragma Mini windows ([56f284f](https://github.com/pragma-sh/pragma/commit/56f284fadb86276f64f263b80943943509f8ab09))
+* **pragma:** add Pragma Mini windows ([0bcf311](https://github.com/pragma-sh/pragma/commit/0bcf311aa3c176dfb4ebab965f2b39c1508b520d))
+* **pragma:** post-update success screen, markdown release notes ([f2858b3](https://github.com/pragma-sh/pragma/commit/f2858b3ff28a9bcb73fe0683ba62be3086a5f1a5))
+* **pragma:** post-update success screen, markdown release notes ([70eba38](https://github.com/pragma-sh/pragma/commit/70eba38c9b70267ecdf251dab71d88aad6052529))
+* **www:** add an RSS feed for the blog ([8eb493f](https://github.com/pragma-sh/pragma/commit/8eb493f4799906ff3d2581ce81a7d89f06c66874))
+* **www:** add the Pragma Go landing page ([64f8a7b](https://github.com/pragma-sh/pragma/commit/64f8a7b0ca0dd11b20fdef8ef5d0c9d63721ef9b))
+* **www:** announce Pragma 1.3 and add the blog RSS feed ([ad076c4](https://github.com/pragma-sh/pragma/commit/ad076c4755ce657b38419d447a02f3ab8a3ef243))
+* **www:** update the home page for Pragma 1.3 ([d528d48](https://github.com/pragma-sh/pragma/commit/d528d487eadce8c00470866fd1047fdc239faec5))
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/www-v1.1.0...www-v1.2.0) (2026-10-03)
 
 

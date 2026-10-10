@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.2.0...pragma-go-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+
+
+### Bug Fixes
+
+* **pragma-go:** replace toSorted for Hermes ([7eb767a](https://github.com/pragma-sh/pragma/commit/7eb767a76aea73ab26ed8fab16290c4bedcc674d))
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.1.0...pragma-go-v1.2.0) (2026-10-03)
 
 

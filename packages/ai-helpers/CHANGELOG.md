@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.2.1...ai-helpers-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **ai-helpers:** weigh account usage limits in auto select ([35e7c5f](https://github.com/pragma-sh/pragma/commit/35e7c5f7305aa6255df668c381f7ef4ce4255fed))
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sidecar-kit bumped to 1.3.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.2.0...ai-helpers-v1.2.1) (2026-10-04)
 
 

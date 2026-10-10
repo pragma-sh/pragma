@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/watcher-kit-v1.2.1...watcher-kit-v1.3.0) (2026-10-10)
+
+
+### Miscellaneous Chores
+
+* **watcher-kit:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.3.0
+    * @pragma-sh/sdk bumped to 1.3.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/watcher-kit-v1.2.0...watcher-kit-v1.2.1) (2026-10-04)
 
 
