@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.3.0...pragma-client-v1.4.0) (2026-10-10)
+
+
+### Miscellaneous Chores
+
+* **pragma-client:** Synchronize desktop versions
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.2.1...pragma-client-v1.3.0) (2026-10-10)
 
 

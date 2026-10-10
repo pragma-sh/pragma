@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.3](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.1.2...dev-test-plugin-v1.1.3) (2026-10-10)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+
 ## [1.1.2](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.1.1...dev-test-plugin-v1.1.2) (2026-10-10)
 
 
