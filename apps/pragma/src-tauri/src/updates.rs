@@ -22,8 +22,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{http, AppHandle, Manager};
 
+use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::pty;
+
+/// Settings key holding the version an applied update is installing, so the
+/// next launch that runs it can say the update succeeded.
+const PENDING_UPDATE_KEY: &str = "updates.pendingVersion";
 
 const UPDATE_PUBLIC_KEY: &str = match option_env!("PRAGMA_UPDATE_PUBLIC_KEY") {
     Some(key) => key,
@@ -214,6 +219,28 @@ pub fn get_update_runtime(app: AppHandle) -> AppResult<UpdateRuntime> {
     })
 }
 
+/// The version a previously applied update installed, returned once — on the
+/// first launch that actually runs it — and then forgotten. `None` while no
+/// update is pending or the installer has not finished yet.
+#[tauri::command]
+pub fn take_completed_update(app: AppHandle) -> AppResult<Option<String>> {
+    let db = app.state::<Db>();
+    let Some(pending) = db.setting(PENDING_UPDATE_KEY)?.filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let versions = running_versions(&app)?;
+    if !is_running_version(&versions, &pending) {
+        return Ok(None);
+    }
+    db.set_setting(PENDING_UPDATE_KEY, "")?;
+    Ok(Some(pending))
+}
+
+/// True when `version` is the running UI (reload) or native app (restart).
+fn is_running_version(versions: &UpdateVersions, version: &str) -> bool {
+    versions.ui == version || versions.app == version
+}
+
 /// Polls the check API with this instance's platform and versions.
 #[tauri::command(async)]
 pub async fn check_for_update(app: AppHandle, check_url: Option<String>) -> AppResult<UpdateCheck> {
@@ -260,6 +287,8 @@ fn apply_blocking(app: &AppHandle, request: &ApplyRequest) -> AppResult<ApplyRes
         &request.manifest_signature,
     )?;
     let bytes = download_asset(app, &request.asset)?;
+    app.state::<Db>()
+        .set_setting(PENDING_UPDATE_KEY, &request.version)?;
     match request.apply.as_str() {
         "reload" => {
             install_ui_overlay(app, &request.version, &bytes)?;
@@ -311,6 +340,7 @@ fn install_restart_update(app: &AppHandle, installer: &Path) -> AppResult<ApplyR
         });
     match prepared {
         Ok(()) => {
+            crate::close_all_tabs(app);
             quit_for_update(app);
             Ok(restart_result(None))
         }
@@ -835,10 +865,23 @@ mod tests {
     use minisign::KeyPair;
 
     use super::{
-        linux_package_format_from_os_release, restart_result, sha256_hex, unpack_ui_archive,
-        update_platform, urlencoding_lite, validate_offer_with_key, verify_asset_signature,
-        UpdateAsset, UpdateRuntime, UpdateVersions,
+        is_running_version, linux_package_format_from_os_release, restart_result, sha256_hex,
+        unpack_ui_archive, update_platform, urlencoding_lite, validate_offer_with_key,
+        verify_asset_signature, UpdateAsset, UpdateRuntime, UpdateVersions,
     };
+
+    #[test]
+    fn pending_update_completes_when_ui_or_app_runs_it() {
+        let versions = UpdateVersions {
+            ui: "1.4.0".to_string(),
+            app: "1.3.0".to_string(),
+            server: "1.3.0".to_string(),
+            protocol: "1".to_string(),
+        };
+        assert!(is_running_version(&versions, "1.4.0"));
+        assert!(is_running_version(&versions, "1.3.0"));
+        assert!(!is_running_version(&versions, "1.5.0"));
+    }
 
     #[test]
     fn restart_result_reports_relaunch_or_fallback() {

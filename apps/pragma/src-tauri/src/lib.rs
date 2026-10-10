@@ -1100,14 +1100,22 @@ fn close_tab(
     tab_id: String,
 ) -> AppResult<()> {
     let tab = db.tab(&tab_id)?;
+    close_tab_record(&app, &db, &hosts, &tab)?;
+    publisher.trigger();
+    Ok(())
+}
+
+/// Stops whatever a tab owns (its terminal session or browser webview) and
+/// deletes its row. Callers publish the workspace mirror afterwards.
+fn close_tab_record(app: &tauri::AppHandle, db: &Db, hosts: &Hosts, tab: &Tab) -> AppResult<()> {
     match tab.kind {
         TabKind::Terminal => {
-            if let Ok(client) = hosts.for_worktree(&db, &tab.worktree_id) {
+            if let Ok(client) = hosts.for_worktree(db, &tab.worktree_id) {
                 let _ = client.kill(tab.id.clone());
             }
             let _ = hosts.unbind_session(&tab.id);
         }
-        TabKind::Browser => browser::browser_close(app, tab.id.clone())?,
+        TabKind::Browser => browser::browser_close(app.clone(), tab.id.clone())?,
         TabKind::Editor
         | TabKind::Diff
         | TabKind::PrReview
@@ -1116,9 +1124,29 @@ fn close_tab(
         | TabKind::Scratchpad
         | TabKind::Whiteboard => {}
     }
-    db.delete_tab(&tab_id)?;
-    publisher.trigger();
-    Ok(())
+    db.delete_tab(&tab.id)
+}
+
+/// Closes every tab in every project, so a restart update relaunches into a
+/// clean workspace instead of reviving tabs whose sessions died with the app.
+/// Best effort per tab: one tab that fails to close never keeps the rest open.
+pub(crate) fn close_all_tabs(app: &tauri::AppHandle) {
+    let db = app.state::<Db>();
+    let hosts = app.state::<Hosts>();
+    let tabs = match db.list_all_tabs() {
+        Ok(tabs) => tabs,
+        Err(error) => {
+            eprintln!("update: could not list tabs to close: {error}");
+            return;
+        }
+    };
+    for tab in &tabs {
+        if let Err(error) = close_tab_record(app, &db, &hosts, tab) {
+            eprintln!("update: could not close tab {}: {error}", tab.id);
+        }
+    }
+    app.state::<workspace_mirror::WorkspacePublisher>()
+        .trigger();
 }
 
 #[tauri::command]
@@ -1428,6 +1456,7 @@ pub fn run() {
             updates::check_for_update,
             updates::apply_update,
             updates::confirm_ui_overlay,
+            updates::take_completed_update,
             load_keybindings,
             set_menu_accelerators_enabled,
             read_plugin_manifests,

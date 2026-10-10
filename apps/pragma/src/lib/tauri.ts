@@ -1808,6 +1808,14 @@ export function confirmUiOverlay(): Promise<void> {
 }
 
 /**
+ * The version a previously applied update installed, returned once on the
+ * first launch that runs it (then forgotten), or null.
+ */
+export function takeCompletedUpdate(): Promise<string | null> {
+  return invoke<string | null>("take_completed_update");
+}
+
+/**
  * Probes WSL on the host that owns `worktreeId`: whether it runs Windows and
  * which distributions are installed there.
  *

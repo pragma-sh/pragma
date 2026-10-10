@@ -19,6 +19,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
+import { UpdateSuccessDialog } from "@/components/updates/UpdateSuccessDialog";
 import { useRequiredContext } from "@/lib/context";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -27,6 +29,7 @@ import {
   confirmUiOverlay,
   getUpdateRuntime,
   readConfig,
+  takeCompletedUpdate,
   type UpdateApplyResult,
   type UpdateCheck,
   type UpdateRuntime,
@@ -56,10 +59,14 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
+  const [completedVersion, setCompletedVersion] = useState<string | null>(null);
   const settingsRef = useRef<OtherSettings>({});
 
   useEffect(() => {
     void confirmUiOverlay().catch(() => undefined);
+    void takeCompletedUpdate()
+      .then(setCompletedVersion)
+      .catch(() => undefined);
   }, []);
 
   const loadSettings = useCallback(async (): Promise<OtherSettings> => {
@@ -177,9 +184,9 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
             <AlertDialogDescription>{constants.updates.restartWarningBody}</AlertDialogDescription>
           </AlertDialogHeader>
           {offer?.notes ? (
-            <p className="max-h-[min(22rem,40vh)] min-h-0 overflow-y-auto pr-1 text-sm break-words whitespace-pre-wrap text-muted-foreground">
-              {offer.notes}
-            </p>
+            <div className="max-h-[min(22rem,40vh)] min-h-0 overflow-y-auto pr-1">
+              <GitHubMarkdown>{offer.notes}</GitHubMarkdown>
+            </div>
           ) : null}
           <AlertDialogFooter>
             <Button variant="ghost" onClick={() => setRestartOpen(false)}>
@@ -191,6 +198,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <UpdateSuccessDialog version={completedVersion} onClose={() => setCompletedVersion(null)} />
     </UpdatesContext.Provider>
   );
 }
