@@ -477,7 +477,10 @@ Shared rules:
 ## Git hooks (Husky)
 
 - **pre-commit:** `lint-staged` auto-fixes staged files (`oxlint --fix`, `oxfmt --write`,
-  `rustfmt`). Fixing — not just checking — is the local behavior.
+  `rustfmt`). Fixing — not just checking — is the local behavior. oxfmt runs with
+  `--no-error-on-unmatched-pattern`: a staged file in its `ignorePatterns` (e.g.
+  `packages/constants/values.json`) otherwise leaves it no targets, it exits non-zero,
+  and lint-staged kills every other task and aborts the commit.
 - **commit-msg:** commitlint validates the message.
 - **pre-push:** full `typecheck` + `cargo fmt --check` + sidecar staging via
   `bun run --filter pragma sidecar:server` (resolves Git Bash on Windows) +
