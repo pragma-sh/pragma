@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/plugin",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Public TypeScript API for building Pragma plugins.",
   "homepage": "https://github.com/pragma-sh/pragma#readme",
   "bugs": "https://github.com/pragma-sh/pragma/issues",
@@ -74,8 +74,8 @@
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma-sh/constants": "^1.2.1",
-    "@pragma-sh/sdk": "^1.2.1",
+    "@pragma-sh/constants": "^1.3.0",
+    "@pragma-sh/sdk": "^1.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

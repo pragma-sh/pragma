@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/constants-v1.2.1...constants-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **constants:** add pragma mini window constants ([78fb84b](https://github.com/pragma-sh/pragma/commit/78fb84bbfaeb302d16a5b65241ad27e40d8ab7e5))
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+* **pragma:** add Pragma Mini windows ([56f284f](https://github.com/pragma-sh/pragma/commit/56f284fadb86276f64f263b80943943509f8ab09))
+* **pragma:** post-update success screen, markdown release notes ([f2858b3](https://github.com/pragma-sh/pragma/commit/f2858b3ff28a9bcb73fe0683ba62be3086a5f1a5))
+* **pragma:** post-update success screen, markdown release notes ([70eba38](https://github.com/pragma-sh/pragma/commit/70eba38c9b70267ecdf251dab71d88aad6052529))
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/constants-v1.2.0...constants-v1.2.1) (2026-10-04)
 
 

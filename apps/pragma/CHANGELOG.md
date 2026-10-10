@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.2.1...pragma-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+* **pragma:** add Pragma Mini windows ([56f284f](https://github.com/pragma-sh/pragma/commit/56f284fadb86276f64f263b80943943509f8ab09))
+* **pragma:** add Pragma Mini windows ([0bcf311](https://github.com/pragma-sh/pragma/commit/0bcf311aa3c176dfb4ebab965f2b39c1508b520d))
+* **pragma:** post-update success screen, markdown release notes ([f2858b3](https://github.com/pragma-sh/pragma/commit/f2858b3ff28a9bcb73fe0683ba62be3086a5f1a5))
+* **pragma:** post-update success screen, markdown release notes ([70eba38](https://github.com/pragma-sh/pragma/commit/70eba38c9b70267ecdf251dab71d88aad6052529))
+* **pragma:** send account usage limits to auto mode ([093012e](https://github.com/pragma-sh/pragma/commit/093012e8b066a3bb3dff116cdb0f952e2073e339))
+
+
+### Bug Fixes
+
+* **accounts-view:** own the auto-select usage types ([8fe5317](https://github.com/pragma-sh/pragma/commit/8fe5317370c4fe271e61d94068462bcc427efad8))
+* **ci:** restore V8 archive and window event mocks ([8b9e4a8](https://github.com/pragma-sh/pragma/commit/8b9e4a8724b879895f6aa018701847cd9c04e582))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.3.0
+    * @pragma-sh/plugin bumped to 1.3.0
+    * @pragma-sh/scratchpad bumped to 1.3.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.3.0
+    * @pragma-sh/sdk bumped to 1.3.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.2.0...pragma-v1.2.1) (2026-10-04)
 
 

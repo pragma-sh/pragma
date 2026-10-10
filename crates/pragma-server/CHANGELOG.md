@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.2.1...pragma-server-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+
+
+### Bug Fixes
+
+* **pragma-server:** finalize retried fanout picks cleanly ([0df40b5](https://github.com/pragma-sh/pragma/commit/0df40b57e6536cfd1574d9be9591cd47dfa0702d))
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.2.0...pragma-server-v1.2.1) (2026-10-04)
 
 

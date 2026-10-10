@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.1.1...codex-plugin-v1.2.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-go:** host-owned terminals, scripts, accounts, and commit/PR for the mobile client ([af59a78](https://github.com/pragma-sh/pragma/commit/af59a78ca108d6c07258529d4d7d6fe0977cfd4c))
+
+
+### Bug Fixes
+
+* **codex-plugin:** delay prefill submit after typing ([8dbf316](https://github.com/pragma-sh/pragma/commit/8dbf316ecb1e41d961fbed725f1f35e55af58f25))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.3.0
+    * @pragma-sh/watcher-kit bumped to 1.3.0
+
 ## [1.1.1](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.1.0...codex-plugin-v1.1.1) (2026-10-04)
 
 

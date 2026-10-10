@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.2.1...pragma-platform-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **pragma-platform:** add dock and taskbar icon menu seam ([482759b](https://github.com/pragma-sh/pragma/commit/482759b6b63a7ad3e27a50adb100cec7d9540d18))
+* **pragma:** add Pragma Mini windows ([56f284f](https://github.com/pragma-sh/pragma/commit/56f284fadb86276f64f263b80943943509f8ab09))
+
+
+### Bug Fixes
+
+* **ci:** restore V8 archive and window event mocks ([8b9e4a8](https://github.com/pragma-sh/pragma/commit/8b9e4a8724b879895f6aa018701847cd9c04e582))
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.2.0...pragma-platform-v1.2.1) (2026-10-04)
 
 
