@@ -10,14 +10,25 @@ Settings → **Other**.
 
 ## Two kinds of update
 
-| Kind        | What changes          | What happens when you install it                                                |
-| ----------- | --------------------- | ------------------------------------------------------------------------------- |
-| **Reload**  | Only the interface    | The window reloads in place. Terminals and agents are untouched.                |
-| **Restart** | The app or its server | Pragma quits, installs the new version over the old one, and relaunches itself. |
+| Kind        | What changes          | What happens when you install it                                                                  |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------------------- |
+| **Reload**  | Only the interface    | The window reloads in place. Terminals and agents are untouched.                                  |
+| **Restart** | The app or its server | Pragma closes your tabs, quits, installs the new version over the old one, and relaunches itself. |
 
 A restart update asks first, because it can restart the Pragma server that runs your
-terminals: open terminal sessions stop. After relaunching, Pragma replaces the server
-only if the update shipped a different server binary.
+terminals. Just before quitting, Pragma closes every open tab in every project and stops
+its terminal session, so it relaunches into a clean workspace. After relaunching, Pragma
+replaces the server only if the update shipped a different server binary.
+
+The confirmation shows the release notes for the version you are about to install.
+
+## After an update
+
+The first time the new version runs, Pragma confirms that the update succeeded. The same
+screen has buttons that open a prefilled post about Pragma on X, Hacker News, Reddit,
+LinkedIn, or Bluesky, and a **Star on GitHub** button. If you are signed in to GitHub in
+Pragma, the button stars the repository for you; otherwise it opens the repository page.
+It is not shown if you have already starred Pragma.
 
 ## How a restart update installs
 

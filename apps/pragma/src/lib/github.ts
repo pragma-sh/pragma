@@ -1,6 +1,6 @@
 import type { GitHubRepoRef } from "@pragma-sh/constants";
 import { constants } from "@pragma-sh/constants";
-import { Octokit } from "octokit";
+import { Octokit, RequestError } from "octokit";
 
 import {
   cachedFetch,
@@ -630,6 +630,31 @@ export const listIssueComments = defineCachedRepoRead(
     }));
   },
 );
+
+/** True when the signed-in user has starred `repo`. */
+export async function isRepoStarred(repo: { owner: string; repo: string }): Promise<boolean> {
+  const octokit = await client();
+  try {
+    await octokit.rest.activity.checkRepoIsStarredByAuthenticatedUser({
+      owner: repo.owner,
+      repo: repo.repo,
+    });
+    return true;
+  } catch (cause) {
+    // GitHub answers "not starred" with a 404 rather than a body.
+    if (cause instanceof RequestError && cause.status === 404) return false;
+    throw cause;
+  }
+}
+
+/** Stars `repo` as the signed-in user. */
+export async function starRepo(repo: { owner: string; repo: string }): Promise<void> {
+  const octokit = await client();
+  await octokit.rest.activity.starRepoForAuthenticatedUser({
+    owner: repo.owner,
+    repo: repo.repo,
+  });
+}
 
 /** Posts a new conversation (issue) comment on the PR as the signed-in user. */
 export async function createIssueComment(

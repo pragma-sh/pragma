@@ -288,7 +288,7 @@
     "buttonLabel": "Install Update",
     "changelogLabel": "View changelog",
     "restartWarningTitle": "This update restarts the app server",
-    "restartWarningBody": "Open terminal sessions will stop. Save anything you need before installing.",
+    "restartWarningBody": "Pragma will close all open tabs and stop their terminal sessions, then relaunch. Save anything you need before installing.",
     "applyModes": [
       "reload",
       "restart"

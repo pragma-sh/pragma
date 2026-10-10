@@ -687,7 +687,10 @@ verified native installer **in place and relaunches** (`install_restart_update` 
 read-only, Finder-less mounted DMG next to the bundle the app runs from, then a detached
 helper swaps it in by rename after exit and `open`s it; Windows runs the NSIS setup `/S`
 after exit and relaunches; Linux installs the `.deb`/`.rpm` through `pkexec` before
-quitting and relaunches. The app quits itself ~750ms after returning
+quitting and relaunches. Just before quitting it closes **every** tab in every
+project (`close_all_tabs` in `lib.rs`, the same per-tab teardown as `close_tab`), so the
+relaunch opens a clean workspace rather than tabs whose sessions died; nothing is closed
+when it falls back to the installer. The app quits itself ~750ms after returning
 `{ relaunching: true }`; the helper logs to `install.log` beside the downloaded
 installers. When in place is impossible (not a bundle, read-only destination, no
 `pkexec`, prompt cancelled, `.msi`) it falls back to opening the installer and returns
@@ -700,7 +703,14 @@ React-only releases. Rust extracts it under the instance update directory and se
 that tree through the private `pragma-ui` protocol; subsequent launches navigate back to
 the installed overlay. A `.pending` marker is removed only after `UpdatesProvider` mounts;
 an overlay that fails before that point is deleted on next launch so bundled UI recovers.
-Do not broaden that protocol to arbitrary app-data paths. Every production asset and the
+Do not broaden that protocol to arbitrary app-data paths.
+Applying either kind records the target version under the `updates.pendingVersion`
+setting; `take_completed_update` hands it back exactly once, on the first launch whose UI
+or app version equals it, and `UpdateSuccessDialog` then shows the post-update screen
+(share links from `lib/share-pragma.ts`, and a GitHub star row: hidden when already
+starred, a one-click star through `lib/github.ts` when signed in, a repo link otherwise).
+The setting lives in the client DB rather than `localStorage` because a reload update
+moves the webview to the `pragma-ui` origin, which has its own storage. Every production asset and the
 manifest binding its version/apply mode/URL are minisign-verified against
 `PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. **That key and every `.sig` are
 base64-wrapped minisign boxes** — the form `tauri signer generate` and `tauri signer sign`
