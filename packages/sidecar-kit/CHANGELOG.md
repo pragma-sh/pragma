@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.3.0...sidecar-kit-v1.4.0) (2026-10-16)
+
+
+### Bug Fixes
+
+* **sidecar-kit:** exit when the supervisor stops reading stdout ([1570fa1](https://github.com/pragma-sh/pragma/commit/1570fa1e39ec48a5fe80b2255345f743a98de984))
+* stop whiteboard renders crashing pragma-server and orphaned sidecars spinning ([fc18124](https://github.com/pragma-sh/pragma/commit/fc18124c2956cfcd16e37d99361468120fac2515))
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/sidecar-kit-v1.2.1...sidecar-kit-v1.3.0) (2026-10-10)
 
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.3.0...scratchpad-v1.4.0) (2026-10-16)
+
+
+### Bug Fixes
+
+* **scratchpad:** back off whiteboard polling after a render failure ([6de9a1a](https://github.com/pragma-sh/pragma/commit/6de9a1a5eacf4413c3cb0491805a6c4f6f37a644))
+* stop whiteboard renders crashing pragma-server and orphaned sidecars spinning ([fc18124](https://github.com/pragma-sh/pragma/commit/fc18124c2956cfcd16e37d99361468120fac2515))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sdk bumped from ^1.3.0 to ^1.4.0
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.2.1...scratchpad-v1.3.0) (2026-10-10)
 
 

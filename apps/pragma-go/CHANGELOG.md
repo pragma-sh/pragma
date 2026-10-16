@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.3.0...pragma-go-v1.3.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pragma-go:** bump the store version to 1.3.0 ([0cd2240](https://github.com/pragma-sh/pragma/commit/0cd2240b0caea3041d983eddaaef42bcc4e8c5c8))
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.2.0...pragma-go-v1.3.0) (2026-10-10)
 
 

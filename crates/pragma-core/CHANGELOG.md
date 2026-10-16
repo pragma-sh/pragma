@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.3.0...pragma-core-v1.4.0) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pragma-core:** assert one whiteboard engine; cancel pragma-ai login on broken pipe ([596295d](https://github.com/pragma-sh/pragma/commit/596295d93c19ea55c2464c2aea4d263bd0488e53))
+* **pragma-core:** serialize whiteboard renders on one engine ([b098b4b](https://github.com/pragma-sh/pragma/commit/b098b4bba237a0b35e3b9d9ca29720db77c031bf))
+* stop whiteboard renders crashing pragma-server and orphaned sidecars spinning ([fc18124](https://github.com/pragma-sh/pragma/commit/fc18124c2956cfcd16e37d99361468120fac2515))
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.2.1...pragma-core-v1.3.0) (2026-10-10)
 
 
