@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.3.0...pragma-v1.4.0) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pragma:** stop scratchpad SVG and indented JSX leaking editor markup ([71c6d83](https://github.com/pragma-sh/pragma/commit/71c6d83624adb1d7f1ffe72954db18141e1ef462))
+* stop whiteboard renders crashing pragma-server and orphaned sidecars spinning ([fc18124](https://github.com/pragma-sh/pragma/commit/fc18124c2956cfcd16e37d99361468120fac2515))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/scratchpad bumped to 1.4.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.2.1...pragma-v1.3.0) (2026-10-10)
 
 

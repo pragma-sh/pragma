@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/www-v1.3.0...www-v1.4.0) (2026-10-16)
+
+
+### Features
+
+* **www:** add region-scoped analytics consent ([b2dbcb0](https://github.com/pragma-sh/pragma/commit/b2dbcb0a2ee4746370c53478a8071d09e9bac1c2))
+* **www:** add region-scoped analytics consent ([e47d732](https://github.com/pragma-sh/pragma/commit/e47d73254511ec376a2b4248c5a12f414baf4c55))
+
 ## [1.3.0](https://github.com/pragma-sh/pragma/compare/www-v1.2.0...www-v1.3.0) (2026-10-10)
 
 
