@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.4](https://github.com/pragma-sh/pragma/compare/grok-plugin-v1.1.3...grok-plugin-v1.1.4) (2026-10-22)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/watcher-kit bumped to 1.4.0
+
 ## [1.1.3](https://github.com/pragma-sh/pragma/compare/grok-plugin-v1.1.2...grok-plugin-v1.1.3) (2026-10-17)
 
 

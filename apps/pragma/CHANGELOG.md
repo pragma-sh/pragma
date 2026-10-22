@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.3.1...pragma-v1.4.0) (2026-10-22)
+
+
+### Features
+
+* **pragma:** drive board cards from live worktrees and fanouts ([2ebcfc0](https://github.com/pragma-sh/pragma/commit/2ebcfc0d31f20f48c025d86304170db16ab09eea))
+* **pragma:** embed a worktree preview in the agent board ([f574c3c](https://github.com/pragma-sh/pragma/commit/f574c3ce080498855cd16e908e0597366a0c0826))
+* **pragma:** fan out from agent board drafts ([1192d41](https://github.com/pragma-sh/pragma/commit/1192d416239c368a739f216a692bfcbcd612bc91))
+* **pragma:** model the agent board from live worktrees ([357ccea](https://github.com/pragma-sh/pragma/commit/357cceaf88cbaab4974dd67eaf18aaac6ed56e87))
+* **pragma:** persist project board preferences ([48c598c](https://github.com/pragma-sh/pragma/commit/48c598c56a279d87e4567635d428e08b0834f013))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+* **pragma:** render the live agent board full frame ([5126c49](https://github.com/pragma-sh/pragma/commit/5126c49a6dfadf8395647a9bf6729959229363d6))
+* **pragma:** suggest drafts for the agent board ([edcc953](https://github.com/pragma-sh/pragma/commit/edcc953daa25635e83b0dac673ec56afdbd9bf63))
+
+
+### Bug Fixes
+
+* **ci:** gate native menu regression test to Unix ([dbfa007](https://github.com/pragma-sh/pragma/commit/dbfa0079561e6ee1d984b166169a19880cb0018d))
+* **pragma:** repair agent board navigation and suggestion loading ([3f5e56b](https://github.com/pragma-sh/pragma/commit/3f5e56b26fb7639025390288f15253e4bd2de1a5))
+* **pragma:** restore Linux native window menu ([449a3cc](https://github.com/pragma-sh/pragma/commit/449a3cc165e6941a111001533322bc40985c0e09))
+* **pragma:** restore the Linux native Window menu ([55659ac](https://github.com/pragma-sh/pragma/commit/55659ac7d324e925edfb2a8947eb1abe5349aec0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/scratchpad bumped to 1.4.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.3.0...pragma-v1.3.1) (2026-10-17)
 
 
