@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/www-v1.4.0...www-v1.5.0) (2026-10-22)
+
+
+### Features
+
+* **opencode-plugin:** support the OpenCode v2 plugin API, accounts, and usage ([4185f14](https://github.com/pragma-sh/pragma/commit/4185f14c1b3b89a2f796848aac03079df78ad6e7))
+* **plugin:** add suggested draft providers ([438de7e](https://github.com/pragma-sh/pragma/commit/438de7e1ed8b39e65689d9470c3da1c9d14633c8))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+
+
+### Bug Fixes
+
+* **pragma:** restore the Linux native Window menu ([55659ac](https://github.com/pragma-sh/pragma/commit/55659ac7d324e925edfb2a8947eb1abe5349aec0))
+
 ## [1.4.0](https://github.com/pragma-sh/pragma/compare/www-v1.3.0...www-v1.4.0) (2026-10-17)
 
 

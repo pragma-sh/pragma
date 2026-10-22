@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.1.3...dev-test-plugin-v1.2.0) (2026-10-22)
+
+
+### Features
+
+* **plugin:** add suggested draft providers ([438de7e](https://github.com/pragma-sh/pragma/commit/438de7e1ed8b39e65689d9470c3da1c9d14633c8))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+
 ## [1.1.3](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.1.2...dev-test-plugin-v1.1.3) (2026-10-17)
 
 
