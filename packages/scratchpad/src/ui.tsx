@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useLocalState } from "./local-state";
 
 import { alignDiffLines } from "./diff";
 import type { DiffLine } from "./diff";
@@ -200,7 +201,8 @@ export function AskQuestion({
   onAnswer,
   onMissingAgent,
 }: AskQuestionProps): React.JSX.Element {
-  const [sent, setSent] = useState<string | null>(null);
+  const stateKey = `question:${question}`;
+  const [sent, setSent] = useLocalState<string | null>(null, `${stateKey}:sent`);
   const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const submit = (value: string): Promise<boolean> =>
@@ -225,6 +227,7 @@ export function AskQuestion({
             pending={pending}
             submit={submit}
             submitLabel={submitLabel}
+            stateKey={stateKey}
             type={type}
           />
           {!enabled ? (
@@ -243,6 +246,7 @@ export function AskQuestion({
 }
 
 interface AskQuestionControlsProps {
+  stateKey: string;
   allowOpenResponse: boolean;
   enabled: boolean;
   options: readonly AskQuestionOption[];
@@ -254,6 +258,7 @@ interface AskQuestionControlsProps {
 
 /** Choice list or free-text form of an unanswered {@link AskQuestion}. */
 function AskQuestionControls({
+  stateKey,
   allowOpenResponse,
   enabled,
   options,
@@ -265,6 +270,7 @@ function AskQuestionControls({
   if (type === "text") {
     return (
       <AskQuestionForm
+        stateKey={stateKey}
         enabled={enabled}
         pending={pending}
         submit={submit}
@@ -274,6 +280,7 @@ function AskQuestionControls({
   }
   return (
     <AskQuestionChoices
+      stateKey={stateKey}
       allowOpenResponse={allowOpenResponse}
       choices={type === "yes-no" ? YES_NO_OPTIONS : options}
       enabled={enabled}
@@ -295,6 +302,7 @@ function choiceValue(option: AskQuestionOption): string {
 }
 
 interface AskQuestionChoicesProps {
+  stateKey: string;
   allowOpenResponse: boolean;
   choices: readonly AskQuestionOption[];
   enabled: boolean;
@@ -310,6 +318,7 @@ interface AskQuestionChoicesProps {
  * choice in the submitted answer; multiple selections are joined with commas.
  */
 function AskQuestionChoices({
+  stateKey,
   allowOpenResponse,
   choices,
   enabled,
@@ -319,8 +328,8 @@ function AskQuestionChoices({
   submitLabel,
 }: AskQuestionChoicesProps): React.JSX.Element {
   const group = useId();
-  const [selected, setSelected] = useState<readonly string[]>([]);
-  const [other, setOther] = useState("");
+  const [selected, setSelected] = useLocalState<readonly string[]>([], `${stateKey}:selected`);
+  const [other, setOther] = useLocalState("", `${stateKey}:other`);
   const items = allowOpenResponse ? [...choices, OTHER_OPTION] : choices;
 
   const toggle = (value: string): void =>
@@ -475,17 +484,19 @@ function Choice({
 
 /** Free-text answer field for a `text` {@link AskQuestion}. */
 function AskQuestionForm({
+  stateKey,
   enabled,
   pending,
   submit,
   submitLabel,
 }: {
+  stateKey: string;
   enabled: boolean;
   pending: boolean;
   submit: (value: string) => Promise<boolean>;
   submitLabel: string;
 }): React.JSX.Element {
-  const [answer, setAnswer] = useState("");
+  const [answer, setAnswer] = useLocalState("", `${stateKey}:answer`);
   const send = (): void => {
     const value = answer.trim();
     if (!enabled || !value) return;
@@ -535,7 +546,10 @@ export function DiffReview({
   onDecision,
   onMissingAgent,
 }: DiffReviewProps): React.JSX.Element {
-  const [decision, setDecision] = useState<boolean | null>(null);
+  const [decision, setDecision] = useLocalState<boolean | null>(
+    null,
+    `diff:${file ?? title}:decision`,
+  );
   const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const decide = (accepted: boolean): Promise<boolean> =>

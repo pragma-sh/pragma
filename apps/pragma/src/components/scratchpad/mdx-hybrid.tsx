@@ -392,7 +392,7 @@ export const MdxJsxContainer = Node.create({
   },
 });
 
-function MdxRenderedBlockView({ extension, node, selected }: ReactNodeViewProps) {
+function MdxRenderedBlockView({ editor, extension, getPos, node, selected }: ReactNodeViewProps) {
   const { raw, context, kind } = node.attrs as {
     raw: string;
     context: string;
@@ -403,6 +403,17 @@ function MdxRenderedBlockView({ extension, node, selected }: ReactNodeViewProps)
   }
   const options = extension.options as MdxRenderedBlockOptions;
   const source = context ? `${context}\n\n${raw}` : raw;
+  let occurrence = 0;
+  const position = getPos();
+  editor.state.doc.descendants((candidate, pos) => {
+    if (
+      position !== undefined &&
+      pos < position &&
+      candidate.type === node.type &&
+      candidate.attrs.raw === raw
+    )
+      occurrence++;
+  });
   return (
     <NodeViewWrapper
       className={
@@ -421,6 +432,7 @@ function MdxRenderedBlockView({ extension, node, selected }: ReactNodeViewProps)
         }
       >
         <ScratchpadPreview
+          blockKey={JSON.stringify([raw, occurrence])}
           filePath={options.filePath}
           getAttachedAgentTabId={options.getAttachedAgentTabId}
           onRequestAgentAttachment={options.onRequestAgentAttachment}

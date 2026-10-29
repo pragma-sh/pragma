@@ -10,6 +10,7 @@ import { scratchpadTheme, type ScratchpadTheme } from "@/lib/scratchpad-theme";
 const THEME_STYLE_ELEMENT_ID = "pragma-scratchpad-theme";
 
 interface ScratchpadPreviewProps {
+  blockKey?: string;
   source: string;
   filePath: string;
   worktreeId: string;
@@ -19,12 +20,14 @@ interface ScratchpadPreviewProps {
 
 /** Sandboxed live renderer for one scratchpad MDX component region. */
 export function ScratchpadPreview({
+  blockKey = "",
   source,
   filePath,
   worktreeId,
   getAttachedAgentTabId,
   onRequestAgentAttachment,
 }: ScratchpadPreviewProps) {
+  const storageKey = `pragma:scratchpad:v1:${JSON.stringify([worktreeId, filePath, blockKey])}`;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const tokenRef = useRef(crypto.randomUUID());
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
@@ -39,7 +42,15 @@ export function ScratchpadPreview({
     void buildScratchpadPreview({ source, filePath, worktreeId })
       .then((bundle) => {
         if (current) {
-          setSrcDoc(previewDocument(bundle.code, bundle.css, tokenRef.current, scratchpadTheme()));
+          let saved = "{}";
+          try {
+            saved = localStorage.getItem(storageKey) ?? "{}";
+          } catch {
+            /* Storage can be unavailable. */
+          }
+          setSrcDoc(
+            previewDocument(bundle.code, bundle.css, tokenRef.current, scratchpadTheme(), saved),
+          );
         }
         return undefined;
       })
@@ -52,13 +63,14 @@ export function ScratchpadPreview({
     return () => {
       current = false;
     };
-  }, [source, filePath, worktreeId]);
+  }, [source, filePath, worktreeId, storageKey]);
 
   useScratchpadFrameBridge({
     iframeRef,
     token: tokenRef.current,
     worktreeId,
     srcDoc,
+    storageKey,
     getAttachedAgentTabId,
     onRequestAgentAttachment,
     onRenderError: setError,
@@ -85,10 +97,16 @@ export function ScratchpadPreview({
   );
 }
 
-function previewDocument(code: string, css: string, token: string, theme: ScratchpadTheme): string {
+function previewDocument(
+  code: string,
+  css: string,
+  token: string,
+  theme: ScratchpadTheme,
+  saved: string,
+): string {
   const nonce = crypto.randomUUID().replaceAll("-", "");
   const runtimeUrl = new URL(frameRuntimeUrl, location.href).href;
-  const bootstrap = bridgeBootstrap(token).replaceAll("</script", "<\\/script");
+  const bootstrap = bridgeBootstrap(token, saved).replaceAll("</script", "<\\/script");
   const safeCode = code.replaceAll("</script", "<\\/script");
   const execution = import.meta.env.DEV
     ? `<script type="module" nonce="${nonce}">import ${JSON.stringify(runtimeUrl)};\n${safeCode}</script>`
@@ -102,7 +120,7 @@ function previewDocument(code: string, css: string, token: string, theme: Scratc
 </head><body><div id="root"></div>${execution}</body></html>`;
 }
 
-function bridgeBootstrap(token: string): string {
+function bridgeBootstrap(token: string, saved: string): string {
   return `(() => {
     const token = ${JSON.stringify(token)};
     globalThis.pragmaScratchpadToken = token;
@@ -110,12 +128,19 @@ function bridgeBootstrap(token: string): string {
     globalThis.$RefreshSig$ = () => (type) => type;
     const pending = new Map();
     const progress = new Map();
+    let state;
+    try { state = JSON.parse(${JSON.stringify(saved)}); if (!state || typeof state !== "object" || Array.isArray(state)) state = {}; } catch { state = {}; }
     const request = (method, payload = {}) => new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
       pending.set(id, { resolve, reject });
       parent.postMessage({ channel: "pragma-scratchpad", token, type: "request", id, method, ...payload }, "*");
     });
     globalThis.pragmaScratchpad = {
+      getLocalState: (key) => state[key],
+      setLocalState: (key, value) => {
+        state[key] = value;
+        parent.postMessage({ channel: "pragma-scratchpad", token, type: "local-state", state }, "*");
+      },
       promptAgent: (text) => request("promptAgent", { text }),
       requestAgentAttachment: () => request("requestAgentAttachment"),
       getWhiteboardSnapshot: (whiteboardId, knownVersion, dark) => request("getWhiteboardSnapshot", { whiteboardId, knownVersion, dark }),

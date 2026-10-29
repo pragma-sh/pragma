@@ -366,6 +366,9 @@ function SplitPane({
   const [retainedTerminalIds, setRetainedTerminalIds] = useState<Set<string>>(() =>
     activeTab?.kind === "terminal" ? new Set([activeTab.id]) : new Set(),
   );
+  const [retainedScratchpadIds, setRetainedScratchpadIds] = useState<Set<string>>(() =>
+    activeTab?.kind === "scratchpad" ? new Set([activeTab.id]) : new Set(),
+  );
   const focused = workspace.focusedPaneId === pane.id;
   const showBar = showPaneBars;
   const cwd = useMemo(
@@ -392,6 +395,13 @@ function SplitPane({
       if (current.has(activeTab.id)) return current;
       return new Set(current).add(activeTab.id);
     });
+  }, [activeTab?.id, activeTab?.kind]);
+
+  useEffect(() => {
+    if (activeTab?.kind !== "scratchpad") return;
+    setRetainedScratchpadIds((current) =>
+      current.has(activeTab.id) ? current : new Set(current).add(activeTab.id),
+    );
   }, [activeTab?.id, activeTab?.kind]);
 
   const retainedTerminals = tabs.filter(
@@ -434,7 +444,24 @@ function SplitPane({
             </div>
           );
         })}
-        {activeTab && activeTab.kind !== "terminal" ? renderActiveTab(activeTab, cwd) : null}
+        {tabs
+          .filter(
+            (tab) =>
+              tab.kind === "scratchpad" &&
+              (tab.id === activeTab?.id || retainedScratchpadIds.has(tab.id)),
+          )
+          .map((tab) => (
+            <div
+              aria-hidden={tab.id !== activeTab?.id}
+              className={cn("absolute inset-0", tab.id !== activeTab?.id && "hidden")}
+              key={tab.id}
+            >
+              {renderActiveTab(tab, cwd)}
+            </div>
+          ))}
+        {activeTab && activeTab.kind !== "terminal" && activeTab.kind !== "scratchpad"
+          ? renderActiveTab(activeTab, cwd)
+          : null}
       </div>
       {/* Section-level, not content-level: a split divides the whole pane (its bar
           included), so a preview measured against the content box alone would be
