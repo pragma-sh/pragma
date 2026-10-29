@@ -61,6 +61,51 @@ describe("ScratchpadPreview", () => {
     expect(restored.srcdoc).toContain('\\"answer\\":\\"hello\\"');
   });
 
+  it("warns without blocking when saved state cannot be read", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    render(
+      <ScratchpadPreview
+        filePath=".pragma/scratchpads/example.mdx"
+        getAttachedAgentTabId={() => null}
+        onRequestAgentAttachment={async () => false}
+        source="<button>Example</button>"
+        worktreeId="worktree-1"
+      />,
+    );
+
+    expect(await screen.findByText(/Saved answers could not be loaded/)).toBeInTheDocument();
+    expect(screen.getByTitle("Rendered MDX component")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("warns without blocking when a frame save fails", async () => {
+    const props = {
+      filePath: ".pragma/scratchpads/example.mdx",
+      getAttachedAgentTabId: () => null,
+      onRequestAgentAttachment: async () => false,
+      source: "<Example />",
+      worktreeId: "worktree-1",
+      blockKey: "block-1",
+    };
+    render(<ScratchpadPreview {...props} />);
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Rendered MDX component");
+    const token = JSON.parse(frame.srcdoc.match(/const token = ("[^"]+");/)![1]!) as string;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: frame.contentWindow,
+        data: { channel: "pragma-scratchpad", token, type: "local-state", state: { a: "b" } },
+      }),
+    );
+
+    expect(await screen.findByText(/Answers could not be saved \(quota exceeded\)/)).toBeVisible();
+    vi.restoreAllMocks();
+  });
+
   it("boots Vite modules inside an opaque sandbox", async () => {
     render(
       <ScratchpadPreview

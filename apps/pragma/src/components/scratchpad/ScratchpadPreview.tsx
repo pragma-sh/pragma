@@ -32,6 +32,7 @@ export function ScratchpadPreview({
   const tokenRef = useRef(crypto.randomUUID());
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [building, setBuilding] = useState(true);
   const [height, setHeight] = useState(96);
 
@@ -42,12 +43,8 @@ export function ScratchpadPreview({
     void buildScratchpadPreview({ source, filePath, worktreeId })
       .then((bundle) => {
         if (current) {
-          let saved = "{}";
-          try {
-            saved = localStorage.getItem(storageKey) ?? "{}";
-          } catch {
-            /* Storage can be unavailable. */
-          }
+          const { saved, error: readError } = readSavedState(storageKey);
+          setStorageError(readError);
           setSrcDoc(
             previewDocument(bundle.code, bundle.css, tokenRef.current, scratchpadTheme(), saved),
           );
@@ -74,6 +71,7 @@ export function ScratchpadPreview({
     getAttachedAgentTabId,
     onRequestAgentAttachment,
     onRenderError: setError,
+    onStorageError: setStorageError,
     onResize: setHeight,
   });
 
@@ -86,15 +84,32 @@ export function ScratchpadPreview({
   if (error) return <pre className="m-4 whitespace-pre-wrap text-sm text-destructive">{error}</pre>;
   if (!srcDoc) return null;
   return (
-    <iframe
-      className="block w-full border-0 bg-transparent"
-      ref={iframeRef}
-      sandbox="allow-scripts"
-      srcDoc={srcDoc}
-      style={{ height }}
-      title="Rendered MDX component"
-    />
+    <>
+      {storageError ? (
+        <output className="block px-2 pt-1 text-xs text-destructive">{storageError}</output>
+      ) : null}
+      <iframe
+        className="block w-full border-0 bg-transparent"
+        ref={iframeRef}
+        sandbox="allow-scripts"
+        srcDoc={srcDoc}
+        style={{ height }}
+        title="Rendered MDX component"
+      />
+    </>
   );
+}
+
+/** Saved state for a block, or the reason it could not be read; the controls still work without it. */
+function readSavedState(storageKey: string): { saved: string; error: string | null } {
+  try {
+    const saved = localStorage.getItem(storageKey) ?? "{}";
+    JSON.parse(saved);
+    return { saved, error: null };
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return { saved: "{}", error: `Saved answers could not be loaded (${reason}).` };
+  }
 }
 
 function previewDocument(

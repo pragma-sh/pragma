@@ -410,7 +410,8 @@ function MdxRenderedBlockView({ editor, extension, getPos, node, selected }: Rea
       position !== undefined &&
       pos < position &&
       candidate.type === node.type &&
-      candidate.attrs.raw === raw
+      candidate.attrs.raw === raw &&
+      candidate.attrs.context === context
     )
       occurrence++;
   });
@@ -432,7 +433,7 @@ function MdxRenderedBlockView({ editor, extension, getPos, node, selected }: Rea
         }
       >
         <ScratchpadPreview
-          blockKey={JSON.stringify([raw, occurrence])}
+          blockKey={JSON.stringify([source, occurrence])}
           filePath={options.filePath}
           getAttachedAgentTabId={options.getAttachedAgentTabId}
           onRequestAgentAttachment={options.onRequestAgentAttachment}

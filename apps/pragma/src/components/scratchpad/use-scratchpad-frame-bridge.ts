@@ -45,6 +45,8 @@ export interface ScratchpadFrameBridgeOptions {
   getAttachedAgentTabId: () => string | null;
   onRequestAgentAttachment: () => Promise<boolean>;
   onRenderError: (message: string) => void;
+  /** Reports the latest save outcome; `null` once a save succeeds. */
+  onStorageError: (message: string | null) => void;
   onResize: (height: number) => void;
 }
 
@@ -61,6 +63,7 @@ export function useScratchpadFrameBridge({
   getAttachedAgentTabId,
   onRequestAgentAttachment,
   onRenderError,
+  onStorageError,
   onResize,
 }: ScratchpadFrameBridgeOptions): void {
   const subscriptionsRef = useRef(new Map<string, string[]>());
@@ -174,7 +177,7 @@ export function useScratchpadFrameBridge({
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>): void => {
       if (event.source !== iframeRef.current?.contentWindow) return;
-      if (saveFrameState(event.data, token, storageKey)) return;
+      if (saveFrameState(event.data, token, storageKey, onStorageError)) return;
       if (applyNotice(event.data)) return;
       if (!isFrameRequest(event.data, token)) return;
       if (applySubscription(event.data)) return;
@@ -214,7 +217,12 @@ export function useScratchpadFrameBridge({
 }
 
 /** Save only state messages from this frame; storage can be unavailable or full. */
-function saveFrameState(value: unknown, token: string, storageKey: string): boolean {
+function saveFrameState(
+  value: unknown,
+  token: string,
+  storageKey: string,
+  onStorageError: (message: string | null) => void,
+): boolean {
   if (
     !matchesShape(value, {
       channel: isOneOf("pragma-scratchpad"),
@@ -227,8 +235,12 @@ function saveFrameState(value: unknown, token: string, storageKey: string): bool
   if (state && typeof state === "object" && !Array.isArray(state)) {
     try {
       localStorage.setItem(storageKey, JSON.stringify(state));
-    } catch {
-      /* Storage can be unavailable or full. */
+      onStorageError(null);
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      onStorageError(
+        `Answers could not be saved (${reason}) and may be lost when this scratchpad is reopened.`,
+      );
     }
   }
   return true;

@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useLocalState } from "./local-state";
+import { useControlKey, useLocalState } from "./local-state";
 
 import { alignDiffLines } from "./diff";
 import type { DiffLine } from "./diff";
@@ -201,7 +201,7 @@ export function AskQuestion({
   onAnswer,
   onMissingAgent,
 }: AskQuestionProps): React.JSX.Element {
-  const stateKey = `question:${question}`;
+  const stateKey = useControlKey(`question:${question}`);
   const [sent, setSent] = useLocalState<string | null>(null, `${stateKey}:sent`);
   const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
@@ -546,10 +546,8 @@ export function DiffReview({
   onDecision,
   onMissingAgent,
 }: DiffReviewProps): React.JSX.Element {
-  const [decision, setDecision] = useLocalState<boolean | null>(
-    null,
-    `diff:${file ?? title}:decision`,
-  );
+  const stateKey = useControlKey(`diff:${file ?? title}`);
+  const [decision, setDecision] = useLocalState<boolean | null>(null, `${stateKey}:decision`);
   const { pending, enabled, run } = useAgentAction({ onMissingAgent });
 
   const decide = (accepted: boolean): Promise<boolean> =>
