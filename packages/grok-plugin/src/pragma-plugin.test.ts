@@ -1,6 +1,7 @@
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { describe, expect, it } from "vitest";
 
-import grokAgentPlugin, { parseGrokModels } from "./pragma-plugin";
+import grokAgentPlugin, { grokResume, parseGrokModels } from "./pragma-plugin";
 
 /** The `initialize` result grok 0.2.114 returns, trimmed to the fields read here. */
 const INITIALIZE_RESULT = {
@@ -101,5 +102,44 @@ describe("grokAgentPlugin", () => {
 
   it("uses the local agent id for the watcher, so reports and events line up", () => {
     expect(grokAgentPlugin.watchers?.[0]?.agent).toBe("grok");
+  });
+
+  it("wires the resume callback into the launch contract", () => {
+    expect(agent?.launch.resume).toBe(grokResume);
+  });
+});
+
+describe("grokResume", () => {
+  const ctx = {} as unknown as PluginContext;
+
+  it("builds the full literal argv with the stored selection's flags", () => {
+    expect(
+      grokResume(
+        {
+          harnessSessionId: "01a1175c-db4b-7153-8db2-6de48cb8f730",
+          selection: { modelId: "grok-4.5", reasoningId: "high", permissionModeId: "plan" },
+          cwd: "/repo",
+        },
+        ctx,
+      ),
+    ).toEqual([
+      "grok",
+      "--model",
+      "grok-4.5",
+      "--reasoning-effort",
+      "high",
+      "--permission-mode",
+      "plan",
+      "--resume",
+      "01a1175c-db4b-7153-8db2-6de48cb8f730",
+    ]);
+  });
+
+  it("resumes bare when no selection was stored", () => {
+    expect(grokResume({ harnessSessionId: "abc", selection: {}, cwd: "/repo" }, ctx)).toEqual([
+      "grok",
+      "--resume",
+      "abc",
+    ]);
   });
 });

@@ -1,6 +1,6 @@
 ---
 title: Updates
-description: How Pragma finds, verifies, and installs new versions, and when an update restarts your terminal sessions.
+description: How Pragma finds, verifies, and installs new versions, and what a restart update does to your tabs and sessions.
 ---
 
 Pragma checks for a new version in the background (every few minutes and when the window
@@ -13,14 +13,44 @@ Settings → **Other**.
 | Kind        | What changes          | What happens when you install it                                                                  |
 | ----------- | --------------------- | ------------------------------------------------------------------------------------------------- |
 | **Reload**  | Only the interface    | The window reloads in place. Terminals and agents are untouched.                                  |
-| **Restart** | The app or its server | Pragma closes your tabs, quits, installs the new version over the old one, and relaunches itself. |
+| **Restart** | The app or its server | Pragma quits, installs the new version over the old one, and relaunches with your workspace kept. |
 
-A restart update asks first, because it can restart the Pragma server that runs your
-terminals. Just before quitting, Pragma closes every open tab in every project and stops
-its terminal session, so it relaunches into a clean workspace. After relaunching, Pragma
-replaces the server only if the update shipped a different server binary.
+A restart update asks first, because it may restart the Pragma server that runs your
+terminals. It is not a clean-slate reset: your projects, worktrees, tabs, and split
+layouts all stay. After relaunching, Pragma replaces the server only if the update shipped
+a different server binary.
 
-The confirmation shows the release notes for the version you are about to install.
+What happens to live sessions depends on whether that server restarted:
+
+- **The server kept running** — the relaunched desktop reattaches to every PTY that
+  survived, with its scrollback and output intact.
+- **The server restarted** — plain shell sessions end. Their tabs reopen as fresh shells;
+  there is no snapshot of an arbitrary shell. Interrupted agent sessions are restored
+  where the integration supports it, as described below.
+
+## What gets restored, exactly
+
+When Pragma launches an agent whose integration supports resume, the host records the
+invocation before the command is written and tracks the child's real exit. After a crash
+or a server restarting under an update, Pragma restores an **interrupted, still-open**
+session only when all of these hold:
+
+- the agent was launched through Pragma — the launcher, the agent board, a phone, the
+  SDK/CLI, or a fanout attempt;
+- the integration reported the harness's own conversation id;
+- the child had actually started; and
+- the tab is still open and was not deliberately closed, killed, or exited.
+
+The integration rebuilds the resume argv itself, so the restored session returns to the
+same conversation with the same working directory, shell, model/mode selection, and
+account binding. Only the conversation is restored: the original prompt, slash command,
+startup input, and pre-launch (`!!`) commands are **not** replayed. If resume fails,
+Pragma reports the failure in the tab and keeps it retryable — it never silently opens a
+new conversation.
+
+Ordinary terminal shells and manually typed agent commands are not restored; a host
+restart ends them and their tabs open fresh shells. The supported integrations and their
+known limits are listed in [Sessions & recovery](/docs/user-guide/sessions#support-matrix).
 
 ## After an update
 

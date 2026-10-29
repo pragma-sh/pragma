@@ -57,6 +57,40 @@ describe("pi watcher", () => {
   });
 });
 
+describe("pi resume", () => {
+  it("reopens the reported session with the recorded launch selection", async () => {
+    const resume = piAgentPlugin.agents?.[0]?.launch.resume;
+    expect(resume).toBeTypeOf("function");
+
+    expect(
+      await resume?.(
+        {
+          harnessSessionId: "01a14ca0-6b34-77f6-a4fa-26cd33561bdd",
+          selection: { modelId: "github-copilot/gpt-4.1", reasoningId: "high" },
+          cwd: "/repo",
+        },
+        {} as never,
+      ),
+    ).toEqual([
+      "pi",
+      "--session",
+      "01a14ca0-6b34-77f6-a4fa-26cd33561bdd",
+      "--model",
+      "github-copilot/gpt-4.1",
+      "--thinking",
+      "high",
+    ]);
+  });
+
+  it("reopens with no model flags when the launch selected none", async () => {
+    const resume = piAgentPlugin.agents?.[0]?.launch.resume;
+
+    expect(
+      await resume?.({ harnessSessionId: "id-1", selection: {}, cwd: "/repo" }, {} as never),
+    ).toEqual(["pi", "--session", "id-1"]);
+  });
+});
+
 describe("parsePiModels", () => {
   it("clears late terminal-query text and submits prefills with Kitty Enter", () => {
     expect(piAgentPlugin.agents?.[0]).toMatchObject({

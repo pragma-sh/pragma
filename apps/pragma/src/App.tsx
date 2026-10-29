@@ -5,6 +5,7 @@ import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
 import { WorkspaceTour } from "@/components/onboarding/WorkspaceTour";
 import { ScriptMigrationDialog } from "@/components/dialogs/ScriptMigrationDialog";
+import { SessionRestoreDialog } from "@/components/dialogs/SessionRestoreDialog";
 import { AgentPluginInstallPrompt } from "@/components/plugins/AgentPluginInstallPrompt";
 import { StorageReminderWatcher } from "@/components/settings/storage/StorageReminderWatcher";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
@@ -49,6 +50,7 @@ function App() {
                                 <ScriptMigrationDialog />
                                 <StorageReminderWatcher />
                                 <ComputerUseController />
+                                <SessionRestoreDialog />
                               </UpdatesProvider>
                             </WorktreeCreationProvider>
                           </ConfirmCloseProvider>

@@ -532,4 +532,128 @@ describe("report.sh", () => {
     expect(reports()).not.toContain("agent report --agent grok cleared");
     expect(existsSync(markerPath())).toBe(true);
   });
+
+  it("reports the session id on a session start", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "s1", source: "new" }),
+    });
+    expect(reports()).toContain("agent report --agent grok session-id --id s1");
+  });
+
+  it("reports a session switch, including a switch back (A -> B -> A)", () => {
+    const start = (sessionId: string): void => {
+      run("cleared", {
+        stdin: JSON.stringify({ hookEventName: "session_start", sessionId, source: "load" }),
+      });
+    };
+    start("a");
+    start("b");
+    start("a");
+    // Deduping is against the last reported id, not a seen-set, so the switch
+    // back to `a` reports again.
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent grok session-id --id a",
+      "agent report --agent grok session-id --id b",
+      "agent report --agent grok session-id --id a",
+    ]);
+  });
+
+  itWithPython3("reports a switch even when the new session's title is unchanged", () => {
+    const prompt = (sessionId: string): void => {
+      run("started", {
+        stdin: JSON.stringify({
+          hookEventName: "user_prompt_submit",
+          sessionId,
+          prompt: "same title",
+        }),
+      });
+    };
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "a", source: "load" }),
+    });
+    prompt("a");
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "b", source: "load" }),
+    });
+    prompt("b");
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent grok session-id --id a",
+      "agent report --agent grok session-id --id b",
+    ]);
+    // The tab name is deduped by title, so the switch itself must not depend on it.
+    expect(reports().filter((call) => call.includes(" session-name "))).toHaveLength(1);
+  });
+
+  it("reports a session id once per session, not once per prompt", () => {
+    const prompt = (text: string): void => {
+      run("started", {
+        stdin: JSON.stringify({
+          hookEventName: "user_prompt_submit",
+          sessionId: "s1",
+          prompt: text,
+        }),
+      });
+    };
+    prompt("one");
+    prompt("two");
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent grok session-id --id s1",
+    ]);
+  });
+
+  it("never reports a subagent's own session id", () => {
+    run("started", {
+      stdin: JSON.stringify({
+        hookEventName: "user_prompt_submit",
+        sessionId: "parent",
+        prompt: "go",
+      }),
+    });
+    // A subagent runs with its own session id while inheriting the parent's
+    // PRAGMA_TAB_ID; neither its prompt nor its SessionEnd may report the id.
+    run("started", {
+      stdin: JSON.stringify({
+        hookEventName: "user_prompt_submit",
+        sessionId: "child",
+        prompt: "memo",
+      }),
+    });
+    run("cleared", {
+      stdin: JSON.stringify({
+        hookEventName: "session_end",
+        sessionId: "child",
+        subagentType: "explore",
+      }),
+    });
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent grok session-id --id parent",
+    ]);
+  });
+
+  it("keeps the current session when a superseded session's end lands late", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "a", source: "load" }),
+    });
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "b", source: "load" }),
+    });
+    const before = reports().length;
+    run("cleared", {
+      stdin: JSON.stringify({ hookEventName: "session_end", sessionId: "a" }),
+    });
+    // A delayed end for the old session is dropped before it can clear the tab
+    // or report the old id over the current one.
+    expect(reports().slice(before)).toEqual([]);
+    expect(reports().findLast((call) => call.includes(" session-id "))).toBe(
+      "agent report --agent grok session-id --id b",
+    );
+  });
+
+  it("never reports a session id outside Pragma", () => {
+    run("cleared", {
+      socket: false,
+      stdin: JSON.stringify({ hookEventName: "session_start", sessionId: "s1" }),
+    });
+    expect(reports()).toEqual([]);
+  });
 });

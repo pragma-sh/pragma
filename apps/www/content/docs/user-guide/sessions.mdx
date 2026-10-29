@@ -1,0 +1,84 @@
+---
+title: Sessions & recovery
+description: What a session is, what survives a desktop reload or host restart, and when Pragma resumes an agent conversation instead of starting fresh.
+---
+
+A **session** is one live terminal process the Pragma host server owns, with its scrollback
+and title. The desktop is a client of that host: closing or reloading it does not end your
+sessions, and Pragma reattaches where it can. This page covers exactly what survives what —
+and when Pragma restores an agent conversation instead of opening a fresh shell.
+
+## What survives what
+
+| Event                                                           | What happens                                                                                                                                          |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop window closes, reloads, or a **reload** update lands    | Nothing ends. Sessions stay on the host; the desktop reattaches with scrollback and resumes output from its last accepted byte.                       |
+| Host server restarts (crash, server update, **Restart** update) | Live PTYs end, so plain shells are gone. Tabs, split layouts, and projects stay; agent sessions Pragma launched may be resumed automatically (below). |
+| You close or kill a tab                                         | The session ends deliberately. Pragma never resurrects it, even after a later host restart.                                                           |
+
+There is no snapshot of an arbitrary shell: when the host server restarts, a terminal tab
+that was running `vim`, a REPL, or a long build comes back as a fresh shell. Only agent
+sessions have a durable recovery record — the host stores a small owner-only
+`agent-invocations.db` beside its socket, plus the harness conversation id the integration
+last reported.
+
+## When an agent session is resumed
+
+An agent launch through Pragma is recorded by the owning host before its command is written.
+Pragma automatically resumes an **interrupted, still-open** agent session when all of these
+hold:
+
+1. The agent was launched through Pragma — the launcher, the agent board, a paired phone,
+   `pragma-cli` / the SDK, or a fanout attempt. A command you typed into a shell yourself is
+   an ordinary terminal session.
+2. The integration supports resume (see the matrix below) and reported the harness's own
+   conversation id.
+3. The agent process had actually started when the host went away — a launch that never ran
+   is never resumed.
+4. The tab is still open and was not closed, killed, or intentionally exited.
+
+The integration rebuilds the resume argv itself, so the session returns to the same
+conversation with the same working directory, shell, and recorded launch selection (model,
+mode, permission mode). The recorded account references are resolved against the current
+bindings; if that login is gone, the harness's effective default applies — and if none is
+bound, the harness starts on its own default login.
+
+**Resume restores the conversation, not the turn.** The original prompt, slash command,
+startup input, and pre-launch (`!!`) commands are not replayed. If a restore cannot run —
+the integration is missing, its CLI changed, or the transport failed — Pragma surfaces the
+error in the tab and keeps the record recoverable. It never falls back to a fresh
+conversation.
+
+## Recovery status in the desktop
+
+After a server restart or crash, a **Restoring sessions** dialog shows the agent
+conversations the host is recovering, including sessions in background tabs. Each row
+shows whether the conversation is resuming, restored, or could not be restored; failures
+include the host's error. **Continue in background** (or Escape) dismisses the dialog
+without cancelling recovery. When the pass finishes, **Done** dismisses the summary.
+Ordinary reattachment to sessions that survived a desktop relaunch does not open this dialog.
+
+## Support matrix
+
+Nine of the ten shipped integrations declare a resume callback. Prime Agent intentionally
+does not: Pragma launches it with `--no-session`, so its session lives in memory and there
+is no saved file a `--resume` could open.
+
+| Integration            | Resume | Conversation id reported                                                          | Known limit                                                                                                                             |
+| ---------------------- | ------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenCode**           | Yes    | From user-initiated activity: a submitted prompt or slash command                 | A TUI session switch with no following prompt is not observable; the last active conversation is restored.                              |
+| **Claude Code**        | Yes    | `SessionStart` / `UserPromptSubmit` when the conversation changes                 | —                                                                                                                                       |
+| **Cursor**             | Yes    | `sessionStart` / `beforeSubmitPrompt`                                             | —                                                                                                                                       |
+| **Codex**              | Yes    | `SessionStart` / `UserPromptSubmit` when the thread changes                       | —                                                                                                                                       |
+| **Pi**                 | Yes    | Session start (resume/fork) or the first assistant message; re-asserted each turn | A brand-new session has no id until its file materializes after the first assistant message, so an earlier crash has nothing to resume. |
+| **Grok**               | Yes    | `SessionStart` and the first prompt that pins a session                           | —                                                                                                                                       |
+| **Kimi**               | Yes    | `SessionStart` / `UserPromptSubmit` when the session changes                      | —                                                                                                                                       |
+| **Junie**              | Yes    | `SessionStart` / `UserPromptSubmit`                                               | —                                                                                                                                       |
+| **GitHub Copilot CLI** | Yes    | `sessionStart` / `userPromptSubmitted`                                            | —                                                                                                                                       |
+| **Prime Agent**        | No     | Never — Pragma's `--no-session` launch is in-memory                               | Not resumable by design; the tab always starts fresh.                                                                                   |
+
+## Deliberately closing a session
+
+Closing a tab, killing a session, or letting the agent command exit all end the record for
+that tab. That is what keeps a session you finished with from coming back on the next host
+restart. To start another conversation, launch a new agent session.

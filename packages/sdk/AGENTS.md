@@ -21,11 +21,17 @@ Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL`
 
 Use `@pragma-sh/sdk` in any JS/TS plugin or consumer that needs gateway access or agent
 status reporting. The top-level `reportStarted` / `reportStopped` / `reportAttention` /
-`reportCleared` / `reportSessionName` helpers return `Promise<void>` and no-op unless
-`hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
+`reportCleared` / `reportSessionName` / `reportSessionId` helpers return `Promise<void>`
+and no-op unless `hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
 `reportSessionName({ agent, env, name })` is status-less: it renames the hosting tab
 to the session's display name (manual tab renames win); call it on session create,
-rename, and switch.
+rename, and switch. `reportSessionId({ agent, id, env? })` is status-less too: it reports
+the harness's own opaque session id as `harnessSessionId` so a later launch can resume it,
+and `id: null` clears the stored id (`clearHarnessSessionId: true`) when the harness
+started a new conversation and has not reported its id yet — call it on session create,
+switch, and new-conversation start. Clearing wins if a payload ever carries both fields;
+absent/`false` changes nothing. Every normal report also carries the run id inferred from
+`PRAGMA_AGENT_RUN_ID` as `agentRunId` when the env has one.
 
 For command-approval: `reportAttention({ kind: "command", command, requestId })` carries
 the command + a correlation id to the approval toast; `client.agents.reportDecision(...)`

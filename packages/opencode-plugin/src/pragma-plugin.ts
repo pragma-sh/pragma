@@ -1,5 +1,6 @@
 import {
   accountProviderTitle,
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
@@ -7,6 +8,7 @@ import {
   type AccountProviderDefinition,
   commandAndSkillDirs,
   slashCommandProvider,
+  type AgentArgsBuilder,
   type AgentMode,
   type AgentModelEntry,
   type CredentialStore,
@@ -94,6 +96,19 @@ const SLASH_COMMAND_SOURCES = [
   { dir: ".opencode/command", layout: "files" as const },
   { dir: "~/.config/opencode/command", layout: "files" as const },
 ];
+
+/**
+ * The option builders a launch and a resume share, so a resumed session is
+ * flagged exactly like the launch it continues. `--session`, `--model`, and
+ * `--agent` are all top-level options (verified against `opencode --help`,
+ * 1.18.35); OpenCode has no permission-mode flag.
+ */
+const OPENCODE_AGENT_ARGS: AgentArgsBuilder = {
+  model: (modelId: string) => ["--model", modelId],
+  reasoning: () => [],
+  permissionMode: () => [],
+  mode: (modeId: string) => ["--agent", modeId],
+};
 
 /**
  * Pragma plugin for OpenCode, bundled to `dist/pragma-plugin.mjs` and loaded by
@@ -196,7 +211,21 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       name: "OpenCode",
       icon: () => null,
       iconPath: "assets/opencode.svg",
-      launch: { command: ["opencode"] },
+      launch: {
+        command: ["opencode"],
+        // `opencode --session <id>` continues that exact stored session, which
+        // keeps its own agent and model, so a resume replays only an explicit
+        // selection — never the original slash command or prompt.
+        resume: ({ harnessSessionId, selection }) => [
+          "opencode",
+          "--session",
+          harnessSessionId,
+          ...agentLaunchArgs(
+            { args: OPENCODE_AGENT_ARGS, modes: [], permissionModes: [] },
+            selection,
+          ),
+        ],
+      },
       prefillDelayMs: 6000,
       models: async (ctx) =>
         parseOpenCodeModels(
@@ -211,12 +240,7 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["opencode", "acp"] },
       }),
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: () => [],
-        permissionMode: () => [],
-        mode: (modeId: string) => ["--agent", modeId],
-      },
+      args: OPENCODE_AGENT_ARGS,
     }),
   ],
 });

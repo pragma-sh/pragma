@@ -130,6 +130,42 @@ it("passes a model straight to --model without a synthetic effort suffix", () =>
   expect(agent?.args.modelReasoning).toBeUndefined();
 });
 
+it("resumes the reported chat id with the recorded launch flags", async () => {
+  const resume = cursorAgentPlugin.agents?.[0]?.launch.resume;
+  expect(resume).toBeTypeOf("function");
+
+  expect(
+    await resume?.(
+      {
+        harnessSessionId: "03ee73b5-3a36-4628-98f7-3e97849e55db",
+        selection: { modelId: "gpt-5", modeId: "plan", permissionModeId: "force" },
+        cwd: "/repo",
+      },
+      {} as never,
+    ),
+  ).toEqual([
+    "cursor-agent",
+    "--approve-mcps",
+    "--resume",
+    "03ee73b5-3a36-4628-98f7-3e97849e55db",
+    "--model",
+    "gpt-5",
+    "--mode",
+    "plan",
+    "--force",
+  ]);
+});
+
+it("replays the launch defaults a resume selection left out", async () => {
+  const resume = cursorAgentPlugin.agents?.[0]?.launch.resume;
+
+  // The first permission mode (`force`) is what every launch applies when the
+  // caller selected none, so the resumed terminal keeps the same behavior.
+  expect(
+    await resume?.({ harnessSessionId: "chat-1", selection: {}, cwd: "/repo" }, {} as never),
+  ).toEqual(["cursor-agent", "--approve-mcps", "--resume", "chat-1", "--force"]);
+});
+
 it("declares a single-login Cursor account provider", () => {
   const provider = cursorAgentPlugin.accounts?.[0];
   expect(provider).toMatchObject({

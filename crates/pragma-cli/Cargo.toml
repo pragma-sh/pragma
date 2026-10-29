@@ -26,5 +26,11 @@ serde_json = { workspace = true }
 toon-format = "0.5"
 uuid = { workspace = true }
 
+# `agent run` keeps the supervisor alive through terminal-generated signals so
+# it can report the child's real exit. Already in the workspace lock
+# (crossterm); used with its safe API only.
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
 [dev-dependencies]
 tempfile = "3"

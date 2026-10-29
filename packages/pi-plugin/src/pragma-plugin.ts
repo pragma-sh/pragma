@@ -11,6 +11,10 @@ export const piAgentPlugin = createPiPragmaPlugin({
     name: "Pi",
     iconPath: "assets/pi-badge.svg",
     command: ["pi"],
+    // `pi --session <uuid>` reopens the session by its reported id (verified
+    // against Pi 0.80.10, whose `--session` accepts a file path or a partial
+    // UUID and resolves it through the current project's session directory).
+    resumeFlag: "--session",
     modelListCommand:
       'pi --list-models 2>/dev/null || fnm exec --using default -- pi --list-models 2>/dev/null || "$HOME/.bun/bin/pi" --list-models 2>/dev/null || "${SHELL:-/bin/sh}" -lc \'pi --list-models\' 2>/dev/null',
     excludeFeatures: ["questions", "commandApproval", "subagents", "usageLimits"],

@@ -546,4 +546,107 @@ describe("report.sh", () => {
       }),
     ).toEqual([]);
   });
+
+  it("reports the session id on a session start", () => {
+    run("cleared", {
+      stdin: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: "session-a",
+        source: "startup",
+      }),
+    });
+    expect(reportCalls()).toContain("agent report --agent kimi session-id --id session-a");
+  });
+
+  it("reports a session switch, including a switch back (A -> B -> A)", () => {
+    const start = (sessionId: string): void => {
+      run("cleared", {
+        stdin: JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: sessionId,
+          source: "startup",
+        }),
+      });
+    };
+    start("session-a");
+    start("session-b");
+    start("session-a");
+    // Deduping is against the last reported id, not a seen-set, so the switch
+    // back to `session-a` reports again.
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent kimi session-id --id session-a",
+      "agent report --agent kimi session-id --id session-b",
+      "agent report --agent kimi session-id --id session-a",
+    ]);
+  });
+
+  itWithNode("reports a switch even when the new session's prompt is unchanged", () => {
+    const prompt = (sessionId: string): void => {
+      run("started", { stdin: promptStdin("same title", sessionId) });
+    };
+    prompt("session-a");
+    prompt("session-b");
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent kimi session-id --id session-a",
+      "agent report --agent kimi session-id --id session-b",
+    ]);
+    // Kimi's name dedupe is per session, so the tab renames on the switch too.
+    expect(reportCalls().filter((call) => call.includes(" session-name "))).toHaveLength(2);
+  });
+
+  it("reports a session id once per session, not once per prompt", () => {
+    run("started", { stdin: promptStdin("one", "session-a") });
+    run("started", { stdin: promptStdin("two", "session-a") });
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent kimi session-id --id session-a",
+    ]);
+  });
+
+  it("never reports a session id from a subagent event", () => {
+    run("started", { stdin: promptStdin("hi", "session-parent") });
+    run("subagent-start", {
+      stdin: JSON.stringify({
+        hook_event_name: "SubagentStart",
+        session_id: "session-parent",
+        agent_name: "Explore",
+      }),
+    });
+    run("subagent-stop", {
+      stdin: JSON.stringify({
+        hook_event_name: "SubagentStop",
+        session_id: "session-parent",
+        agent_name: "Explore",
+      }),
+    });
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent kimi session-id --id session-parent",
+    ]);
+  });
+
+  it("keeps the current session when a superseded session's end lands late", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "session-a" }),
+    });
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "session-b" }),
+    });
+    const before = reportCalls().length;
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "SessionEnd", session_id: "session-a" }),
+    });
+    // The delayed end belongs to a superseded session, so it must not clear the
+    // tab or report the old id over the current one.
+    expect(reportCalls().slice(before)).toEqual([]);
+    expect(reportCalls().findLast((call) => call.includes(" session-id "))).toBe(
+      "agent report --agent kimi session-id --id session-b",
+    );
+  });
+
+  it("never reports a session id outside Pragma", () => {
+    run("cleared", {
+      socket: false,
+      stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "session-a" }),
+    });
+    expect(reportCalls()).toEqual([]);
+  });
 });

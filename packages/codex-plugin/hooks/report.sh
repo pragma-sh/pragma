@@ -20,6 +20,11 @@ watcher_file="${state_prefix}.watcher"
 question_file="${state_prefix}.question"
 messages_file="${state_prefix}.messages"
 session_name_marker="${state_prefix}.named"
+# Holds the conversation (thread) id last reported for this tab, so every
+# SessionStart switch — startup, resume, /new, fork — reports the new id
+# exactly once, even with no title and no following prompt. A→B→A reports each
+# switch because only the last id is remembered.
+session_id_file="${state_prefix}.session-id"
 subagent_dir="${state_prefix}.subagents"
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 watch_interval="${PRAGMA_WATCH_INTERVAL:-1}"
@@ -74,6 +79,19 @@ report_session_name_once() {
   [ -n "$name" ] || return 0
   report session-name --name "$name"
   : >"$session_name_marker"
+}
+
+# Reports the tab's current top-level conversation id (status-less) so Pragma
+# can resume that exact Codex thread. Called only from SessionStart and
+# UserPromptSubmit — never from a subagent hook — and only on an id change.
+# `report` swallows failures, so an older installed pragma-cli without the
+# `session-id` report cannot disrupt the session.
+report_session_id() {
+  session_id="$1"
+  [ -n "$session_id" ] || return 0
+  [ "$(cat "$session_id_file" 2>/dev/null || true)" = "$session_id" ] && return 0
+  report session-id --id "$session_id"
+  printf '%s' "$session_id" >"$session_id_file"
 }
 
 safe_id() {
@@ -230,8 +248,13 @@ case "${1:-}" in
     watch_abort "${2:-}" "${3:-}" "${4:-0}"
     ;;
   cleared)
+    # SessionStart carries the conversation's `session_id` (the same thread id
+    # `codex resume <id>` accepts); read it before clearing the turn state.
+    input="$(cat)"
+    session_id="$(json_field session_id "$input")"
     clear_state
     rm -f "$session_name_marker"
+    report_session_id "$session_id"
     report cleared
     ;;
   started)
@@ -239,6 +262,7 @@ case "${1:-}" in
     turn_id="$(json_field turn_id "$input")"
     transcript="$(json_field transcript_path "$input")"
     prompt="$(json_field prompt "$input")"
+    session_id="$(json_field session_id "$input")"
     token="${turn_id:-$$-$(date +%s)}"
     offset="$(transcript_offset "$transcript")"
     stop_watcher
@@ -254,6 +278,9 @@ case "${1:-}" in
     # the transcript's `turn_aborted` marker was never scanned, so the status
     # stayed `running` forever.
     start_abort_watcher "$transcript" "$token" "$offset"
+    # A prompt is the second authoritative conversation signal (after
+    # SessionStart), covering a plugin loaded mid-session.
+    report_session_id "$session_id"
     report started
     if [ -n "$prompt" ]; then
       report_session_name_once "$prompt"

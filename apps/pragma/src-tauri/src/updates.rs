@@ -340,7 +340,12 @@ fn install_restart_update(app: &AppHandle, installer: &Path) -> AppResult<ApplyR
         });
     match prepared {
         Ok(()) => {
-            crate::close_all_tabs(app);
+            // The workspace is deliberately left intact across the quit: tab
+            // rows, split layouts, and non-terminal tabs stay, the relaunched
+            // desktop reattaches to sessions that survived on the host, and the
+            // host restores an agent run interrupted by the restart from its
+            // durable record. Closing tabs here would delete the rows and kill
+            // exactly the sessions resume exists to restore.
             quit_for_update(app);
             Ok(restart_result(None))
         }
@@ -901,6 +906,33 @@ mod tests {
                 "relaunching": false,
                 "fallbackReason": "/Volumes/Pragma is not writable",
             })
+        );
+    }
+
+    /// The successful restart-update quit must preserve the workspace: tab rows,
+    /// split layouts, and non-terminal tabs stay, the relaunched desktop
+    /// reattaches to surviving sessions, and the host restores an agent run the
+    /// restart interrupted. The old all-tabs teardown deleted every row and
+    /// killed every host session, destroying exactly what crash/update resume
+    /// restores.
+    ///
+    /// The update path is not constructible in a unit test (it needs a live
+    /// `AppHandle` and a prepared installer), so this guards the source contract
+    /// directly — same approach as `installer-hooks.test.ts`. The needles are
+    /// assembled at runtime so this test's own source cannot satisfy them.
+    #[test]
+    fn restart_update_never_closes_tabs() {
+        let updates = include_str!("updates.rs");
+        let lib = include_str!("lib.rs");
+        let teardown = ["close", "_all", "_tabs"].concat();
+        let teardown_fn = ["fn ", "close", "_all", "_tabs"].concat();
+        assert!(
+            !updates.contains(&teardown),
+            "the update path must not tear down tabs; it preserves them for resume"
+        );
+        assert!(
+            !lib.contains(&teardown_fn),
+            "the all-tabs teardown helper was removed: preserving the workspace is the contract"
         );
     }
 

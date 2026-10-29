@@ -72,6 +72,21 @@ Observed payloads (26.8.3):
 {"hook_event_name":"SessionEnd","reason":"other"}
 ```
 
+## Session resume
+
+`report.sh` reports the harness session id (`pragma-cli agent report --agent junie
+session-id --id <session_id>`) on the only two events that carry it, `SessionStart` and
+`UserPromptSubmit`, and before the cached-pin fallback can fill the id in. The id is
+reported only when it differs from the last reported one, so a switch back to an earlier
+session (A -> B -> A) reports again while a same-session prompt stays silent. `SessionEnd`
+carries no id and never re-reports the cached one.
+
+`launch.resume` returns the full literal argv `junie <model/effort/permission flags>
+--session-id <id>`. Verified against `junie --help` on 26.8.10 (`--session-id=<text>` is
+"Id of the previously executed session to follow up", and the CLI's `resolveSessionId`
+returns it directly) and against the CLI's own shutdown hint, which prints exactly
+`junie --session-id <id>`.
+
 ## Gotchas worth keeping
 
 - **Silence auto-approves a `PermissionRequest`.** Junie's contract is the opposite of

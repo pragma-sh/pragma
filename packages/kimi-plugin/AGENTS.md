@@ -68,6 +68,23 @@ messages; subagent counting is unaffected either way.
 A `Stop`/`StopFailure` arriving while the count is non-zero is a subagent turn ending —
 never a parent completion — so the tab stays on `started` until the parent's own `Stop`.
 
+## Session resume
+
+`report.sh` reports the harness session id (`pragma-cli agent report --agent kimi
+session-id --id <session_id>`) whenever the tab's session changes: on `SessionStart` and
+on `UserPromptSubmit`. Both pass the existing session pin first, and the id is reported
+only when it differs from the last reported one — a switch back to an earlier session
+(A -> B -> A) reports again, while a same-session prompt stays silent. Kimi subagents
+share the parent `session_id`, so there is no child id to isolate.
+
+`launch.resume` returns the full literal argv `kimi <model/permission flags>
+--session=<id>`. Verified against `kimi --help` on 0.36.1 (`-S, --session [id]` — "With
+ID: resume that session") and against the bundled CLI source, which declares it as a
+Commander optional-value option, so the attached form is used to bind the id unambiguously.
+Kimi rejects `--agent` together with `--session` ("Cannot be combined with
+--session/--continue"), so the callback deliberately drops the stored agent profile (mode)
+while keeping the model and permission flags.
+
 ## Why no abort watcher (unlike claude/grok)
 
 Claude Code and Grok fire **no hook on user cancel**, so their `report.sh` scripts spawn a

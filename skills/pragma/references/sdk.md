@@ -54,6 +54,7 @@ import {
   reportAttention,
   reportCleared,
   reportMessage,
+  reportSessionId,
   reportSessionName,
   reportStarted,
   reportStopped,
@@ -62,19 +63,29 @@ import {
 if (hasPragmaEnvironment()) {
   await reportStarted({ agent: "my-agent" });
   await reportSessionName({ agent: "my-agent", name: "Refactor auth" });
+  await reportSessionId({ agent: "my-agent", id: harnessSessionId });
 }
 ```
 
 Helpers resolve gateway, token, tab, and worktree from environment. They no-op outside full
 Pragma environment. Catch reporting errors so reporting never breaks host agent.
 
-| Helper              | Status      | Use                                   |
-| ------------------- | ----------- | ------------------------------------- |
-| `reportStarted`     | `running`   | Work began.                           |
-| `reportStopped`     | `done`      | Started work finished normally.       |
-| `reportAttention`   | `attention` | Answer or command decision needed.    |
-| `reportCleared`     | `cleared`   | Abort, reset, exit, or stale cleanup. |
-| `reportSessionName` | unchanged   | Update display name only.             |
+| Helper              | Status      | Use                                                          |
+| ------------------- | ----------- | ------------------------------------------------------------ |
+| `reportStarted`     | `running`   | Work began.                                                  |
+| `reportStopped`     | `done`      | Started work finished normally.                              |
+| `reportAttention`   | `attention` | Answer or command decision needed.                           |
+| `reportCleared`     | `cleared`   | Abort, reset, exit, or stale cleanup.                        |
+| `reportSessionName` | unchanged   | Update display name only.                                    |
+| `reportSessionId`   | unchanged   | Report the harness conversation id a later resume continues. |
+
+`reportSessionId({ agent, id })` is status-less. Pragma stores `id` as the opaque
+`harnessSessionId` on the agent's durable invocation record and never parses it; report it on
+session create and every session switch so a crash or host restart resumes the conversation
+that was actually active. Every normal report also carries the run id from
+`PRAGMA_AGENT_RUN_ID` as `agentRunId` when a tracked launch set it. Status is runtime-only;
+the session id is the durable recovery identity. See the plugin reference for the
+`launch.resume` callback that rebuilds the resume argv.
 
 ## Duplex Agent Connection
 

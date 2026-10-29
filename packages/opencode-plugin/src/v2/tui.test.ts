@@ -4,6 +4,7 @@ const sdkMocks = vi.hoisted(() => ({
   reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportMessage: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportSessionId: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportSessionName: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
@@ -14,6 +15,7 @@ vi.mock("@pragma-sh/sdk", () => ({
   reportAttention: (...args: unknown[]) => sdkMocks.reportAttention(...args),
   reportCleared: (...args: unknown[]) => sdkMocks.reportCleared(...args),
   reportMessage: (...args: unknown[]) => sdkMocks.reportMessage(...args),
+  reportSessionId: (...args: unknown[]) => sdkMocks.reportSessionId(...args),
   reportSessionName: (...args: unknown[]) => sdkMocks.reportSessionName(...args),
   reportStarted: (...args: unknown[]) => sdkMocks.reportStarted(...args),
   reportStopped: (...args: unknown[]) => sdkMocks.reportStopped(...args),
@@ -127,6 +129,9 @@ describe("PragmaOpencodeTuiPlugin", () => {
       }),
     );
     expect(sdkMocks.reportStarted).toHaveBeenCalled();
+    expect(sdkMocks.reportSessionId).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ses_root" }),
+    );
     await (cleanup as () => Promise<void>)();
   });
 

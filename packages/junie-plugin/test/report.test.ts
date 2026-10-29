@@ -253,6 +253,7 @@ describe("report.sh", () => {
       }),
     });
     expect(reports()).toEqual([
+      `agent report --agent junie session-id --id ${SESSION_ID}`,
       "agent report --agent junie started",
       "agent report --agent junie session-name --name Fix auth",
       "agent report --agent junie stopped",
@@ -684,5 +685,88 @@ describe("report.sh", () => {
     run("cleared", { stdin: JSON.stringify({ hook_event_name: "SessionEnd", reason: "other" }) });
     expect(reports()).toContain("agent report --agent junie cleared");
     expect(existsSync(statePath("session"))).toBe(false);
+  });
+
+  it("reports the session id on a session start", () => {
+    run("cleared", {
+      stdin: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: SESSION_ID,
+        source: "startup",
+      }),
+    });
+    expect(reports()).toContain(`agent report --agent junie session-id --id ${SESSION_ID}`);
+  });
+
+  it("reports a session switch, including a switch back (A -> B -> A)", () => {
+    const start = (sessionId: string): void => {
+      run("cleared", {
+        stdin: JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: sessionId,
+          source: "startup",
+        }),
+      });
+    };
+    start("session-a");
+    start("session-b");
+    start("session-a");
+    // Deduping is against the last reported id, not a seen-set, so the switch
+    // back to `session-a` reports again.
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent junie session-id --id session-a",
+      "agent report --agent junie session-id --id session-b",
+      "agent report --agent junie session-id --id session-a",
+    ]);
+  });
+
+  it("reports a switch even when the new session's title is unchanged", () => {
+    writeEvents([]);
+    run("started", { stdin: startPayload("same title") });
+    run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "session-other",
+        prompt: "same title",
+      }),
+    });
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      `agent report --agent junie session-id --id ${SESSION_ID}`,
+      "agent report --agent junie session-id --id session-other",
+    ]);
+    // The tab name is deduped by title, so the switch itself must not depend on it.
+    expect(reports().filter((call) => call.includes(" session-name "))).toHaveLength(1);
+  });
+
+  it("reports a session id once per session, not once per prompt", () => {
+    run("started", { stdin: startPayload("one") });
+    run("started", { stdin: startPayload("two") });
+    expect(reports().filter((call) => call.includes(" session-id "))).toEqual([
+      `agent report --agent junie session-id --id ${SESSION_ID}`,
+    ]);
+  });
+
+  it("never re-reports the cached session id from an end event", () => {
+    // `SessionEnd` carries no session id in Junie, so the cached pin must not be
+    // reported as if it were a fresh session.
+    run("cleared", {
+      stdin: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: SESSION_ID,
+        source: "startup",
+      }),
+    });
+    const before = reports().length;
+    run("cleared", { stdin: JSON.stringify({ hook_event_name: "SessionEnd", reason: "other" }) });
+    expect(
+      reports()
+        .slice(before)
+        .filter((call) => call.includes(" session-id ")),
+    ).toEqual([]);
+  });
+
+  it("never reports a session id outside Pragma", () => {
+    run("started", { socket: false, stdin: startPayload("hi") });
+    expect(calls()).toEqual([]);
   });
 });

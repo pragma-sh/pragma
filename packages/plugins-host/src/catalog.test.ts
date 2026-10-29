@@ -384,6 +384,36 @@ describe("agent launch options", () => {
     expect(agent?.slashCommands).toBeUndefined();
     expect(agent?.launch.modeArgs).toBeUndefined();
   });
+
+  it("marks an agent resumable only when it declares a resume callback", async () => {
+    const plugins: ResolvedPlugin[] = [
+      plugin("p.one", {
+        agents: [
+          {
+            id: "resumable",
+            name: "Resumable",
+            launch: { command: ["resumable"], resume: () => ["resumable", "--resume"] },
+            models: [],
+            args: { model: () => [] },
+          },
+          {
+            id: "plain",
+            name: "Plain",
+            launch: { command: ["plain"] },
+            models: [],
+            args: { model: () => [] },
+          },
+        ],
+      }),
+    ];
+    const { catalog } = await assembleCatalog(plugins, ctx);
+    expect(catalog.agents.find((agent) => agent.id === "p.one.resumable")?.supportsResume).toBe(
+      true,
+    );
+    expect(
+      catalog.agents.find((agent) => agent.id === "p.one.plain")?.supportsResume,
+    ).toBeUndefined();
+  });
 });
 
 describe("assembleWatchers", () => {

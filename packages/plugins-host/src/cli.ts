@@ -14,6 +14,7 @@ import {
 import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
 import { handleAccountsOp, type AccountsOp } from "./accounts";
+import { resolveAgentResume, type AgentResumeQuery } from "./resume";
 import { loadUsageLimits } from "./usage-limits";
 
 interface LoadCommand {
@@ -33,7 +34,9 @@ interface UsageLimitsCommand {
 
 type AccountsCommand = { type: "accounts"; requestId: string } & AccountsOp;
 
-type Command = LoadCommand | UsageLimitsCommand | AccountsCommand;
+type AgentResumeCommand = { type: "agentResume"; requestId: string } & AgentResumeQuery;
+
+type Command = LoadCommand | UsageLimitsCommand | AccountsCommand | AgentResumeCommand;
 
 interface LoadedState {
   plugins: ResolvedPlugin[];
@@ -181,6 +184,12 @@ class StdinLines {
           void this.handleAccounts(command);
           return;
         }
+        // A resume callback may also shell out (finding the harness's session
+        // file), so it runs beside the queue for the same reason.
+        if (command.type === "agentResume") {
+          void this.handleAgentResume(command);
+          return;
+        }
         this.queue = this.queue.then(() => this.dispatch(command));
       },
       () => process.exit(0),
@@ -274,6 +283,27 @@ class StdinLines {
   private runAccounts(command: AccountsCommand): Promise<{ value?: unknown; error?: string }> {
     if (!this.loaded) return Promise.resolve({ error: "plugin catalog has not loaded" });
     return settle(handleAccountsOp(this.loaded.plugins, this.loaded.sdk, command));
+  }
+
+  /**
+   * Builds the resume argv through the agent's plugin. A rejection, an unknown
+   * agent, and an invalid argv all answer the correlated request with `error`;
+   * the supervisor's own timeout bounds a callback that never settles.
+   */
+  private async handleAgentResume(command: AgentResumeCommand): Promise<void> {
+    if (!this.loaded) {
+      emit({
+        type: "agentResumeResult",
+        requestId: command.requestId,
+        error: "plugin catalog has not loaded",
+      });
+      return;
+    }
+    emit({
+      type: "agentResumeResult",
+      requestId: command.requestId,
+      ...(await settle(resolveAgentResume(this.loaded.plugins, this.loaded.sdk, command))),
+    });
   }
 
   private async handleUsageLimits(command: UsageLimitsCommand): Promise<void> {

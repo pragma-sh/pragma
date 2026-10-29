@@ -4,7 +4,8 @@ ESM opencode plugin that reports agent status into Pragma, for both OpenCode plu
 APIs: v1 (`@opencode-ai/plugin`, `src/index.ts`) and v2 (`@opencode/plugin`, `src/v2/`).
 It reacts to opencode hooks/events and reports `started` / `stopped` / `attention` / `cleared` /
 `session-name` (the parent session's title from `session.created`/`session.updated`,
-deduplicated, so Pragma renames the hosting tab on create/rename/switch)
+deduplicated, so Pragma renames the hosting tab on create/rename/switch) and
+`session-id` (the current top-level conversation id, so Pragma can resume it)
 through `@pragma-sh/sdk`.
 
 ## File map
@@ -288,6 +289,53 @@ Reporting uses the fetch-based `@pragma-sh/sdk` gateway helpers. Plugin options 
 accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` unless
 `PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
 `PRAGMA_WORKTREE_ID` are present.
+
+## Conversation tracking + resume
+
+The plugin reports the tab's current **top-level conversation id** as a status-less
+`session-id` report (SDK `reportSessionId`), so Pragma can resume that exact OpenCode
+session through the agent's `launch.resume` callback.
+
+**Where the id comes from — and its limit (verified against opencode 1.18.35).**
+opencode's server API has **no "currently selected session" event**: the TUI keeps its
+route in its own process (`api.route.current`, exposed only to a `tui.json` TUI plugin)
+and never publishes selection. `session.created` / `session.updated` are also not proof
+of selection — a root session can be created, renamed, or kept busy in the background
+while the user views another. The only authoritative selection signal a server plugin
+can see is **user-initiated activity**: `chat.message` (a submitted prompt) and
+`command.execute.before` (a slash command). The tracker latches that session's id and
+reports each change (A→B→A included; keyed on ids only, so same-title and untitled
+switches work). A switch that never prompts is not observable from here — a documented
+limit, not a silent approximation. Background root activity (`session.status`,
+`tool.execute.before`, `message.*`) never moves the latch, and child sessions
+(`info.parentID`) are tracked separately and never reported.
+
+`session.deleted` for the latched session reports `null` (the SDK's explicit
+`clearHarnessSessionId`), so the durable record cannot keep offering a resume of a
+deleted conversation; the next user activity latches and reports the new one. Deleting
+a background root or a child never clears — a deletion is only authoritative when it
+names the tracked session, and child deletions are consumed by the subagent tracker
+before this path. Aborting a turn or quitting opencode deliberately does **not** clear:
+the conversation still exists and stays resumable. Nothing reports a session-ended
+state — the host's supervised invocation tracks the real TUI exit separately.
+
+**A brand-new conversation's id is unknown until it is first prompted (verified against
+opencode 1.18.35).** `session.new` (or `/new`) only navigates the TUI back to its home
+route; the session itself is created server-side when the first prompt is submitted,
+which is also the `chat.message` that reports its id. `session.created` cannot stand in
+for selection: background roots (another client, `opencode run`, a plugin) emit it too,
+so treating it as a selection would hand the tab — and a later resume — to a
+conversation the user never opened. After a deletion clear, the stored id stays cleared
+until the next user activity (a prompt or slash command) reports the conversation it
+lands in. The TUI-level `api.route.current` signal would close this gap, but it is
+available only to a `tui.json` TUI plugin, and a module cannot be both the server and
+TUI plugin target.
+
+**Resume.** `launch.resume` returns the full literal argv
+`["opencode", "--session", <id>, ...selection args]`. `--session`, `--model`, and
+`--agent` are all top-level options (verified with `opencode --help`), so an explicit
+launch selection is replayed and no default mode is forced — the stored session keeps
+its own agent/model. The original slash command and prompt are never replayed.
 
 ## Plugin launcher
 

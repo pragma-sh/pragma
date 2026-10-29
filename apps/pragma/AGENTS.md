@@ -54,6 +54,7 @@ apps/pragma/
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
     ├── src/kanban.rs            # Tauri commands for the agent board (CRUD + move)
+    ├── src/agent_sessions.rs    # Host-routed launch preparation + interrupted-session restore
     ├── src/mini_window.rs       # Pragma Mini windows: create, route menu actions, `--mini` argv, dock menu
     ├── linux/pragma.desktop     # Bundler .desktop template (default + "New Pragma Mini Window" action)
     ├── src/updates.rs           # Desktop auto-update check/download/apply (reload overlay vs OS installer)
@@ -693,10 +694,14 @@ verified native installer **in place and relaunches** (`install_restart_update` 
 read-only, Finder-less mounted DMG next to the bundle the app runs from, then a detached
 helper swaps it in by rename after exit and `open`s it; Windows runs the NSIS setup `/S`
 after exit and relaunches; Linux installs the `.deb`/`.rpm` through `pkexec` before
-quitting and relaunches. Just before quitting it closes **every** tab in every
-project (`close_all_tabs` in `lib.rs`, the same per-tab teardown as `close_tab`), so the
-relaunch opens a clean workspace rather than tabs whose sessions died; nothing is closed
-when it falls back to the installer. The app quits itself ~750ms after returning
+quitting and relaunches. **The successful in-place quit deliberately leaves the
+workspace alone**: every project, worktree, tab row, and split layout stays, and
+nothing is closed or killed. The relaunched desktop reattaches to sessions that
+survived on the host, and the host restores an agent run the restart interrupted
+from its durable record — the old `close_all_tabs` teardown deleted exactly those
+rows and sessions. `updates.rs` carries a source-contract test
+(`restart_update_never_closes_tabs`) guarding the no-teardown rule. Nothing is
+touched when it falls back to the installer either. The app quits itself ~750ms after returning
 `{ relaunching: true }`; the helper logs to `install.log` beside the downloaded
 installers. When in place is impossible (not a bundle, read-only destination, no
 `pkexec`, prompt cancelled, `.msi`) it falls back to opening the installer and returns
@@ -849,6 +854,85 @@ never blocks a launch for more than 5 s. Settings → Account Providers
 `components/accounts/ProviderSection.tsx` with `wide` + `manage` — keep the two one UI, never
 a second Settings-only layout. The page pins the chips' write scope via `rowActions(…, scope)`.
 
+## Agent session preparation & resume
+
+`components/dialogs/SessionRestoreDialog.tsx` (mounted once in `App`) presents the
+host's read-only `sessionRestoreStatus` report through `session_restore_status` /
+`sessionRestoreStatus` in the typed bridge. It polls all connected hosts, refreshes on
+agent-stream reconnect, and includes proactive recovery of unmounted/background tabs.
+The host retains attempted-restore outcomes for its boot, so a desktop launched after
+recovery still sees the summary. Dismissal is cosmetic localStorage boot acknowledgements,
+never cancellation or a second recovery authority; ordinary live-PTY reattachment stays silent.
+
+An agent launch is prepared by the worktree's **owning host** before its command
+is written, so a session can be restored after a crash or a native-update quit.
+The desktop side is two thin host-routed adapters
+(`src-tauri/src/agent_sessions.rs`, typed wrappers `prepareAgentLaunch` /
+`restoreAgentSession` in `lib/tauri.ts`):
+
+- **`prepareAgentLaunch(worktreeId, tabId, agentId, command, selection)`** sends
+  the `tabs` RPC `prepareAgentLaunch` op (the `action`-tagged `TabsRequest`) and
+  returns `{ command, runId?, commandLine? }`. For a supported agent the host
+  wraps the argv in `pragma-cli agent run --run-id …` and tracks the child's
+  exit; for an unsupported one the command comes back unchanged. `selection` is
+  the shared `AgentLaunchSelection` from `@pragma-sh/constants` (re-exported by
+  `lib/tauri.ts`), so the wire shape has one source of truth.
+  **Before the op runs, the wrapper barriers the host**: it resolves (and
+  reconnects) the worktree's client, publishes that host's workspace snapshot
+  with `workspace_mirror::publish_snapshot_to` — a synchronous publish that
+  waits for the host's acknowledgement, so a worktree or tab created moments ago
+  is mirrored rather than lost to the publisher's debounce — and then registers
+  every project root with the host's plugin catalog, so a brand-new project's
+  agent resolves instead of failing as unknown. Both run inside
+  `spawn_blocking`; the main thread never blocks.
+  **`commandLine` is the literal line to type, rendered by the host** for a
+  tracked launch from the live session's `shell_program()`: PowerShell/`cmd.exe`
+  quoting on Windows, POSIX elsewhere, POSIX for a WSL profile, and whatever the
+  remote host's own platform needs. The desktop **forwards it unchanged and
+  never re-resolves the shell or re-quotes the argv** — only the host that owns
+  the session knows the shell that will parse the typed line. A tracked result
+  without a line is a host error the caller surfaces rather than joining the
+  argv itself. The launch's PTY must exist before preparation for this to be
+  possible: the foreground path prepares after its terminal connected, and the
+  background path spawns before preparing.
+- **`restoreAgentSession(worktreeId, tabId)`** sends `restoreAgentSession` and
+  returns whether an interrupted session was restored. A host that still has a
+  live PTY keeps it (no duplicate); `false` means no eligible record only — an
+  eligible record whose resume fails is an error the desktop surfaces.
+
+`startAgentInTab` keeps its sync/void signature. Internally it computes the
+legacy argv, registers the account env as before, marks the tab as having a
+launch in flight (`terminalManager.markLaunchPending`), then waits for the
+terminal connection, resolves the worktree from the mounted tab, asks the host
+for the prepared command, and only then schedules the delayed write. A tracked
+launch types the host-rendered `commandLine`; an unsupported one keeps the
+legacy `agentStartCommand` join (a single token stays raw). A preparation failure
+is rendered into the tab with `terminalManager.writeNotice` — **never through
+`writeWhenReady`**: that is PTY _input_, and an interpolated host error would be
+executed by the shell. `writeNotice` writes to the xterm renderer (or a toast
+when no terminal is live) and never reaches the shell. The failure is never
+swallowed into the untracked command, which would start a fresh conversation.
+
+`startBackgroundAgentSession` **spawns its detached PTY first, then prepares**
+(the host needs the live session to render the line), and rejects on preparation
+failure. Because the session may already exist by then, it kills the PTY only
+when this launch actually spawned it — a racing mount's live session is never
+destroyed — and callers that close the tab do so through the normal teardown.
+The pending-launch marker is set before the spawn (so a racing mount cannot ask
+the host to restore a session being created), cleared in a `finally`, and
+cleared on `dispose`, so a closed tab can never keep a later mount from
+restoring.
+
+`TerminalManager.connect` treats the first attach of a mounted tab as a
+three-way fork: a **definitive** `session not found` asks the host to restore the
+session and attaches to it when `restored`; `restored: false` spawns the tab's
+shell as before; a transport/auth failure (anything else) surfaces in the
+terminal and **never** spawns a replacement. A restore RPC failure surfaces too —
+errors must never fall back to a fresh conversation. A tab with a launch in
+flight skips the restore round trip entirely and uses the legacy spawn path, so
+a mount cannot race a brand-new launch; the connection generation still guards
+every step, so a superseded attach never attaches or leaks a stream.
+
 ## Remote agent session launch
 
 `control.rs` handles the brokered `agentSessionLaunch` control method: it resolves or
@@ -954,6 +1038,11 @@ The two halves are fixed differently, and the boundary was measured rather than 
 workspace root. Two worktree checkouts → different channels; same worktree → stable
 across rebuilds. Product identity (not `cfg!(debug_assertions)`) is deliberate so a
 release-built dev app keeps its own per-worktree instance.
+
+The frontend port is isolated too: `scripts/tauri-dev.ts` finds a free Vite/HMR port
+pair starting at 1420, overrides Tauri's `build.devUrl`, and exports the same
+`PRAGMA_DEV_PORT` to Vite. Do not reintroduce a fixed-port preflight; concurrent
+worktrees are expected to run together.
 
 - **Data dir:** `instance_data_dir` returns the legacy app-data root verbatim for prod
   (no relocation) and `app_data_dir/<channel>` for dev. `lib.rs` `setup_app` resolves

@@ -2,7 +2,8 @@ import type { PluginDefinition } from "@pragma-sh/plugin";
 import type { PragmaClient } from "@pragma-sh/sdk";
 import { describe, expect, it, vi } from "vitest";
 
-import { handleAccountsOp, listAccountProviders, winningPlugins, withAccountEnv } from "./accounts";
+import { handleAccountsOp, listAccountProviders, withAccountEnv } from "./accounts";
+import { winningPlugins } from "./catalog";
 import type { ResolvedPlugin } from "./catalog";
 
 function plugin(

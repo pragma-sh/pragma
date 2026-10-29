@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 mod agent_launch;
+mod agent_run;
 mod agent_verify;
 mod broker;
 mod cli;
@@ -77,6 +78,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Options(args) => agent_launch::options(args, out),
             AgentCommand::Status(args) => direct::agent_status(args, out),
             AgentCommand::Report(args) => direct::agent_report(args, out),
+            AgentCommand::Run(args) => agent_run::run(args, out),
             AgentCommand::Message(args) => direct::agent_message(args, out),
             AgentCommand::AwaitDecision(args) => direct::agent_await_decision(args),
             AgentCommand::Decide(args) => direct::agent_decide(args, out),

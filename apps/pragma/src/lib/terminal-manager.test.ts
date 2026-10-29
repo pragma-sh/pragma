@@ -22,6 +22,16 @@ vi.mock("@tauri-apps/api/core", () => {
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
+const toastErrorMock = vi.fn();
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+  },
+}));
+
 const terminalDispose = vi.fn();
 const terminalClear = vi.fn();
 const terminalReset = vi.fn();
@@ -249,6 +259,33 @@ describe("TerminalManager lifecycle", () => {
     terminalClear.mockClear();
     terminalReset.mockClear();
     terminalRefresh.mockClear();
+    toastErrorMock.mockClear();
+  });
+
+  it("renders a Pragma notice to the terminal without feeding the shell", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const terminal = (Terminal as unknown as { instances: Array<{ writeln: Mock }> }).instances.at(
+      -1,
+    )!;
+    invokeMock.mockClear();
+
+    manager.writeNotice(tab.id, "[pragma: could not prepare the agent session: boom]");
+
+    expect(terminal.writeln).toHaveBeenCalledWith(
+      "\r\n[pragma: could not prepare the agent session: boom]",
+    );
+    // A notice is display-only: it must never reach the shell as input.
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+
+  it("surfaces a notice for a tab with no live terminal as a toast", () => {
+    const manager = new TerminalManager();
+    manager.writeNotice("missing", "boom");
+    expect(toastErrorMock).toHaveBeenCalledWith("boom");
   });
 
   it("kills the daemon session and disposes the xterm widget on dispose", async () => {
@@ -372,6 +409,214 @@ describe("TerminalManager lifecycle", () => {
     expect(terminal.writeln).not.toHaveBeenCalledWith(
       expect.stringContaining("failed to start terminal"),
     );
+  });
+
+  it("restores an interrupted agent session when attach finds no PTY", async () => {
+    let attachCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        attachCalls += 1;
+        return attachCalls === 1
+          ? Promise.reject(new Error("daemon error: server error: session not found: tab-1"))
+          : Promise.resolve(undefined);
+      }
+      if (command === "restore_agent_session") {
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock).toHaveBeenCalledWith("restore_agent_session", {
+      worktreeId: "wt-1",
+      tabId: "tab-1",
+    });
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(2);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(0);
+  });
+
+  it("spawns a fresh shell when the host has no restorable session", async () => {
+    let attachCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        attachCalls += 1;
+        return attachCalls === 1
+          ? Promise.reject(new Error("daemon error: server error: session not found: tab-1"))
+          : Promise.resolve(undefined);
+      }
+      if (command === "restore_agent_session") {
+        return Promise.resolve(false);
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(1);
+  });
+
+  it("never falls back to a fresh shell when the restore fails", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return Promise.reject(new Error("daemon error: server error: session not found: tab-1"));
+      }
+      if (command === "restore_agent_session") {
+        return Promise.reject(new Error("daemon error: host is unreachable"));
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const terminal = (Terminal as unknown as { instances: Array<{ writeln: Mock }> }).instances.at(
+      -1,
+    )!;
+    expect(terminal.writeln).toHaveBeenCalledWith(
+      expect.stringContaining("failed to start terminal: daemon error: host is unreachable"),
+    );
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(0);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(1);
+  });
+
+  it("does not spawn a replacement shell after a transport failure", async () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === "pty_attach"
+        ? Promise.reject(new Error("daemon error: remote host 'box' is not connected"))
+        : Promise.resolve(undefined),
+    );
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const terminal = (Terminal as unknown as { instances: Array<{ writeln: Mock }> }).instances.at(
+      -1,
+    )!;
+    expect(terminal.writeln).toHaveBeenCalledWith(
+      expect.stringContaining("failed to start terminal"),
+    );
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(0);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(0);
+  });
+
+  it("keeps a surviving PTY without asking the host to restore", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(0);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(0);
+  });
+
+  it("asks to restore once when the same terminal re-parents", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return Promise.reject(new Error("daemon error: server error: session not found: tab-1"));
+      }
+      if (command === "restore_agent_session") {
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const first = document.createElement("div");
+    const second = document.createElement("div");
+    document.body.append(first, second);
+
+    manager.mount(tab, "/repo", first);
+    manager.mount(tab, "/repo", second);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(0);
+  });
+
+  it("lets a brand-new launch own its spawn instead of restoring", async () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === "pty_attach"
+        ? Promise.reject(new Error("daemon error: server error: session not found: tab-1"))
+        : Promise.resolve(undefined),
+    );
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.markLaunchPending(tab.id);
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manager.clearLaunchPending(tab.id);
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(0);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(1);
+  });
+
+  it("clears a pending launch marker on dispose so a later mount may restore", async () => {
+    let attachCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        attachCalls += 1;
+        // The first two attaches find no PTY: the first is the in-flight
+        // launch's mount, the second is the remount after dispose.
+        return attachCalls < 3
+          ? Promise.reject(new Error("daemon error: server error: session not found: tab-1"))
+          : Promise.resolve(undefined);
+      }
+      if (command === "restore_agent_session") {
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const first = document.createElement("div");
+    const second = document.createElement("div");
+    document.body.append(first, second);
+
+    // The launch in flight owns the first mount: the legacy spawn path runs
+    // and no restore is asked for.
+    manager.markLaunchPending(tab.id);
+    manager.mount(tab, "/repo", first);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(0);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(1);
+
+    // Closing the tab clears the marker; the next mount is free to restore.
+    manager.dispose(tab.id);
+    manager.mount(tab, "/repo", second);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "restore_agent_session"),
+    ).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(1);
   });
 
   it("restarts output stream when queued renderer work exceeds its byte cap", async () => {
@@ -885,7 +1130,7 @@ describe("TerminalManager lifecycle", () => {
     invokeMock.mockReset();
     invokeMock.mockImplementation((command: string) =>
       command === "pty_attach"
-        ? Promise.reject(new Error("session gone after daemon reset"))
+        ? Promise.reject(new Error("daemon error: server error: session not found: tab-1"))
         : Promise.resolve(undefined),
     );
     try {

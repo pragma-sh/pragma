@@ -33,6 +33,22 @@ do not present context-window consumption as account allowance.
 Full live verification is optional while Prime retains Pi's extension API. Focused tests
 must still cover identity matching and model parsing.
 
+## Session identity and resume
+
+Prime Agent gets the shared Pi identity reporting, but under Pragma's launch it has
+nothing to report. `--no-session` makes the session client-owned — which is exactly what
+lets the daemon worker receive `PRAGMA_*` and report status — and that session is
+`SessionManager.inMemory()`: no file, so every observation is a pending session and the
+extension reports only the status-less clear (`session-id` with a null id). That clear is
+a no-op with no tracked invocation: `prepareAgentLaunch` records nothing for an agent
+without `launch.resume`, so there is no stored conversation to drop. `prime-agent
+--resume <path|id>` resolves saved session files, and dropping `--no-session` to persist
+one would run a resident daemon session whose environment is stripped of `PRAGMA_*`, so
+the extension could not report status at all. The plugin therefore passes no
+`resumeFlag`: `supportsResume` stays false. Verified against the installed Prime Agent
+0.7.2: the extension's `session_start` fires with `getSessionFile() === undefined` and
+`isPersisted() === false`.
+
 ## Account providers
 
 Uses `piAccountProviders` from `@pragma-sh/pi-plugin/pragma-plugin-factory` with Prime's own store: `PRIME_AGENT_CODING_AGENT_DIR`, default `~/.prime/agent/auth.json` (same entry keys as Pi). The env name is derived from the package's config name upstream (`packages/coding-agent/src/config.ts`). See the Pi guide for why the agent dir never moves. OpenAI switches by swapping `auth.json` like Pi's; its login is `prime-agent --no-session` with `input: ["/login", "ChatGPT"]` and `inputDelayMs: 6000`. Prime 0.7's `/login` takes no provider and lists signed-in providers first, which an in-place sign-in has just signed out of, so the line filters the picker rather than trusting the order; Prime starts a daemon and kernel before its prompt accepts input. Prime cannot sign in against a scratch `PRIME_AGENT_CODING_AGENT_DIR` (its per-user daemon socket is shared and dies with `DaemonSocketClosedError`), which is why sign-in is in place. Prime wraps the sign-in URL at its panel width without an OSC 8 link, so on an SSH host the dialog's link is truncated; Prime opens the browser itself locally.

@@ -37,6 +37,44 @@ describe("Claude Code launch options", () => {
     ]);
   });
 
+  it("resumes the exact session id with the launch flags, never the prompt", async () => {
+    const resume = agent.launch.resume;
+    expect(resume).toBeTypeOf("function");
+    expect(
+      await resume!(
+        {
+          harnessSessionId: "2f3a4b5c-6d7e-8f90-1234-56789abcdef0",
+          selection: { modelId: "sonnet", reasoningId: "high", slashCommand: "review" },
+          cwd: "/repo",
+        },
+        emptyHost,
+      ),
+    ).toEqual([
+      "claude",
+      "--resume",
+      "2f3a4b5c-6d7e-8f90-1234-56789abcdef0",
+      "--model",
+      "sonnet",
+      "--effort",
+      "high",
+      "--permission-mode",
+      "auto",
+    ]);
+  });
+
+  it("replays an explicit agent and permission mode on resume", async () => {
+    expect(
+      await agent.launch.resume!(
+        {
+          harnessSessionId: "s",
+          selection: { modeId: "reviewer", permissionModeId: "plan" },
+          cwd: "/repo",
+        },
+        emptyHost,
+      ),
+    ).toEqual(["claude", "--resume", "s", "--agent", "reviewer", "--permission-mode", "plan"]);
+  });
+
   it("lists the agents Claude Code reports, default first and utilities hidden", () => {
     expect(
       parseClaudeAgents(

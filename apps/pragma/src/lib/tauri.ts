@@ -39,6 +39,7 @@ import type {
   WorktreeStorage,
   AgentMessage,
   AgentReportPayload,
+  AgentLaunchSelection,
   AutomationInfo,
   AutomationRootRegistration,
   OpenPort,
@@ -456,6 +457,81 @@ export function ptyResize(sessionId: string, cols: number, rows: number): Promis
 /** Kills a daemon PTY session. */
 export function ptyKill(sessionId: string): Promise<void> {
   return invoke("pty_kill", { sessionId });
+}
+
+/**
+ * The agent-launch choices a host records alongside a prepared run, mirroring
+ * the `selection` object of the `prepareAgentLaunch` op. Re-exported from
+ * `@pragma-sh/constants` (shared with plugin `launch.resume` callbacks) so the
+ * wire shape has one source of truth.
+ */
+export type { AgentLaunchSelection } from "@pragma-sh/constants";
+
+/**
+ * A host-prepared agent invocation. `command` is the argv to run — wrapped in
+ * `pragma-cli agent run --run-id …` for a supported agent, unchanged for an
+ * unsupported one — and `runId` is present only when the host tracks the run
+ * for crash / update resume. `commandLine` is the literal line to type for a
+ * tracked launch, rendered by the host from the live session's actual shell
+ * (never re-quoted by the desktop); it is absent for an unsupported agent,
+ * whose caller keeps the legacy join.
+ */
+export interface PreparedAgentLaunch {
+  command: string[];
+  runId?: string | null;
+  commandLine?: string | null;
+}
+
+/**
+ * Asks the worktree's owning host to prepare an agent invocation before the
+ * command is written to the shell, so a supported agent runs under a tracked
+ * `pragma-cli agent run` and can be restored after a crash or native update.
+ * A rejection is surfaced by the caller; it is never silently replaced with the
+ * untracked command, which would start a fresh conversation.
+ */
+export function prepareAgentLaunch(
+  worktreeId: string,
+  tabId: string,
+  agentId: string,
+  command: string[],
+  selection?: AgentLaunchSelection | null,
+): Promise<PreparedAgentLaunch> {
+  return invoke<PreparedAgentLaunch>("prepare_agent_launch", {
+    worktreeId,
+    tabId,
+    agentId,
+    command,
+    selection: selection ?? null,
+  });
+}
+
+/**
+ * Asks the worktree's owning host to restore an interrupted agent session for a
+ * tab whose PTY is gone. `false` means no eligible record; a host that still
+ * has the live PTY keeps it instead of spawning a duplicate.
+ */
+export function restoreAgentSession(worktreeId: string, tabId: string): Promise<boolean> {
+  return invoke<boolean>("restore_agent_session", { worktreeId, tabId });
+}
+
+/** Host-owned progress for one interrupted session; never a recovery identity. */
+export interface SessionRestoreProgress {
+  tabId: string;
+  title: string;
+  complete: boolean;
+  error: string | null;
+}
+
+/** Read-only report retained for one host boot, including unmounted agent tabs. */
+export interface SessionRestoreSnapshot {
+  bootId: string;
+  startupComplete: boolean;
+  sessions: SessionRestoreProgress[];
+}
+
+/** Reads recovery progress from all currently connected hosts. */
+export function sessionRestoreStatus(): Promise<SessionRestoreSnapshot[]> {
+  return invoke<SessionRestoreSnapshot[]>("session_restore_status");
 }
 
 /**

@@ -1,9 +1,14 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   modeProvider,
   slashCommandProvider,
+  type AgentArgsBuilder,
+  type AgentPermissionMode,
+  type AgentResumeRequest,
+  type PluginContext,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
@@ -65,6 +70,43 @@ const AGENT_SOURCES = [
 ];
 const DEFAULT_MODE = "default";
 
+/** Permission modes; the first, `ask`, passes no flag. */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "ask", name: "Ask" },
+  { id: "allow-all", name: "Allow all" },
+];
+
+/** Launch flags for a model/reasoning/mode/permission selection. */
+const copilotArgs: AgentArgsBuilder = {
+  model: (modelId: string) => ["--model", modelId],
+  reasoning: (reasoningId: string) => ["--effort", reasoningId],
+  modelReasoning: (modelId: string, reasoningId: string) => [
+    "--model",
+    modelId,
+    "--effort",
+    reasoningId,
+  ],
+  permissionMode: (permissionModeId: string) =>
+    permissionModeId === "allow-all" ? ["--allow-all"] : [],
+  mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
+};
+
+/**
+ * Builds the full literal argv for resuming a recorded Copilot session: the
+ * base command, the stored selection's flags, and `--resume=<session-id>`.
+ * Verified against `copilot --help` (`-r, --resume[=value]`, documented as
+ * `copilot --resume=<session-id>`): the attached form is required because the
+ * value is optional, so a space-separated id would be read as the prompt.
+ */
+export function copilotResume(request: AgentResumeRequest, _ctx: PluginContext): string[] {
+  return [
+    "copilot",
+    "--no-auto-update",
+    ...agentLaunchArgs({ args: copilotArgs, permissionModes: PERMISSION_MODES }, request.selection),
+    `--resume=${request.harnessSessionId}`,
+  ];
+}
+
 /** Pragma plugin for GitHub Copilot CLI. */
 export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
   name: "GitHub Copilot CLI",
@@ -119,7 +161,7 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
       name: "GitHub Copilot CLI",
       icon: () => null,
       iconPath: "assets/copilot.png",
-      launch: { command: ["copilot", "--no-auto-update"] },
+      launch: { command: ["copilot", "--no-auto-update"], resume: copilotResume },
       excludeFeatures: ["abort", "interrupt"],
       // Copilot's interactive TUI mounts slowly on a cold start (skills,
       // hooks, and extensions load before the composer accepts input), so a
@@ -132,23 +174,8 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["copilot", "--acp"] },
       }),
-      permissionModes: [
-        { id: "ask", name: "Ask" },
-        { id: "allow-all", name: "Allow all" },
-      ],
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: (reasoningId: string) => ["--effort", reasoningId],
-        modelReasoning: (modelId: string, reasoningId: string) => [
-          "--model",
-          modelId,
-          "--effort",
-          reasoningId,
-        ],
-        permissionMode: (permissionModeId: string) =>
-          permissionModeId === "allow-all" ? ["--allow-all"] : [],
-        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
-      },
+      permissionModes: PERMISSION_MODES,
+      args: copilotArgs,
     }),
   ],
 });

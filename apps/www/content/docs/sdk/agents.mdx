@@ -26,12 +26,21 @@ import {
   reportAttention, // status: "attention"
   reportCleared, // status: "cleared"
   reportSessionName,
+  reportSessionId,
   reportMessage,
 } from "@pragma-sh/sdk";
 ```
 
-`reportSessionName({ agent, sessionName })` names the hosting tab (a user rename always
-wins). `reportMessage({ agent, message })` publishes a rich message shown in the app.
+`reportSessionName({ agent, name })` names the hosting tab (a user rename always wins).
+`reportSessionId({ agent, id })` stores the harness's own opaque conversation id as
+`harnessSessionId`, without changing status, so a later launch can resume that session; call
+it on session create and switch. `reportMessage({ agent, message })` publishes a rich
+message shown in the app.
+
+When a tracked launch set `PRAGMA_AGENT_RUN_ID`, every report from that child also carries it
+as `agentRunId`, so the host can attribute the id to the exact run and reject a stale report
+from a superseded one. See [Sessions & recovery](/docs/user-guide/sessions) for what a
+restore does and does not replay.
 
 ## Questions — round trips, not just events
 

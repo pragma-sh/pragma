@@ -5,6 +5,7 @@ const invokeMock = vi.fn();
 
 const invokeResults: Record<string, unknown> = {
   list_projects: [],
+  session_restore_status: [],
   get_projects_directory: "/tmp",
   ai_status: { available: false, signedIn: [] },
   ai_setup_dismissed: true,

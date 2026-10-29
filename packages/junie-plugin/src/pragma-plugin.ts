@@ -1,10 +1,15 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   commandAndSkillDirs,
+  modelFlagArgs,
   slashCommandProvider,
+  type AgentArgsBuilder,
   type AgentModelEntry,
+  type AgentPermissionMode,
+  type AgentResumeRequest,
   type PluginContext,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
@@ -35,6 +40,44 @@ const baseWatcher = createTuiWatcher({
   // Selection opens Junie's answer summary; one more Enter submits it.
   questionFinalizeKeys: "\r",
 });
+
+/**
+ * Permission modes; Junie's approval behaviour is the `brave_mode` setting,
+ * whose only command-line lever is `--brave`. The first, `default`, passes
+ * nothing and keeps whatever the user configured (which defaults to `auto`).
+ */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "default", name: "Ask for approval" },
+  { id: "plan", name: "Plan mode" },
+  { id: "brave", name: "Brave mode (no approvals)" },
+];
+
+/** Launch flags for a model/reasoning/permission selection. */
+const junieArgs: AgentArgsBuilder = {
+  model: modelFlagArgs,
+  reasoning: (reasoningId: string) => ["--effort", reasoningId],
+  permissionMode: (permissionModeId: string) => {
+    if (permissionModeId === "brave") return ["--brave"];
+    return permissionModeId === "plan" ? ["--plan"] : [];
+  },
+};
+
+/**
+ * Builds the full literal argv for resuming a recorded Junie session: the base
+ * command, the stored model/reasoning/permission flags, and
+ * `--session-id <id>`. Verified against `junie --help` (`--session-id=<text>`
+ * "Id of the previously executed session to follow up", which `--resume` uses
+ * when present) and against the CLI's own resume hint, which prints exactly
+ * `junie --session-id <id>`.
+ */
+export function junieResume(request: AgentResumeRequest, _ctx: PluginContext): string[] {
+  return [
+    "junie",
+    ...agentLaunchArgs({ args: junieArgs, permissionModes: PERMISSION_MODES }, request.selection),
+    "--session-id",
+    request.harnessSessionId,
+  ];
+}
 
 /** Junie built-ins worth starting a session with; custom commands are discovered. */
 const BUILTIN_SLASH_COMMANDS = [
@@ -103,19 +146,12 @@ export const junieAgentPlugin: PluginDefinition = definePlugin({
       name: "Junie",
       icon: () => null,
       iconPath: "assets/junie.svg",
-      launch: { command: ["junie"] },
+      launch: { command: ["junie"], resume: junieResume },
       prefillDelayMs: PREFILL_DELAY_MS,
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: loadJunieModels,
-      // Junie's approval behaviour is the `brave_mode` setting, whose only
-      // command-line lever is `--brave` (equivalent to `Brave: on`). Leaving it
-      // off keeps whatever the user configured, which defaults to `auto`.
-      permissionModes: [
-        { id: "default", name: "Ask for approval" },
-        { id: "plan", name: "Plan mode" },
-        { id: "brave", name: "Brave mode (no approvals)" },
-      ],
+      permissionModes: PERMISSION_MODES,
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["junie", "--acp=true", "--skip-update-check", "--cache-dir={tmp}"] },
       }),
@@ -123,14 +159,7 @@ export const junieAgentPlugin: PluginDefinition = definePlugin({
       // per-agent hook (`PreToolUse` carries no agent or session id), so their
       // start and finish are not observable from a hook bridge.
       excludeFeatures: ["subagents"],
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: (reasoningId: string) => ["--effort", reasoningId],
-        permissionMode: (permissionModeId: string) => {
-          if (permissionModeId === "brave") return ["--brave"];
-          return permissionModeId === "plan" ? ["--plan"] : [];
-        },
-      },
+      args: junieArgs,
     }),
   ],
 });

@@ -12,12 +12,26 @@ commands on stdin, and emits NDJSON events on stdout:
 
 - **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId), correlated
   `usageLimits` (`requestId` + optional `pluginId`; each account provider's default login, for
-  `agent verify`), and correlated `accounts` (`requestId` + `op`: `providers`, `launch`, `identify`,
-  `usage`). `accounts` ops run **beside** the serial command queue: they shell out to harness
-  CLIs that take seconds, and one slow usage load must not stall a launch's env lookup. There is no separate `reload`
+  `agent verify`), correlated `accounts` (`requestId` + `op`: `providers`, `launch`, `identify`,
+  `usage`), and correlated `agentResume` (`requestId` + `agentId` + `projectRoot` + `request`:
+  `{ harnessSessionId, selection, cwd }`). `accounts` and `agentResume` run **beside** the serial
+  command queue: they shell out to harness CLIs that take seconds, and one slow usage load must not
+  stall a launch's env lookup or a resume's argv. There is no separate `reload`
   command — host re-sends full `load` with fresh gateway credentials.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
-  correlated `usageLimits` and `accountsResult`, `error`, `log`.
+  correlated `usageLimits`, `accountsResult`, and `agentResumeResult` (`value` argv or `error`),
+  `error`, `log`.
+
+**Resume resolves through the plugin, not the catalog.** An `agentResume` command names the
+qualified catalog `agentId` and the project root; the sidecar picks the winning plugin for
+that root (project override beats global, the same rule catalog assembly applies), builds
+the plugin context (`pluginId`, `pluginDir`, `config`, `project`), and calls the agent's
+`launch.resume` callback. The returned argv is validated before it can reach a shell: it
+must be a non-empty string array whose executable is non-empty and whose tokens carry no
+NUL/CR/LF. An unknown agent, an agent without `resume`, a rejecting callback, and a
+malformed argv all answer the correlated request with `error`; the supervisor's own
+timeout bounds a callback that never settles. A resume callback gets the plain plugin
+context today — no account env — because a full resume argv must not embed credentials.
 
 **Re-importing rebuilt bundles.** Each `load` re-imports every bundle through
 `freshImportSpecifier(mainPath, mtime)` (`@pragma-sh/sidecar-kit`). Do not go back to a
@@ -36,7 +50,13 @@ Supervisor stdin is the ownership boundary: EOF must terminate the Bun process s
 On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust
 `plugins.rs` `resolve_local_dir` semantics — accepted duplication, flagged as debt until
-resolution moves into `pragma-core`). It imports those user-configured local-path plugins
+resolution moves into `pragma-core`). **Relative specifiers resolve against the config
+file's own directory (`<root>/.pragma`), never the scope root, for the global and project
+files alike**: `../packages/x` in `<project>/.pragma/config.json` is
+`<project>/packages/x`, and in `~/.pragma/config.json` it is `<home>/packages/x`. `./`,
+`../` (and `.\` / `..\` where the platform treats backslash as a separator), absolute
+paths, and `~/` follow the Rust resolver; npm specifiers are skipped here. It imports those
+user-configured local-path plugins
 via Bun `import()` (the `pragma-watch` precedent), resolves async model providers through a
 `PragmaClient` pointed at the local gateway, hashes icon files (`sha256`, 256 KB cap), and
 assembles the `AgentCatalog`. A flaky model provider (exec throwing, or returning no
@@ -59,10 +79,12 @@ packages/plugins-host/
 │   ├── catalog.ts    # assembleCatalog, resolveModels, hashIcon, mimeForIcon, ICON_MAX_BYTES
 │   ├── manifest.ts   # resolveManifests: global + project .pragma/config.json plugins
 │   ├── accounts.ts     # Account ops: provider metadata, login env, identify, usage (env applied to sdk.exec)
+│   ├── resume.ts       # agentResume: winning plugin lookup + launch.resume + argv validation
 │   ├── usage-limits.ts # Default-login usage per account provider (the `usageLimits` command)
 │   ├── lifecycle.ts # Executes onInstall/onPragmaLoad with durable dedupe markers
 │   ├── index.ts      # Re-exports for tests/consumers
 │   ├── catalog.test.ts
+│   ├── resume.test.ts
 │   └── manifest.test.ts
 └── package.json      # bin: pragma-plugins -> src/cli.ts; build:sidecar compiles dist/pragma-plugins
 ```

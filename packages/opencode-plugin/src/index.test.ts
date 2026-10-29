@@ -4,6 +4,7 @@ const sdkMocks = vi.hoisted(() => ({
   reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportMessage: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportSessionId: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportSessionName: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
@@ -22,6 +23,7 @@ vi.mock("@pragma-sh/sdk", () => {
     reportAttention: forwardReportMock(sdkMocks.reportAttention),
     reportCleared: forwardReportMock(sdkMocks.reportCleared),
     reportMessage: forwardReportMock(sdkMocks.reportMessage),
+    reportSessionId: forwardReportMock(sdkMocks.reportSessionId),
     reportSessionName: forwardReportMock(sdkMocks.reportSessionName),
     reportStarted: forwardReportMock(sdkMocks.reportStarted),
     reportStopped: forwardReportMock(sdkMocks.reportStopped),
@@ -44,6 +46,7 @@ const pragmaEnv = {
 function testHooks() {
   const reports: Report[] = [];
   const sessionNames: string[] = [];
+  const sessionIds: Array<string | null> = [];
   const commands: string[] = [];
   const questions: Array<{
     question: string;
@@ -104,8 +107,11 @@ function testHooks() {
     async sessionName(name) {
       sessionNames.push(name);
     },
+    async sessionId(id) {
+      sessionIds.push(id);
+    },
   });
-  return { hooks, reports, commands, questions, messages, sessionNames };
+  return { hooks, reports, commands, questions, messages, sessionNames, sessionIds };
 }
 
 function runtimeEvent(type: string, properties: Record<string, unknown>) {
@@ -288,6 +294,7 @@ describe("Pragma opencode plugin", () => {
         reports.push("cleared");
       },
       async sessionName() {},
+      async sessionId() {},
     });
 
     const started = hooks.event?.(sessionStatus("busy"));
@@ -469,6 +476,116 @@ describe("Pragma opencode plugin", () => {
       },
       ["started"],
     );
+  });
+
+  it("tracks the top-level conversation from user activity, not session events", async () => {
+    const { hooks, sessionIds } = testHooks();
+    // A root session being created/renamed/statused is not proof the user
+    // selected it, so none of it may claim the tracked conversation.
+    await hooks.event?.(runtimeEvent("session.created", { info: { id: "s1", title: "Fix auth" } }));
+    await hooks.event?.(runtimeEvent("session.updated", { info: { id: "s1", title: "Renamed" } }));
+    await hooks.event?.(sessionStatus("busy"));
+    expect(sessionIds).toEqual([]);
+
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+    expect(sessionIds).toEqual(["s1"]);
+  });
+
+  it("reports every A-B-A switch, same title or not", async () => {
+    const { hooks, sessionIds } = testHooks();
+    const prompt = async (sessionID: string) => {
+      await hooks["chat.message"]?.({ sessionID }, { message: {} as never, parts: [] });
+    };
+
+    await prompt("s1");
+    await prompt("s2");
+    await prompt("s1");
+    // No titles are involved: the tracker keys on ids, so an untitled or
+    // same-title switch is still a switch.
+    expect(sessionIds).toEqual(["s1", "s2", "s1"]);
+  });
+
+  it("never tracks a subagent session id", async () => {
+    const { hooks, sessionIds } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
+    );
+    await hooks["chat.message"]?.({ sessionID: "child-1" }, { message: {} as never, parts: [] });
+    await hooks["command.execute.before"]?.(
+      { command: "review", sessionID: "child-1", arguments: "" },
+      { parts: [] },
+    );
+    expect(sessionIds).toEqual([]);
+  });
+
+  it("does not follow a background root session's model activity", async () => {
+    const { hooks, sessionIds } = testHooks();
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+
+    // s2 keeps working in the background while the user stays in s1: its
+    // status, tool, and message events must not steal the tracked conversation.
+    await hooks.event?.(
+      runtimeEvent("session.status", { sessionID: "s2", status: { type: "busy" } }),
+    );
+    await hooks["tool.execute.before"]?.(
+      { tool: "bash", sessionID: "s2", callID: "c1" },
+      { args: { command: "npm test" } },
+    );
+    await hooks.event?.({
+      event: {
+        type: "message.updated",
+        properties: { info: { id: "m2", sessionID: "s2" } },
+      } as never,
+    });
+    expect(sessionIds).toEqual(["s1"]);
+
+    // Only user-initiated activity in s2 (a slash command here) switches.
+    await hooks["command.execute.before"]?.(
+      { command: "review", sessionID: "s2", arguments: "" },
+      { parts: [] },
+    );
+    expect(sessionIds).toEqual(["s1", "s2"]);
+  });
+
+  it("clears the resumable conversation when the tracked session is deleted", async () => {
+    const { hooks, sessionIds } = testHooks();
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+    await hooks.event?.(runtimeEvent("session.deleted", { info: { id: "s1" } }));
+    // The user deleted their conversation, so nothing may resume it: the
+    // stored id is cleared (null) before any next selection event.
+    expect(sessionIds).toEqual(["s1", null]);
+
+    // A repeated/stale deletion makes no further statement.
+    await hooks.event?.(runtimeEvent("session.deleted", { info: { id: "s1" } }));
+    expect(sessionIds).toEqual(["s1", null]);
+  });
+
+  it("does not clear for a background root or child session deletion", async () => {
+    const { hooks, sessionIds } = testHooks();
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+    // A background root session (another client, `opencode run`, a plugin) is
+    // never the tracked conversation, so deleting it must not clear s1.
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "s2", title: "Background" } }),
+    );
+    await hooks.event?.(runtimeEvent("session.deleted", { info: { id: "s2" } }));
+    // Child session lifecycle is tracked separately (see the subagent tests);
+    // its deletion must clear nothing either.
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
+    );
+    await hooks.event?.(runtimeEvent("session.deleted", { info: { id: "child-1" } }));
+    expect(sessionIds).toEqual(["s1"]);
+  });
+
+  it("reports the next selected conversation after a deletion clear", async () => {
+    const { hooks, sessionIds } = testHooks();
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+    await hooks.event?.(runtimeEvent("session.deleted", { info: { id: "s1" } }));
+    // The replacement conversation's id is only knowable from its first
+    // prompt — no guess from session lifecycle events (see AGENTS.md).
+    await hooks["chat.message"]?.({ sessionID: "s2" }, { message: {} as never, parts: [] });
+    expect(sessionIds).toEqual(["s1", null, "s2"]);
   });
 
   async function expectStoppedAfter(input: ReturnType<typeof runtimeEvent>) {
@@ -1238,5 +1355,34 @@ describe("PragmaOpencodePlugin initialization", () => {
     });
 
     expect(sdkMocks.reportCleared).not.toHaveBeenCalled();
+  });
+
+  it("reports the conversation id through the SDK on user activity", async () => {
+    sdkMocks.reportSessionId.mockClear();
+    const hooks = await PragmaOpencodePlugin(input, { env: pragmaEnv });
+
+    await hooks["chat.message"]?.({ sessionID: "ses_1" }, { message: {} as never, parts: [] });
+
+    expect(sdkMocks.reportSessionId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: "opencode",
+        id: "ses_1",
+        env: expect.objectContaining(pragmaEnv),
+      }),
+    );
+  });
+
+  it("clears the stored conversation through the SDK when the tracked session is deleted", async () => {
+    sdkMocks.reportSessionId.mockClear();
+    const hooks = await PragmaOpencodePlugin(input, { env: pragmaEnv });
+
+    await hooks["chat.message"]?.({ sessionID: "ses_1" }, { message: {} as never, parts: [] });
+    await hooks.event?.({
+      event: { type: "session.deleted", properties: { info: { id: "ses_1" } } } as never,
+    });
+
+    expect(sdkMocks.reportSessionId).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agent: "opencode", id: null }),
+    );
   });
 });

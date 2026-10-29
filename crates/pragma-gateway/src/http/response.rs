@@ -201,6 +201,9 @@ pub fn event_json(event: EventFrame) -> Value {
             agent,
             status,
             session_name,
+            harness_session_id,
+            agent_run_id,
+            clear_harness_session_id,
             attention_kind,
             command,
             question,
@@ -214,6 +217,9 @@ pub fn event_json(event: EventFrame) -> Value {
             "agent": agent,
             "status": status,
             "sessionName": session_name,
+            "harnessSessionId": harness_session_id,
+            "agentRunId": agent_run_id,
+            "clearHarnessSessionId": clear_harness_session_id,
             "attentionKind": attention_kind,
             "command": command,
             "question": question,
@@ -341,7 +347,10 @@ mod tests {
             tab_id: "tab".to_string(),
             agent: "cursor".to_string(),
             status: Some(AgentStatus::Attention),
-            session_name: None,
+            session_name: Some("Fix flaky tests".to_string()),
+            harness_session_id: Some("sess-1".to_string()),
+            agent_run_id: Some("run-1".to_string()),
+            clear_harness_session_id: Some(true),
             attention_kind: Some(pragma_constants::AgentAttentionKind::Question),
             command: None,
             question: Some("Which database?".to_string()),
@@ -353,6 +362,10 @@ mod tests {
             value["options"][0]["description"],
             "Client-server relational database"
         );
+        // The session identity fields ride through to NDJSON clients.
+        assert_eq!(value["harnessSessionId"], "sess-1");
+        assert_eq!(value["agentRunId"], "run-1");
+        assert_eq!(value["clearHarnessSessionId"], true);
     }
 
     #[test]

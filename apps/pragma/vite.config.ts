@@ -5,11 +5,14 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { resolveDevPort } from "./scripts/dev-port";
+
 // Tauri injects this when running `tauri dev` on a physical device / LAN.
 const host = process.env.TAURI_DEV_HOST;
+const port = resolveDevPort(process.env.PRAGMA_DEV_PORT);
 const localDevOrigin = /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 
-// https://vite.dev/config/ — tuned for Tauri (fixed port, no clear screen).
+// https://vite.dev/config/ — tuned for Tauri (shared launcher port, no clear screen).
 export default defineConfig({
   plugins: [
     react({
@@ -28,13 +31,13 @@ export default defineConfig({
   // Prevent Vite from obscuring Rust errors.
   clearScreen: false,
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     host: host ?? false,
     // Sandboxed scratchpad frames have an opaque `null` origin. Their dev-only
     // module graph still comes from Vite and therefore requires CORS permission.
     cors: { origin: [localDevOrigin, "null"] },
-    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    hmr: host ? { protocol: "ws", host, port: port + 1 } : undefined,
     // Tauri owns the Rust side; don't let Vite watch it.
     watch: { ignored: ["**/src-tauri/**"] },
   },

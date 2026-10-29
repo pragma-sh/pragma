@@ -101,6 +101,24 @@ pub(crate) fn publish_now(app: &AppHandle) -> AppResult<()> {
     let db = app.state::<Db>();
     let hosts = app.state::<Hosts>();
     adopt_fanout_workspace(&db, &hosts);
+    publish_snapshot(app, None)
+}
+
+/// Publishes the current workspace snapshot to one host and returns once that
+/// host acknowledged it. A host with no owning projects is a no-op.
+///
+/// An agent-session op resolves its worktree and tab from the host's mirrored
+/// snapshot, which the debounced publisher may not have delivered yet for a
+/// worktree or tab created moments ago; publishing here makes that state
+/// visible before the op runs. The caller resolves (and reconnects) the host
+/// client first, so a disconnected remote is registered by the time this runs.
+pub(crate) fn publish_snapshot_to(app: &AppHandle, host_id: &str) -> AppResult<()> {
+    publish_snapshot(app, Some(host_id))
+}
+
+fn publish_snapshot(app: &AppHandle, only_host: Option<&str>) -> AppResult<()> {
+    let db = app.state::<Db>();
+    let hosts = app.state::<Hosts>();
     let projects = db.list_projects()?;
     let worktrees = db.list_all_worktrees()?;
     let tabs = db.list_all_tabs()?;
@@ -134,6 +152,9 @@ pub(crate) fn publish_now(app: &AppHandle) -> AppResult<()> {
         }
     }
     for (host_id, snapshot) in snapshots {
+        if !snapshot_wanted(only_host, &host_id) {
+            continue;
+        }
         // A disconnected remote will receive its full snapshot on its next
         // successful publish after reconnect; local projects keep publishing.
         let Ok(client) = hosts.client_for_host(&host_id) else {
@@ -142,6 +163,12 @@ pub(crate) fn publish_now(app: &AppHandle) -> AppResult<()> {
         client.publish_workspace(&snapshot)?;
     }
     Ok(())
+}
+
+/// True when a snapshot for `host_id` is wanted: every host for a full publish,
+/// only the named one for the prepare-path barrier.
+fn snapshot_wanted(only_host: Option<&str>, host_id: &str) -> bool {
+    only_host.map_or(true, |target| target == host_id)
 }
 
 /// Adopts host-created fanout worktrees and their live agent tabs into the
@@ -407,9 +434,22 @@ fn adopt_fanout_tabs(db: &Db, hosts: &Hosts) {
 
 #[cfg(test)]
 mod tests {
-    use super::{fanout_parentage, order_fanout_worktrees};
+    use super::{fanout_parentage, order_fanout_worktrees, snapshot_wanted};
     use pragma_core::git::HeadlessWorktree;
     use serde_json::json;
+
+    #[test]
+    fn snapshot_targets_are_all_hosts_or_exactly_the_named_one() {
+        // A full publish (the debounced worker, fanout finalization) targets
+        // every host...
+        assert!(snapshot_wanted(None, "local"));
+        assert!(snapshot_wanted(None, "remote-1"));
+        // ...while the prepare-path barrier publishes only the host that owns
+        // the worktree it is about to prepare, so it never waits on an
+        // unrelated remote.
+        assert!(snapshot_wanted(Some("remote-1"), "remote-1"));
+        assert!(!snapshot_wanted(Some("remote-1"), "local"));
+    }
 
     #[test]
     fn fanout_parentage_maps_attempts_to_their_parent_and_the_parent_to_its_source() {

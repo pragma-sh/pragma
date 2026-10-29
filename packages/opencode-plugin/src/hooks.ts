@@ -80,6 +80,13 @@ export interface PragmaReporter {
   /** Reports the session's display name so Pragma can rename the hosting tab. */
   sessionName(name: string): Promise<void>;
   /**
+   * Reports the top-level conversation's harness session id, status-less, so a
+   * later launch can resume it. `null` clears the stored id — the tracked
+   * conversation was deleted, so nothing may resume it. Never called with a
+   * subagent session id.
+   */
+  sessionId(id: string | null): Promise<void>;
+  /**
    * Reports a `command` attention carrying the command text + a correlation id.
    * Drives the Pragma approval toast; the paired host-side watcher answers the
    * verdict with `sendKeys`. Used for opencode's permission prompts (which have
@@ -153,6 +160,16 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   };
 
   let lastSessionName: string | null = null;
+  /**
+   * The top-level conversation the user is actually in, as far as a server
+   * plugin can tell. `session.created`/`session.updated` are not proof of
+   * selection: opencode keeps the TUI's current route in its own process and
+   * never publishes it, and a background root session keeps emitting
+   * model/tool events while the user views another. So the tracker moves only
+   * on user-initiated activity — a submitted prompt or slash command — and
+   * latches the last such session until a different one sees activity.
+   */
+  let activeSessionId: string | null = null;
 
   /**
    * Mirrors a child session's lifecycle onto its parent. Returns true if handled.
@@ -226,6 +243,14 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     if (CHAT_EVENT_TYPES.has(event.type)) {
       await reportChatContent(event);
     }
+    if (isTrackedSessionDeleted(event)) {
+      // The user's own conversation was deleted in the TUI: clear the stored
+      // id before any next selection event so a resume cannot resurrect it.
+      // Only the tracked top-level session reaches this non-consuming path —
+      // child deletions are consumed earlier and a background root is never
+      // the tracked session.
+      await clearActiveSession();
+    }
     const action = applyEvent(event);
     if (action === "clear") {
       await clear();
@@ -248,6 +273,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       if (isChildSessionId(_input.sessionID)) {
         return;
       }
+      await reportActiveSession(_input.sessionID);
       busy = true;
       const text =
         textFromParts(output.parts) ??
@@ -267,6 +293,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       if (isChildSessionId(input.sessionID)) {
         return;
       }
+      await reportActiveSession(input.sessionID);
       busy = true;
       await queueReport(() =>
         reporter.message(
@@ -351,6 +378,40 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     }
     lastSessionName = info.title;
     await reporter.sessionName(info.title);
+  }
+
+  /**
+   * Latches the current top-level conversation from user-initiated activity
+   * (a prompt or slash command) and reports each change. A→B→A switches are
+   * reported again because only the latched id is deduplicated, and a session
+   * switch with no following prompt is not observable here — opencode's
+   * selection state lives in the TUI process (see {@link activeSessionId}).
+   */
+  async function reportActiveSession(sessionId: string | undefined): Promise<void> {
+    if (!sessionId || childSessions.has(sessionId) || sessionId === activeSessionId) {
+      return;
+    }
+    activeSessionId = sessionId;
+    await queueReport(() => reporter.sessionId(sessionId));
+  }
+
+  /** Whether this event is the deletion of the conversation the tab tracks. */
+  function isTrackedSessionDeleted(event: RuntimeEvent): boolean {
+    return event.type === "session.deleted" && sessionIdFromEvent(event) === activeSessionId;
+  }
+
+  /**
+   * Reports that the tab has no conversation left to resume, so Pragma stops
+   * offering one. Only the deletion of the tracked top-level session calls
+   * this; aborting a turn or quitting opencode deliberately does not (the
+   * conversation still exists and stays resumable).
+   */
+  async function clearActiveSession(): Promise<void> {
+    if (activeSessionId === null) {
+      return;
+    }
+    activeSessionId = null;
+    await queueReport(() => reporter.sessionId(null));
   }
 
   function applyChildSessionEvent(event: RuntimeEvent): boolean {

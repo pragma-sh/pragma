@@ -46,6 +46,9 @@ const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
 /// Account callbacks shell out to harness CLIs (`claude -p`, `codex app-server`)
 /// that can take tens of seconds on a cold start; usage shares the same bound.
 const ACCOUNTS_REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
+/// A resume callback imports the plugin bundle and builds one argv. The first
+/// import of a cold bundle is the slow part, so this shares the catalog bound.
+const AGENT_RESUME_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(not(test))]
 const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
 
@@ -145,6 +148,16 @@ enum SidecarEvent {
         #[serde(default)]
         error: Option<String>,
     },
+    /// A plugin's `launch.resume` callback result: the full argv that resumes
+    /// the harness conversation, or the error that stopped it. A missing
+    /// callback or an error is a failed resume, never a fresh command.
+    AgentResumeResult {
+        request_id: String,
+        #[serde(default)]
+        value: Option<Vec<String>>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 }
 
 /// Owns the supervised sidecar plus the cached catalog + asset map.
@@ -163,6 +176,89 @@ pub struct PluginsRegistry {
     loaded_generation: AtomicU64,
     reload_lock: Mutex<()>,
     server_boot_id: String,
+}
+
+/// Drains the sidecar's stdout events on a dedicated thread: caches each
+/// published catalog + asset map + watcher set, and hands correlated replies
+/// to their waiting requests.
+fn start_event_loop(
+    rx: mpsc::Receiver<SidecarEvent>,
+    catalog: Arc<Mutex<Value>>,
+    assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
+    watchers: Arc<Mutex<Vec<WatcherSpec>>>,
+    publish_revision: Arc<(Mutex<u64>, Condvar)>,
+    pending: PendingRequests,
+) {
+    thread::spawn(move || {
+        for event in rx {
+            match event {
+                SidecarEvent::Catalog {
+                    catalog: fresh,
+                    assets: fresh_assets,
+                    watchers: fresh_watchers,
+                } => {
+                    if let Ok(mut guard) = catalog.lock() {
+                        *guard = fresh;
+                    }
+                    if let Ok(mut guard) = assets.lock() {
+                        *guard = fresh_assets;
+                    }
+                    if let Ok(mut guard) = watchers.lock() {
+                        *guard = fresh_watchers;
+                    }
+                    let (revision, changed) = &*publish_revision;
+                    if let Ok(mut revision) = revision.lock() {
+                        *revision += 1;
+                        changed.notify_all();
+                    }
+                }
+                SidecarEvent::Error { error } => {
+                    eprintln!(
+                        "pragma-plugins sidecar error: {}",
+                        error.unwrap_or_default()
+                    );
+                }
+                SidecarEvent::Log { message } => {
+                    if let Some(message) = message {
+                        eprintln!("pragma-plugins: {message}");
+                    }
+                }
+                SidecarEvent::UsageLimits {
+                    request_id,
+                    providers,
+                    error,
+                } => {
+                    let result =
+                        error.map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
+                    complete_pending(&pending, &request_id, result);
+                }
+                SidecarEvent::AccountsResult {
+                    request_id,
+                    value,
+                    error,
+                } => {
+                    let result = error.map_or_else(|| Ok(value.unwrap_or(Value::Null)), Err);
+                    complete_pending(&pending, &request_id, result);
+                }
+                SidecarEvent::AgentResumeResult {
+                    request_id,
+                    value,
+                    error,
+                } => {
+                    let result = error.map_or_else(
+                        || {
+                            value
+                                .map(|command| json!(command))
+                                .ok_or_else(|| "resume callback returned no command".to_string())
+                        },
+                        Err,
+                    );
+                    complete_pending(&pending, &request_id, result);
+                }
+                SidecarEvent::Ready => {}
+            }
+        }
+    });
 }
 
 impl PluginsRegistry {
@@ -188,61 +284,14 @@ impl PluginsRegistry {
             reload_lock: Mutex::new(()),
             server_boot_id: uuid::Uuid::new_v4().to_string(),
         });
-        thread::spawn(move || {
-            for event in rx {
-                match event {
-                    SidecarEvent::Catalog {
-                        catalog: fresh,
-                        assets: fresh_assets,
-                        watchers: fresh_watchers,
-                    } => {
-                        if let Ok(mut guard) = catalog.lock() {
-                            *guard = fresh;
-                        }
-                        if let Ok(mut guard) = assets.lock() {
-                            *guard = fresh_assets;
-                        }
-                        if let Ok(mut guard) = watchers.lock() {
-                            *guard = fresh_watchers;
-                        }
-                        let (revision, changed) = &*publish_revision;
-                        if let Ok(mut revision) = revision.lock() {
-                            *revision += 1;
-                            changed.notify_all();
-                        }
-                    }
-                    SidecarEvent::Error { error } => {
-                        eprintln!(
-                            "pragma-plugins sidecar error: {}",
-                            error.unwrap_or_default()
-                        );
-                    }
-                    SidecarEvent::Log { message } => {
-                        if let Some(message) = message {
-                            eprintln!("pragma-plugins: {message}");
-                        }
-                    }
-                    SidecarEvent::UsageLimits {
-                        request_id,
-                        providers,
-                        error,
-                    } => {
-                        let result =
-                            error.map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
-                        complete_pending(&pending, &request_id, result);
-                    }
-                    SidecarEvent::AccountsResult {
-                        request_id,
-                        value,
-                        error,
-                    } => {
-                        let result = error.map_or_else(|| Ok(value.unwrap_or(Value::Null)), Err);
-                        complete_pending(&pending, &request_id, result);
-                    }
-                    SidecarEvent::Ready => {}
-                }
-            }
-        });
+        start_event_loop(
+            rx,
+            Arc::clone(&catalog),
+            Arc::clone(&assets),
+            Arc::clone(&watchers),
+            Arc::clone(&publish_revision),
+            Arc::clone(&pending),
+        );
         #[cfg(not(test))]
         {
             let initial_registry = Arc::clone(&registry);
@@ -292,6 +341,13 @@ impl PluginsRegistry {
                 "unknown plugins action: {other}"
             ))),
         }
+    }
+
+    /// This server boot's id, shared with the plugin sidecar's lifecycle
+    /// markers. Lifecycle reports are bound to it so a wrapper authorized by a
+    /// previous boot cannot end a record the current boot is about to resume.
+    pub(crate) fn boot_id(&self) -> &str {
+        &self.server_boot_id
     }
 
     fn cached_catalog(&self) -> Result<Value, PluginsError> {
@@ -522,6 +578,40 @@ impl PluginsRegistry {
     pub fn accounts_request(&self, mut op: Value) -> Result<Value, PluginsError> {
         op["type"] = Value::String("accounts".to_string());
         self.request(op, ACCOUNTS_REQUEST_TIMEOUT)
+    }
+
+    /// Asks a plugin's `launch.resume` callback for the full argv that resumes
+    /// one harness conversation. The callback owns the argv completely: the
+    /// host appends nothing (no model args, no startup input, no prompt), it
+    /// only wraps it in the supervisor that tracks the child's exit.
+    pub fn resume_agent(
+        &self,
+        agent_id: &str,
+        project_root: &str,
+        request: &pragma_constants::AgentResumeRequest,
+    ) -> Result<Vec<String>, PluginsError> {
+        self.ensure_root(project_root)?;
+        let request = serde_json::to_value(request).map_err(|error| {
+            PluginsError::Operation(format!("serialize resume request: {error}"))
+        })?;
+        let value = self.request(
+            json!({
+                "type": "agentResume",
+                "agentId": agent_id,
+                "projectRoot": project_root,
+                "request": request,
+            }),
+            AGENT_RESUME_TIMEOUT,
+        )?;
+        let command: Vec<String> = serde_json::from_value(value).map_err(|error| {
+            PluginsError::Operation(format!("resume callback returned no command: {error}"))
+        })?;
+        if command.is_empty() {
+            return Err(PluginsError::Operation(
+                "resume callback returned an empty command".to_string(),
+            ));
+        }
+        Ok(command)
     }
 
     /// Sends one correlated command and waits for the sidecar's matching reply.
@@ -861,6 +951,36 @@ mod tests {
             value.get("mime").and_then(|v| v.as_str()),
             Some("image/svg+xml")
         );
+    }
+
+    #[test]
+    fn parses_agent_resume_result() {
+        let event: SidecarEvent = serde_json::from_str(
+            r#"{"type":"agentResumeResult","requestId":"req-1","value":["claude","--resume","abc"]}"#,
+        )
+        .expect("resume result must parse");
+        match event {
+            SidecarEvent::AgentResumeResult {
+                request_id, value, ..
+            } => {
+                assert_eq!(request_id, "req-1");
+                assert_eq!(
+                    value.expect("argv"),
+                    ["claude", "--resume", "abc"],
+                    "the callback's full argv is carried verbatim"
+                );
+            }
+            other => panic!("expected agentResumeResult, got {other:?}"),
+        }
+
+        let failed: SidecarEvent = serde_json::from_str(
+            r#"{"type":"agentResumeResult","requestId":"req-2","error":"no launch.resume"}"#,
+        )
+        .expect("a resume error must parse");
+        assert!(matches!(
+            failed,
+            SidecarEvent::AgentResumeResult { error: Some(_), .. }
+        ));
     }
 
     #[test]

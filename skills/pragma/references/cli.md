@@ -12,14 +12,15 @@ pragma-cli [--json | --toon] <group> <command> ...
 Default output is human-readable. Use `--json` for scripts or `--toon` for token-efficient
 structured agent context. Both flags are global and mutually exclusive.
 
-| Variable                  | Purpose                                                   |
-| ------------------------- | --------------------------------------------------------- |
-| `PRAGMA_WORKTREE_ID`      | Current worktree and default for many `--worktree` flags. |
-| `PRAGMA_TAB_ID`           | Current terminal tab and agent-report route.              |
-| `PRAGMA_SERVER_SOCKET`    | Preferred direct connection to persistent host.           |
-| `PRAGMA_DAEMON_SOCKET`    | Legacy server-socket fallback.                            |
-| `PRAGMA_FANOUT_ID`        | Current fanout.                                           |
-| `PRAGMA_FANOUT_MEMBER_ID` | Current fanout attempt.                                   |
+| Variable                  | Purpose                                                         |
+| ------------------------- | --------------------------------------------------------------- |
+| `PRAGMA_WORKTREE_ID`      | Current worktree and default for many `--worktree` flags.       |
+| `PRAGMA_TAB_ID`           | Current terminal tab and agent-report route.                    |
+| `PRAGMA_SERVER_SOCKET`    | Preferred direct connection to persistent host.                 |
+| `PRAGMA_DAEMON_SOCKET`    | Legacy server-socket fallback.                                  |
+| `PRAGMA_AGENT_RUN_ID`     | Set only inside a tracked agent child (`pragma-cli agent run`). |
+| `PRAGMA_FANOUT_ID`        | Current fanout.                                                 |
+| `PRAGMA_FANOUT_MEMBER_ID` | Current fanout attempt.                                         |
 
 ## Worktrees
 
@@ -80,23 +81,45 @@ pragma-cli agent report --agent <id> started
 pragma-cli agent report --agent <id> stopped
 pragma-cli agent report --agent <id> attention
 pragma-cli agent report --agent <id> session-name --name "Refactor auth"
+pragma-cli agent report --agent <id> session-id --id "harness-conversation-id"
 pragma-cli agent report --agent <id> cleared
 ```
 
-| Report         | Runtime state | Use                                               |
-| -------------- | ------------- | ------------------------------------------------- |
-| `started`      | `running`     | Turn or tool work began.                          |
-| `stopped`      | `done`        | Started work finished with meaningful output.     |
-| `attention`    | `attention`   | Agent needs input or permission.                  |
-| `cleared`      | removed       | Process exited, aborted, reset, or has no result. |
-| `session-name` | unchanged     | Rename hosting tab without changing status.       |
+| Report         | Runtime state | Use                                                          |
+| -------------- | ------------- | ------------------------------------------------------------ |
+| `started`      | `running`     | Turn or tool work began.                                     |
+| `stopped`      | `done`        | Started work finished with meaningful output.                |
+| `attention`    | `attention`   | Agent needs input or permission.                             |
+| `cleared`      | removed       | Process exited, aborted, reset, or has no result.            |
+| `session-name` | unchanged     | Rename hosting tab without changing status.                  |
+| `session-id`   | unchanged     | Report the harness conversation id a later resume continues. |
 
 `stopped` should follow `started`. Use `cleared`, not `stopped`, for abort or process exit.
+`session-id` is status-less: report it on session create and every session switch, the value
+verbatim (Pragma never parses it). Every report from a tracked agent child also carries the
+run id from `PRAGMA_AGENT_RUN_ID` as `agentRunId`, so the host attributes it to the right run.
+`session-id` and `session-name` are distinct: one stores the resume pointer, the other renames
+the tab.
 
 ```sh
 pragma-cli agent message --agent <id> --payload '<AgentMessage-json>'
 pragma-cli agent message --agent <id> --stdin
 ```
+
+## Tracked Launches
+
+When Pragma launches an agent whose plugin declares `launch.resume`, the host records the
+invocation before the command is written and wraps the argv in:
+
+```sh
+pragma-cli agent run --run-id <id> -- <agent-argv...>
+```
+
+The wrapper is internal — do not run it by hand. It sets `PRAGMA_AGENT_RUN_ID` in the child,
+reports `startRun` before the spawn and `finishRun` only after the child's real exit, and
+exits with the child's code. A resume restores the conversation through the agent's recorded
+session id; it never replays the prompt or startup input. See `/docs/user-guide/sessions` for
+what does and does not survive a restart.
 
 ## Questions And Approvals
 

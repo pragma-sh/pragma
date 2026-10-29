@@ -31,7 +31,7 @@ beforeEach(() => {
   mkdirSync(tmpEnvDir, { recursive: true });
   writeFileSync(
     join(binDir, "pragma-cli"),
-    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${TMPDIR:-}" ] && [ -n "\${PRAGMA_TAB_ID:-}" ] && [ -f "$TMPDIR/pragma-cli-codex-$PRAGMA_TAB_ID.watcher" ]; then printf 'watcher-running\\n' >> "$PRAGMA_TEST_LOG"; fi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${PRAGMA_TEST_REJECT_SESSION_ID:-}" ]; then\n  case " $* " in *" session-id "*) exit 2;; esac\nfi\nif [ -n "\${TMPDIR:-}" ] && [ -n "\${PRAGMA_TAB_ID:-}" ] && [ -f "$TMPDIR/pragma-cli-codex-$PRAGMA_TAB_ID.watcher" ]; then printf 'watcher-running\\n' >> "$PRAGMA_TEST_LOG"; fi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -134,6 +134,14 @@ function transcript(lines: object[] = []): { path: string; input: string } {
   };
 }
 
+/**
+ * The stdin JSON Codex sends for a SessionStart (with its `source`), the event
+ * that announces startup, resume, clear, compact, and fork.
+ */
+function sessionStartPayload(sessionId: string, source = "startup"): string {
+  return JSON.stringify({ hook_event_name: "SessionStart", session_id: sessionId, source });
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -214,6 +222,101 @@ describe("report.sh", () => {
       "agent report --agent codex session-name --name First session",
       "agent report --agent codex session-name --name Next session",
     ]);
+  });
+
+  // Session tracking: the status-less `session-id` report Pragma stores so a
+  // later launch can resume this exact Codex thread.
+  describe("session id tracking", () => {
+    function sessionIdCalls(): string[] {
+      return reports().filter((call) => call.includes(" session-id "));
+    }
+
+    it("reports the conversation on SessionStart with no prompt", () => {
+      // /new, codex resume, and fork all surface as SessionStart with the
+      // thread id `codex resume <id>` accepts; no prompt needs to follow.
+      expect(
+        run("cleared", { stdin: sessionStartPayload("11111111-2222-3333-4444-555555555555") }),
+      ).toEqual([
+        "agent report --agent codex session-id --id 11111111-2222-3333-4444-555555555555",
+        "agent report --agent codex cleared",
+      ]);
+    });
+
+    it("reports each A-B-A switch, even with no title", () => {
+      run("cleared", { stdin: sessionStartPayload("thread-a") });
+      run("cleared", { stdin: sessionStartPayload("thread-b", "resume") });
+      run("cleared", { stdin: sessionStartPayload("thread-a", "resume") });
+      expect(sessionIdCalls()).toEqual([
+        "agent report --agent codex session-id --id thread-a",
+        "agent report --agent codex session-id --id thread-b",
+        "agent report --agent codex session-id --id thread-a",
+      ]);
+    });
+
+    it("reports the conversation from the first prompt when no SessionStart was seen", () => {
+      // A plugin loaded mid-session still learns the id from user activity.
+      run("started", {
+        stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth", session_id: "thread-a" }),
+      });
+      expect(reports()).toEqual([
+        "agent report --agent codex session-id --id thread-a",
+        "agent report --agent codex started",
+        "agent report --agent codex session-name --name Fix auth",
+      ]);
+    });
+
+    it("never reports a subagent's session id", () => {
+      run("started");
+      run("subagent-start", {
+        stdin: JSON.stringify({ agent_id: "child-1", session_id: "thread-a", turn_id: "turn-1" }),
+      });
+      run("subagent-stop", {
+        stdin: JSON.stringify({ agent_id: "child-1", session_id: "thread-a", turn_id: "turn-1" }),
+      });
+      expect(sessionIdCalls()).toEqual([]);
+    });
+
+    it("keeps the tracked conversation across child and stale turn events", () => {
+      run("started", {
+        stdin: JSON.stringify({ turn_id: "turn-1", prompt: "one", session_id: "thread-a" }),
+      });
+      run("cleared", { stdin: sessionStartPayload("thread-b", "clear") });
+      // The old thread's child stop and a stopped hook with no live marker
+      // must not move the tracked conversation back.
+      run("subagent-stop", {
+        stdin: JSON.stringify({ agent_id: "child", session_id: "thread-a" }),
+      });
+      run("stopped", {
+        stdin: JSON.stringify({
+          hook_event_name: "Stop",
+          turn_id: "turn-1",
+          session_id: "thread-b",
+        }),
+      });
+      expect(sessionIdCalls()).toEqual([
+        "agent report --agent codex session-id --id thread-a",
+        "agent report --agent codex session-id --id thread-b",
+      ]);
+    });
+
+    it("keeps statuses flowing when the installed CLI rejects session-id", () => {
+      // A legacy CLI exits nonzero on the unknown subcommand; the status-less
+      // report is best-effort and must never block statuses.
+      run("started", {
+        env: { PRAGMA_TEST_REJECT_SESSION_ID: "1" },
+        stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth", session_id: "thread-a" }),
+      });
+      run("stopped", {
+        env: { PRAGMA_TEST_REJECT_SESSION_ID: "1" },
+        stdin: JSON.stringify({ turn_id: "turn-1", session_id: "thread-a" }),
+      });
+      expect(reports()).toEqual([
+        "agent report --agent codex session-id --id thread-a",
+        "agent report --agent codex started",
+        "agent report --agent codex session-name --name Fix auth",
+        "agent report --agent codex stopped",
+      ]);
+    });
   });
 
   it("streams transcript assistant markdown during the turn and never duplicates it on stop", async () => {

@@ -26,6 +26,7 @@ import {
   ptyResize,
   ptySpawn,
   ptyWrite,
+  restoreAgentSession,
   type LaunchEnv,
   type PtyMessage,
   type PtyStream,
@@ -389,6 +390,18 @@ function focusIsClaimed(activeElement: Element | null): boolean {
   return textInputFocused || dialogOpen;
 }
 
+/**
+ * True when an attach failure means the host definitively has no such PTY
+ * session (the server's `session not found: <id>`), as opposed to a transport
+ * or auth failure on the way to it. Only the former may ask the host to restore
+ * an interrupted agent session; the latter surfaces instead of falling back to
+ * a fresh shell — and never to a fresh conversation.
+ */
+function isMissingPtySessionError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /session not found/i.test(message);
+}
+
 // Nerd Font variants ship full text-presentation glyph coverage for
 // box-drawing / block / powerline characters, which most dev machines
 // already have installed. We fall through to the system monospaces that
@@ -419,6 +432,12 @@ export class TerminalManager {
   private pendingInput = new Map<string, PendingInputQueue>();
   /** Per-tab env resolvers consumed by the tab's first spawn. */
   private spawnEnv = new Map<string, (tab: Tab) => Promise<LaunchEnv>>();
+  /**
+   * Tabs with a brand-new agent launch in flight (spawn prepared but not yet
+   * landed). A mount racing such a launch must follow the legacy spawn path
+   * instead of asking the host to restore a session that is being created.
+   */
+  private pendingLaunches = new Set<string>();
   private nextHostGeneration = 0;
   // Title listeners are keyed by tab id and kept **independent of the terminal's
   // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
@@ -832,6 +851,7 @@ export class TerminalManager {
     managed.container.remove();
     this.terminals.delete(tabId);
     this.pendingInput.delete(tabId);
+    this.pendingLaunches.delete(tabId);
     this.connectionWaiters.delete(tabId);
     this.exitListeners.delete(tabId);
     this.findRequestListeners.delete(tabId);
@@ -1438,6 +1458,39 @@ export class TerminalManager {
     this.spawnEnv.set(tabId, resolve);
   }
 
+  /** The most recently mounted tab for `tabId`, while its terminal is live. */
+  tabFor(tabId: string): Tab | undefined {
+    return this.terminals.get(tabId)?.tab;
+  }
+
+  /**
+   * Writes a Pragma notice to the terminal's renderer. This is display-only:
+   * unlike {@link writeWhenReady} it never reaches the shell as input, so an
+   * interpolated message (a host error, say) can never be executed as a
+   * command. A tab with no live terminal surfaces the notice as a toast.
+   */
+  writeNotice(tabId: string, message: string): void {
+    const managed = this.terminals.get(tabId);
+    if (managed) {
+      managed.terminal.writeln(`\r\n${message}`);
+      return;
+    }
+    toast.error(message);
+  }
+
+  /**
+   * Marks a tab as having a brand-new agent launch in flight, so a mount that
+   * races it does not ask the host to restore a session that is being created.
+   */
+  markLaunchPending(tabId: string): void {
+    this.pendingLaunches.add(tabId);
+  }
+
+  /** Clears a tab's in-flight launch marker once the launch settled. */
+  clearLaunchPending(tabId: string): void {
+    this.pendingLaunches.delete(tabId);
+  }
+
   private takeSpawnEnv(tab: Tab): Promise<LaunchEnv> {
     const resolve = this.spawnEnv.get(tab.id);
     this.spawnEnv.delete(tab.id);
@@ -1461,7 +1514,7 @@ export class TerminalManager {
     const rows = managed.terminal.rows || 24;
     const cursor = managed.outputCursor;
     ptyAttach(tabId, cols, rows, cursor, onEvent)
-      .catch(() => {
+      .catch((attachError: unknown) => {
         // Recovery or disposal can supersede this attach while it is in flight.
         // Only the current generation may create the missing shell.
         if (!isCurrentConnection()) {
@@ -1474,23 +1527,15 @@ export class TerminalManager {
           this.restartStream(tabId, managed);
           return null;
         }
-        // The tab's own shell profile, so a session respawned after a server
-        // restart returns to the shell it was opened with rather than the
-        // current default.
-        return this.takeSpawnEnv(tab)
-          .then((env) =>
-            ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null, env),
-          )
-          .catch((spawnError) => {
-            if (!isCurrentConnection()) {
-              return null;
-            }
-            // Another creator may have won between attach and spawn. Re-attach
-            // once; preserve the spawn error when no session actually appeared.
-            return ptyAttach(tabId, cols, rows, null, onEvent).catch(() =>
-              Promise.reject(spawnError),
-            );
-          });
+        return this.connectMissingSession(
+          tab,
+          cwd,
+          cols,
+          rows,
+          onEvent,
+          isCurrentConnection,
+          attachError,
+        );
       })
       .then((stream) => {
         if (!stream) {
@@ -1536,6 +1581,69 @@ export class TerminalManager {
             error instanceof Error ? error.message : String(error)
           }]`,
         );
+      });
+  }
+
+  /**
+   * First connect of a mounted tab found no live session. A definitive
+   * "session not found" asks the worktree's host whether an interrupted agent
+   * session can be restored (a crash or native-update quit left a durable
+   * record); when the host says no, the tab's shell spawns as before. A
+   * transport/auth failure never spawns a replacement — and a restore failure
+   * never falls back to a fresh conversation. A brand-new launch in flight
+   * owns this tab's PTY, so a racing mount follows the legacy spawn path
+   * instead of asking the host to restore a session being created.
+   */
+  private connectMissingSession(
+    tab: Tab,
+    cwd: string,
+    cols: number,
+    rows: number,
+    onEvent: (message: PtyMessage) => void,
+    isCurrentConnection: () => boolean,
+    attachError: unknown,
+  ): Promise<PtyStream | null> {
+    if (this.pendingLaunches.has(tab.id)) {
+      return this.spawnFreshShell(tab, cwd, cols, rows, onEvent, isCurrentConnection);
+    }
+    if (!isMissingPtySessionError(attachError)) {
+      return Promise.reject(attachError);
+    }
+    return restoreAgentSession(tab.worktreeId, tab.id).then((restored) => {
+      if (!isCurrentConnection()) {
+        return null;
+      }
+      if (!restored) {
+        return this.spawnFreshShell(tab, cwd, cols, rows, onEvent, isCurrentConnection);
+      }
+      // The host restored (or already had) the session: attach to it.
+      return ptyAttach(tab.id, cols, rows, null, onEvent);
+    });
+  }
+
+  /**
+   * Spawns the tab's shell (its own shell profile, so a session respawned after
+   * a server restart returns to the shell it was opened with rather than the
+   * current default) and re-attaches once when another creator won the spawn
+   * race, preserving the spawn error when no session actually appeared.
+   */
+  private spawnFreshShell(
+    tab: Tab,
+    cwd: string,
+    cols: number,
+    rows: number,
+    onEvent: (message: PtyMessage) => void,
+    isCurrentConnection: () => boolean,
+  ): Promise<PtyStream | null> {
+    return this.takeSpawnEnv(tab)
+      .then((env) =>
+        ptySpawn(tab.id, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null, env),
+      )
+      .catch((spawnError) => {
+        if (!isCurrentConnection()) {
+          return null;
+        }
+        return ptyAttach(tab.id, cols, rows, null, onEvent).catch(() => Promise.reject(spawnError));
       });
   }
 

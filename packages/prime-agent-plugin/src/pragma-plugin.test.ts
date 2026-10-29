@@ -18,6 +18,14 @@ describe("Prime Agent plugin", () => {
     expect(primeAgentPlugin.watchers?.[0]?.agent).toBe("prime-agent");
   });
 
+  it("omits resume because its client-owned session is in-memory", () => {
+    // `--no-session` is what lets PRAGMA_* reach the daemon worker, and that
+    // session is `SessionManager.inMemory()`: no file, so `--resume <id>` has
+    // nothing to open, and dropping the flag would run a resident session
+    // whose env is stripped of PRAGMA_*. See AGENTS.md.
+    expect(primeAgentPlugin.agents?.[0]?.launch.resume).toBeUndefined();
+  });
+
   it("identifies Pi's sign-ins from Prime Agent's own directory", () => {
     const accounts = primeAgentPlugin.accounts ?? [];
     expect(accounts.map((provider) => provider.provider)).toEqual(

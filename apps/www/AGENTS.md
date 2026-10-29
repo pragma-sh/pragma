@@ -428,6 +428,14 @@ apps/www/
   the sidebar to just that section. `user-guide` is deliberately a plain, `defaultOpen`
   folder instead, so its pages stay visible alongside every other section. Write from the source, not from memory: UI labels, command flags, and API
   names come from the components and crates they describe.
+- **Recovery docs keep three things apart.** A desktop reload/relaunch reattaches to
+  surviving PTYs; a host-server restart ends plain shells (there is no arbitrary-shell
+  snapshot, and their tabs reopen fresh); only an interrupted, still-open, resume-capable
+  agent session launched through Pragma is restored, and a failed restore is an error — never
+  a fresh conversation. The sources of truth are `user-guide/sessions` (matrix and limits),
+  `user-guide/updates` (restart expectations), `wiki/server` + `wiki/disk-layout`
+  (`agent-invocations.db` and the wrapper), and `plugins/agents` + `cli/agents` + `sdk/agents`
+  (the reported id and `launch.resume`). Change one, check the others.
 - **Keyboard shortcuts are platform-aware — never write `⌘X / Ctrl+X` in prose.** Use
   the `<Keys mac="⌘K" other="Ctrl+K" />` component (registered in `components/mdx.tsx`).
   Both variants are server-rendered; the docs layout sniffs the user agent into

@@ -3,6 +3,7 @@ import {
   reportAttention,
   reportCleared,
   reportMessage,
+  reportSessionId,
   reportSessionName,
   reportStarted,
   reportStopped,
@@ -66,6 +67,7 @@ export function createSdkReporter(options: PragmaReporterOptions): PragmaReporte
       report(() => reportMessage({ agent, env, message })),
     cleared: () => report(() => reportCleared({ agent, env })),
     sessionName: (name: string) => report(() => reportSessionName({ agent, env, name })),
+    sessionId: (id: string | null) => report(() => reportSessionId({ agent, env, id })),
   };
 
   async function report(run: () => Promise<unknown>): Promise<void> {

@@ -2,11 +2,15 @@ import { constants } from "@pragma-sh/constants";
 
 import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { launchPrompt, modelLaunchArgs } from "@/lib/agent-model-selection";
+import { errorMessage } from "@/lib/errors";
 import {
   accountsLaunchEnv,
   type AgentConfig,
+  type AgentLaunchSelection,
   type AgentModelSelection,
   type LaunchEnv,
+  prepareAgentLaunch,
+  ptyKill,
   ptySpawn,
   ptySpawnDetached,
   ptyWrite,
@@ -103,6 +107,12 @@ function shellQuote(value: string): string {
  * each need a moment to become ready and there is no readiness event to await;
  * the prefill is bracketed-pasted so multi-line input stays literal, and its
  * submit key is sent as a separate, later write (see {@link schedulePrefill}).
+ *
+ * Before the command is written, the worktree's host prepares the tracked
+ * invocation (`prepareAgentLaunch`), so a supported agent runs under
+ * `pragma-cli agent run --run-id …` and can be restored after a crash or a
+ * native update. A preparation failure is reported in the tab instead of
+ * silently dispatching the untracked command.
  */
 export function startAgentInTab(
   tabId: string,
@@ -110,7 +120,7 @@ export function startAgentInTab(
   prefill?: string,
   selection?: AgentModelSelection,
 ): void {
-  const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
+  const argv = [...agent.start, ...modelLaunchArgs(agent, selection)];
   const prompt = launchPrompt(agent, prefill, selection);
   const message = prompt?.trim() ? prompt : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
@@ -119,19 +129,117 @@ export function startAgentInTab(
   terminalManager.setSpawnEnv(tabId, (tab) =>
     resolveAgentLaunchEnv(tab.worktreeId, agent.id, tabId),
   );
+  // This launch owns the tab's PTY: a mount racing it must not ask the host to
+  // restore a session that is being created right now.
+  terminalManager.markLaunchPending(tabId);
   // Start the clocks only once the PTY is connected. A slow connect (e.g. a
   // freshly created worktree) would otherwise queue the command, paste, and
   // submit key and flush them as one write, so the TUI swallows the Enter.
-  void terminalManager.whenConnected(tabId).then(() => {
-    window.setTimeout(() => {
-      runAgentCommand(command, write);
-      scheduleStartupInput(agent, write);
-      if (message) {
-        schedulePrefill(agent, message, write);
+  void terminalManager
+    .whenConnected(tabId)
+    .then(async () => {
+      const worktreeId = terminalManager.tabFor(tabId)?.worktreeId;
+      if (!worktreeId) {
+        throw new Error(`terminal ${tabId} is not mounted; cannot prepare its launch`);
       }
-    }, AGENT_START_DELAY_MS);
-    return undefined;
-  });
+      const prepared = await prepareTrackedCommand(worktreeId, tabId, agent.id, argv, selection);
+      window.setTimeout(() => {
+        runAgentCommand(prepared.commandLine ?? agentStartCommand(prepared.argv), write);
+        scheduleStartupInput(agent, write);
+        if (message) {
+          schedulePrefill(agent, message, write);
+        }
+      }, AGENT_START_DELAY_MS);
+      return undefined;
+    })
+    .catch((cause: unknown) => {
+      // Rendered in the tab, never typed into the shell: this message is
+      // interpolated from a host error, and PTY input would execute it.
+      console.error(`agent launch preparation failed for ${tabId}`, cause);
+      terminalManager.writeNotice(
+        tabId,
+        `[pragma: could not prepare the agent session: ${errorMessage(cause)}]`,
+      );
+    })
+    .finally(() => {
+      terminalManager.clearLaunchPending(tabId);
+    });
+}
+
+/** Normalizes an optional selection field to the host's nullable wire shape. */
+function nullable<T>(value: T | null | undefined): T | null {
+  return value ?? null;
+}
+
+/** The `selection` object the host records with a prepared run. */
+function launchSelection(selection?: AgentModelSelection): AgentLaunchSelection {
+  if (!selection) {
+    return {
+      modelId: null,
+      reasoningId: null,
+      modeId: null,
+      permissionModeId: null,
+      slashCommand: null,
+    };
+  }
+  return {
+    modelId: nullable(selection.modelId),
+    reasoningId: nullable(selection.reasoningId),
+    modeId: nullable(selection.modeId),
+    permissionModeId: nullable(selection.permissionModeId),
+    slashCommand: nullable(selection.slashCommand),
+  };
+}
+
+/** A host-prepared launch command: the argv to run, and the literal line for a tracked run. */
+interface PreparedLaunchCommand {
+  /** The argv to run — wrapped by the host for a supported agent. */
+  argv: string[];
+  /**
+   * The literal command line to type when the host tracks the run, quoted by
+   * the host for the session's actual shell. `null` for an unsupported agent,
+   * whose launch keeps the legacy join in {@link agentStartCommand}.
+   */
+  commandLine: string | null;
+}
+
+/**
+ * Asks the host to prepare the tracked invocation for a launch. Failures
+ * propagate: an opted-in launch must never fall back to the untracked command,
+ * which would start a fresh conversation.
+ *
+ * A tracked launch must carry the host-rendered command line — only the host
+ * owns the live session's shell program, so the desktop never re-joins the argv
+ * (a POSIX join would mangle a Windows shell's line, and a remote host's
+ * platform is not the desktop's). A tracked result without a line is a host
+ * error, not something to paper over here.
+ */
+async function prepareTrackedCommand(
+  worktreeId: string,
+  tabId: string,
+  agentId: string,
+  argv: string[],
+  selection?: AgentModelSelection,
+): Promise<PreparedLaunchCommand> {
+  const prepared = await prepareAgentLaunch(
+    worktreeId,
+    tabId,
+    agentId,
+    argv,
+    launchSelection(selection),
+  );
+  if (!Array.isArray(prepared.command) || prepared.command.length === 0) {
+    throw new Error("the host returned no prepared command");
+  }
+  const tracked = typeof prepared.runId === "string" && prepared.runId.length > 0;
+  if (!tracked) {
+    return { argv: prepared.command, commandLine: null };
+  }
+  const commandLine = prepared.commandLine;
+  if (typeof commandLine !== "string" || commandLine.length === 0) {
+    throw new Error("the host returned no command line for a tracked launch");
+  }
+  return { argv: prepared.command, commandLine };
 }
 
 function runAgentCommand(command: string, write: (data: string) => void): void {
@@ -267,7 +375,7 @@ export async function startBackgroundAgentSession(
 ): Promise<void> {
   const cols = Math.min(BACKGROUND_TERMINAL_COLS, MAX_TERMINAL_COLS);
   const rows = Math.min(BACKGROUND_TERMINAL_ROWS, MAX_TERMINAL_ROWS);
-  const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
+  const argv = [...agent.start, ...modelLaunchArgs(agent, selection)];
   const prompt = launchPrompt(agent, prefill, selection);
   const message = prompt?.trim() ? prompt : null;
 
@@ -281,26 +389,54 @@ export async function startBackgroundAgentSession(
   // output never crosses the IPC boundary into the webview.
   const alternateScreen =
     message && agent.prefillMode !== "plain" ? createAlternateScreenTracker() : null;
-  // A racing terminal mount may have already spawned this session (mobile
-  // `tabOpened` used to select the tab). Treat "already exists" as success so
-  // the start command + prefill still land in the live PTY.
-  const env = await resolveAgentLaunchEnv(worktreeId, agent.id, tabId);
+  // This launch owns the tab's PTY: a mount racing it must not ask the host to
+  // restore a session that is being created right now.
+  terminalManager.markLaunchPending(tabId);
+  // Only a session this launch actually spawned may be cleaned up when
+  // preparation fails; a racing mount's live PTY is never ours to kill.
+  let spawnedHere = false;
   try {
-    await (alternateScreen
-      ? ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle, null, env)
-      : ptySpawnDetached(tabId, worktreeId, cwd, cols, rows, null, env));
+    // Spawn first: the host renders the tracked command line from the live
+    // session's actual shell, so the PTY must exist before preparation. The
+    // pending marker above keeps a racing mount from asking the host to restore
+    // a session that is being created.
+    const env = await resolveAgentLaunchEnv(worktreeId, agent.id, tabId);
+    try {
+      await (alternateScreen
+        ? ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle, null, env)
+        : ptySpawnDetached(tabId, worktreeId, cwd, cols, rows, null, env));
+      spawnedHere = true;
+    } catch (cause) {
+      // A racing terminal mount may have already spawned this session (mobile
+      // `tabOpened` used to select the tab). Treat "already exists" as success
+      // so the start command + prefill still land in the live PTY.
+      if (!isSessionAlreadyExists(cause)) {
+        throw cause;
+      }
+    }
+    // Prepare before dispatching the command: a tracked launch is typed as the
+    // host-rendered line, and the run record must exist before the child starts.
+    const prepared = await prepareTrackedCommand(worktreeId, tabId, agent.id, argv, selection);
+    window.setTimeout(() => {
+      runAgentCommand(prepared.commandLine ?? agentStartCommand(prepared.argv), write);
+      scheduleStartupInput(agent, write);
+      if (message) {
+        scheduleBackgroundPrefill(agent, message, write, alternateScreen);
+      }
+    }, AGENT_START_DELAY_MS);
   } catch (cause) {
-    if (!isSessionAlreadyExists(cause)) {
-      throw cause;
+    // Preparation failed after we created the session: close only what this
+    // launch spawned, never a PTY a racing mount (or an earlier launch) owns.
+    // Callers that also close the tab do so through the normal teardown.
+    if (spawnedHere) {
+      void ptyKill(tabId).catch((error: unknown) => {
+        console.error(`could not kill unlaunched agent session ${tabId}`, error);
+      });
     }
+    throw cause;
+  } finally {
+    terminalManager.clearLaunchPending(tabId);
   }
-  window.setTimeout(() => {
-    runAgentCommand(command, write);
-    scheduleStartupInput(agent, write);
-    if (message) {
-      scheduleBackgroundPrefill(agent, message, write, alternateScreen);
-    }
-  }, AGENT_START_DELAY_MS);
 }
 
 /** True when a PTY spawn failed because this tab already has a live session. */

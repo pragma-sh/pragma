@@ -28,6 +28,11 @@ state_dir="${TMPDIR:-/tmp}"
 # phantom status onto an already-finished turn.
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 session_name_marker="${state_dir}/pragma-cli-${agent}-${tab}.named"
+# Holds the conversation id last reported for this tab, so every sessionStart
+# switch — startup, resume, /new — reports the new id exactly once, even with
+# no title and no following prompt. A→B→A reports each switch because only the
+# last id is remembered.
+session_id_marker="${state_dir}/pragma-cli-${agent}-${tab}.session-id"
 # How long beforeShellExecution/beforeMCPExecution blocks waiting for a remote
 # approve/deny from a Pragma toast before letting Cursor use its own prompt.
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
@@ -97,6 +102,47 @@ if isinstance(value, str):
 ' "$1" 2>/dev/null
 }
 
+# Extracts a quote-free string field (a hook id) without python3. Hook ids are
+# UUIDs and camelCase event names, so a sed scrape is exact.
+json_string_field() {
+  printf '%s' "$2" | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# The hook's own event name (`sessionStart`, `beforeSubmitPrompt`, …), or empty.
+hook_event_name() {
+  value="$(json_field hook_event_name "$1")"
+  [ -n "$value" ] || value="$(json_string_field hook_event_name "$1")"
+  printf '%s' "$value"
+}
+
+# Cursor's stable conversation id for this hook payload. `conversation_id` is
+# the documented common field; `session_id` is the canonical alias the CLI
+# fills from it.
+hook_conversation_id() {
+  input="$1"
+  for field in conversation_id session_id; do
+    value="$(json_field "$field" "$input")"
+    [ -n "$value" ] || value="$(json_string_field "$field" "$input")"
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+}
+
+# Reports the tab's top-level conversation id (status-less) so Pragma can
+# resume that exact Cursor chat — `cursor-agent --resume <chatId>` takes it
+# verbatim. Deduplicates repeats of the last reported id; a session boundary
+# resets the marker so the next process (a resume) reports it again even when
+# the id is unchanged. `report` swallows failure, so an older installed
+# pragma-cli without `session-id` cannot disrupt the session.
+report_session_id() {
+  [ -n "$1" ] || return 0
+  [ "$(cat "$session_id_marker" 2>/dev/null || true)" = "$1" ] && return 0
+  report session-id --id "$1"
+  printf '%s' "$1" >"$session_id_marker"
+}
+
 content_message() {
   role="$1"
   text="$2"
@@ -135,6 +181,9 @@ case "${1:-}" in
     printf '%s' "$$-$(date +%s)" >"$marker"
     report started
     input="$(cat)"
+    # A prompt is the second authoritative conversation signal (after
+    # sessionStart), covering a plugin loaded mid-session.
+    report_session_id "$(hook_conversation_id "$input")"
     prompt="$(json_field prompt "$input")"
     if [ -n "$prompt" ]; then
       report_session_name_once "$prompt"
@@ -155,6 +204,16 @@ case "${1:-}" in
   cleared)
     rm -f "$marker"
     rm -f "$session_name_marker"
+    input="$(cat)"
+    # `cleared` serves both sessionStart and sessionEnd. Either boundary
+    # releases the remembered conversation id so the next process (a resume)
+    # reports it again, but only a start reports one — a session that is
+    # leaving must never repoint the tab at the conversation it left.
+    rm -f "$session_id_marker"
+    case "$(hook_event_name "$input")" in
+      [Ss]ession[Ee]nd) ;;
+      *) report_session_id "$(hook_conversation_id "$input")" ;;
+    esac
     report cleared
     ;;
   response)

@@ -124,6 +124,7 @@ export {
   reportAttention,
   reportCleared,
   reportMessage,
+  reportSessionId,
   reportSessionName,
   reportStarted,
   reportStopped,
@@ -163,6 +164,7 @@ export type {
   ConnectOptions,
   ReportMessageOptions,
   ReportOptions,
+  ReportSessionIdOptions,
   ReportSessionNameOptions,
   WorkspaceSnapshot,
 } from "./types/agents";

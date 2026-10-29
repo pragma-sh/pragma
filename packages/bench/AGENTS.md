@@ -42,11 +42,8 @@ Dual TS + Rust in one package, like `packages/constants`:
 - **macOS or Linux.** `dev_bridge.rs` writes its token to a hard-coded `/tmp`
   path, so the benchmark refuses to start on Windows rather than scanning a
   directory that will always be empty there.
-- **No other dev server running.** `tauri.conf.json` pins `devUrl` to one port,
-  so a second `bun run dev` dies with `Port 1420 is already in use` — and Tauri
-  reports only `The "beforeDevCommand" terminated with a non-zero status code`,
-  five minutes into a build. The benchmark pre-flights the port and refuses to
-  start with that as the reason instead. Quit the other dev instance first.
+- Other dev instances may remain open. The launcher finds a free Vite/HMR port
+  pair and passes the selected origin to both Vite and Tauri.
 - Nothing else. If the dev instance has never seen this worktree, the benchmark
   registers it by invoking `add_project`, then waits for the workspace snapshot.
 
@@ -281,10 +278,9 @@ you see a scenario reporting all drops, this is the list to check.
   `pragma_platform::process::kill_tree` reaches one generation on Unix
   (`pkill -P`), and the dev instance is four deep (`bun run dev` → `bash -c` →
   `tauri dev` → the app, plus Vite). Killing only the supervisor reparents the
-  rest to init, where they hold Vite's port and the _next_ run refuses to start
-  with "port 1420 is already in use" — pointing at a dev server the user never
-  launched. `DevInstance::drop` collects descendants from the process table
-  first, then kills leaves before the root.
+  rest to init, where they keep consuming resources and repainting terminals
+  after the run ends. `DevInstance::drop` collects descendants from the process
+  table first, then kills leaves before the root.
 - **Expect a long rebuild between a bench change and a run.** `cargo build -p
 pragma-bench` and the app's own build resolve features differently for the
   crates they share, so each invalidates the other. Two or three minutes of

@@ -1,9 +1,12 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   slashCommandProvider,
+  type AgentArgsBuilder,
   type AgentModelEntry,
+  type AgentPermissionMode,
   type AgentSlashCommand,
   type PluginContext,
   type PluginDefinition,
@@ -41,6 +44,39 @@ const BUILTIN_SLASH_COMMANDS = [
 const SLASH_COMMAND_SOURCES = [
   { dir: "~/.codex/prompts", layout: "files" as const, recursive: false, prefix: "prompts:" },
 ];
+
+/**
+ * Permission modes; the first (`default`) is the launch default and passes no
+ * flag, so Codex's own config decides.
+ */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "default", name: "Use Codex config" },
+  { id: "untrusted", name: "Ask for untrusted commands" },
+  { id: "on-request", name: "Ask when requested" },
+  { id: "never", name: "Never ask" },
+];
+
+/**
+ * The option builders a launch and a resume share. `codex resume <id>` accepts
+ * `-a/--ask-for-approval`, `-m/--model`, and `-c/--config`, so a resume can
+ * replay the same model, reasoning, and permission flags a launch applies
+ * (verified against `codex resume --help`, 0.160.0).
+ */
+const AGENT_ARGS: AgentArgsBuilder = {
+  model: (modelId: string) => ["--model", modelId],
+  reasoning: (reasoningId: string) => [
+    "--config",
+    `model_reasoning_effort=${JSON.stringify(reasoningId)}`,
+  ],
+  modelReasoning: (modelId: string, reasoningId: string) => [
+    "--model",
+    modelId,
+    "--config",
+    `model_reasoning_effort=${JSON.stringify(reasoningId)}`,
+  ],
+  permissionMode: (permissionModeId: string) =>
+    permissionModeId === "default" ? [] : ["--ask-for-approval", permissionModeId],
+};
 
 /** Pragma plugin for Codex CLI. */
 export const codexAgentPlugin: PluginDefinition = definePlugin({
@@ -98,7 +134,24 @@ export const codexAgentPlugin: PluginDefinition = definePlugin({
       name: "Codex",
       icon: () => null,
       iconPath: "assets/codex.png",
-      launch: { command: ["codex", "--enable", "default_mode_request_user_input"] },
+      launch: {
+        command: ["codex", "--no-daemon", "--enable", "default_mode_request_user_input"],
+        // `codex resume <id>` reopens exactly that conversation; the `--enable`
+        // flag is kept so a resumed session still offers `request_user_input`.
+        // Never the original slash command or prompt.
+        resume: ({ harnessSessionId, selection }) => [
+          "codex",
+          "--no-daemon",
+          "resume",
+          harnessSessionId,
+          "--enable",
+          "default_mode_request_user_input",
+          ...agentLaunchArgs(
+            { args: AGENT_ARGS, modes: [], permissionModes: PERMISSION_MODES },
+            selection,
+          ),
+        ],
+      },
       prefillDelayMs: 4000,
       prefillMode: "plain",
       prefillSubmit: "\r",
@@ -111,27 +164,8 @@ export const codexAgentPlugin: PluginDefinition = definePlugin({
           parseCodexSkills(await execFirst(ctx, "codex debug prompt-input 2>/dev/null")),
       }),
       // First entry is the default: no flag, so Codex's own config decides.
-      permissionModes: [
-        { id: "default", name: "Use Codex config" },
-        { id: "untrusted", name: "Ask for untrusted commands" },
-        { id: "on-request", name: "Ask when requested" },
-        { id: "never", name: "Never ask" },
-      ],
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: (reasoningId: string) => [
-          "--config",
-          `model_reasoning_effort=${JSON.stringify(reasoningId)}`,
-        ],
-        modelReasoning: (modelId: string, reasoningId: string) => [
-          "--model",
-          modelId,
-          "--config",
-          `model_reasoning_effort=${JSON.stringify(reasoningId)}`,
-        ],
-        permissionMode: (permissionModeId: string) =>
-          permissionModeId === "default" ? [] : ["--ask-for-approval", permissionModeId],
-      },
+      permissionModes: PERMISSION_MODES,
+      args: AGENT_ARGS,
     }),
   ],
 });

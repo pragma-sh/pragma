@@ -1,9 +1,14 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   modeProvider,
   slashCommandProvider,
+  type AgentArgsBuilder,
+  type AgentPermissionMode,
+  type AgentResumeRequest,
+  type PluginContext,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
@@ -40,6 +45,53 @@ const AGENT_SOURCES = [
   { dir: "~/.agents/agents", layout: "files" as const, nameFromFrontmatter: true },
 ];
 const DEFAULT_MODE = "default";
+
+/**
+ * Permission modes; the first, `yolo`, is the default every launch applies so
+ * a safe shell command completes headlessly.
+ */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "yolo", name: "Auto-approve tools" },
+  { id: "default", name: "Ask for approval" },
+  { id: "auto", name: "Fully autonomous" },
+  { id: "plan", name: "Plan mode" },
+];
+
+/** Launch flags for a model/mode/permission selection. */
+const kimiArgs: AgentArgsBuilder = {
+  model: (modelId: string) => ["-m", modelId],
+  reasoning: () => [],
+  mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
+  permissionMode: (permissionModeId: string) => {
+    if (permissionModeId === "yolo") {
+      return ["-y"];
+    }
+    if (permissionModeId === "auto") {
+      return ["--auto"];
+    }
+    return permissionModeId === "plan" ? ["--plan"] : [];
+  },
+};
+
+/**
+ * Builds the full literal argv for resuming a recorded Kimi session: the base
+ * command, the stored model and permission flags, and `--session=<id>`.
+ * Verified against `kimi --help` (`-S, --session [id]` — "With ID: resume that
+ * session"; the attached form binds the optional value on every Commander
+ * version). Kimi rejects `--agent` together with `--session` ("Cannot be
+ * combined with --session/--continue"), so the selection's agent profile is
+ * deliberately dropped.
+ */
+export function kimiResume(request: AgentResumeRequest, _ctx: PluginContext): string[] {
+  return [
+    "kimi",
+    ...agentLaunchArgs(
+      { args: kimiArgs, permissionModes: PERMISSION_MODES },
+      { ...request.selection, modeId: null },
+    ),
+    `--session=${request.harnessSessionId}`,
+  ];
+}
 
 const baseWatcher = createTuiWatcher({
   agent: "kimi",
@@ -109,22 +161,17 @@ export const kimiAgentPlugin: PluginDefinition = definePlugin({
       name: "Kimi Code",
       icon: () => null,
       iconPath: "assets/kimi.png",
-      launch: { command: ["kimi"] },
+      launch: { command: ["kimi"], resume: kimiResume },
       prefillDelayMs: PREFILL_DELAY_MS,
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: loadKimiModels,
-      // First entry is the default: `-y` (yolo), because Kimi's manual mode
+      // The first entry is the default: `-y` (yolo), because Kimi's manual mode
       // gates Bash behind a TUI approval prompt, so a plain `kimi` never
       // completes a safe shell command headlessly (`pragma-cli agent verify`
       // `command-no-permission`). These are the real launch flags that change
       // how much Kimi asks for.
-      permissionModes: [
-        { id: "yolo", name: "Auto-approve tools" },
-        { id: "default", name: "Ask for approval" },
-        { id: "auto", name: "Fully autonomous" },
-        { id: "plan", name: "Plan mode" },
-      ],
+      permissionModes: PERMISSION_MODES,
       modes: modeProvider([{ id: DEFAULT_MODE, name: "Default" }], AGENT_SOURCES),
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["kimi", "acp"] },
@@ -132,20 +179,7 @@ export const kimiAgentPlugin: PluginDefinition = definePlugin({
       // `commandApproval`: Kimi's permission-request hook is fire-and-forget,
       // so Pragma cannot approve on the agent's behalf.
       excludeFeatures: ["commandApproval"],
-      args: {
-        model: (modelId: string) => ["-m", modelId],
-        reasoning: () => [],
-        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
-        permissionMode: (permissionModeId: string) => {
-          if (permissionModeId === "yolo") {
-            return ["-y"];
-          }
-          if (permissionModeId === "auto") {
-            return ["--auto"];
-          }
-          return permissionModeId === "plan" ? ["--plan"] : [];
-        },
-      },
+      args: kimiArgs,
     }),
   ],
 });

@@ -77,6 +77,7 @@ describe("report.sh", () => {
     run("started", JSON.stringify({ sessionId: "session-1", timestamp: 100, prompt: "Fix auth" }));
     run("stopped", JSON.stringify({ transcriptPath: transcript }));
     expect(calls()).toEqual([
+      "agent report --agent github-copilot session-id --id session-1",
       "agent report --agent github-copilot started",
       "agent report --agent github-copilot session-name --name Fix auth",
       expect.stringContaining(
@@ -199,6 +200,81 @@ describe("report.sh", () => {
     expect(calls()).toEqual([
       "agent report --agent github-copilot attention --kind question --question Provide a short response. --request-id call-free-form",
     ]);
+  });
+
+  it("reports the session id on a session start", () => {
+    run(
+      "session-start",
+      JSON.stringify({ sessionId: "session-a", timestamp: 1, source: "startup" }),
+    );
+    expect(calls()).toContain("agent report --agent github-copilot session-id --id session-a");
+  });
+
+  it("reports the session id from the prompt when sessionStart arrives late", () => {
+    // Copilot 1.0.75 can fire userPromptSubmitted before sessionStart in a
+    // fresh interactive session, so the prompt must not lose the id.
+    run("started", JSON.stringify({ sessionId: "session-a", timestamp: 1, prompt: "Hi" }));
+    const before = calls().length;
+    run(
+      "session-start",
+      JSON.stringify({ sessionId: "session-a", timestamp: 2, source: "startup" }),
+    );
+    expect(calls().slice(before)).toEqual([]);
+    expect(calls()).toContain("agent report --agent github-copilot session-id --id session-a");
+  });
+
+  it("reports a session switch, including a switch back (A -> B -> A)", () => {
+    const start = (sessionId: string): void => {
+      run("session-start", JSON.stringify({ sessionId, timestamp: 1, source: "resume" }));
+    };
+    start("a");
+    start("b");
+    start("a");
+    // Deduping is against the last reported id, not a seen-set, so the switch
+    // back to `a` reports again.
+    expect(calls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent github-copilot session-id --id a",
+      "agent report --agent github-copilot session-id --id b",
+      "agent report --agent github-copilot session-id --id a",
+    ]);
+  });
+
+  it("reports a switch from the prompt even when the name was already sent", () => {
+    run("started", JSON.stringify({ sessionId: "session-a", timestamp: 1, prompt: "same title" }));
+    run("started", JSON.stringify({ sessionId: "session-b", timestamp: 2, prompt: "same title" }));
+    expect(calls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent github-copilot session-id --id session-a",
+      "agent report --agent github-copilot session-id --id session-b",
+    ]);
+    // The tab name is reported once per install, so the switch itself must not
+    // depend on a rename.
+    expect(calls().filter((call) => call.includes(" session-name "))).toHaveLength(1);
+  });
+
+  it("ignores a superseded session's delayed sessionEnd", () => {
+    run("started", JSON.stringify({ sessionId: "session-a", timestamp: 1, prompt: "Hi" }));
+    run("session-end", JSON.stringify({ sessionId: "session-a", reason: "user_exit" }));
+    run("started", JSON.stringify({ sessionId: "session-b", timestamp: 2, prompt: "Hi" }));
+    const before = calls().length;
+    // `/clear` dispatches the old session's sessionEnd detached, so it can land
+    // after the replacement session started; it must not clear the new turn or
+    // roll the reported session back.
+    run("session-end", JSON.stringify({ sessionId: "session-a", reason: "user_exit" }));
+    expect(calls().slice(before)).toEqual([]);
+    expect(existsSync(join(tempDir, `pragma-cli-github-copilot-${TAB_ID}.active`))).toBe(true);
+    expect(calls().findLast((call) => call.includes(" session-id "))).toBe(
+      "agent report --agent github-copilot session-id --id session-b",
+    );
+  });
+
+  it("never reports a session id outside Pragma", () => {
+    run(
+      "started",
+      JSON.stringify({ sessionId: "session-a", timestamp: 1, prompt: "Hi" }),
+      "",
+      false,
+    );
+    expect(calls()).toEqual([]);
   });
 
   it("includes enum choices when reporting a transcript ask_user", () => {

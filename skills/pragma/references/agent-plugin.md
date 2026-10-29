@@ -82,6 +82,58 @@ Never disrupt host. Catch SDK reporting failures; wrap CLI calls with
 `>/dev/null 2>&1 || true`. Emit one `cleared` on plugin/session load and another on
 observable process exit.
 
+## Durable Session Identity And Resume
+
+Status is runtime-only; the harness conversation id is the durable recovery identity.
+Report it status-lessly whenever the tab's session changes (create, switch, resume):
+
+- SDK: `reportSessionId({ agent, env, id })`.
+- CLI: `pragma-cli agent report --agent <id> session-id --id "<harness-id>"`.
+
+The id is opaque to Pragma and must be the value the host's own resume flag accepts. Report
+only the **top-level** conversation (never a subagent/session id), dedupe repeats, and
+re-report on A→B→A switches. A report from a tracked launch automatically carries
+`PRAGMA_AGENT_RUN_ID` as `agentRunId`, which is how the host attributes the id to the exact
+run; do not set it yourself. `session-id` and `session-name` are independent — one stores
+the resume pointer, the other renames the tab.
+
+Then declare `launch.resume` on the `defineAgent` launcher:
+
+```ts
+launch: {
+  command: ["my-agent"],
+  resume: ({ harnessSessionId, selection }) => [
+    "my-agent",
+    "--resume",
+    harnessSessionId,
+    // Replay the recorded selection yourself; replace with your flag builders.
+    ...(selection.modelId ? ["--model", selection.modelId] : []),
+  ],
+}
+```
+
+Rules:
+
+- Return the **complete** argv; the host appends no model, mode, prompt, startup-input, or
+  prelaunch args. Replay the recorded `selection` yourself (an explicit mode/permission
+  flag included).
+- Use the host's documented resume form, verified against its own `--help` or source. An
+  attached form (`--resume=<id>`) is required where the value is optional.
+- First discover which session the host actually has active; never guess, and never report
+  an id whose backing file does not exist yet.
+- Pragma wraps the argv in `pragma-cli agent run --run-id …`; the callback never launches
+  the process itself and never sees credentials.
+- Resume restores the conversation, not the turn: no prompt, slash command, or startup
+  input replay. A failed resume is a recorded, retryable failure — never fall back to a
+  fresh conversation.
+
+Official coverage is nine of the ten shipped integrations. OpenCode learns the active
+conversation only from user-initiated activity (a prompt or slash command), so a TUI switch
+that never prompts is unobservable and restores the last active conversation. Pi has no id
+until its session file materializes after the first assistant message. Prime Agent is
+deliberately unsupported: Pragma launches it with `--no-session`, whose in-memory session
+has no file a resume could open.
+
 ## SDK Route
 
 Build reporter like `packages/opencode-plugin/src/index.ts`:
@@ -90,7 +142,8 @@ Build reporter like `packages/opencode-plugin/src/index.ts`:
 - Guard environment before calling SDK.
 - Catch every report failure; optional debug logging only.
 - Use `reportStarted`, `reportStopped`, `reportAttention`, `reportCleared`,
-  `reportSessionName`, and `reportMessage` instead of constructing transport payloads.
+  `reportSessionName`, `reportSessionId`, and `reportMessage` instead of constructing
+  transport payloads.
 - Keep message ids stable while streaming updates. `ts` is Unix milliseconds, not
   seconds. Preserve non-decreasing timestamps per id.
 - Carry `requestId` from attention through decision/answer round-trips.
@@ -144,6 +197,8 @@ Contribute launcher with `defineAgent`:
   consumers and `agent verify` filter the event stream by it, so a qualified id makes
   every report invisible to mobile.
 - `launch.command`: argv array; never shell-join it.
+- `launch.resume`: optional full-argv callback that reopens a reported conversation; declaring
+  it is what makes the agent resumable (`CatalogAgent.supportsResume`).
 - `models`: static entries or async `(ctx) => Promise<entries>` provider.
 - `args.model`, `args.reasoning`, optional `args.modelReasoning`, and
   `args.permissionMode`: return argv fragments.
@@ -396,6 +451,8 @@ approval and finish with `gh pr create`.
 - Official icon provenance/license documented; asset sanitized and contrast-checked.
 - Sub-agent work cannot produce premature done.
 - Question/decision request ids round-trip.
+- Top-level session id reported on create/switch and `launch.resume` rebuilds the exact
+  conversation argv (or the agent is documented as deliberately not resumable).
 - Account provider declared; `usageLimits` included when host exposes account limits.
 - Every script uses TypeScript, except necessary POSIX `sh` hooks or wrappers.
 - Unsupported optional capabilities are listed in `excludeFeatures`; skipped verifier

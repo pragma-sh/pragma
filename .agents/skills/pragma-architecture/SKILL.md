@@ -14,17 +14,18 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `components/ui/` — shadcn/ui primitives (generated; don't hand-edit).
   - `lib/tauri.ts` — the ONLY place `invoke()` is called; typed wrappers per command.
   - `lib/terminal-manager.ts` — non-React xterm registry; terminal output bypasses React state.
+    Owns reattach vs. restore on the first attach of a tab whose session is gone.
   - `lib/scripts.ts` — pure planner for project `run` scripts and split templates.
   - `lib/native-editing.ts` — OS text-editing chords → readline sequences; text-context detection.
   - `hooks/` — React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss).
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
   - `lib/external-store.ts` — synchronous snapshots and stable subscriptions shared by frontend stores.
-- `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons).
+- `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons, `agent_sessions.rs` for host-routed launch preparation/restore).
 - `crates/pragma-cli/` — `pragma-cli` helper CLI that external agents call from terminals.
 - `crates/pragma-client/` — Rust native-client transport, frame I/O, and SSH streamlocal bridge.
 - `crates/pragma-core/` — pure Rust host business logic boundary, no Tauri dependencies.
-- `crates/pragma-server/` — persistent Unix-socket host server; owns PTYs, scrollback, and runtime agent status fanout.
+- `crates/pragma-server/` — persistent Unix-socket host server; owns PTYs, scrollback, runtime agent status fanout, and the durable agent-invocation store (`invocations.rs`, `agent_resume.rs`).
 - `crates/pragma-protocol/` — shared daemon wire frames/framing used by daemon, Tauri app, and CLI.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
@@ -81,6 +82,9 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | User color overrides (global/project)            | `.pragma/theme.json` via `apps/pragma/src/lib/theme.ts`           |
 | A feature component (composition of primitives)  | elsewhere under `src/`                                            |
 | PTY/session ownership                            | `crates/pragma-server`                                            |
+| Durable agent invocation + auto-resume record    | `crates/pragma-server/src/invocations.rs` + `agent_resume.rs`     |
+| Desktop launch preparation / session restore     | `apps/pragma/src-tauri/src/agent_sessions.rs`                     |
+| Resume argv (plugin-owned)                       | `AgentDefinition.launch.resume` (`packages/plugin/src/agent.ts`)  |
 | Fanout rules (selectors, branches, status)       | `crates/pragma-core/src/fanout.rs`                                |
 | Fanout record, state machine, pick transaction   | `crates/pragma-server/src/fanouts.rs`                             |
 | A fanout side effect (git, PTY, catalog, AI)     | `crates/pragma-server/src/fanout_host.rs` (the `FanoutHost` seam) |
@@ -98,7 +102,15 @@ architecture** with **consistent conventions across TypeScript and Rust**.
    shared or could be, give it a `packages/*` home.
 4. **No magic values across the boundary.** Put them in `@pragma-sh/constants`.
 5. **Never route terminal output through React state.** Workspace state tracks metadata only.
-6. **Agent status is runtime-only.** Daemon snapshots live in memory; frontend status uses `useSyncExternalStore`; pins use localStorage; no SQLite migration.
+6. **Runtime status is ephemeral; recovery identity is durable.** Status dots/messages live
+   in memory (frontend store via `useSyncExternalStore`; pins in localStorage). The durable
+   record is the host's `agent-invocations.db` row plus the harness session id an integration
+   reports (`reportSessionId` / `agent report session-id`) — never client DB, localStorage,
+   or plugin state. A restore is driven by the host and the plugin's `launch.resume` callback;
+   it resumes a conversation, never replays prompts or startup input.
+   The desktop's `SessionRestoreDialog` displays the host's boot-scoped
+   `tabs.sessionRestoreStatus` snapshot (all connected hosts, including background tabs).
+   Its dismissal is cosmetic and must never cancel or initiate recovery.
 7. **Agent model discovery parsing belongs to plugins.** Plugin agents provide static models or
    async model providers; host-specific parsing must not be added to Rust/Tauri IPC.
 8. **Sweeping refactors for clarity are welcome** — this project is early.

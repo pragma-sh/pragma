@@ -150,7 +150,9 @@ rename, or delete a file.
 A worktree's **Terminals** section lists its shells and script runs; agent sessions stay under
 **Agents**, where the chat screen's **Chat / Terminal** switcher reaches the agent's raw TUI.
 Tap a row to attach to it, or **New terminal** to open a fresh shell. A terminal opened from
-the phone is a real tab: it shows up on the desktop too and survives a restart of the host.
+the phone is a real tab: it shows up on the desktop too and outlives the desktop window. It is
+still an ordinary shell, so a host-server restart ends it and it reopens fresh — see
+[Sessions & recovery](/docs/user-guide/sessions).
 
 - The keys a phone keyboard lacks sit above it: **ctrl** (sticky), **esc**, **tab**, **^C**,
   and the arrows, with the rest one tap away under **⋯**. Ctrl-D is deliberately not next to

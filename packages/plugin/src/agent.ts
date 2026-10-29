@@ -1,4 +1,8 @@
-import type { AgentFeature as SharedAgentFeature } from "@pragma-sh/constants";
+import type {
+  AgentFeature as SharedAgentFeature,
+  AgentLaunchSelection as SharedAgentLaunchSelection,
+  AgentResumeRequest as SharedAgentResumeRequest,
+} from "@pragma-sh/constants";
 
 import type { PluginIcon } from "./contributions";
 import type { PluginContext } from "./types";
@@ -90,6 +94,15 @@ export interface AgentArgsBuilder {
   slashCommand?: (name: string) => string;
 }
 
+/**
+ * The `--model <id>` pair most harness CLIs accept as their model selector,
+ * directly usable as {@link AgentArgsBuilder.model}. A CLI that spells the flag
+ * differently (Kimi's `-m`) keeps its own mapping instead.
+ */
+export function modelFlagArgs(modelId: string): string[] {
+  return ["--model", modelId];
+}
+
 /** Optional agent capabilities that can be excluded from `pragma-cli agent verify`. */
 export type AgentFeature = SharedAgentFeature;
 
@@ -107,7 +120,20 @@ export interface AgentDefinition<TConfig = unknown> {
   icon: PluginIcon;
   /** Browser URL, absolute filesystem path, or plugin-dir-relative asset path for the agent icon. */
   iconPath?: string;
-  launch: { command: string[] };
+  launch: {
+    command: string[];
+    /**
+     * Builds the full argv that resumes the harness session identified by
+     * `request.harnessSessionId`. The returned array is used verbatim — the
+     * host appends no model, mode, or prompt args, so a resume can restore
+     * exactly what the original launch selected. Opt-in: an agent without it
+     * cannot be resumed, and `CatalogAgent.supportsResume` stays false.
+     */
+    resume?: (
+      request: AgentResumeRequest,
+      ctx: PluginContext<TConfig>,
+    ) => string[] | Promise<string[]>;
+  };
   models: AgentModelEntry[] | ((ctx: PluginContext<TConfig>) => Promise<AgentModelEntry[]>);
   /** Permission modes; the first is the default applied when a launch selects none. */
   permissionModes: AgentOptionSource<AgentPermissionMode, TConfig>;
@@ -133,13 +159,10 @@ export function defineAgent<TConfig = unknown>(
 }
 
 /** The launch-time choices a caller made for one agent; every field is optional. */
-export interface AgentLaunchSelection {
-  modelId?: string | null;
-  reasoningId?: string | null;
-  modeId?: string | null;
-  permissionModeId?: string | null;
-  slashCommand?: string | null;
-}
+export type AgentLaunchSelection = SharedAgentLaunchSelection;
+
+/** What {@link AgentDefinition.launch.resume} needs to rebuild a resume argv. */
+export type AgentResumeRequest = SharedAgentResumeRequest;
 
 /** Options resolved from an agent's static lists or async providers. */
 export interface ResolvedAgentOptions {

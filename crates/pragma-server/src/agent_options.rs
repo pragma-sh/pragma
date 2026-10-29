@@ -2,6 +2,7 @@
 //! catalog agent entry. Mirrors `agentLaunchArgs`/`applySlashCommand` in
 //! `@pragma-sh/plugin`, which the desktop uses for the same selection.
 
+use pragma_constants::AgentLaunchSelection;
 use serde_json::Value;
 
 /// The launch-time choices beyond model/reasoning. `None` selects the agent's
@@ -31,6 +32,43 @@ pub fn option_args(agent: &Value, options: &AgentLaunchOptions) -> Result<Vec<St
         "permission mode",
     )?);
     Ok(args)
+}
+
+/// Fills a launch selection with the *effective* defaults the catalog applies
+/// when a caller omitted them: the first declared mode and permission mode.
+///
+/// A durable record must not store "the caller chose nothing", because that
+/// would silently change meaning if the agent's default mode moves. Explicitly
+/// selected ids are validated here too, so a resume can never record a choice
+/// the launch itself would reject.
+pub fn effective_selection(
+    agent: &Value,
+    selection: &mut AgentLaunchSelection,
+) -> Result<(), String> {
+    for (list_key, selected, label) in [
+        ("modes", &mut selection.mode_id, "mode"),
+        (
+            "permissionModes",
+            &mut selection.permission_mode_id,
+            "permission mode",
+        ),
+    ] {
+        let list = agent[list_key].as_array().map_or(&[][..], Vec::as_slice);
+        match selected.as_deref() {
+            Some(id) => {
+                if !list.iter().any(|item| item["id"] == id) {
+                    return Err(format!("unknown {label}: {id}"));
+                }
+            }
+            None => {
+                *selected = list
+                    .first()
+                    .and_then(|item| item["id"].as_str())
+                    .map(str::to_string);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The prompt to prefill: the slash command's invocation followed by the
@@ -129,6 +167,34 @@ mod tests {
             permission_mode_id: permission.map(str::to_string),
             slash_command: None,
         }
+    }
+
+    #[test]
+    fn effective_selection_records_the_defaults_the_launch_would_apply() {
+        let agent = agent();
+        let mut selection = AgentLaunchSelection::default();
+        effective_selection(&agent, &mut selection).expect("defaults");
+        assert_eq!(selection.mode_id.as_deref(), Some("build"));
+        assert_eq!(selection.permission_mode_id.as_deref(), Some("auto"));
+
+        let mut explicit = AgentLaunchSelection {
+            mode_id: Some("plan".to_string()),
+            permission_mode_id: None,
+            ..AgentLaunchSelection::default()
+        };
+        effective_selection(&agent, &mut explicit).expect("explicit mode kept");
+        assert_eq!(explicit.mode_id.as_deref(), Some("plan"));
+        assert_eq!(explicit.permission_mode_id.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn effective_selection_rejects_an_unknown_choice() {
+        let agent = agent();
+        let mut selection = AgentLaunchSelection {
+            mode_id: Some("nope".to_string()),
+            ..AgentLaunchSelection::default()
+        };
+        assert!(effective_selection(&agent, &mut selection).is_err());
     }
 
     #[test]

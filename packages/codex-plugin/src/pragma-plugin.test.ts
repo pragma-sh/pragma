@@ -70,7 +70,12 @@ it("returns no models for malformed output", () => {
 
 it("builds model, reasoning, and permission arguments", () => {
   const agent = codexAgentPlugin.agents?.[0];
-  expect(agent?.launch.command).toEqual(["codex", "--enable", "default_mode_request_user_input"]);
+  expect(agent?.launch.command).toEqual([
+    "codex",
+    "--no-daemon",
+    "--enable",
+    "default_mode_request_user_input",
+  ]);
   expect(agent?.args.modelReasoning?.("gpt-5.6-sol", "high")).toEqual([
     "--model",
     "gpt-5.6-sol",

@@ -30,4 +30,40 @@ describe("OpenCode launch options", () => {
   it("selects the agent with --agent", () => {
     expect(agent.args.mode?.("plan")).toEqual(["--agent", "plan"]);
   });
+
+  it("resumes the exact session id with the selection's model and agent", async () => {
+    const resume = agent.launch.resume;
+    expect(resume).toBeTypeOf("function");
+    expect(
+      await resume!(
+        {
+          harnessSessionId: "ses_01ABC",
+          selection: { modelId: "anthropic/claude-sonnet-5-5", modeId: "plan" },
+          cwd: "/repo",
+        },
+        undefined as never,
+      ),
+    ).toEqual([
+      "opencode",
+      "--session",
+      "ses_01ABC",
+      "--model",
+      "anthropic/claude-sonnet-5-5",
+      "--agent",
+      "plan",
+    ]);
+  });
+
+  it("resumes without inventing a selection and never replays a prompt", async () => {
+    expect(
+      await agent.launch.resume!(
+        {
+          harnessSessionId: "ses_01ABC",
+          selection: { slashCommand: "review" },
+          cwd: "/repo",
+        },
+        undefined as never,
+      ),
+    ).toEqual(["opencode", "--session", "ses_01ABC"]);
+  });
 });

@@ -1,11 +1,13 @@
 mod accounts;
 mod agent_options;
+mod agent_resume;
 mod ai;
 mod automations;
 mod computer;
 mod fanout_host;
 mod fanouts;
 mod github;
+mod invocations;
 mod plugins_host;
 mod ports;
 mod registry;
@@ -176,6 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_watcher_reconciler(&registry);
     start_viewport_lease_sweeper(&registry);
     start_account_token_sync(&registry);
+    start_invocation_reconciler(&registry);
     start_dropped_files_sweeper();
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
@@ -251,6 +254,49 @@ fn start_account_token_sync(registry: &Arc<Registry>) {
     thread::spawn(move || loop {
         thread::sleep(ACCOUNT_TOKEN_SYNC_INTERVAL);
         registry.sync_account_tokens();
+    });
+}
+
+/// How long the startup invocation pass waits for the plugin catalog before
+/// giving up. A resume callback needs the catalog; running before the sidecar
+/// is up would mark every interrupted record failed even though nothing about
+/// it was broken.
+const INVOCATION_CATALOG_WAIT: Duration = Duration::from_secs(15);
+
+/// Brings back every eligible interrupted agent invocation, including tabs no
+/// client currently has mounted. Runs once, shortly after start-up, so a
+/// server that a crash or a native-update quit replaced resumes the harness
+/// conversations a desktop mount would otherwise have to ask for one by one.
+fn start_invocation_reconciler(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    thread::spawn(move || {
+        let interrupted = registry
+            .invocations
+            .interrupted_and_resumable()
+            .is_ok_and(|records| !records.is_empty());
+        if interrupted {
+            // Wait, bounded, for the plugin sidecar to publish a catalog. The
+            // restore itself is claim-serialized and idempotent, so racing the
+            // desktop's on-demand call is safe either way.
+            let deadline = std::time::Instant::now() + INVOCATION_CATALOG_WAIT;
+            while std::time::Instant::now() < deadline {
+                let ready = registry
+                    .plugins()
+                    .handle_rpc(&serde_json::json!({ "action": "catalog" }))
+                    .is_ok_and(|catalog| {
+                        catalog["agents"]
+                            .as_array()
+                            .is_some_and(|agents| !agents.is_empty())
+                    });
+                if ready {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+        // Also settles startup progress when the store is unavailable or
+        // there were no interrupted records.
+        registry.reconcile_invocations();
     });
 }
 
@@ -766,6 +812,51 @@ fn handle_tabs_rpc(
                 })
                 .map_err(|error| error.to_string())
             }),
+        pragma_core::tabs::TabsRequest::PrepareAgentLaunch {
+            tab_id,
+            worktree_id,
+            agent_id,
+            command,
+            selection,
+        } => registry
+            .handle_prepare_agent_launch(agent_resume::PrepareLaunch {
+                tab_id,
+                worktree_id,
+                agent_id,
+                command,
+                selection,
+            })
+            .and_then(|prepared| serde_json::to_value(prepared).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::RestoreAgentSession {
+            tab_id,
+            worktree_id,
+        } => registry
+            .handle_restore_agent_session(&tab_id, &worktree_id)
+            .and_then(|restored| serde_json::to_value(restored).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::SessionRestoreStatus => {
+            serde_json::to_value(registry.restore.snapshot()).map_err(|error| error.to_string())
+        }
+        // CLI-internal run lifecycle: only the supervisor `pragma-cli agent run`
+        // sends these. A stale run id is an error, never a state change.
+        //
+        // The start reply is
+        // `{ ok: true, env: [[key, value], …], serverBootId }`: the wrapper
+        // applies that env to its child, so the execution runs under the
+        // account the launch was prepared with even when the shell's own
+        // spawn-time env resolved differently or timed out, and it echoes the
+        // boot id on `finishRun` so a report from a previous server boot is
+        // stale.
+        pragma_core::tabs::TabsRequest::StartRun { run_id } => handle_start_run(registry, &run_id),
+        pragma_core::tabs::TabsRequest::FinishRun {
+            run_id,
+            exit_code,
+            server_boot_id,
+        } => handle_finish_run(registry, &run_id, exit_code, server_boot_id.as_deref()),
+        pragma_core::tabs::TabsRequest::FailRun {
+            run_id,
+            reason,
+            server_boot_id,
+        } => handle_fail_run(registry, &run_id, &reason, server_boot_id.as_deref()),
     };
     Ok(match result {
         Ok(payload) => RpcResponseFrame {
@@ -784,6 +875,38 @@ fn handle_tabs_rpc(
                 details: None,
             }),
         },
+    })
+}
+
+fn handle_fail_run(
+    registry: &Registry,
+    run_id: &str,
+    reason: &str,
+    server_boot_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    registry
+        .handle_fail_run(run_id, reason, server_boot_id)
+        .map(|()| serde_json::json!({ "ok": true }))
+}
+
+fn handle_finish_run(
+    registry: &Registry,
+    run_id: &str,
+    exit_code: Option<i32>,
+    server_boot_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    registry
+        .handle_finish_run(run_id, exit_code, server_boot_id)
+        .map(|()| serde_json::json!({ "ok": true }))
+}
+
+fn handle_start_run(registry: &Registry, run_id: &str) -> Result<serde_json::Value, String> {
+    registry.handle_start_run(run_id).map(|authorized| {
+        serde_json::json!({
+            "ok": true,
+            "env": authorized.env,
+            "serverBootId": authorized.server_boot_id,
+        })
     })
 }
 
@@ -1664,8 +1787,9 @@ mod tests {
         read_json_frame, write_json_frame, ControlMethod, ControlRequest, ControlResult,
         RequestFrame, RequestKind, ServerFrame,
     };
+    use serde_json::json;
 
-    use super::{acquire_lock, handle_client, take_socket_path, Registry};
+    use super::{acquire_lock, handle_client, handle_tabs_rpc, take_socket_path, Registry};
 
     fn request(kind: RequestKind) -> RequestFrame {
         RequestFrame {
@@ -1792,6 +1916,212 @@ mod tests {
                 .snapshot(registry.as_ref())
                 .desktop_connected
         );
+    }
+
+    /// A registry with one published project, worktree, and terminal tab.
+    fn published_registry(dir: &std::path::Path, cwd: &str) -> Registry {
+        use pragma_constants::{Project, Tab, TabKind, WorkspaceSnapshot, Worktree};
+
+        let registry = Registry::new(
+            dir.join("daemon.sock"),
+            dir.to_path_buf(),
+            std::path::PathBuf::new(),
+        );
+        registry.publish_workspace(WorkspaceSnapshot {
+            projects: vec![Project {
+                id: "project-1".to_string(),
+                name: "sandbox".to_string(),
+                path: cwd.to_string(),
+                icon_emoji: None,
+                order_index: 0,
+                created_at: "2026-01-01 00:00:00".to_string(),
+                is_git: true,
+            }],
+            worktrees: vec![Worktree {
+                id: "worktree-main".to_string(),
+                project_id: "project-1".to_string(),
+                parent_id: None,
+                branch: "main".to_string(),
+                title: None,
+                path: cwd.to_string(),
+                is_main: true,
+                hidden: false,
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }],
+            tabs: vec![Tab {
+                id: "tab-1".to_string(),
+                project_id: "project-1".to_string(),
+                worktree_id: "worktree-main".to_string(),
+                kind: TabKind::Terminal,
+                title: None,
+                url: None,
+                file_path: None,
+                diff_side: None,
+                diff_commit: None,
+                pr_number: None,
+                plugin_id: None,
+                plugin_view_id: None,
+                plugin_payload: None,
+                plugin_dedupe_key: None,
+                whiteboard_id: None,
+                agent_id: None,
+                fanout_id: None,
+                fanout_member_id: None,
+                user_renamed: false,
+                shell: None,
+                order_index: 0,
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }],
+        });
+        registry
+    }
+
+    /// An active invocation on the published tab with a known conversation.
+    fn active_invocation(registry: &Registry, cwd: &str) -> String {
+        let run_id = registry
+            .prepare_invocation(
+                "tab-1",
+                "worktree-main",
+                "project-1",
+                cwd,
+                "pragma.claude-code",
+                &["claude".to_string()],
+                pragma_constants::AgentLaunchSelection {
+                    model_id: None,
+                    reasoning_id: None,
+                    mode_id: None,
+                    permission_mode_id: None,
+                    slash_command: None,
+                },
+                None,
+                Vec::new(),
+            )
+            .expect("prepare");
+        registry.invocations.start(&run_id).expect("start");
+        registry
+            .invocations
+            .set_harness_session_id(&run_id, "harness-1")
+            .expect("session id");
+        run_id
+    }
+
+    /// The CLI's `agent report session-id --clear` wire shape, through the
+    /// real frame handler: `clearHarnessSessionId` clears the execution's
+    /// stored conversation so nothing auto-resumes it.
+    #[test]
+    fn an_agent_report_clear_op_clears_the_execution() {
+        use super::{handle_request, Outcome};
+        use pragma_protocol::{RequestFrame, RequestKind};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let registry = published_registry(dir.path(), &cwd);
+        let run_id = active_invocation(&registry, &cwd);
+
+        let request = RequestFrame {
+            request_id: "report-1".to_string(),
+            kind: RequestKind::AgentReport,
+            session_id: None,
+            worktree_id: None,
+            cwd: None,
+            cols: None,
+            rows: None,
+            data: Some(
+                json!({
+                    "agent": "claude-code",
+                    "worktreeId": "worktree-main",
+                    "tabId": "tab-1",
+                    "status": null,
+                    "clearHarnessSessionId": true,
+                    "agentRunId": run_id,
+                })
+                .to_string(),
+            ),
+            shell: None,
+            rpc: None,
+            subscription: None,
+            control: None,
+            control_result: None,
+            env: None,
+        };
+        let outcome: Outcome = handle_request(
+            request,
+            &registry,
+            &pragma_core::Core::new(dir.path()).expect("core"),
+        )
+        .ok()
+        .expect("the clear report is handled");
+
+        assert!(
+            outcome.event_stream.is_none(),
+            "a report is fire-and-forget"
+        );
+        assert_eq!(
+            registry
+                .invocations
+                .record(&run_id)
+                .expect("read")
+                .expect("exists")
+                .harness_session_id,
+            None,
+            "the wire clear reached the store"
+        );
+    }
+
+    /// The exact `tabs` RPC shapes the desktop and the CLI send, through the
+    /// real handler: an unknown agent fails the prepare (never a silent
+    /// untracked launch), no record means `{restored:false}`, and a stale run
+    /// lifecycle op is an error.
+    #[test]
+    fn tabs_agent_session_ops_answer_the_contract_shapes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = Registry::new(
+            dir.path().join("daemon.sock"),
+            dir.path().to_path_buf(),
+            std::path::PathBuf::new(),
+        );
+
+        let prepared = handle_tabs_rpc(
+            "r1".to_string(),
+            json!({
+                "action": "prepareAgentLaunch",
+                "tabId": "tab-1",
+                "worktreeId": "worktree-1",
+                "agentId": "pragma.claude-code",
+                "command": ["claude"],
+                "selection": null,
+            }),
+            &registry,
+        )
+        .ok()
+        .expect("a response");
+        assert!(!prepared.ok, "an unknown worktree cannot be prepared");
+        assert!(prepared.payload.is_none());
+
+        let restore = handle_tabs_rpc(
+            "r2".to_string(),
+            json!({
+                "action": "restoreAgentSession",
+                "tabId": "tab-1",
+                "worktreeId": "worktree-1",
+            }),
+            &registry,
+        )
+        .ok()
+        .expect("a response");
+        assert!(restore.ok);
+        assert_eq!(restore.payload.expect("payload")["restored"], json!(false));
+
+        for action in ["startRun", "finishRun"] {
+            let response = handle_tabs_rpc(
+                "r3".to_string(),
+                json!({ "action": action, "runId": "missing" }),
+                &registry,
+            )
+            .ok()
+            .expect("a response");
+            assert!(!response.ok, "{action} for an unknown run is rejected");
+        }
     }
 
     #[test]

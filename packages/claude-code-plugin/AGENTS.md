@@ -30,18 +30,18 @@ means the script works regardless of its executable bit. Keeping the logic in on
 
 ## Hook → status mapping
 
-| Hook                         | `report.sh` arg  | Reports                                                                                                                                                                                                                                                                                                                         |
-| ---------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SessionStart`               | `cleared`        | `cleared` status only (+ tears down any stale watcher)                                                                                                                                                                                                                                                                          |
-| `SessionEnd`                 | `cleared`        | `cleared` status only (+ tears down the watcher)                                                                                                                                                                                                                                                                                |
-| `UserPromptSubmit`           | `started`        | `started` + `session-name` (once per `session_id`, derived from the first real prompt's first line, ~48 chars) + user prompt message (+ spawns the abort watcher — see below). A synthetic `<task-notification>` prompt (subagent completion auto-resume) reports `started` but renders a system note, never a fake user bubble |
-| `Stop`                       | `stopped`        | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt; stays `started` while tracked subagents or `background_tasks` remain active — see below                                                                                                                                            |
-| `SubagentStart`              | `subagent-start` | Tracks each active child and re-asserts `started`                                                                                                                                                                                                                                                                               |
-| `SubagentStop`               | `subagent-stop`  | Removes only that child; final status remains owned by the parent `Stop`                                                                                                                                                                                                                                                        |
-| `PostToolUse`                | `running`        | `started` **iff** a turn's marker exists; else nothing (see below)                                                                                                                                                                                                                                                              |
-| `PermissionRequest`          | `permission`     | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below. `AskUserQuestion` branches to `attention --kind question` (+ question + options + requestId) and blocks for the answer — see questions below                                                                           |
-| `Elicitation`                | `attention`      | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                                                                                                                                                                                                                                        |
-| `Notification` `idle_prompt` | `idle`           | `cleared` **iff** a turn's marker still exists; else nothing                                                                                                                                                                                                                                                                    |
+| Hook                         | `report.sh` arg  | Reports                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SessionStart`               | `cleared`        | `session-id` when the top-level conversation changes, then `cleared` status (+ tears down any stale watcher)                                                                                                                                                                                                                                                                               |
+| `SessionEnd`                 | `cleared`        | `cleared` status only (+ tears down the watcher); forgets the reported conversation id so a later `--resume` re-reports it                                                                                                                                                                                                                                                                 |
+| `UserPromptSubmit`           | `started`        | `session-id` when the pinned conversation id changes, then `started` + `session-name` (once per `session_id`, derived from the first real prompt's first line, ~48 chars) + user prompt message (+ spawns the abort watcher — see below). A synthetic `<task-notification>` prompt (subagent completion auto-resume) reports `started` but renders a system note, never a fake user bubble |
+| `Stop`                       | `stopped`        | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt; stays `started` while tracked subagents or `background_tasks` remain active — see below                                                                                                                                                                                                       |
+| `SubagentStart`              | `subagent-start` | Tracks each active child and re-asserts `started`                                                                                                                                                                                                                                                                                                                                          |
+| `SubagentStop`               | `subagent-stop`  | Removes only that child; final status remains owned by the parent `Stop`                                                                                                                                                                                                                                                                                                                   |
+| `PostToolUse`                | `running`        | `started` **iff** a turn's marker exists; else nothing (see below)                                                                                                                                                                                                                                                                                                                         |
+| `PermissionRequest`          | `permission`     | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below. `AskUserQuestion` branches to `attention --kind question` (+ question + options + requestId) and blocks for the answer — see questions below                                                                                                                                      |
+| `Elicitation`                | `attention`      | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                                                                                                                                                                                                                                                                                                   |
+| `Notification` `idle_prompt` | `idle`           | `cleared` **iff** a turn's marker still exists; else nothing                                                                                                                                                                                                                                                                                                                               |
 
 `Stop` always trails `UserPromptSubmit` on a _normal_ turn, so the happy path needs no
 state machine. Cancelled turns fire **no hook at all** — that is the whole problem the
@@ -55,6 +55,39 @@ subagent tool/stop events cannot overwrite the parent agent's status. For Claude
 that emit child completion as a plain `Stop` without those fields, the script pins each
 Pragma tab to the parent `session_id` observed at `SessionStart` / `UserPromptSubmit`
 and ignores events carrying any other session ID.
+
+## Session tracking + resume
+
+The bridge reports the tab's current **top-level conversation id** as a status-less
+`session-id` report (`pragma-cli agent report --agent claude-code session-id --id
+<session_id>`) so Pragma can resume that exact Claude Code session through the agent's
+`launch.resume` callback.
+
+`report_session_id` runs only at the `SessionStart` / `UserPromptSubmit` pin — after
+every subagent payload and other-session event has exited — and only on an id change
+(`$TMPDIR/pragma-cli-claude-code-$TAB.session-id` remembers the last reported one):
+
+- `SessionStart` fires for startup, `/clear`, `/compact`, `/resume`, and `--resume`,
+  so a switch with no title and no following prompt still reports its id; A→B→A
+  reports each switch. The display name and the id are independent state: names
+  dedupe by title, ids by id.
+- A late old-session `SessionEnd` is discarded by the parent pin before it could
+  report the id it is leaving.
+- `SessionEnd` forgets the reported id, so a later `claude --resume <id>` (a new run)
+  reports the same id again.
+- Subagent hooks (`agent_id` present) exit before the pin and can never report a
+  child session id.
+- `report` swallows failures, so an older installed `pragma-cli` without the
+  `session-id` subcommand cannot disrupt status reporting.
+
+Nothing reports a "session ended" state: `cleared` stays status-only and the host's
+supervised invocation tracks the real process exit separately.
+
+**Resume** (verified against `claude --help`, 2.1.302): `-r, --resume [value]` reopens a
+conversation by session ID, and `--model`, `--effort`, `--permission-mode`, and
+`--agent` are top-level options, so the callback returns
+`["claude", "--resume", <id>, ...launch flags]` — the default `--permission-mode auto`
+included — and never replays the original slash command or prompt.
 
 ## Background subagents: a parent `Stop` is not "done"
 

@@ -324,6 +324,33 @@ pub enum EventFrame {
             skip_serializing_if = "Option::is_none"
         )]
         session_name: Option<String>,
+        /// Opaque id of the harness's own session (Claude Code's session id,
+        /// opencode's session id), when the agent reported one; a later launch
+        /// can resume it. Never parsed by the protocol.
+        #[serde(
+            rename = "harnessSessionId",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        harness_session_id: Option<String>,
+        /// Opaque id Pragma assigned to the agent run that produced this
+        /// report (`PRAGMA_AGENT_RUN_ID`), when present.
+        #[serde(
+            rename = "agentRunId",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        agent_run_id: Option<String>,
+        /// Explicitly forget the stored harness session id for this report's
+        /// run (or the tab's newest invocation when no run id is present):
+        /// `Some(true)` clears, `None`/`Some(false)` makes no statement. When
+        /// both this and `harness_session_id` are present, clearing wins.
+        #[serde(
+            rename = "clearHarnessSessionId",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        clear_harness_session_id: Option<bool>,
         #[serde(rename = "attentionKind")]
         attention_kind: Option<AgentAttentionKind>,
         /// The command awaiting approval, when `status` is a `command` attention.
@@ -598,6 +625,9 @@ mod tests {
             agent: "claude-code".to_string(),
             status: Some(AgentStatus::Attention),
             session_name: Some("Fix flaky tests".to_string()),
+            harness_session_id: Some("sess-1".to_string()),
+            agent_run_id: Some("run-1".to_string()),
+            clear_harness_session_id: None,
             attention_kind: Some(pragma_constants::AgentAttentionKind::Command),
             command: Some("npm test".to_string()),
             question: None,
@@ -611,10 +641,14 @@ mod tests {
         match decoded {
             ServerFrame::Event(EventFrame::Agent {
                 command,
+                harness_session_id,
+                agent_run_id,
                 request_id,
                 ..
             }) => {
                 assert_eq!(command.as_deref(), Some("npm test"));
+                assert_eq!(harness_session_id.as_deref(), Some("sess-1"));
+                assert_eq!(agent_run_id.as_deref(), Some("run-1"));
                 assert_eq!(request_id.as_deref(), Some("req-1"));
             }
             _ => panic!("expected agent event"),
@@ -660,6 +694,84 @@ mod tests {
                 assert!(!answer.dismissed);
             }
             _ => panic!("expected answer event"),
+        }
+    }
+
+    #[test]
+    fn agent_event_session_identity_fields_are_optional_on_the_wire() {
+        // An older server's agent event carries none of the identity fields; it must decode.
+        let legacy: EventFrame = serde_json::from_str(
+            r#"{"event":"agent","worktreeId":"w","tabId":"t","agent":"a","status":"running","attentionKind":null}"#,
+        )
+        .expect("legacy agent event");
+        match legacy {
+            EventFrame::Agent {
+                harness_session_id,
+                agent_run_id,
+                clear_harness_session_id,
+                ..
+            } => {
+                assert!(harness_session_id.is_none());
+                assert!(agent_run_id.is_none());
+                assert!(clear_harness_session_id.is_none());
+            }
+            _ => panic!("expected agent event"),
+        }
+        // Absent fields stay omitted, so they never bloat an older client's stream.
+        let json = serde_json::to_value(EventFrame::Agent {
+            worktree_id: "w".to_string(),
+            tab_id: "t".to_string(),
+            agent: "a".to_string(),
+            status: Some(AgentStatus::Running),
+            session_name: None,
+            harness_session_id: None,
+            agent_run_id: None,
+            clear_harness_session_id: None,
+            attention_kind: None,
+            command: None,
+            question: None,
+            options: None,
+            questions: None,
+            request_id: None,
+        })
+        .expect("encode agent event");
+        assert!(json.get("harnessSessionId").is_none());
+        assert!(json.get("agentRunId").is_none());
+        assert!(json.get("clearHarnessSessionId").is_none());
+
+        // A clear report serializes the flag and round-trips it; the id stays absent.
+        let clearing = serde_json::to_value(EventFrame::Agent {
+            worktree_id: "w".to_string(),
+            tab_id: "t".to_string(),
+            agent: "a".to_string(),
+            status: Some(AgentStatus::Running),
+            session_name: None,
+            harness_session_id: None,
+            agent_run_id: Some("run-1".to_string()),
+            clear_harness_session_id: Some(true),
+            attention_kind: None,
+            command: None,
+            question: None,
+            options: None,
+            questions: None,
+            request_id: None,
+        })
+        .expect("encode clear agent event");
+        assert_eq!(clearing["clearHarnessSessionId"], true);
+        let decoded: EventFrame =
+            serde_json::from_value(clearing).expect("decode clear agent event");
+        match decoded {
+            EventFrame::Agent {
+                harness_session_id,
+                agent_run_id,
+                clear_harness_session_id,
+                ..
+            } => {
+                assert!(harness_session_id.is_none());
+                assert_eq!(agent_run_id.as_deref(), Some("run-1"));
+                assert_eq!(clear_harness_session_id, Some(true));
+            }
+            _ => panic!("expected agent event"),
         }
     }
 

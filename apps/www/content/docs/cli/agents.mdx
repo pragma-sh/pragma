@@ -34,13 +34,20 @@ changes.
 pragma-cli agent report --agent <ID> <subcommand>
 ```
 
-| Subcommand                   | Effect                                                                |
-| ---------------------------- | --------------------------------------------------------------------- |
-| `started`                    | Yellow dot — running.                                                 |
-| `stopped`                    | Green dot — done. `--worktree-id` overrides the environment worktree. |
-| `attention`                  | Red dot — the user is needed (see below).                             |
-| `cleared`                    | Remove the indicator entirely (agent exited without a result).        |
-| `session-name --name <NAME>` | Name the hosting tab (user renames win).                              |
+| Subcommand                     | Effect                                                                |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `started`                      | Yellow dot — running.                                                 |
+| `stopped`                      | Green dot — done. `--worktree-id` overrides the environment worktree. |
+| `attention`                    | Red dot — the user is needed (see below).                             |
+| `cleared`                      | Remove the indicator entirely (agent exited without a result).        |
+| `session-name --name <NAME>`   | Name the hosting tab (user renames win).                              |
+| `session-id --id <HARNESS-ID>` | Store the harness conversation id a later resume continues.           |
+
+`session-name` and `session-id` are status-less and independent: one renames the tab, the
+other stores the resume pointer. Report both on session create, rename, and switch; the id
+is opaque to Pragma, so report the value your harness's own resume flag accepts. Every
+report from a launch Pragma tracked also carries the run id from `PRAGMA_AGENT_RUN_ID` as
+`agentRunId`, which is how the host attributes it to the right invocation.
 
 `attention` carries what the user must act on:
 
@@ -51,6 +58,20 @@ pragma-cli agent report --agent <ID> <subcommand>
 
 Always pass a `--request-id` and block on the answer (below) — the same prompt renders in
 the desktop and on paired phones.
+
+## Tracked launches
+
+```sh
+pragma-cli agent run --run-id <ID> -- <argv...>
+```
+
+Internal: do not run it by hand. When Pragma launches an agent whose integration supports
+resume, the host records the invocation before the command is written and wraps the argv in
+this wrapper. It sets `PRAGMA_AGENT_RUN_ID` in the child, reports the start before the spawn
+and the finish after the child's real exit (never from a cleared status), and exits with the
+child's code. The host uses that record plus the reported `session-id` to restore an
+interrupted session after a crash or server restart — see
+[Sessions & recovery](/docs/user-guide/sessions).
 
 ## ask and answer
 

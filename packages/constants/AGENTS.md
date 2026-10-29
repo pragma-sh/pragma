@@ -134,6 +134,14 @@ Two things that break the tarball if changed carelessly:
   `System1Status` is what the backend reports to the UI (never the key).
 - `AgentModelEntry.canonicalId` — optional provider-qualified id for an aliased model,
   used only by auto mode's benchmark matching.
+- `AgentLaunchSelection` / `AgentResumeRequest` — the launch-time selection plugin
+  callbacks receive, and what a resume needs (`harnessSessionId`, `selection`, `cwd`).
+  `AgentReportPayload.harnessSessionId` / `agentRunId` carry the harness's own session id
+  and the Pragma run that reported it; `clearHarnessSessionId: true` forgets the stored id
+  (clear wins over a combined `harnessSessionId`, absent/`false` makes no statement) when
+  the harness started a new conversation; `CatalogAgent.supportsResume` marks an agent
+  whose plugin declared a `launch.resume` callback. `@pragma-sh/plugin` re-exports both
+  types.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

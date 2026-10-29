@@ -42,6 +42,10 @@ session_file="${state_dir}/pragma-cli-${agent}-${tab}.session"
 # Holds the session_id whose name was already reported, so each session (incl.
 # a /resume switch to another session) names the tab exactly once.
 named_file="${state_dir}/pragma-cli-${agent}-${tab}.sessionname"
+# Holds the session_id last reported as the tab's conversation, so every switch
+# (startup, /resume, /clear) reports the new id exactly once — even when the
+# session has no title yet or no prompt follows. A→B→A reports each switch.
+session_id_file="${state_dir}/pragma-cli-${agent}-${tab}.session-id"
 children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 # The session id that owns the in-flight marker. `/clear` fires SessionEnd (old
 # session) + SessionStart (new session) while the user's next prompt may already
@@ -163,6 +167,21 @@ report_session_name() {
   [ -n "$session_name" ] || return 0
   report session-name --name "$session_name"
   printf '%s' "$hook_session_id" >"$named_file"
+}
+
+# Reports the tab's current top-level conversation id (status-less) so Pragma
+# can resume that exact Claude Code session. Called only for the parent session
+# (subagent payloads and other-session events exit earlier), and only on an id
+# change: SessionStart fires for startup, /clear, /compact, /resume, and
+# --resume, so a switch with no title and no following prompt still reports.
+# Swallows failure via `report`, so an older installed pragma-cli without the
+# `session-id` report cannot disrupt the session.
+report_session_id() {
+  session_id="$1"
+  [ -n "$session_id" ] || return 0
+  [ "$(cat "$session_id_file" 2>/dev/null)" = "$session_id" ] && return 0
+  report session-id --id "$session_id"
+  printf '%s' "$session_id" >"$session_id_file"
 }
 
 # Reports a rich message whose text is JSON-escaped (safe for arbitrary
@@ -751,7 +770,14 @@ fi
 hook_session_id="$(json_field session_id "$input")"
 case "$hook_event_name" in
   SessionStart|UserPromptSubmit)
-    [ -z "$hook_session_id" ] || printf '%s' "$hook_session_id" >"$session_file"
+    if [ -n "$hook_session_id" ]; then
+      printf '%s' "$hook_session_id" >"$session_file"
+      # The event that (re)pins the parent owns the tab's conversation id too.
+      # Reporting here — before the /clear SessionEnd/SessionStart race is
+      # resolved by the guard below — means a late old-session SessionEnd never
+      # gets the chance to report the id it is leaving.
+      report_session_id "$hook_session_id"
+    fi
     ;;
 esac
 if [ -n "$hook_session_id" ] && [ -f "$session_file" ]; then
@@ -865,6 +891,9 @@ case "${1:-}" in
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
       rm -f "$named_file"
+      # A later process (e.g. `claude --resume <id>`) is a new run and must
+      # report its conversation id again, even when the id is unchanged.
+      rm -f "$session_id_file"
     fi
     report cleared
     ;;

@@ -62,6 +62,10 @@ named_file="${state_dir}/pragma-cli-${agent}-${tab}.sessionname"
 # The session id that owns the in-flight marker, so a late `cleared` from a
 # superseded session cannot wipe a turn that already started in a new one.
 turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
+# The harness session id last reported to Pragma, so a session start or switch
+# reports it exactly once -- including a switch back to an earlier session
+# (A -> B -> A), which a seen-set would wrongly suppress.
+harness_session_file="${state_dir}/pragma-cli-${agent}-${tab}.harness-session"
 # Characters of assistant output already streamed for the active turn.
 sent_file="${state_dir}/pragma-cli-${agent}-${tab}.sent"
 # Event-log byte offset the active turn started at, so `stopped` can run the
@@ -87,6 +91,20 @@ approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 # a Junie session (e.g. when pragma-cli or the server is unavailable).
 report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
+}
+
+# Reports the harness's own session id, which Pragma records on the run so a
+# later launch can resume it. Only `SessionStart` and `UserPromptSubmit` carry
+# the id, so only those authoritative start/switch events call this (see the
+# cache below). Deduping against the last *reported* id rather than a seen-set
+# is what keeps a switch back to an earlier session reporting again while a
+# same-session event stays silent.
+report_session_id() {
+  harness_id="$1"
+  [ -n "$harness_id" ] || return 0
+  [ "$(cat "$harness_session_file" 2>/dev/null)" = "$harness_id" ] && return 0
+  report session-id --id "$harness_id"
+  printf '%s' "$harness_id" >"$harness_session_file"
 }
 
 # AgentMessage.ts is milliseconds since Unix epoch (see @pragma-sh/constants).
@@ -548,6 +566,15 @@ if [ "$hook_event_name" = "SessionStart" ]; then
     printf '%s' "$junie_home" >"$home_file"
   fi
 fi
+# `SessionStart` and `UserPromptSubmit` are the only events that carry the
+# session id, so they are also the only authoritative start/switch signals.
+# Report before the fallback below can fill the id from the cached pin, so a
+# payload without an id never re-reports the previous session.
+case "$hook_event_name" in
+  SessionStart | UserPromptSubmit)
+    report_session_id "$hook_session_id"
+    ;;
+esac
 [ -n "$hook_session_id" ] || hook_session_id="$(cat "$session_file" 2>/dev/null)"
 
 case "${1:-}" in

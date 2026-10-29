@@ -1,8 +1,12 @@
 import {
+  agentLaunchArgs,
   credentialStoreAccount,
   defineAgent,
   type AccountLogin,
   type AccountProviderDefinition,
+  type AgentArgsBuilder,
+  type AgentPermissionMode,
+  type AgentResumeRequest,
   type StoredSharedTokenOptions,
   type CredentialStore,
   definePlugin,
@@ -21,6 +25,22 @@ const CLEAR_INPUT = "\x15";
 const PI_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(
   (id) => ({ id, name: id === "xhigh" ? "Extra High" : `${id[0]?.toUpperCase()}${id.slice(1)}` }),
 );
+
+/** Pi-family launches carry no primary modes or permission modes. */
+const PI_PERMISSION_MODES: AgentPermissionMode[] = [];
+
+/** The launch args every Pi-compatible CLI accepts for a selected model/reasoning. */
+const PI_LAUNCH_ARGS: AgentArgsBuilder = {
+  model: (modelId: string) => ["--model", modelId],
+  reasoning: (reasoningId: string) => ["--thinking", reasoningId],
+  modelReasoning: (modelId: string, reasoningId: string) => [
+    "--model",
+    modelId,
+    "--thinking",
+    reasoningId,
+  ],
+  permissionMode: () => [],
+};
 
 /**
  * Pi's sign-ins, keyed by Pragma's well-known provider, with their entries in
@@ -150,6 +170,14 @@ export interface PiPragmaPluginOptions {
     excludeFeatures: AgentFeature[];
     /** Where this CLI reads prompt templates and skills. Defaults to Pi's directories. */
     slashCommandSources?: MarkdownSource[];
+    /**
+     * Flag that reopens a reported session (`--session` for Pi, `--resume` for
+     * Prime Agent), making the launcher resumable. Omit it when Pragma's launch
+     * runs an ephemeral session — Prime Agent passes `--no-session` so the
+     * client-owned daemon worker receives `PRAGMA_*` — because an in-memory
+     * session has no file a resume could open.
+     */
+    resumeFlag?: string;
   };
   /** Account providers the CLI signs in to (see `defineAccounts`). */
   accounts?: AccountProviderDefinition[];
@@ -158,6 +186,7 @@ export interface PiPragmaPluginOptions {
 /** Creates a branded Pragma launcher for a Pi-compatible coding agent. */
 export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefinition {
   const { agent } = options;
+  const resumeFlag = agent.resumeFlag;
   const baseWatcher = createTuiWatcher({
     agent: agent.id,
     handleDecisions: false,
@@ -198,7 +227,30 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
         name: agent.name,
         icon: () => null,
         iconPath: agent.iconPath,
-        launch: { command: agent.command },
+        launch: {
+          command: agent.command,
+          ...(resumeFlag
+            ? {
+                // The callback owns the full argv: the host appends no model,
+                // mode, or prompt args, so the recorded launch selection is
+                // replayed here to restore exactly what the original launch
+                // selected.
+                resume: ({ harnessSessionId, selection }: AgentResumeRequest) => [
+                  ...agent.command,
+                  resumeFlag,
+                  harnessSessionId,
+                  ...agentLaunchArgs(
+                    {
+                      args: PI_LAUNCH_ARGS,
+                      modes: [],
+                      permissionModes: PI_PERMISSION_MODES,
+                    },
+                    selection,
+                  ),
+                ],
+              }
+            : {}),
+        },
         excludeFeatures: agent.excludeFeatures,
         // Pi's 100ms OSC 11 theme probe can expire before Pragma relays the
         // terminal response, leaving the late response in the composer. Clear
@@ -208,22 +260,12 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
         prefillMode: "plain",
         prefillSubmit: KITTY_ENTER,
         models: async (ctx) => parsePiModels(await execFirst(ctx, agent.modelListCommand)),
-        permissionModes: [],
+        permissionModes: PI_PERMISSION_MODES,
         slashCommands: slashCommandProvider(
           PI_BUILTIN_SLASH_COMMANDS,
           agent.slashCommandSources ?? PI_SLASH_COMMAND_SOURCES,
         ),
-        args: {
-          model: (modelId: string) => ["--model", modelId],
-          reasoning: (reasoningId: string) => ["--thinking", reasoningId],
-          modelReasoning: (modelId: string, reasoningId: string) => [
-            "--model",
-            modelId,
-            "--thinking",
-            reasoningId,
-          ],
-          permissionMode: () => [],
-        },
+        args: PI_LAUNCH_ARGS,
       }),
     ],
   });

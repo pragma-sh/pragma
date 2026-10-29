@@ -10,7 +10,7 @@ import {
 import type { AccountProviderInfo } from "@pragma-sh/constants";
 import type { PragmaClient } from "@pragma-sh/sdk";
 
-import { qualifiedAgentId, type ResolvedPlugin } from "./catalog";
+import { pluginContext, qualifiedAgentId, winningPlugins, type ResolvedPlugin } from "./catalog";
 
 /** Sidecar `accounts` request ops, answered with one correlated `accountsResult`. */
 export type AccountsOp =
@@ -231,20 +231,6 @@ export function withAccountEnv(sdk: PragmaClient, env: Record<string, string>): 
   });
 }
 
-/**
- * One plugin per id: the project-scoped copy for `root` wins over the global
- * one, matching how the catalog picks a winner.
- */
-export function winningPlugins(plugins: ResolvedPlugin[], root?: string): ResolvedPlugin[] {
-  const byId = new Map<string, ResolvedPlugin>();
-  for (const plugin of plugins) {
-    if (plugin.scope === "project" && plugin.root !== root) continue;
-    if (plugin.scope === "global" && byId.has(plugin.pluginId)) continue;
-    byId.set(plugin.pluginId, plugin);
-  }
-  return [...byId.values()];
-}
-
 function findProvider(
   plugins: ResolvedPlugin[],
   pluginId: string,
@@ -271,21 +257,6 @@ function accountContext(
   return {
     ...pluginContext(match.plugin, withAccountEnv(sdk, env), root),
     account: { loginId: home ?? "default", home, env },
-  };
-}
-
-function pluginContext(
-  plugin: ResolvedPlugin,
-  sdk: PragmaClient,
-  root: string | undefined,
-): PluginContext {
-  return {
-    pluginId: plugin.pluginId,
-    pluginDir: plugin.dir,
-    config: plugin.config,
-    project: root ? { id: root, name: root, path: root } : null,
-    sdk,
-    notify: () => {},
   };
 }
 

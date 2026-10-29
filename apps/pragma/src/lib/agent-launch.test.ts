@@ -8,23 +8,35 @@ import { AGENT_COMMAND_SUBMITTED_EVENT } from "./agent-plugin-prompt";
 const ptyWriteMock = vi.fn();
 const ptySpawnMock = vi.fn();
 const ptySpawnDetachedMock = vi.fn();
+const ptyKillMock = vi.fn();
 const writeWhenReadyMock = vi.fn();
+const writeNoticeMock = vi.fn();
 const whenConnectedMock = vi.fn();
 const setSpawnEnvMock = vi.fn();
+const markLaunchPendingMock = vi.fn();
+const clearLaunchPendingMock = vi.fn();
+const tabForMock = vi.fn();
 const accountsLaunchEnvMock = vi.fn(async () => ({ env: [] as Array<[string, string]> }));
+const prepareAgentLaunchMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   ptyWrite: (...args: unknown[]) => ptyWriteMock(...args),
   ptySpawn: (...args: unknown[]) => ptySpawnMock(...args),
   ptySpawnDetached: (...args: unknown[]) => ptySpawnDetachedMock(...args),
+  ptyKill: (...args: unknown[]) => ptyKillMock(...args),
   accountsLaunchEnv: (...args: unknown[]) => accountsLaunchEnvMock(...(args as [])),
+  prepareAgentLaunch: (...args: unknown[]) => prepareAgentLaunchMock(...args),
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
   terminalManager: {
     writeWhenReady: (...args: unknown[]) => writeWhenReadyMock(...args),
+    writeNotice: (...args: unknown[]) => writeNoticeMock(...args),
     whenConnected: (...args: unknown[]) => whenConnectedMock(...args),
     setSpawnEnv: (...args: unknown[]) => setSpawnEnvMock(...args),
+    tabFor: (...args: unknown[]) => tabForMock(...args),
+    markLaunchPending: (...args: unknown[]) => markLaunchPendingMock(...args),
+    clearLaunchPending: (...args: unknown[]) => clearLaunchPendingMock(...args),
   },
   MAX_TERMINAL_COLS: 240,
   MAX_TERMINAL_ROWS: 90,
@@ -65,9 +77,21 @@ describe("startAgentInTab", () => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
     ptyWriteMock.mockResolvedValue(undefined);
+    ptyKillMock.mockReset();
+    ptyKillMock.mockResolvedValue(undefined);
     writeWhenReadyMock.mockReset();
+    writeNoticeMock.mockReset();
     whenConnectedMock.mockReset();
     whenConnectedMock.mockResolvedValue(undefined);
+    markLaunchPendingMock.mockReset();
+    clearLaunchPendingMock.mockReset();
+    tabForMock.mockReset();
+    tabForMock.mockReturnValue({ worktreeId: "wt-1" });
+    prepareAgentLaunchMock.mockReset();
+    // Default: the host does not track this agent and returns the argv unchanged.
+    prepareAgentLaunchMock.mockImplementation((_worktree, _tab, _agent, command: string[]) =>
+      Promise.resolve({ command }),
+    );
   });
 
   afterEach(() => {
@@ -174,6 +198,116 @@ describe("startAgentInTab", () => {
     expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "agent --model sonnet\r");
   });
 
+  it("asks the host to prepare the tracked invocation with the worktree, argv, and selection", async () => {
+    const selected = {
+      ...agent(["claude"]),
+      models: { source: "static" as const, modelArg: ["--model", "{model}"], items: [] },
+    };
+    startAgentInTab("tab-1", selected, "Fix the bug", {
+      modelId: "sonnet",
+      reasoningId: "high",
+      modeId: "plan",
+      permissionModeId: "ask",
+      slashCommand: "review",
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(prepareAgentLaunchMock).toHaveBeenCalledWith(
+      "wt-1",
+      "tab-1",
+      "test",
+      ["claude", "--model", "sonnet"],
+      {
+        modelId: "sonnet",
+        reasoningId: "high",
+        modeId: "plan",
+        permissionModeId: "ask",
+        slashCommand: "review",
+      },
+    );
+    expect(markLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+    expect(clearLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+  });
+
+  it("dispatches the host-formatted tracked command line instead of re-quoting the argv", async () => {
+    prepareAgentLaunchMock.mockResolvedValueOnce({
+      command: [
+        "pragma-cli",
+        "agent",
+        "run",
+        "--run-id",
+        "r1",
+        "--",
+        "claude",
+        "C:\\Users\\Ada's project",
+      ],
+      runId: "r1",
+      // What the native host adapter returns for a PowerShell tab: the literal
+      // line to type, already quoted for the shell that parses it.
+      commandLine: "pragma-cli agent run --run-id r1 -- claude 'C:\\Users\\Ada''s project'",
+    });
+    startAgentInTab("tab-1", agent(["claude"]));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(writeWhenReadyMock).toHaveBeenCalledWith(
+      "tab-1",
+      "pragma-cli agent run --run-id r1 -- claude 'C:\\Users\\Ada''s project'\r",
+    );
+    // The desktop never re-joins a tracked argv with POSIX quoting.
+    expect(writeWhenReadyMock).not.toHaveBeenCalledWith("tab-1", expect.stringContaining("'\\''"));
+  });
+
+  it("keeps the legacy argv when the host does not track the agent", async () => {
+    // Unsupported agents come back unchanged with no run id; the launch is
+    // byte-identical to the pre-resume behavior, including a single-token
+    // command staying raw.
+    prepareAgentLaunchMock.mockResolvedValueOnce({ command: ["opencode"] });
+    startAgentInTab("tab-1", agent(["opencode"]));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "opencode\r");
+  });
+
+  it("fails a tracked launch with no host command line instead of joining the argv", async () => {
+    // Only the host owns the live session's shell program, so a tracked result
+    // without a line is a host error — re-joining here would type a POSIX line
+    // into whatever shell the host actually runs.
+    prepareAgentLaunchMock.mockResolvedValueOnce({
+      command: ["pragma-cli", "agent", "run", "--run-id", "r1", "--", "claude"],
+      runId: "r1",
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    startAgentInTab("tab-1", agent(["claude"]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(writeNoticeMock).toHaveBeenCalledWith(
+      "tab-1",
+      expect.stringContaining("the host returned no command line for a tracked launch"),
+    );
+    expect(writeWhenReadyMock).not.toHaveBeenCalled();
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+    expect(clearLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+    error.mockRestore();
+  });
+
+  it("renders a preparation failure as display output, never as PTY input", async () => {
+    prepareAgentLaunchMock.mockRejectedValueOnce(new Error("host is unreachable; $(touch pwned)"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    startAgentInTab("tab-1", agent(["opencode"]), "Fix the bug");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("agent launch preparation failed for tab-1"),
+      expect.any(Error),
+    );
+    expect(writeNoticeMock).toHaveBeenCalledWith(
+      "tab-1",
+      expect.stringContaining("could not prepare the agent session: host is unreachable"),
+    );
+    // Nothing was typed into the shell: the interpolated error must never
+    // reach the PTY, and the launch must never fall back to the untracked
+    // command or its prefill.
+    expect(writeWhenReadyMock).not.toHaveBeenCalled();
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+    expect(clearLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+    error.mockRestore();
+  });
+
   it("skips a whitespace-only prefill", async () => {
     startAgentInTab("tab-1", agent(["claude"]), "   \n  ");
     await vi.advanceTimersByTimeAsync(10_000);
@@ -205,13 +339,97 @@ describe("startBackgroundAgentSession", () => {
     ptyWriteMock.mockResolvedValue(undefined);
     ptySpawnMock.mockReset();
     ptySpawnDetachedMock.mockReset();
+    ptyKillMock.mockReset();
+    ptyKillMock.mockResolvedValue(undefined);
     writeWhenReadyMock.mockReset();
+    writeNoticeMock.mockReset();
     ptySpawnMock.mockResolvedValue(undefined);
     ptySpawnDetachedMock.mockResolvedValue(undefined);
+    markLaunchPendingMock.mockReset();
+    clearLaunchPendingMock.mockReset();
+    prepareAgentLaunchMock.mockReset();
+    prepareAgentLaunchMock.mockImplementation((_worktree, _tab, _agent, command: string[]) =>
+      Promise.resolve({ command }),
+    );
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("spawns the daemon PTY before preparing the tracked invocation", async () => {
+    prepareAgentLaunchMock.mockResolvedValueOnce({
+      command: ["pragma-cli", "agent", "run", "--run-id", "r1", "--", "opencode"],
+      runId: "r1",
+      commandLine: "pragma-cli agent run --run-id r1 -- opencode",
+    });
+    await startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["opencode"]));
+    expect(prepareAgentLaunchMock).toHaveBeenCalledWith(
+      "wt-1",
+      "tab-1",
+      "test",
+      ["opencode"],
+      expect.objectContaining({ modelId: null, slashCommand: null }),
+    );
+    // The session exists before preparation, so the host can render the line
+    // from its actual shell program.
+    const spawnedAt = ptySpawnDetachedMock.mock.invocationCallOrder[0]!;
+    const preparedAt = prepareAgentLaunchMock.mock.invocationCallOrder[0]!;
+    expect(spawnedAt).toBeLessThan(preparedAt);
+    vi.advanceTimersByTime(500);
+    expect(ptyWriteMock).toHaveBeenCalledWith(
+      "tab-1",
+      "pragma-cli agent run --run-id r1 -- opencode\r",
+    );
+    expect(markLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+    expect(clearLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+  });
+
+  it("types the host-formatted line for a tracked background launch", async () => {
+    prepareAgentLaunchMock.mockResolvedValueOnce({
+      command: [
+        "pragma-cli",
+        "agent",
+        "run",
+        "--run-id",
+        "r1",
+        "--",
+        "claude",
+        "C:\\Users\\Ada's project",
+      ],
+      runId: "r1",
+      commandLine: "pragma-cli agent run --run-id r1 -- claude 'C:\\Users\\Ada''s project'",
+    });
+    await startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["claude"]));
+    vi.advanceTimersByTime(500);
+    expect(ptyWriteMock).toHaveBeenCalledWith(
+      "tab-1",
+      "pragma-cli agent run --run-id r1 -- claude 'C:\\Users\\Ada''s project'\r",
+    );
+  });
+
+  it("kills the session it spawned when the host cannot prepare the invocation", async () => {
+    prepareAgentLaunchMock.mockRejectedValueOnce(new Error("host is unreachable"));
+    await expect(
+      startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["opencode"])),
+    ).rejects.toThrow(/host is unreachable/);
+    // The spawn landed before preparation, so this launch owns the session and
+    // must not leave it running with no agent in it.
+    expect(ptySpawnDetachedMock).toHaveBeenCalled();
+    expect(ptyKillMock).toHaveBeenCalledWith("tab-1");
+    expect(ptyWriteMock).not.toHaveBeenCalled();
+    expect(clearLaunchPendingMock).toHaveBeenCalledWith("tab-1");
+  });
+
+  it("does not kill a session a racing mount already owns when preparation fails", async () => {
+    ptySpawnDetachedMock.mockRejectedValueOnce(new Error("session already exists: tab-1"));
+    prepareAgentLaunchMock.mockRejectedValueOnce(new Error("host is unreachable"));
+    await expect(
+      startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["opencode"])),
+    ).rejects.toThrow(/host is unreachable/);
+    // The live PTY was not this launch's to destroy.
+    expect(ptyKillMock).not.toHaveBeenCalled();
+    expect(ptyWriteMock).not.toHaveBeenCalled();
   });
 
   it("spawns the daemon PTY detached before sending the start command", async () => {

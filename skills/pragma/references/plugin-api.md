@@ -179,7 +179,17 @@ const agent = defineAgent({
   id: "example",
   name: "Example",
   icon: icons.Bot,
-  launch: { command: ["example", "--interactive"] },
+  launch: {
+    command: ["example", "--interactive"],
+    // Optional: full argv that reopens a conversation the integration
+    // reported through reportSessionId. The host appends nothing.
+    resume: ({ harnessSessionId, selection }) => [
+      "example",
+      "--resume",
+      harnessSessionId,
+      ...(selection.modelId ? ["--model", selection.modelId] : []),
+    ],
+  },
   models: [{ id: "default", name: "Default" }],
   // First entry = default applied to every launch that picks none.
   permissionModes: [
@@ -208,6 +218,25 @@ dropdown, and opens a slash-command picker on `/`. `agentLaunchArgs(agent, selec
 Models may be static or async `(ctx) => Promise<AgentModelEntry[]>`. Keep host-tool parsing
 inside plugin. `excludeFeatures` tells `pragma-cli agent verify` which optional scenarios tool
 does not support. Read `agent-plugin.md` before implementing lifecycle/status integration.
+
+### Agent resume
+
+Resume is opt-in. Declare `launch.resume(request, ctx)` and report the harness's own
+conversation id through `reportSessionId` / `pragma-cli agent report session-id`; the host
+sets `CatalogAgent.supportsResume` from the callback alone and only records launches of
+agents that declare it.
+
+- `AgentResumeRequest` is `{ harnessSessionId, selection, cwd }`: the id the integration last
+  reported, the original launch selection, and the session's working directory.
+- Return the **complete** argv. The host appends no model, mode, prompt, startup-input, or
+  prelaunch args, so replay the recorded `selection` yourself; return a non-empty string
+  array whose executable is non-empty and whose tokens contain no NUL/CR/LF (validated before
+  anything reaches a shell).
+- Resume restores the conversation, not the turn: never replay the original prompt, slash
+  command, or startup input.
+- A missing callback or a rejected resume leaves a recoverable failure and surfaces an error;
+  it never starts a fresh conversation. Read `agent-plugin.md` for the exact reporting
+  contract and per-harness caveats.
 
 ## Constraints
 

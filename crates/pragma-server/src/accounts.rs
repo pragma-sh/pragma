@@ -234,7 +234,7 @@ impl AccountsHost {
         project_root: Option<&str>,
         tab_id: Option<&str>,
     ) -> Vec<(String, String)> {
-        match self.try_launch_env(registry, agent_id, project_root, tab_id) {
+        match self.try_launch_env(registry, agent_id, project_root, tab_id, &[], false) {
             Ok(env) => env,
             Err(error) => {
                 eprintln!("accounts: launch env for {agent_id} unavailable: {error}");
@@ -243,12 +243,75 @@ impl AccountsHost {
         }
     }
 
+    /// The effective account references (provider + account key, never
+    /// credentials) that a launch of `agent_id` would use right now. Recorded
+    /// with a prepared invocation so a resume returns to the same logins even
+    /// if the effective binding moved in the meantime.
+    ///
+    /// A resolution failure is an error, not an empty list: recording "no
+    /// accounts" would make a resume start under the harness's default login
+    /// while the original launch ran under a bound one.
+    pub fn effective_references(
+        &self,
+        registry: &Registry,
+        agent_id: &str,
+        project_root: Option<&str>,
+    ) -> Result<Vec<AccountSessionUse>, String> {
+        let Some(store) = self.store.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let state = store.snapshot().map_err(|error| error.to_string())?;
+        let providers = providers_for(registry, project_root)?;
+        Ok(providers
+            .iter()
+            .filter(|provider| provider.agent_ids.iter().any(|id| id == agent_id))
+            .filter_map(|provider| {
+                let login = login_for(&state, agent_id, &provider.provider, project_root, &[])?;
+                Some(AccountSessionUse {
+                    tab_id: String::new(),
+                    agent_id: agent_id.to_string(),
+                    provider: provider.provider.clone(),
+                    account_key: core_accounts::account_key(login),
+                })
+            })
+            .collect())
+    }
+
+    /// Env for launching `agent_id` with the accounts named by `references`,
+    /// falling back to the current effective binding only for a provider whose
+    /// recorded account is gone. Used to resume a prepared invocation with the
+    /// same logins it originally launched under.
+    ///
+    /// A failure is returned, never swallowed: an execution that cannot
+    /// establish the recorded account must fail rather than start under the
+    /// wrong home. A swap provider's activation failure is fatal here too —
+    /// the shared credential file would otherwise stay on another login.
+    ///
+    /// Empty references mean "the original launch had no bound accounts": the
+    /// explicit default provenance, resolved to an empty env without ever
+    /// re-resolving the *current* binding (which may have moved since).
+    pub fn launch_env_for_references(
+        &self,
+        registry: &Registry,
+        agent_id: &str,
+        project_root: Option<&str>,
+        tab_id: Option<&str>,
+        references: &[AccountSessionUse],
+    ) -> Result<Vec<(String, String)>, String> {
+        if references.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.try_launch_env(registry, agent_id, project_root, tab_id, references, true)
+    }
+
     fn try_launch_env(
         &self,
         registry: &Registry,
         agent_id: &str,
         project_root: Option<&str>,
         tab_id: Option<&str>,
+        preferred: &[AccountSessionUse],
+        strict: bool,
     ) -> Result<Vec<(String, String)>, String> {
         let Some(store) = self.store.as_ref() else {
             return Ok(Vec::new());
@@ -263,9 +326,13 @@ impl AccountsHost {
             .iter()
             .filter(|provider| provider.agent_ids.iter().any(|id| id == agent_id))
         {
-            let Some(login) =
-                core_accounts::resolve_login(&state, agent_id, &provider.provider, project_root)
-            else {
+            let Some(login) = login_for(
+                &state,
+                agent_id,
+                &provider.provider,
+                project_root,
+                preferred,
+            ) else {
                 continue;
             };
             if let Some(group) = login.token_group.clone() {
@@ -300,9 +367,18 @@ impl AccountsHost {
             self.sync_token_group(registry, &providers, &group, project_root);
         }
         for (provider, home) in swaps {
-            // A failed swap leaves the shared file as it was; the launch still
-            // goes ahead rather than blocking the user's agent.
             if let Err(error) = activate_op(registry, provider, home, &env, project_root) {
+                if strict {
+                    // A prepared/authorized execution must not run under the
+                    // wrong shared login: the swap is part of the account
+                    // contract, not a best-effort convenience.
+                    return Err(format!(
+                        "could not switch {agent_id} to its {} account: {error}",
+                        provider.title
+                    ));
+                }
+                // A failed swap leaves the shared file as it was; an ordinary
+                // launch still goes ahead rather than blocking the user.
                 eprintln!(
                     "accounts: switching {agent_id} to its {} account failed: {error}",
                     provider.title
@@ -520,9 +596,14 @@ impl AccountsHost {
         }
         // `; exit` works in POSIX shells and PowerShell alike, so the session
         // ends when the login command does and the client can see it finish.
+        // Quoting follows the program the hidden session actually runs.
+        let program = registry.session(&session_id).map_or_else(
+            |_| pragma_platform::shell::default_shell(),
+            |session| session.shell_program().to_string(),
+        );
         let line = format!(
             "{}; exit\r",
-            crate::registry::agent_command_line(&command, None)
+            crate::registry::agent_command_line(&command, &program)
         );
         // Same readiness wait as an agent launch: the shell needs a moment
         // before typed input lands at its prompt.
@@ -1052,6 +1133,32 @@ fn providers_for(
         .accounts_request(json!({ "op": "providers", "root": project_root }))
         .map_err(|error| error.to_string())?;
     serde_json::from_value(value).map_err(|error| format!("invalid account providers: {error}"))
+}
+
+/// The login an agent launches with for one provider: a recorded reference
+/// (a resume returning to the account the invocation started under) wins, then
+/// the current effective binding, then the harness's own default login.
+fn login_for<'a>(
+    state: &'a AccountsState,
+    agent_id: &str,
+    provider: &str,
+    project_root: Option<&str>,
+    preferred: &[AccountSessionUse],
+) -> Option<&'a AccountLogin> {
+    if let Some(reference) = preferred
+        .iter()
+        .find(|entry| entry.agent_id == agent_id && entry.provider == provider)
+    {
+        if let Some(login) = state
+            .logins
+            .iter()
+            .filter(|login| login.agent_id == agent_id && login.provider == provider)
+            .find(|login| core_accounts::account_key(login) == reference.account_key)
+        {
+            return Some(login);
+        }
+    }
+    core_accounts::resolve_login(state, agent_id, provider, project_root)
 }
 
 fn launch_op(

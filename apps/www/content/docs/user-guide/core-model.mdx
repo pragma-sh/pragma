@@ -69,7 +69,11 @@ Tabs can be **split** horizontally or vertically (<Keys mac="⌘/" other="Ctrl+/
 
 A **session** is one live terminal process the host server owns — with scrollback, a
 title, and an owner worktree. An **agent** is a coding-agent CLI (or anything else)
-running in one. Agent integrations are plugins that report status into the app:
+running in one. Sessions outlive the desktop window; what a host restart does to them,
+and which agent sessions Pragma resumes, is covered in
+[Sessions & recovery](/docs/user-guide/sessions).
+
+Agent integrations are plugins that report status into the app:
 
 | Status      | Dot colour | Meaning                                          |
 | ----------- | ---------- | ------------------------------------------------ |

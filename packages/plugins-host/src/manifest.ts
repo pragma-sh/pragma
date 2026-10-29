@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /** One resolved plugin manifest: where to import it from and under what id. */
 export interface ResolvedManifest {
@@ -35,19 +35,20 @@ const CONFIG_FILE = ".pragma/config.json";
  * Resolves configured plugin manifests, preserving declaration order: global
  * `~/.pragma/config.json`, then each project root's `.pragma/config.json`.
  *
- * Mirrors `plugins.rs` `resolve_local_dir` semantics for local-path specifiers
- * (`./`, `../`, `/`, `~/`); non-local specifiers (npm) are skipped here. This is
- * accepted duplication of the Rust resolver, flagged as debt until resolution
- * moves into pragma-core. Unreadable config files and broken entries are
- * skipped, never fatal.
+ * Mirrors `plugins.rs` `resolve_local_dir` exactly: every local-path specifier
+ * resolves against the **directory containing the config file** (`<root>/.pragma`),
+ * not the scope root, for the global and project files alike. Non-local
+ * specifiers (npm) are skipped here. This is accepted duplication of the Rust
+ * resolver, flagged as debt until resolution moves into pragma-core. Unreadable
+ * config files and broken entries are skipped, never fatal.
  */
 export async function resolveManifests(
   homeDir: string,
   roots: string[],
 ): Promise<ResolvedManifest[]> {
   const manifests = await Promise.all([
-    resolveScope(homeDir, "global"),
-    ...roots.map((root) => resolveScope(root, "project")),
+    resolveScope(homeDir, "global", homeDir),
+    ...roots.map((root) => resolveScope(root, "project", homeDir)),
   ]);
   return preferHigherScope(manifests.flat());
 }
@@ -61,11 +62,17 @@ function preferHigherScope(manifests: ResolvedManifest[]): ResolvedManifest[] {
 async function resolveScope(
   root: string,
   scope: "global" | "project",
+  homeDir: string,
 ): Promise<ResolvedManifest[]> {
-  const entries = await readConfigEntries(join(root, CONFIG_FILE));
+  const configPath = join(root, CONFIG_FILE);
+  // plugins.rs resolves every entry against the config file's own directory
+  // (`<root>/.pragma`), not the scope root: `../packages/x` in a project config
+  // points at `<project>/packages/x`, and the same holds for `~/.pragma`.
+  const configDir = dirname(configPath);
+  const entries = await readConfigEntries(configPath);
   const manifests = await Promise.all(
     entries.map((entry) => {
-      const dir = resolveLocalDir(root, entry.path);
+      const dir = resolveLocalDir(configDir, homeDir, entry.path);
       return dir ? readManifest(dir, entry.config, scope, root) : null;
     }),
   );
@@ -113,17 +120,38 @@ async function readManifest(
   }
 }
 
-/** Resolves a local-path plugin specifier to an absolute directory, or null. */
-function resolveLocalDir(root: string, specifier: string): string | null {
-  if (specifier.startsWith("~/")) {
-    const home = process.env.HOME ?? "";
-    return home ? join(home, specifier.slice(2)) : null;
-  }
-  if (specifier.startsWith("./") || specifier.startsWith("../")) {
-    return resolve(root, specifier);
+/**
+ * Resolves a local-path plugin specifier exactly as `plugins.rs`
+ * `resolve_local_dir` does: `~/` and `~\` against the home directory, absolute
+ * paths as given, and explicit relative paths against the directory containing
+ * the config file. Anything else is an npm specifier (`null`), which this host
+ * skips.
+ */
+function resolveLocalDir(configDir: string, homeDir: string, specifier: string): string | null {
+  if (specifier.startsWith("~/") || specifier.startsWith("~\\")) {
+    return homeDir ? resolve(homeDir, specifier.slice(2)) : null;
   }
   if (isAbsolute(specifier)) {
-    return specifier;
+    return resolve(specifier);
+  }
+  if (isExplicitRelative(specifier)) {
+    return resolve(configDir, specifier);
   }
   return null;
+}
+
+/**
+ * True when a specifier explicitly opts into relative resolution. Mirrors the
+ * component check in `plugins.rs`: bare `.` / `..`, `./` / `../`, and the `.\` /
+ * `..\` spellings where the platform treats backslash as a separator. A dotfile
+ * name such as `.hidden` is not relative and stays an npm specifier.
+ */
+function isExplicitRelative(specifier: string): boolean {
+  return (
+    specifier === "." ||
+    specifier === ".." ||
+    specifier.startsWith("./") ||
+    specifier.startsWith("../") ||
+    (sep === "\\" && (specifier.startsWith(".\\") || specifier.startsWith("..\\")))
+  );
 }

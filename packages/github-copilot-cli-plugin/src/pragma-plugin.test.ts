@@ -1,6 +1,7 @@
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { expect, it, vi } from "vitest";
 
-import { githubCopilotCliPlugin } from "./pragma-plugin";
+import { copilotResume, githubCopilotCliPlugin } from "./pragma-plugin";
 import {
   extractGitHubCopilotUsageLimits,
   loadGitHubCopilotUsageLimits,
@@ -31,6 +32,41 @@ it("defines GitHub Copilot launcher and usage UI", () => {
     iconPath: "assets/copilot.png",
   });
   expect(usage?.env?.("/h/1")).toEqual({ COPILOT_HOME: "/h/1" });
+});
+
+it("wires the resume callback into the launch contract", () => {
+  const agent = githubCopilotCliPlugin.agents?.[0];
+  expect(agent?.launch.resume).toBe(copilotResume);
+});
+
+it("builds the full literal argv for resuming a session", () => {
+  const ctx = {} as unknown as PluginContext;
+  expect(
+    copilotResume(
+      {
+        harnessSessionId: "0cb916db-26aa-40f2-86b5-1ba81b225fd2",
+        selection: { modelId: "gpt-5.6-sol", reasoningId: "high", permissionModeId: "allow-all" },
+        cwd: "/repo",
+      },
+      ctx,
+    ),
+  ).toEqual([
+    "copilot",
+    "--no-auto-update",
+    "--model",
+    "gpt-5.6-sol",
+    "--effort",
+    "high",
+    "--allow-all",
+    "--resume=0cb916db-26aa-40f2-86b5-1ba81b225fd2",
+  ]);
+});
+
+it("resumes bare when no selection was stored", () => {
+  const ctx = {} as unknown as PluginContext;
+  expect(
+    copilotResume({ harnessSessionId: "session-x", selection: {}, cwd: "/repo" }, ctx),
+  ).toEqual(["copilot", "--no-auto-update", "--resume=session-x"]);
 });
 
 it("normalizes GitHub Copilot AI-credit usage", () => {

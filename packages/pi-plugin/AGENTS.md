@@ -31,6 +31,8 @@ timeout is shorter than a relayed terminal roundtrip; otherwise the late
 | normal `agent_end` after a start                         | `stopped`                                     |
 | `agent_end` containing assistant `stopReason: "aborted"` | `cleared`                                     |
 | `session_shutdown`                                       | `cleared`                                     |
+| `session_start` / `before_agent_start` / `agent_end`     | `session-id` (see below)                      |
+| `session_info_changed`                                   | `session-name` (Pi's own name)                |
 | first `before_agent_start` prompt after each `cleared`   | `session-name` (first prompt line, ~48 chars) |
 
 Pi 0.80.10 emits `agent_end` after Escape abort and records the final assistant message
@@ -40,6 +42,38 @@ Session-exit clearing uses both layers: extension `session_shutdown` reports `cl
 on a graceful quit. The exact launched-session watcher also reports `cleared`
 when its session exits, covering crashes and kills that skip `session_shutdown`; reporting
 failures are swallowed so cleanup cannot disrupt watcher shutdown.
+
+## Session identity and resume
+
+Every `session_start`, `before_agent_start`, and `agent_end` observes the extension's
+own top-level session: the session manager's id (always present) plus the resumable
+locator once Pi has written the session file. Pi reserves the file path up front but
+writes the file only after the first assistant message, so a brand-new session has no
+locator for its first turn.
+
+The reporter keeps only the last observed session id and the last reported identity:
+
+- A resumed or forked session (file on disk) reports its id at `session_start`; a
+  brand-new one reports at its first `agent_end`, when the file materializes.
+- A switch to a session whose file is not written yet reports an explicit clear
+  (`session-id` with a null id, which the host persists as `clearHarnessSessionId`) —
+  the previous conversation is no longer the one running in the tab, so an interruption
+  before the new session's first assistant message must not restore it.
+- Repeating the same pending observation never re-clears, the same session's missing
+  file never clears a known id, and a generic status clear or `session_shutdown` never
+  touches identity at all.
+- A→B→A reports each switch, repeated turns of one session do not, and same-title
+  sessions stay distinct by identity.
+
+`createPiPragmaPlugin` adds `launch.resume` when the product passes `agent.resumeFlag`.
+Pi passes `--session`: `pi --session <path|id>` accepts a session file or a partial
+UUID, and `pi --session <uuid>` reopens the reported session (verified against Pi
+0.80.10, including that the file only materializes after the first assistant message).
+The callback owns the full argv — the host appends no model, mode, or prompt args — so
+it replays the recorded launch selection (`--model` / `--thinking`) after
+`--session <id>`. Prime Agent passes no flag: its Pragma launch runs `--no-session`
+(client-owned, so `PRAGMA_*` reaches the daemon worker) and that session is in-memory,
+so there is nothing a resume could open.
 
 ## Launch options
 

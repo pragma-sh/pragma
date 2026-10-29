@@ -16,6 +16,7 @@ import type {
   ResolvedAgentOptions,
 } from "@pragma-sh/plugin";
 import { resolveAgentOptions, slashCommandInvocation } from "@pragma-sh/plugin/catalog";
+import type { PragmaClient } from "@pragma-sh/sdk";
 
 /**
  * How long one agent's modes, permission modes, and slash commands may take to
@@ -248,6 +249,7 @@ async function catalogAgent(
     ...(runtimeAgentId ? { runtimeAgentId } : {}),
     models,
     ...catalogOptions(agent, options),
+    ...(typeof agent.launch.resume === "function" ? { supportsResume: true } : {}),
     launch,
     ...(agent.excludeFeatures ? { excludeFeatures: agent.excludeFeatures } : {}),
     ...(icon ? { icon } : {}),
@@ -335,6 +337,20 @@ function withoutNulls<T extends object>(item: T): WithoutNulls<T> {
 export function qualifiedAgentId(pluginId: string, agentId: string): string {
   if (agentId.includes(".")) return agentId;
   return pluginId === `pragma.${agentId}` ? pluginId : `${pluginId}.${agentId}`;
+}
+
+/**
+ * One plugin per id: the project-scoped copy for `root` wins over the global
+ * one, matching how the catalog picks a winner.
+ */
+export function winningPlugins(plugins: ResolvedPlugin[], root?: string): ResolvedPlugin[] {
+  const byId = new Map<string, ResolvedPlugin>();
+  for (const plugin of plugins) {
+    if (plugin.scope === "project" && plugin.root !== root) continue;
+    if (plugin.scope === "global" && byId.has(plugin.pluginId)) continue;
+    byId.set(plugin.pluginId, plugin);
+  }
+  return [...byId.values()];
 }
 
 function catalogIcon(
@@ -432,4 +448,25 @@ function catalogLaunch(
       : {}),
   };
   return launch;
+}
+
+/**
+ * The context a host-side plugin callback gets for one resolved plugin: its
+ * id, directory, config, and the project it is answering for. A project-scoped
+ * plugin is pinned to its own root; a global plugin answers for the requested
+ * project root.
+ */
+export function pluginContext(
+  plugin: ResolvedPlugin,
+  sdk: PragmaClient,
+  root: string | undefined,
+): PluginContext {
+  return {
+    pluginId: plugin.pluginId,
+    pluginDir: plugin.dir,
+    config: plugin.config,
+    project: root ? { id: root, name: root, path: root } : null,
+    sdk,
+    notify: () => {},
+  };
 }

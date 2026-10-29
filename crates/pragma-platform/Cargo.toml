@@ -14,6 +14,9 @@ pragma-constants = { path = "../../packages/constants" }
 sysinfo = { workspace = true }
 thiserror = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
@@ -28,6 +31,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 
 [target.'cfg(windows)'.dependencies]
+ctrlc = "3.5"
 uds_windows = "1.2"
 windows = { version = "0.61", features = [
   "Win32_Foundation",

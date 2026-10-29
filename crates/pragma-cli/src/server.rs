@@ -5,6 +5,8 @@
 //! frame, and verifies the protocol version. `--worktree` defaults to
 //! `$PRAGMA_WORKTREE_ID` everywhere it is optional.
 
+use std::time::Duration;
+
 use pragma_platform::ipc::{self, LocalStream};
 
 use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
@@ -47,9 +49,16 @@ pub struct Server {
 /// Connects to the server, reads the hello frame, and verifies the protocol
 /// version. Returns a stream ready to send requests.
 pub fn connect() -> Result<Server, CliError> {
+    connect_with_timeout(None)
+}
+
+/// [`connect`] with a bound on the hello read, for callers that must not hang
+/// on a wedged server (the `agent run` supervisor after its child exits).
+pub fn connect_with_timeout(timeout: Option<Duration>) -> Result<Server, CliError> {
     let path = socket_path().map_err(CliError::config)?;
     let mut stream = ipc::connect(std::path::Path::new(&path))
         .map_err(|e| CliError::config(format!("connect to {path}: {e}")))?;
+    let _ = stream.set_read_timeout(timeout);
     let expected = CONSTANTS.daemon.protocol_version.as_str();
     match read_json_frame::<ServerFrame>(&mut stream) {
         Ok(ServerFrame::Hello(HelloFrame {
@@ -80,7 +89,18 @@ pub fn connect() -> Result<Server, CliError> {
 
 /// Sends one direct host RPC and waits for its matching response.
 pub fn rpc(method: ProtocolRpcMethod, payload: Value) -> Result<Value, CliError> {
-    rpc_reply(method, payload)?.map_err(|error| CliError::server(error.message))
+    rpc_with_timeout(method, payload, None)
+}
+
+/// [`rpc`] with a bound on every read, so a server that accepts a connection
+/// and then wedges cannot pin the caller forever.
+pub fn rpc_with_timeout(
+    method: ProtocolRpcMethod,
+    payload: Value,
+    timeout: Option<Duration>,
+) -> Result<Value, CliError> {
+    rpc_reply_with_timeout(method, payload, timeout)?
+        .map_err(|error| CliError::server(error.message))
 }
 
 /// Sends one RPC and returns the server's reply as-is: the payload, or the
@@ -90,7 +110,16 @@ pub fn rpc_reply(
     method: ProtocolRpcMethod,
     payload: Value,
 ) -> Result<Result<Value, pragma_protocol::RpcError>, CliError> {
-    let Server { mut stream } = connect()?;
+    rpc_reply_with_timeout(method, payload, None)
+}
+
+/// [`rpc_reply`] with an optional bound on every read.
+fn rpc_reply_with_timeout(
+    method: ProtocolRpcMethod,
+    payload: Value,
+    timeout: Option<Duration>,
+) -> Result<Result<Value, pragma_protocol::RpcError>, CliError> {
+    let Server { mut stream } = connect_with_timeout(timeout)?;
     let request_id = Uuid::new_v4().to_string();
     write_json_frame(
         &mut stream,
@@ -111,7 +140,7 @@ pub fn rpc_reply(
             env: None,
         },
     )?;
-    let _ = stream.set_read_timeout(None);
+    let _ = stream.set_read_timeout(timeout);
     loop {
         if let ServerFrame::Rpc(RpcResponseFrame {
             request_id: id,

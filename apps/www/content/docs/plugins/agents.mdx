@@ -49,6 +49,63 @@ prompt **prefill** sends the user's typed prompt and its submit key as two PTY w
 (bracketed mode waits for the terminal's alt screen, bounded by a generous timeout, so
 agents that redraw themselves don't eat the prompt).
 
+## Session identity and resume
+
+Pragma can bring an interrupted agent session back — after a crash, a server restart, or a
+**Restart** update — by resuming the harness's own conversation. Two plugin pieces make that
+possible: reporting the conversation id, and rebuilding the resume argv.
+
+**Report the conversation id.** Call `reportSessionId` (SDK) or
+`pragma-cli agent report --agent <id> session-id --id …` (CLI) whenever the tab's session is
+created or switched:
+
+```tsx
+import { reportSessionId } from "@pragma-sh/sdk";
+
+await reportSessionId({ agent: agentId, id: harnessSessionId });
+```
+
+The id is opaque to Pragma and never parsed — it must be exactly what your harness's resume
+flag accepts. Report only the top-level conversation (never a subagent's), and report again
+on an A→B→A switch. A report from a tracked launch automatically carries the host's run id
+(`PRAGMA_AGENT_RUN_ID`) as `agentRunId`.
+
+**Declare the resume argv.** Add `launch.resume` to the agent definition:
+
+```tsx
+launch: {
+  command: ["my-agent"],
+  resume: ({ harnessSessionId, selection }) => [
+    "my-agent",
+    "--resume",
+    harnessSessionId,
+    // Replay the recorded selection: the host appends no model/mode args.
+    ...(selection.modelId ? ["--model", selection.modelId] : []),
+  ],
+}
+```
+
+The callback receives `{ harnessSessionId, selection, cwd }` and returns the **complete**
+argv. Unlike `launch.command`, the host appends no model, mode, permission-mode, or prompt
+args, so the callback must replay `selection` itself. Pragma validates the result before
+typing it into the shell: a non-empty string array, a non-empty executable, and no NUL/CR/LF
+in any token. Resume is opt-in — a catalog agent without the callback reports
+`supportsResume: false` and cannot be resumed.
+
+Two rules keep a restore honest:
+
+- **The conversation, not the turn.** Reopening a session never replays the original prompt,
+  slash command, startup input, or pre-launch (`!!`) commands.
+- **A failed resume is an error, never a fresh session.** The record stays recoverable with
+  its id and selection; Pragma surfaces the failure instead of opening a new conversation.
+
+Limits worth knowing, all verified against the shipped integrations: OpenCode can only learn
+the active conversation from user-initiated activity, so a TUI switch with no following
+prompt is unobservable; Pi has no session id until its session file exists (after the first
+assistant message); Prime Agent deliberately declares no resume because Pragma launches it
+with `--no-session`. See the full support matrix in
+[Sessions & recovery](/docs/user-guide/sessions#support-matrix).
+
 ## Modes, permission modes, and slash commands
 
 These three work like `models`: each is a static list or an async `(ctx) => …` provider,
@@ -107,7 +164,8 @@ A watcher attaches to a launched session, reads its output, and reports status t
 the [SDK](/docs/sdk/agents):
 
 ```tsx
-import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma-sh/plugin";
+import { definePlugin, defineWatcher } from "@pragma-sh/plugin";
+import { reportStarted, reportAttention, reportStopped } from "@pragma-sh/sdk";
 
 watchers: [
   defineWatcher({

@@ -48,21 +48,56 @@ Official references:
 
 ## Hook to status mapping
 
-| Codex hook                      | Script event     | Pragma behavior                                                               |
-| ------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
-| `SessionStart`                  | `cleared`        | Clears stale status, watcher, and child markers                               |
-| `UserPromptSubmit`              | `started`        | Reports running; first prompt derives `session-name`; starts abort watcher    |
-| `Stop`                          | `stopped`        | Reports done only with an active turn marker and no active children           |
-| `SubagentStart`                 | `subagent-start` | Tracks child by `agent_id`, reasserts running                                 |
-| `SubagentStop`                  | `subagent-stop`  | Removes only matching child; parent `Stop` owns done                          |
-| `PermissionRequest`             | `permission`     | Reports command attention and blocks for finite remote decision               |
-| `PostToolUse`                   | `running`        | Reasserts running after approved tool completes                               |
-| Transcript `request_user_input` | abort watcher    | Reports single-question attention; watcher returns remote answers as TUI keys |
-| Transcript `agent_message`      | abort watcher    | Streams each completed assistant message (raw Markdown) mid-turn              |
+| Codex hook                      | Script event     | Pragma behavior                                                                                                             |
+| ------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `SessionStart`                  | `cleared`        | Reports `session-id` when the conversation changes, then clears stale status, watcher, and child markers                    |
+| `UserPromptSubmit`              | `started`        | Reports `session-id` when the conversation changes, then running; first prompt derives `session-name`; starts abort watcher |
+| `Stop`                          | `stopped`        | Reports done only with an active turn marker and no active children                                                         |
+| `SubagentStart`                 | `subagent-start` | Tracks child by `agent_id`, reasserts running                                                                               |
+| `SubagentStop`                  | `subagent-stop`  | Removes only matching child; parent `Stop` owns done                                                                        |
+| `PermissionRequest`             | `permission`     | Reports command attention and blocks for finite remote decision                                                             |
+| `PostToolUse`                   | `running`        | Reasserts running after approved tool completes                                                                             |
+| Transcript `request_user_input` | abort watcher    | Reports single-question attention; watcher returns remote answers as TUI keys                                               |
+| Transcript `agent_message`      | abort watcher    | Streams each completed assistant message (raw Markdown) mid-turn                                                            |
 
 `SubagentStart` also emits a system message with marker-derived
 `subAgentsActive`. Status reports do not carry that count; without this message,
 chat consumers and `agent verify` cannot observe real parallel activity.
+
+## Session tracking + resume
+
+`SessionStart` and `UserPromptSubmit` carry a required **`session_id`** — Codex's own
+thread UUID, the value `codex resume <id>` accepts. It is **not** `turn_id` (per-turn)
+and it is present on every tested version (`session-start` / `user-prompt-submit`
+generated schemas at `rust-v0.144.4`, `rust-v0.153.4`, and the 0.160.0 parser). The
+bridge reads it in the `cleared` (SessionStart) and `started` branches and reports it
+status-lessly as `session-id --id <id>` only when it changes
+(`$TMPDIR/pragma-cli-codex-$TAB.session-id` remembers the last reported id), so
+startup, `codex resume`, `/new`, and fork report the new conversation even with no
+title and no following prompt; A→B→A reports each switch. The `UserPromptSubmit` call
+also covers a plugin loaded mid-session.
+
+`SubagentStart` / `SubagentStop` payloads also carry `session_id` (the parent thread),
+but those branches never report it, and a `stopped` hook with no live marker exits
+before touching state, so a child or a stale turn cannot take over the tracked
+conversation. `report` swallows failures, so an older installed `pragma-cli` without
+the `session-id` subcommand cannot disrupt status reporting. No "session ended" state
+is reported: `cleared` stays status-only and the host's supervised invocation tracks
+the real process exit separately.
+
+**Resume** (verified against `codex resume --help`, 0.160.0): `codex resume <SESSION_ID>`
+accepts `--enable`, `-m/--model`, `-c/--config`, and `-a/--ask-for-approval`, so the
+callback returns `["codex", "--no-daemon", "resume", <id>, "--enable",
+"default_mode_request_user_input", ...model/reasoning/permission flags]` and never
+replays the original slash command or prompt. Keep `--enable
+default_mode_request_user_input`: without it a resumed session does not offer
+`request_user_input` in Default mode.
+
+**Permission-mode caveat (found while verifying resume):** Codex 0.160's
+`--ask-for-approval` accepts only `on-request` and `never` — `codex -a untrusted
+--version` errors — so the `untrusted` permission-mode entry's launch flag is invalid
+on this version. The resume callback replays the same builder, so neither path
+introduces a new limitation; fixing the mode is separate work.
 
 ## Assistant message streaming
 
@@ -143,8 +178,10 @@ Prefill waits `PREFILL_SUBMIT_DELAY_MS` before its Enter: Codex 0.160 reads a fa
 keystrokes as a paste and turns an Enter inside it into a newline, which left the prompt
 typed but never submitted.
 
-Launcher passes `--enable default_mode_request_user_input`; without it, Codex 0.144.4 only
-offers the tool in Plan mode and verification prompts cannot create question reports. Watcher
+Launcher passes `--no-daemon` (so each tab owns its own process instead of sharing the
+background app-server) and `--enable default_mode_request_user_input`; without the feature
+flag, Codex 0.144.4 only offers the tool in Plan mode and verification prompts cannot create
+question reports. Watcher
 keeps `handleDecisions: false` for command decisions but enables question answers. Listed
 answers use Codex's digit shortcuts and dismissal sends Escape. Custom free-text answers
 open the native final answer row, type into its editor, and submit with Enter. Answers never
@@ -255,17 +292,18 @@ A sidecar binary older than that fix keeps serving the first import (ESM module 
 until the sidecar process itself restarts — kill `pragma-plugins` (its supervisor
 respawns it lazily and the cached catalog holds in the meantime) or restart the detached
 `pragma-server`. Confirm with `GET /v1/agents/catalog` that the `pragma.codex` launch
-commands include `--enable default_mode_request_user_input` before running headless
-`agent verify` — without the flag Codex never exposes the question tool and every
-question scenario times out with the agent answering in plain text.
+commands include `--no-daemon` and `--enable default_mode_request_user_input` before
+running headless `agent verify` — without the feature flag Codex never exposes the
+question tool and every question scenario times out with the agent answering in plain text.
 
 A correct catalog is still not sufficient while the desktop app is running: the server
 forwards `agentSessionLaunch` to the app controller, and the app builds the spawn
-command from its own plugin copy — a stale app silently drops the `--enable` flag even
-though the gateway catalog shows it. Quit the desktop app before `agent verify` so
-launches take the server's headless path (fresh sidecar catalog); persistent terminal
-sessions survive because PTYs live in `pragma-server`. Confirm by inspecting the spawned
-process: `ps -o command= -p $(pgrep -x codex)` must show the `--enable` flag.
+command from its own plugin copy — a stale app silently drops `--no-daemon` /
+`--enable` even though the gateway catalog shows them. Quit the desktop app before
+`agent verify` so launches take the server's headless path (fresh sidecar catalog);
+persistent terminal sessions survive because PTYs live in `pragma-server`. Confirm by
+inspecting the spawned process: `ps -o command= -p $(pgrep -x codex)` must show both
+flags.
 
 ## Verification
 

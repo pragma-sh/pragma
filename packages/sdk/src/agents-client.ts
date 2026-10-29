@@ -22,6 +22,7 @@ import type {
   ConnectOptions,
   ReportMessageOptions,
   ReportOptions,
+  ReportSessionIdOptions,
   ReportSessionNameOptions,
 } from "./types/agents";
 
@@ -103,7 +104,18 @@ export class AgentsClient {
    * again on every rename or session switch.
    */
   reportSessionName(options: ReportSessionNameOptions): Promise<void> {
-    return reportWithClient(this, options, null, null, options.name);
+    return reportWithClient(this, options, null, null, { sessionName: options.name });
+  }
+
+  /**
+   * Reports the harness's own opaque session id without changing status, so a
+   * later launch can resume the session; pass `null` when the harness started
+   * a new conversation and has not reported its id yet, which clears the
+   * stored id. Call on session create, switch, and new-conversation start; the
+   * id is never parsed by Pragma.
+   */
+  reportSessionId(options: ReportSessionIdOptions): Promise<void> {
+    return reportWithClient(this, options, null, null, sessionIdExtras(options.id));
   }
 
   /** Returns the resolved agent catalog assembled by the plugins sidecar. */
@@ -377,7 +389,21 @@ export function reportCleared(options: ReportOptions): Promise<void> {
  * every rename or session switch.
  */
 export function reportSessionName(options: ReportSessionNameOptions): Promise<void> {
-  return reportWithStatus(options, null, null, options.name);
+  return reportWithStatus(options, null, null, { sessionName: options.name });
+}
+
+/**
+ * Reports the harness's own opaque session id without changing agent status,
+ * so a later launch can resume the session. Pragma stores it as
+ * `AgentReportPayload.harnessSessionId` and never parses it; report again on
+ * every session create or switch. Pass `null` when the harness started a new
+ * conversation and its id is not known yet: that sends
+ * `clearHarnessSessionId: true`, so a resume cannot continue the previous
+ * conversation (clearing wins if both fields ever appear on the wire). The run
+ * id carried by the env (`PRAGMA_AGENT_RUN_ID`) rides along as `agentRunId`.
+ */
+export function reportSessionId(options: ReportSessionIdOptions): Promise<void> {
+  return reportWithStatus(options, null, null, sessionIdExtras(options.id));
 }
 
 /** Reports one rich agent message. No-ops unless Pragma gateway env is present. */
@@ -468,11 +494,23 @@ export async function awaitAgentAnswer(options: AwaitAnswerOptions): Promise<str
   });
 }
 
+/** The status-less report fields carried alongside status/attention. */
+interface ReportExtras {
+  sessionName?: string;
+  harnessSessionId?: string;
+  clearHarnessSessionId?: boolean;
+}
+
+/** `null` clears the stored harness session id; a string records one. */
+function sessionIdExtras(id: string | null): ReportExtras {
+  return id === null ? { clearHarnessSessionId: true } : { harnessSessionId: id };
+}
+
 async function reportWithStatus(
   options: ReportOptions,
   status: AgentReportPayload["status"],
   attentionKind: AgentReportPayload["attentionKind"],
-  sessionName?: string,
+  extras: ReportExtras = {},
 ): Promise<void> {
   if (!options.client && !hasPragmaEnvironment(options.env)) {
     return;
@@ -485,7 +523,7 @@ async function reportWithStatus(
         token: readEnv(PRAGMA_ENV_KEYS.gatewayToken, options.env),
       }),
     );
-  await reportWithClient(agents, options, status, attentionKind, sessionName);
+  await reportWithClient(agents, options, status, attentionKind, extras);
 }
 
 async function reportWithClient(
@@ -493,7 +531,7 @@ async function reportWithClient(
   options: ReportOptions,
   status: AgentReportPayload["status"],
   attentionKind: AgentReportPayload["attentionKind"],
-  sessionName?: string,
+  extras: ReportExtras = {},
 ): Promise<void> {
   const worktreeId = options.worktreeId ?? readEnv(PRAGMA_ENV_KEYS.worktreeId, options.env);
   const tabId = readEnv(PRAGMA_ENV_KEYS.tabId, options.env);
@@ -501,9 +539,36 @@ async function reportWithClient(
     return;
   }
   await agents.report(
-    reportPayload(options, { worktreeId, tabId }, status, attentionKind, sessionName),
+    reportPayload(options, { worktreeId, tabId }, status, attentionKind, extras),
     { signal: options.signal },
   );
+}
+
+/** The status-less session fields a report carries, spread only when present. */
+function sessionFields(extras: ReportExtras): Partial<AgentReportPayload> {
+  return {
+    ...(extras.sessionName ? { sessionName: extras.sessionName } : {}),
+    ...(extras.harnessSessionId ? { harnessSessionId: extras.harnessSessionId } : {}),
+    ...(extras.clearHarnessSessionId ? { clearHarnessSessionId: true } : {}),
+  };
+}
+
+/** A list field rides along only when it has entries; the host omits empty lists. */
+function nonEmptyList<T>(values: T[] | undefined): T[] | undefined {
+  return values?.length ? values : undefined;
+}
+
+/** The command/question fields an attention report carries, spread only when present. */
+function attentionFields(options: ReportOptions): Partial<AgentReportPayload> {
+  const choices = nonEmptyList(options.options);
+  const questions = nonEmptyList(options.questions);
+  return {
+    ...(options.command ? { command: options.command } : {}),
+    ...(options.question ? { question: options.question } : {}),
+    ...(choices ? { options: choices } : {}),
+    ...(questions ? { questions } : {}),
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  };
 }
 
 function reportPayload(
@@ -511,20 +576,18 @@ function reportPayload(
   routing: { worktreeId: string; tabId: string },
   status: AgentReportPayload["status"],
   attentionKind: AgentReportPayload["attentionKind"],
-  sessionName?: string,
+  extras: ReportExtras = {},
 ): AgentReportPayload {
+  const agentRunId = readEnv(PRAGMA_ENV_KEYS.agentRunId, options.env);
   return {
     agent: options.agent,
     worktreeId: routing.worktreeId,
     tabId: routing.tabId,
     status,
     attentionKind,
-    ...(sessionName ? { sessionName } : {}),
-    ...(options.command ? { command: options.command } : {}),
-    ...(options.question ? { question: options.question } : {}),
-    ...(options.options && options.options.length > 0 ? { options: options.options } : {}),
-    ...(options.questions && options.questions.length > 0 ? { questions: options.questions } : {}),
-    ...(options.requestId ? { requestId: options.requestId } : {}),
+    ...sessionFields(extras),
+    ...(agentRunId ? { agentRunId } : {}),
+    ...attentionFields(options),
   };
 }
 

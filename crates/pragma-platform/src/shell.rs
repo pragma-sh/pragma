@@ -174,13 +174,30 @@ pub fn command_args(program: &str, command: &str) -> Vec<String> {
 /// that shell parses them. POSIX single quotes are not PowerShell quoting — a
 /// path with a space would split, and an embedded quote would end the string —
 /// so the two are built separately rather than sharing one escape.
+///
+/// PowerShell also needs the call operator in front of a *quoted* executable:
+/// `'C:\Program Files\…\pragma-cli.exe' agent run` parses the first word as a
+/// string expression, not a command, and fails before the agent starts. `&`
+/// puts the quoted path in executable position. A bare command name already is
+/// in executable position, so the common line stays unadorned.
 #[must_use]
 pub fn interactive_command_line(program: &str, parts: &[String]) -> String {
-    parts
+    let quoted = parts
         .iter()
         .map(|part| quote_for_shell(program, part))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect::<Vec<_>>();
+    let Some(first) = quoted.first() else {
+        return String::new();
+    };
+    let line = quoted.join(" ");
+    // A quoted first word is a PowerShell string expression, never a command.
+    // POSIX and `cmd.exe` execute a quoted command name directly, so this is
+    // deliberately PowerShell-only.
+    if is_powershell(program) && first != &parts[0] {
+        format!("& {line}")
+    } else {
+        line
+    }
 }
 
 /// Quotes one value the way `program`'s shell parses it, for splicing into a
@@ -334,7 +351,7 @@ pub fn find_on_path(name: &str) -> Option<PathBuf> {
 #[must_use]
 pub fn find_on_path_in(name: &str, path: &OsStr) -> Option<PathBuf> {
     if Path::new(name).is_absolute() {
-        return Path::new(name).is_file().then(|| PathBuf::from(name));
+        return is_executable(Path::new(name)).then(|| PathBuf::from(name));
     }
     std::env::split_paths(path).find_map(|dir| find_in_path_dir(&dir, name))
 }
@@ -347,7 +364,7 @@ fn find_in_path_dir(dir: &Path, name: &str) -> Option<PathBuf> {
     if cfg!(windows) && Path::new(name).extension().is_none() {
         if let Some(found) = path_extensions().split(';').find_map(|extension| {
             let candidate = dir.join(format!("{name}{extension}"));
-            candidate.is_file().then_some(candidate)
+            is_executable(&candidate).then_some(candidate)
         }) {
             // PATHEXT spelling is uppercase; return the file's own casing so callers
             // that compare or display the path see what is really on disk.
@@ -355,7 +372,74 @@ fn find_in_path_dir(dir: &Path, name: &str) -> Option<PathBuf> {
         }
     }
     let candidate = dir.join(name);
-    candidate.is_file().then_some(candidate)
+    is_executable(&candidate).then_some(candidate)
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// Resolves a program on the provided PATH, including the platform shell fallback.
+#[must_use]
+pub fn resolve_program(name: &str, path: &OsStr) -> Option<PathBuf> {
+    find_on_path_in(name, path).or_else(|| {
+        if cfg!(windows) && name == "sh" {
+            find_git_bash()
+        } else {
+            None
+        }
+    })
+}
+
+/// Platform-specific user tool directories, honoring redirected Windows folders.
+#[must_use]
+pub fn user_tool_paths(home: Option<&Path>) -> Vec<PathBuf> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    windows_tool_paths(
+        home,
+        std::env::var_os("APPDATA").as_deref(),
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+    )
+}
+
+fn windows_tool_paths(
+    home: Option<&Path>,
+    appdata: Option<&OsStr>,
+    localappdata: Option<&OsStr>,
+) -> Vec<PathBuf> {
+    let folder = |value: Option<&OsStr>, fallback: &str| {
+        value
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home.map(|h| h.join("AppData").join(fallback)))
+    };
+    let mut paths = Vec::new();
+    if let Some(path) = folder(appdata, "Roaming") {
+        paths.push(path.join("npm"));
+    }
+    if let Some(path) = folder(localappdata, "Local") {
+        paths.push(path.join("Microsoft").join("WindowsApps"));
+    }
+    if let Some(home) = home {
+        paths.push(home.join("scoop").join("shims"));
+    }
+    paths
 }
 
 fn path_extensions() -> String {
@@ -406,6 +490,8 @@ fn bash_near_git(git: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use pragma_constants::TerminalBackend;
+    use std::ffi::OsStr;
+    use std::path::Path;
 
     use super::{
         bash_near_git, find_on_path, find_on_path_in, interactive_command_line, parse_profile,
@@ -652,6 +738,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("tool");
         std::fs::write(&file, b"").expect("seed an executable");
+        crate::perms::set_executable(&file).expect("executable");
         assert_eq!(
             find_on_path(file.to_str().expect("utf-8 path")),
             Some(file.clone())
@@ -669,13 +756,51 @@ mod tests {
     fn a_windows_shim_wins_over_an_extensionless_script() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("tool"), b"#!/bin/sh\n").expect("posix script");
+        crate::perms::set_executable(&dir.path().join("tool")).expect("executable");
         std::fs::write(dir.path().join("tool.cmd"), b"@echo off\r\n").expect("cmd shim");
         let found = find_on_path_in("tool", dir.path().as_os_str()).expect("resolved");
         if cfg!(windows) {
-            assert_eq!(found, dir.path().join("tool.cmd"));
+            assert_eq!(
+                found,
+                crate::path::canonicalize(dir.path().join("tool.cmd")).expect("canonical shim")
+            );
         } else {
             assert_eq!(found, dir.path().join("tool"));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lookup_skips_non_executable_files() {
+        let first = tempfile::tempdir().expect("first directory");
+        let second = tempfile::tempdir().expect("second directory");
+        std::fs::write(first.path().join("tool"), b"").expect("file");
+        let executable = second.path().join("tool");
+        std::fs::write(&executable, b"").expect("file");
+        crate::perms::set_executable(&executable).expect("executable");
+        let path = std::env::join_paths([first.path(), second.path()]).expect("path");
+        assert_eq!(find_on_path_in("tool", &path), Some(executable));
+    }
+
+    #[test]
+    fn windows_tool_paths_use_redirected_folders_and_fallbacks() {
+        let home = Path::new("home");
+        let paths = super::windows_tool_paths(
+            Some(home),
+            Some(OsStr::new("roaming")),
+            Some(OsStr::new("local")),
+        );
+        assert_eq!(
+            paths,
+            vec![
+                Path::new("roaming").join("npm"),
+                Path::new("local").join("Microsoft/WindowsApps"),
+                home.join("scoop/shims")
+            ]
+        );
+        let paths = super::windows_tool_paths(Some(home), None, None);
+        assert_eq!(paths[0], home.join("AppData/Roaming/npm"));
+        assert_eq!(paths[1], home.join("AppData/Local/Microsoft/WindowsApps"));
     }
 
     /// Git for Windows ships its POSIX shell beside `git.exe`; both the
@@ -704,19 +829,19 @@ mod tests {
             "--model".to_string(),
             "it's".to_string(),
         ];
-        // PowerShell: doubled quote, no backslash escaping.
+        // PowerShell: call operator for the quoted executable, doubled quote
+        // for an embedded quote, and no backslash escaping.
         let pwsh = interactive_command_line("pwsh.exe", &parts);
-        assert!(
-            pwsh.contains("'C:\\Program Files\\opencode\\opencode.exe'"),
-            "got: {pwsh}"
+        assert_eq!(
+            pwsh,
+            "& 'C:\\Program Files\\opencode\\opencode.exe' --model 'it''s'"
         );
-        assert!(pwsh.contains("'it''s'"), "got: {pwsh}");
         assert!(
             !pwsh.contains("\\'"),
             "PowerShell has no backslash escape: {pwsh}"
         );
 
-        // POSIX: `'\''` for an embedded quote.
+        // POSIX: `'\''` for an embedded quote, and no call operator.
         let posix = interactive_command_line("/bin/zsh", &["it's".to_string()]);
         assert_eq!(posix, "'it'\\''s'");
 
@@ -729,5 +854,86 @@ mod tests {
             interactive_command_line("pwsh", &["opencode".to_string()]),
             "opencode"
         );
+    }
+
+    /// A quoted word in PowerShell command position is a string expression:
+    /// `'C:\Program Files\…\pragma-cli.exe' agent run` fails to parse, so the
+    /// tracked launch never starts. The call operator makes it executable.
+    #[test]
+    fn a_quoted_powershell_executable_is_invoked_with_the_call_operator() {
+        let spaced = vec![
+            "C:\\Users\\Jane Doe\\AppData\\Local\\Pragma\\pragma-cli.exe".to_string(),
+            "agent".to_string(),
+            "run".to_string(),
+            "--run-id".to_string(),
+            "run-1".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("pwsh.exe", &spaced),
+            "& 'C:\\Users\\Jane Doe\\AppData\\Local\\Pragma\\pragma-cli.exe' agent run --run-id run-1"
+        );
+
+        let apostrophe = vec![
+            "C:\\Users\\Jane O'Doe\\pragma-cli.exe".to_string(),
+            "agent".to_string(),
+            "run".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("powershell.exe", &apostrophe),
+            "& 'C:\\Users\\Jane O''Doe\\pragma-cli.exe' agent run"
+        );
+    }
+
+    /// A bare executable is already in command position, so it needs no call
+    /// operator — including an absolute path with no characters that force
+    /// quoting.
+    #[test]
+    fn a_bare_powershell_executable_needs_no_call_operator() {
+        let bare = vec![
+            "opencode".to_string(),
+            "--model".to_string(),
+            "sonnet".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("pwsh", &bare),
+            "opencode --model sonnet"
+        );
+
+        let unspaced_path = vec![
+            "C:\\Users\\Jane\\bin\\pragma-cli.exe".to_string(),
+            "agent".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("pwsh.exe", &unspaced_path),
+            "C:\\Users\\Jane\\bin\\pragma-cli.exe agent"
+        );
+    }
+
+    /// The call operator is PowerShell syntax; `cmd.exe` treats `&` as a
+    /// command separator, and POSIX executes a quoted command name directly.
+    #[test]
+    fn other_shells_do_not_gain_a_call_operator() {
+        let posix = vec![
+            "/Users/Jane Doe/bin/pragma-cli".to_string(),
+            "agent".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("/bin/zsh", &posix),
+            "'/Users/Jane Doe/bin/pragma-cli' agent"
+        );
+
+        let cmd = vec![
+            "C:\\Program Files\\Pragma\\pragma-cli.exe".to_string(),
+            "agent".to_string(),
+        ];
+        assert_eq!(
+            interactive_command_line("cmd.exe", &cmd),
+            "\"C:\\Program Files\\Pragma\\pragma-cli.exe\" agent"
+        );
+    }
+
+    #[test]
+    fn an_empty_command_line_stays_empty() {
+        assert_eq!(interactive_command_line("pwsh.exe", &[] as &[String]), "");
     }
 }

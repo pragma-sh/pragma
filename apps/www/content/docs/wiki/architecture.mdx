@@ -55,6 +55,9 @@ cannot be overwritten.
    each SSH remote — with a 500 ms reconnect loop.
 7. The frontend publishes workspace snapshots to the server (debounced) so headless and
    phone launches keep working while the app is closed.
+8. A freshly started server marks every `active` agent invocation `interrupted` and runs a
+   proactive pass that restores eligible ones — tabs no client has mounted included (see
+   [Server → Durable agent invocations](/docs/wiki/server#durable-agent-invocations)).
 
 ## One server per channel
 

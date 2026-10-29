@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 use crate::agent_options::{self, AgentLaunchOptions};
 use crate::automations::{AutomationError, AutomationsRegistry};
+use crate::invocations::{invocations_path, InvocationStore};
 use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::ports::{self, SessionOwner};
 use crate::session::{Session, SessionError};
@@ -81,8 +82,8 @@ const FILE_EVENT_CHANNEL_CAPACITY: usize = 64;
 /// Grid a server-owned agent session starts on. No client has attached yet, so
 /// this is what the TUI first lays itself out for; an attaching desktop resizes
 /// it to the real viewport.
-const AGENT_SESSION_COLS: u16 = 120;
-const AGENT_SESSION_ROWS: u16 = 40;
+pub(crate) const AGENT_SESSION_COLS: u16 = 120;
+pub(crate) const AGENT_SESSION_ROWS: u16 = 40;
 pub struct Registry {
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     socket_path: PathBuf,
@@ -143,7 +144,23 @@ pub struct Registry {
     computer: Arc<crate::computer::ComputerService>,
     /// Host-owned account providers: logins, bindings, hidden sign-in
     /// terminals, and the env every launch path resolves through.
-    accounts: crate::accounts::AccountsHost,
+    pub(crate) accounts: crate::accounts::AccountsHost,
+    /// Durable prepared/in-flight agent invocations, so a crash or a
+    /// native-update quit can resume the harness conversation. See
+    /// [`crate::agent_resume`].
+    pub(crate) invocations: InvocationStore,
+    /// Serializes restores per tab: one owner runs a restore and every other
+    /// caller waits for its outcome instead of racing a second spawn.
+    pub(crate) restore: Arc<crate::agent_resume::RestoreCoordinator>,
+    /// The plugin `launch.resume` callback a restore runs through. Tests may
+    /// substitute a deterministic one; production uses the plugins sidecar.
+    pub(crate) resume_callback: Mutex<Arc<dyn crate::agent_resume::ResumeCallback>>,
+    /// One lock per tab, serializing a restore's final revalidate-and-spawn
+    /// against a close, kill, or new launch for the same tab.
+    pub(crate) tab_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// The `pragma-cli` a wrapped invocation runs. Resolved once from the CLI
+    /// this server exports into its sessions; tests substitute a fake.
+    pub(crate) agent_run_binary: String,
 }
 
 type AgentKey = (String, String, String);
@@ -152,11 +169,18 @@ type AgentKey = (String, String, String);
 struct ResolvedAgentLaunch {
     /// The catalog `launch` config (startup input, prefill timing).
     spec: Value,
-    /// The shell command line that starts the agent.
-    command: String,
+    /// The agent's literal argv, before model/reasoning/mode args are applied.
+    /// A durable invocation records exactly this, so a resume callback can
+    /// rebuild it from the harness session alone.
+    parts: Vec<String>,
+    /// Raw model snippet that bypasses catalog model/reasoning args, if any.
+    model_cmd: Option<String>,
     agent_name: String,
     /// The full catalog entry, for slash-command lookup.
     agent: Value,
+    /// Whether the plugin declared a `launch.resume` callback, so this launch
+    /// can be wrapped and recorded for crash/update resume.
+    supports_resume: bool,
 }
 
 /// One server-owned agent launch. Shared by the controller-free
@@ -235,14 +259,15 @@ fn now_timestamp() -> String {
 /// Renders an agent's launch command for the shell the session actually runs.
 ///
 /// The command is *typed into* a live interactive shell, so it must be quoted
-/// the way that shell parses it — POSIX quoting typed into PowerShell mangles
-/// every Windows path with a space in it.
-pub(crate) fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
-    let launch = shell.map_or_else(
-        || pragma_platform::shell::resolve_launch(None),
-        |profile| pragma_platform::shell::resolve_profile_launch(profile, None),
-    );
-    pragma_platform::shell::interactive_command_line(&launch.program, parts)
+/// the way *that* shell parses it — POSIX quoting typed into PowerShell mangles
+/// every Windows path with a space in it, and PowerShell quoting typed into a
+/// POSIX shell leaves a literal `'` in an argument. `program` is always the
+/// session's own [`Session::shell_program`], never a re-resolution: the spawn
+/// may have picked a project `terminal.shell` override, a WSL backend, or the
+/// platform default, and only the program that is actually running can parse
+/// what is typed into it.
+pub(crate) fn agent_command_line(parts: &[String], program: &str) -> String {
+    pragma_platform::shell::interactive_command_line(program, parts)
 }
 
 /// Alternate-screen enter sequences a TUI emits once it takes the terminal.
@@ -275,7 +300,20 @@ fn wait_for_alt_screen(session: &Session) {
     }
 }
 
-fn schedule_agent_launch(session: &Session, launch: &Value, command: &str, prompt: Option<&str>) {
+fn schedule_agent_launch(
+    session: &Session,
+    launch: &Value,
+    parts: &[String],
+    model_cmd: Option<&str>,
+    prompt: Option<&str>,
+) {
+    let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
+        Some(model_cmd) => format!(
+            "{} {model_cmd}",
+            agent_command_line(parts, session.shell_program())
+        ),
+        None => agent_command_line(parts, session.shell_program()),
+    };
     thread::sleep(Duration::from_millis(
         pragma_constants::CONSTANTS.agents.start_delay_ms,
     ));
@@ -386,7 +424,25 @@ fn prune_agent_answers(answers: &mut Vec<RecentAgentAnswer>) {
 }
 
 impl Registry {
+    /// `pragma-cli agent run --run-id <id> -- <argv…>`: the one wrapper every
+    /// tracked invocation runs under. The binary is the CLI this server
+    /// exports into its sessions, so the command never depends on what a
+    /// shell's `PATH` happens to resolve.
+    pub(crate) fn wrap_agent_run(&self, run_id: &str, argv: &[String]) -> Vec<String> {
+        let mut wrapped = vec![
+            self.agent_run_binary.clone(),
+            "agent".to_string(),
+            "run".to_string(),
+            "--run-id".to_string(),
+            run_id.to_string(),
+            "--".to_string(),
+        ];
+        wrapped.extend(argv.iter().cloned());
+        wrapped
+    }
+
     pub fn new(socket_path: PathBuf, server_dir: PathBuf, _workspace_root: PathBuf) -> Self {
+        let plugins = PluginsRegistry::new(server_dir.clone());
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             socket_path,
@@ -407,7 +463,7 @@ impl Registry {
             script_runs: Mutex::new(HashMap::new()),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
-            plugins: PluginsRegistry::new(server_dir.clone()),
+            plugins: Arc::clone(&plugins),
             tunnel: TunnelRegistry::new(server_dir.clone()),
             watchers: WatcherSupervisor::new(server_dir.clone()),
             fanouts: {
@@ -423,6 +479,39 @@ impl Registry {
                 computer.start_sweeper();
                 computer
             },
+            resume_callback: Mutex::new(
+                Arc::clone(&plugins) as Arc<dyn crate::agent_resume::ResumeCallback>
+            ),
+            invocations: {
+                let store = match InvocationStore::open(&invocations_path(&server_dir)) {
+                    Ok(store) => store,
+                    Err(error) => {
+                        eprintln!("agent invocations: durable store unavailable: {error}");
+                        InvocationStore::unavailable(error.to_string())
+                    }
+                };
+                // Completion journal entries come first: a wrapper that could
+                // not reach the server after its child exited recorded the
+                // intentional exit beside the socket, and it must not be
+                // mistaken for a crash by the reconciliation below.
+                if let Err(error) =
+                    store.replay_completions(&crate::invocations::completions_dir(&server_dir))
+                {
+                    eprintln!("agent invocations: completion replay failed: {error}");
+                }
+                // Anything the previous process left active was interrupted by
+                // definition; a record that never started is not restored.
+                if let Err(error) = store.reconcile_after_restart() {
+                    eprintln!("agent invocations: startup reconciliation failed: {error}");
+                }
+                store
+            },
+            restore: Arc::new(crate::agent_resume::RestoreCoordinator::new()),
+            tab_gates: Mutex::new(HashMap::new()),
+            agent_run_binary: crate::session::pragma_cli_path().map_or_else(
+                || "pragma-cli".to_string(),
+                |path| path.to_string_lossy().into_owned(),
+            ),
             server_dir,
         }
     }
@@ -781,12 +870,9 @@ impl Registry {
     /// — so the tombstone matters as much as the removal: a desktop snapshot
     /// composed before the close must not bring the tab back.
     pub fn close_tab(&self, tab_id: &str) -> Result<(), RegistryError> {
-        // A tab whose shell already exited is still closable: the row is what
-        // the user is removing.
-        match self.kill(tab_id) {
-            Ok(()) | Err(RegistryError::NotFound(_)) => {}
-            Err(error) => return Err(error),
-        }
+        // Suppression comes first: the tombstone and the ended record must be
+        // visible to a restore that is between its resume callback and its
+        // spawn, and the tab gate makes that check and the spawn atomic.
         {
             let mut managed = self
                 .managed_tabs
@@ -799,6 +885,16 @@ impl Registry {
             let overflow = managed.tombstones.len().saturating_sub(TOMBSTONE_LIMIT);
             managed.tombstones.drain(..overflow);
             persist_managed_tabs(&self.server_dir, &managed);
+        }
+        // The session may already have been gone (an interrupted record has no
+        // PTY to kill), but closing the tab is still an explicit end: nothing
+        // may restore it.
+        self.end_invocations_for_tab(tab_id);
+        // A tab whose shell already exited is still closable: the row is what
+        // the user is removing.
+        match self.kill(tab_id) {
+            Ok(()) | Err(RegistryError::NotFound(_)) => {}
+            Err(error) => return Err(error),
         }
         let _ = self.mutate_workspace(|snapshot| {
             snapshot.tabs.retain(|tab| tab.id != tab_id);
@@ -844,7 +940,10 @@ impl Registry {
     }
 
     /// The project and absolute path a worktree row names.
-    fn worktree_location(&self, worktree_id: &str) -> Result<(String, String), RegistryError> {
+    pub(crate) fn worktree_location(
+        &self,
+        worktree_id: &str,
+    ) -> Result<(String, String), RegistryError> {
         let workspace = self
             .workspace
             .lock()
@@ -1241,13 +1340,47 @@ impl Registry {
             launch.options.slash_command.as_deref(),
             launch.prompt.as_deref(),
         )?;
+        let mut selection = crate::agent_resume::selection_from_launch(launch);
+        // Record the effective mode and permission mode, so a resume does not
+        // silently pick up a future default change.
+        agent_options::effective_selection(&resolved.agent, &mut selection)?;
         let ResolvedAgentLaunch {
             spec,
-            command,
+            parts,
+            model_cmd,
             agent_name,
+            supports_resume,
             ..
         } = resolved;
         let tab_id = Uuid::new_v4().to_string();
+        // A server-owned launch of an opted-in agent is recorded exactly like
+        // the desktop's `prepareAgentLaunch`: the same durable primitive, so
+        // both paths restore identically after a crash or update. A raw
+        // `modelCmd` snippet cannot be reconstructed as argv, so it stays on
+        // the untracked path rather than recording a command a resume could
+        // not reproduce.
+        let parts = if supports_resume && model_cmd.is_none() {
+            let project_root = self.mirrored_project_path(&launch.project_id).ok();
+            let accounts = self.accounts.effective_references(
+                self,
+                &launch.agent_id,
+                project_root.as_deref(),
+            )?;
+            let run_id = self.prepare_invocation(
+                &tab_id,
+                &launch.worktree_id,
+                &launch.project_id,
+                &launch.cwd,
+                &launch.agent_id,
+                &parts,
+                selection,
+                None,
+                accounts,
+            )?;
+            self.wrap_agent_run(&run_id, &parts)
+        } else {
+            parts
+        };
         let project_root = self.mirrored_project_path(&launch.project_id).ok();
         let account_env = self.accounts.launch_env(
             self,
@@ -1274,7 +1407,13 @@ impl Registry {
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
         thread::spawn(move || {
-            schedule_agent_launch(&session, &spec, &command, prompt.as_deref());
+            schedule_agent_launch(
+                &session,
+                &spec,
+                &parts,
+                model_cmd.as_deref(),
+                prompt.as_deref(),
+            );
         });
         self.append_mirrored_tab(
             &launch.project_id,
@@ -1384,6 +1523,81 @@ impl Registry {
         self.sessions
             .lock()
             .is_ok_and(|sessions| sessions.contains_key(tab_id))
+    }
+
+    /// The mirrored row for a tab, cloned out of the workspace snapshot. Used
+    /// by launch preparation (the tab's shell) and restore (its shell and
+    /// fanout identity).
+    pub(crate) fn mirrored_tab(&self, tab_id: &str) -> Option<Tab> {
+        self.workspace
+            .lock()
+            .ok()?
+            .as_ref()?
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .cloned()
+    }
+
+    /// True when a tab was closed through this host; it must never be restored.
+    pub(crate) fn tab_is_tombstoned(&self, tab_id: &str) -> bool {
+        self.managed_tabs
+            .lock()
+            .is_ok_and(|managed| managed.tombstones.iter().any(|id| id == tab_id))
+    }
+
+    /// True when the mirrored workspace still carries the tab, so a proactive
+    /// restore is allowed to bring its session back.
+    pub(crate) fn tab_is_open(&self, tab_id: &str) -> bool {
+        if self.tab_is_tombstoned(tab_id) {
+            return false;
+        }
+        self.workspace.lock().is_ok_and(|workspace| {
+            workspace
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.tabs.iter().any(|tab| tab.id == tab_id))
+        })
+    }
+
+    /// Ends every live invocation record for a tab whose session is gone, so a
+    /// later restart never resurrects a session the user deliberately left.
+    fn end_invocations_for_tab(&self, tab_id: &str) {
+        if let Err(error) = self.invocations.end_for_tab(tab_id) {
+            eprintln!("agent invocations: could not end records for tab {tab_id}: {error}");
+        }
+    }
+
+    /// The completion journal directory beside the socket, for re-reading a
+    /// delayed wrapper's exit just before a restore rotates an execution.
+    pub(crate) fn completions_dir(&self) -> PathBuf {
+        crate::invocations::completions_dir(&self.server_dir)
+    }
+
+    /// The lifecycle gate for one tab. A restore holds it across its final
+    /// revalidation, spawn, and command write; a close, kill, session exit, or
+    /// new launch holds it while it retires the tab's records, so the two can
+    /// never interleave into a session nobody owns.
+    pub(crate) fn tab_gate(&self, tab_id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self
+            .tab_gates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(
+            gates
+                .entry(tab_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
+    /// Drops a session this process just spawned but could not hand its command
+    /// to. Never takes the tab gate: every caller already holds it.
+    pub(crate) fn discard_session(&self, session_id: &str) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            if let Some(session) = sessions.remove(session_id) {
+                let _ = session.kill();
+            }
+        }
+        self.clear_agents_for_tab(session_id);
     }
 
     /// Spawns an agent session's PTY, exporting the fanout identity when the
@@ -1637,13 +1851,8 @@ impl Registry {
                     .ok_or_else(|| "agent launch command contains non-string".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut command = command;
-        command.extend(agent_options::option_args(agent, options)?);
-        let command = agent_command_line(&command, None);
-        let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
-            Some(model_cmd) => format!("{command} {model_cmd}"),
-            None => command,
-        };
+        let mut parts = command;
+        parts.extend(agent_options::option_args(agent, options)?);
         let agent_name = agent["name"]
             .as_str()
             .filter(|name| !name.is_empty())
@@ -1651,9 +1860,11 @@ impl Registry {
             .to_string();
         Ok(ResolvedAgentLaunch {
             spec: agent["launch"].clone(),
-            command,
+            parts,
+            model_cmd: model_cmd.map(str::to_string),
             agent_name,
             agent: agent.clone(),
+            supports_resume: agent["supportsResume"] == Value::Bool(true),
         })
     }
 
@@ -1925,6 +2136,12 @@ impl Registry {
     }
 
     pub fn kill(&self, session_id: &str) -> Result<(), RegistryError> {
+        // Serialize with a restore's final spawn: whichever wins, the tab ends
+        // up with either a killed session or no session, never an orphan.
+        let gate = self.tab_gate(session_id);
+        let _guard = gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let session = self
             .sessions
             .lock()
@@ -1932,6 +2149,8 @@ impl Registry {
             .remove(session_id)
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))?;
         session.kill()?;
+        // The tab's session is intentionally over: no record may bring it back.
+        self.end_invocations_for_tab(session_id);
         self.clear_agents_for_tab(session_id);
         Ok(())
     }
@@ -1940,36 +2159,56 @@ impl Registry {
     /// underneath it. Returns the number of sessions terminated; missing
     /// sessions are skipped so this is idempotent.
     pub fn kill_for_cwd(&self, path: &str) -> Result<usize, RegistryError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| RegistryError::LockPoisoned)?;
-        let target_ids: Vec<String> = sessions
-            .iter()
-            .filter_map(|(id, session)| {
-                let cwd = session.cwd();
-                if cwd == path || cwd.starts_with(format!("{path}/").as_str()) {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // The sessions lock is never held while taking a tab gate: a restore
+        // takes the gate and then the sessions lock, and the reverse order
+        // would deadlock.
+        let target_ids: Vec<String> = {
+            let sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            sessions
+                .iter()
+                .filter_map(|(id, session)| {
+                    let cwd = session.cwd();
+                    if cwd == path || cwd.starts_with(format!("{path}/").as_str()) {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
         let mut killed = 0;
         for id in &target_ids {
-            let Some(session) = sessions.get(id).cloned() else {
-                continue;
+            let gate = self.tab_gate(id);
+            let _guard = gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let removed = {
+                let mut sessions = self
+                    .sessions
+                    .lock()
+                    .map_err(|_| RegistryError::LockPoisoned)?;
+                let Some(session) = sessions.get(id).cloned() else {
+                    continue;
+                };
+                // Only stop tracking a session once it is actually dead. Removing
+                // it first and ignoring a kill failure would orphan a still-running
+                // shell in a deleted worktree with no way to reach it again.
+                if session.kill().is_ok() {
+                    sessions.remove(id);
+                    true
+                } else {
+                    false
+                }
             };
-            // Only stop tracking a session once it is actually dead. Removing it
-            // first and ignoring a kill failure would orphan a still-running
-            // shell in a deleted worktree with no way to reach it again.
-            if session.kill().is_ok() {
-                sessions.remove(id);
+            if removed {
+                self.end_invocations_for_tab(id);
                 self.clear_agents_for_tab(id);
                 killed += 1;
             }
         }
-        drop(sessions);
         self.remove_file_watchers_for_cwd(path);
         Ok(killed)
     }
@@ -1982,9 +2221,16 @@ impl Registry {
     /// the process is already reaped by the session's own reader thread, so
     /// this only needs to drop our reference.
     pub fn remove_exited(&self, session_id: &str) {
+        let gate = self.tab_gate(session_id);
+        let _guard = gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.remove(session_id);
         }
+        // The shell exited on its own: the tab is finished with, not
+        // interrupted, so nothing may restore it.
+        self.end_invocations_for_tab(session_id);
         self.clear_agents_for_tab(session_id);
     }
 
@@ -1994,14 +2240,28 @@ impl Registry {
             payload.tab_id.clone(),
             payload.agent.clone(),
         );
+        // A status-less report is a metadata update (session name, harness ids):
+        // it must not be treated as a fresh status for fanout progress or
+        // notifications. An ids-only report (`session-id` from a running run)
+        // changes nothing a subscriber can observe, so it is persisted and
+        // nothing is broadcast.
+        let explicit_status = payload.status.is_some();
+        let ids_only = !explicit_status
+            && payload.session_name.is_none()
+            && payload.attention_kind.is_none()
+            && payload.command.is_none()
+            && payload.question.is_none()
+            && payload.options.is_empty()
+            && payload.questions.is_empty()
+            && payload.request_id.is_none();
         let mut statuses = self
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
-        let needs_watcher_reconcile = !statuses.contains_key(&key);
+        let existed = statuses.contains_key(&key);
         // Merge with the stored entry: a status-less report (`session-name`)
         // must not disturb the last status, and a status report without a
-        // session name must not drop the last reported name.
+        // session name must not drop the last reported name or harness ids.
         let mut payload = payload;
         if let Some(prev) = statuses.get(&key) {
             if payload.status.is_none() {
@@ -2010,6 +2270,58 @@ impl Registry {
             if payload.session_name.is_none() {
                 payload.session_name.clone_from(&prev.session_name);
             }
+            // Identity carries forward only within one execution: a report
+            // that names a *different* run is a new execution in this tab, and
+            // it must begin with no known conversation rather than inherit the
+            // previous one. A report without a run id (an older reporter, or
+            // an agent started outside Pragma) is assumed to be the same run.
+            let same_run = match payload.agent_run_id.as_deref() {
+                None => true,
+                Some(run_id) => prev.agent_run_id.as_deref() == Some(run_id),
+            };
+            if same_run {
+                if payload.harness_session_id.is_none() {
+                    payload
+                        .harness_session_id
+                        .clone_from(&prev.harness_session_id);
+                }
+                if payload.agent_run_id.is_none() {
+                    payload.agent_run_id.clone_from(&prev.agent_run_id);
+                }
+            }
+            // A status-less report (a rename or a session-id update) must also
+            // leave a pending attention payload intact: dropping the question
+            // while keeping `attention` would leave a client with nothing to
+            // answer.
+            if !explicit_status {
+                if payload.attention_kind.is_none() {
+                    payload.attention_kind = prev.attention_kind;
+                }
+                if payload.command.is_none() {
+                    payload.command.clone_from(&prev.command);
+                }
+                if payload.question.is_none() {
+                    payload.question.clone_from(&prev.question);
+                }
+                if payload.options.is_empty() {
+                    payload.options.clone_from(&prev.options);
+                }
+                if payload.questions.is_empty() {
+                    payload.questions.clone_from(&prev.questions);
+                }
+                if payload.request_id.is_none() {
+                    payload.request_id.clone_from(&prev.request_id);
+                }
+            }
+        }
+        // The durable invocation store is the authority on which harness
+        // conversation a later resume continues.
+        let clear = payload.clear_harness_session_id.unwrap_or(false);
+        self.apply_session_identity(&mut payload, clear);
+        let identity_only = ids_only && !clear;
+        if identity_only && !existed {
+            // Nothing to show: the next real status report creates the entry.
+            return Ok(());
         }
         let event = agent_event(&payload);
         // `cleared` is stored like every other status: it marks an idle-but-live
@@ -2019,12 +2331,20 @@ impl Registry {
         // broadcast `cleared` event as "remove the indicator". Entries are
         // removed when the hosting tab's session exits
         // ([`Self::clear_agents_for_tab`]).
-        let member_status = payload.status.and_then(fanout_member_status);
-        let finished = payload.status;
+        let finished = if explicit_status {
+            payload.status
+        } else {
+            None
+        };
+        let member_status = finished.and_then(fanout_member_status);
         let tab_id = payload.tab_id.clone();
+        // The clear flag is a command, not stored state: relaying it in the
+        // live event is useful, but keeping it in the snapshot would make
+        // every later subscriber replay a stale instruction.
+        payload.clear_harness_session_id = None;
         statuses.insert(key, payload);
         drop(statuses);
-        if needs_watcher_reconcile {
+        if !existed {
             // A manually started agent has no catalog id on its mirrored tab.
             // Start its watcher before publishing status so a phone cannot see
             // a reply target whose input consumer has not even been spawned.
@@ -2032,7 +2352,8 @@ impl Registry {
         }
         // A fanout attempt's member status follows its agent, but is a separate
         // vocabulary: the attempt can be `done` while the fanout is still only
-        // `partial` because a sibling failed.
+        // `partial` because a sibling failed. Only a report that actually
+        // carried a status moves the fanout.
         if let Some(status) = member_status {
             self.fanouts.apply_agent_status(&tab_id, status);
         }
@@ -2041,9 +2362,81 @@ impl Registry {
         if matches!(finished, Some(AgentStatus::Done | AgentStatus::Cleared)) {
             self.computer.end_tab(&tab_id);
         }
+        if identity_only {
+            // Stored (the ids may be new), but there is nothing observable for
+            // subscribers beyond what they already have.
+            return Ok(());
+        }
         self.broadcast_agent(&event);
         self.broadcast_agent_status()?;
         Ok(())
+    }
+
+    /// Applies a report's harness-identity instruction to the durable store.
+    ///
+    /// A clear is applied after the carry-forward merge and wins over any id
+    /// in the same report: the harness started a new conversation, so neither
+    /// the previous id nor a concurrently supplied one may survive to be
+    /// auto-resumed. A setter carrying a run id must match that run — a
+    /// superseded or unknown run is stale and the id is dropped from the
+    /// report. A report without a run id (an older plugin, or an agent started
+    /// outside Pragma) applies to the tab's newest record. Store failures
+    /// never drop the report; they only log.
+    fn apply_session_identity(&self, payload: &mut AgentReportPayload, clear: bool) {
+        if clear {
+            let cleared = match payload.agent_run_id.as_deref() {
+                Some(run_id) => self.invocations.clear_harness_session_id(run_id),
+                None => self
+                    .invocations
+                    .clear_harness_session_id_for_tab(&payload.worktree_id, &payload.tab_id),
+            };
+            if let Err(error) = cleared {
+                eprintln!("agent invocations: session id clear failed: {error}");
+            }
+            payload.harness_session_id = None;
+            return;
+        }
+        let Some(harness_session_id) = payload.harness_session_id.clone() else {
+            return;
+        };
+        if !self.record_harness_session_id(payload, &harness_session_id) {
+            // A stale run cannot move the tab's session pointer; drop the id
+            // from the report rather than advertise a lie.
+            payload.harness_session_id = None;
+        }
+    }
+
+    /// Writes a reported harness session id onto the invocation that owns it.
+    ///
+    /// A report carrying a run id must match that run — a superseded or
+    /// unknown run is stale and returns `false`. A report without one (an
+    /// older plugin, or an agent started outside Pragma) applies to the tab's
+    /// newest record. Store failures never drop the report; they only log.
+    fn record_harness_session_id(
+        &self,
+        payload: &AgentReportPayload,
+        harness_session_id: &str,
+    ) -> bool {
+        let Some(run_id) = payload.agent_run_id.as_deref() else {
+            if let Err(error) = self.invocations.set_harness_session_id_for_tab(
+                &payload.worktree_id,
+                &payload.tab_id,
+                harness_session_id,
+            ) {
+                eprintln!("agent invocations: session id write failed: {error}");
+            }
+            return true;
+        };
+        match self
+            .invocations
+            .set_harness_session_id(run_id, harness_session_id)
+        {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                eprintln!("agent invocations: session id write failed: {error}");
+                true
+            }
+        }
     }
 
     /// Subscribes to a snapshot-then-replacement stream of all live agent statuses.
@@ -2390,6 +2783,9 @@ impl Registry {
                 options: vec![],
                 questions: vec![],
                 request_id: None,
+                harness_session_id: None,
+                agent_run_id: None,
+                clear_harness_session_id: None,
             }));
         }
     }
@@ -2566,6 +2962,9 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
         agent: payload.agent.clone(),
         status: payload.status,
         session_name: payload.session_name.clone(),
+        harness_session_id: payload.harness_session_id.clone(),
+        agent_run_id: payload.agent_run_id.clone(),
+        clear_harness_session_id: payload.clear_harness_session_id,
         attention_kind: payload.attention_kind,
         command: payload.command.clone(),
         question: payload.question.clone(),
@@ -2963,6 +3362,9 @@ mod tests {
             options: vec![],
             questions: vec![],
             request_id: None,
+            harness_session_id: None,
+            agent_run_id: None,
+            clear_harness_session_id: None,
         }
     }
 
@@ -3124,6 +3526,9 @@ mod tests {
                 options: vec![],
                 questions: vec![],
                 request_id: None,
+                harness_session_id: None,
+                agent_run_id: None,
+                clear_harness_session_id: None,
             })
             .expect("report agent");
 
@@ -3377,6 +3782,9 @@ mod tests {
             options: vec![],
             questions: vec![],
             request_id: None,
+            harness_session_id: None,
+            agent_run_id: None,
+            clear_harness_session_id: None,
         };
         registry
             .report_agent(payload("tab-1", "opencode", AgentStatus::Done))
@@ -3638,6 +4046,9 @@ mod tests {
                 options: vec![],
                 questions: vec![],
                 request_id: None,
+                harness_session_id: None,
+                agent_run_id: None,
+                clear_harness_session_id: None,
             })
             .expect("report agent");
 
@@ -4034,5 +4445,52 @@ mod tests {
                 .expect("managed tabs"),
             [] as [pragma_constants::Tab; 0]
         );
+    }
+
+    /// The command line typed into a session is quoted for the program that
+    /// session actually runs — POSIX and PowerShell quoting are not
+    /// interchangeable, and re-resolving the shell at write time can disagree
+    /// with the spawn.
+    #[test]
+    fn command_quoting_follows_the_actual_shell_program() {
+        let parts = vec!["claude".to_string(), "a b".to_string(), "it's".to_string()];
+        assert_eq!(
+            super::agent_command_line(&parts, "bash"),
+            "claude 'a b' 'it'\\''s'"
+        );
+        assert_eq!(
+            super::agent_command_line(&parts, "pwsh"),
+            "claude 'a b' 'it''s'"
+        );
+    }
+
+    /// A project `terminal.shell` override is what the session actually runs,
+    /// so a command typed into it must be quoted for that program.
+    #[test]
+    fn a_session_reports_the_shell_program_it_actually_runs() {
+        let dir = tempdir().expect("tempdir");
+        let shell = pragma_platform::shell::default_shell();
+        let config = serde_json::json!({ "terminal": { "shell": shell } });
+        std::fs::create_dir_all(dir.path().join(".pragma")).expect("pragma dir");
+        std::fs::write(
+            dir.path().join(".pragma/config.json"),
+            serde_json::to_vec(&config).expect("config json"),
+        )
+        .expect("config");
+        let registry = Registry::default();
+        let session_id = "session-shell-program".to_string();
+        registry
+            .spawn(
+                session_id.clone(),
+                "worktree-1".to_string(),
+                dir.path().to_string_lossy().into_owned(),
+                80,
+                24,
+                None,
+            )
+            .expect("session spawns");
+        let session = registry.session(&session_id).expect("session");
+        assert_eq!(session.shell_program(), shell);
+        registry.kill(&session_id).expect("cleanup kill");
     }
 }

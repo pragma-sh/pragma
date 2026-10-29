@@ -36,6 +36,28 @@ for alt-screen entry with a bounded extra wait). Headless launches
 `<project>/.pragma/worktrees/<uuid>` via `pragma-core` and merge them into the
 workspace mirror; the desktop adopts them from disk later.
 
+## Durable agent invocations
+
+`invocations.rs` (SQLite `agent-invocations.db` beside the socket, WAL, owner-only) plus
+`agent_resume.rs` give resume-capable agent launches crash / update recovery:
+
+- A launch the desktop prepares (`prepareAgentLaunch`) — and every headless or fanout
+  launch of an agent whose plugin declared `launch.resume` — is recorded before its command
+  is written and wrapped in `pragma-cli agent run --run-id …`. The wrapper sets
+  `PRAGMA_AGENT_RUN_ID` in the child, reports `startRun` before the spawn and `finishRun`
+  after the child's real exit, and exits with its code.
+- Startup reconciliation marks records left `active` as `interrupted` (`prepared` records
+  are left alone and never restored). A background pass then restores every interrupted
+  record with a reported harness session id whose tab is still open, even headless tabs no
+  client has mounted; a transient failure is retried once, then left recoverable `failed`.
+- Restores are claim-serialized per tab and reattach-first: a live PTY always wins. The
+  plugin callback (`plugins-host` `agentResume`) returns the complete argv — Pragma appends
+  no model, prompt, startup input, or prelaunch args — and a missing callback or resume
+  error never falls back to a fresh conversation.
+- `close_tab`, `kill`, `kill_for_cwd`, and a session exiting on its own end the tab's live
+  records before teardown, so nothing resurrects a session the user deliberately left.
+  Plain shells have no record: a server restart ends them.
+
 ## Agent status
 
 `Registry::report_agent` keys entries by `(worktreeId, tabId, agent)` and merges
@@ -92,5 +114,6 @@ completed` — and a retry resumes at the first incomplete stage. A merge confli
   reported — the security boundary for the Ports card.
 - **WSL**: the server answers the `wsl` RPC for its own host, so an SSH host reports its
   own distributions.
-- **Tabs RPC**: terminal _agent metadata_ only (agent id, agent title) — the desktop
-  owns the rest of tab state.
+- **Tabs RPC**: terminal agent metadata (agent id, agent title) plus the launch lifecycle —
+  `prepareAgentLaunch`, `restoreAgentSession`, and the CLI-internal `startRun`/`finishRun`
+  that drive durable resume. The desktop still owns the rest of tab state.

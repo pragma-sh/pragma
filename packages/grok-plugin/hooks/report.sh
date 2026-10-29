@@ -47,6 +47,10 @@ children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 # The session id that owns the in-flight marker, so a late `cleared` from a
 # superseded session cannot wipe a turn that already started in a new one.
 turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
+# The harness session id last reported to Pragma, so a session start or switch
+# reports it exactly once -- including a switch back to an earlier session
+# (A -> B -> A), which a seen-set would wrongly suppress.
+harness_session_file="${state_dir}/pragma-cli-${agent}-${tab}.harness-session"
 # Characters of assistant output already streamed for the active turn.
 sent_file="${state_dir}/pragma-cli-${agent}-${tab}.sent"
 # Transcript byte offset the active turn started at, so `stopped` can run the
@@ -63,6 +67,19 @@ max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
 # a Grok session (e.g. when pragma-cli or the server is unavailable).
 report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
+}
+
+# Reports the harness's own session id, which Pragma records on the run so a
+# later launch can resume it. Only authoritative start/switch events call this
+# (see the parent pin below). Deduping against the last *reported* id rather
+# than a seen-set is what keeps a switch back to an earlier session reporting
+# again while a same-session event stays silent.
+report_session_id() {
+  harness_id="$1"
+  [ -n "$harness_id" ] || return 0
+  [ "$(cat "$harness_session_file" 2>/dev/null)" = "$harness_id" ] && return 0
+  report session-id --id "$harness_id"
+  printf '%s' "$harness_id" >"$harness_session_file"
 }
 
 # AgentMessage.ts is milliseconds since Unix epoch (see @pragma-sh/constants).
@@ -552,6 +569,17 @@ if [ -n "$hook_session_id" ] && [ -f "$session_file" ]; then
   parent_session_id="$(cat "$session_file" 2>/dev/null)"
   [ -z "$parent_session_id" ] || [ "$hook_session_id" = "$parent_session_id" ] || exit 0
 fi
+
+# The tab's harness session identity is authoritative only on a `SessionStart`
+# (a new or resumed session, including a `/new` or `/clear`) and on the first
+# prompt that pins a session. Both have passed the parent pin above, so a
+# subagent's own session or a delayed event from a superseded session can never
+# report an id over the parent's.
+case "$hook_event_name" in
+  session_start | user_prompt_submit)
+    report_session_id "$hook_session_id"
+    ;;
+esac
 
 case "${1:-}" in
   started)

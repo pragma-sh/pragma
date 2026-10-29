@@ -40,7 +40,8 @@ beforeEach(() => {
     fake,
     // PRAGMA_TEST_REJECT_QUESTIONS emulates an installed CLI older than the
     // hook: clap exits nonzero on the unknown `--questions` flag.
-    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${PRAGMA_TEST_REJECT_QUESTIONS:-}" ]; then\n  case " $* " in *" --questions "*) exit 2;; esac\nfi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "$1 $2" = "agent await-answer" ]; then printf '%s' "\${PRAGMA_TEST_ANSWER:-}"; fi\n`,
+    // PRAGMA_TEST_REJECT_SESSION_ID does the same for the newer `session-id`.
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${PRAGMA_TEST_REJECT_QUESTIONS:-}" ]; then\n  case " $* " in *" --questions "*) exit 2;; esac\nfi\nif [ -n "\${PRAGMA_TEST_REJECT_SESSION_ID:-}" ]; then\n  case " $* " in *" session-id "*) exit 2;; esac\nfi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "$1 $2" = "agent await-answer" ]; then printf '%s' "\${PRAGMA_TEST_ANSWER:-}"; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -172,6 +173,14 @@ function transcript(lines: string[]): string {
   return JSON.stringify({ hook_event_name: "Stop", transcript_path: path });
 }
 
+/**
+ * The stdin JSON Claude Code sends for a SessionStart (with its `source`), the
+ * event that announces startup, /clear, /compact, and /resume switches.
+ */
+function sessionStartPayload(sessionId: string, source = "startup"): string {
+  return JSON.stringify({ hook_event_name: "SessionStart", session_id: sessionId, source });
+}
+
 const ASSISTANT_DONE = JSON.stringify({
   type: "assistant",
   message: { role: "assistant", content: [{ type: "text", text: "All done." }] },
@@ -283,6 +292,7 @@ describe("report.sh", () => {
         stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "child-session" }),
       }),
     ).toEqual([
+      "agent report --agent claude-code session-id --id parent-session",
       "agent report --agent claude-code cleared",
       "agent report --agent claude-code started",
     ]);
@@ -293,6 +303,7 @@ describe("report.sh", () => {
         stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "parent-session" }),
       }),
     ).toEqual([
+      "agent report --agent claude-code session-id --id parent-session",
       "agent report --agent claude-code cleared",
       "agent report --agent claude-code started",
       "agent report --agent claude-code stopped",
@@ -487,6 +498,100 @@ describe("report.sh", () => {
     expect(afterSwitch).toContainEqual(
       expect.stringContaining("session-name --name Second session"),
     );
+  });
+
+  // Session tracking: the status-less `session-id` report Pragma stores so a
+  // later launch can resume this exact conversation.
+  describe("session id tracking", () => {
+    function sessionIdCalls(): string[] {
+      return reportCalls().filter((call) => call.includes(" session-id "));
+    }
+
+    itWithPython3("reports the conversation on SessionStart with no prompt or title", () => {
+      // /clear, /resume, and --resume all surface as SessionStart, and Claude
+      // Code exposes no title: the id alone must land, before any next prompt.
+      expect(run("cleared", { stdin: sessionStartPayload("session-a") })).toEqual([
+        "agent report --agent claude-code session-id --id session-a",
+        "agent report --agent claude-code cleared",
+      ]);
+    });
+
+    itWithPython3("reports each A-B-A switch, even with no title", () => {
+      run("cleared", { stdin: sessionStartPayload("session-a") });
+      run("cleared", { stdin: sessionStartPayload("session-b", "resume") });
+      run("cleared", { stdin: sessionStartPayload("session-a", "resume") });
+      expect(sessionIdCalls()).toEqual([
+        "agent report --agent claude-code session-id --id session-a",
+        "agent report --agent claude-code session-id --id session-b",
+        "agent report --agent claude-code session-id --id session-a",
+      ]);
+    });
+
+    itWithPython3("does not re-report the same session on /compact", () => {
+      run("started", {
+        stdin: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          session_id: "session-a",
+          prompt: "Fix auth",
+        }),
+      });
+      run("cleared", { stdin: sessionStartPayload("session-a", "compact") });
+      expect(sessionIdCalls()).toEqual([
+        "agent report --agent claude-code session-id --id session-a",
+      ]);
+    });
+
+    it("never reports a subagent's session id", () => {
+      // Subagent hooks carry agent_id + the child's own session_id and exit
+      // before the parent pin; a child can never take over the tab.
+      expect(
+        run("subagent-start", {
+          stdin: JSON.stringify({
+            hook_event_name: "SubagentStart",
+            agent_id: "child-1",
+            session_id: "child-session",
+          }),
+        }),
+      ).toEqual(["agent report --agent claude-code started"]);
+      expect(sessionIdCalls()).toEqual([]);
+    });
+
+    itWithPython3("reports the resumed id again after SessionEnd", () => {
+      // A new process (`claude --resume <id>`) is a new run: the same session
+      // id must be reported again even though it was reported before.
+      run("cleared", { stdin: sessionStartPayload("session-a") });
+      run("cleared", {
+        stdin: JSON.stringify({ hook_event_name: "SessionEnd", session_id: "session-a" }),
+      });
+      run("cleared", { stdin: sessionStartPayload("session-a", "resume") });
+      expect(sessionIdCalls()).toEqual([
+        "agent report --agent claude-code session-id --id session-a",
+        "agent report --agent claude-code session-id --id session-a",
+      ]);
+    });
+
+    itWithPython3("keeps statuses flowing when the installed CLI rejects session-id", () => {
+      // An older installed pragma-cli exits nonzero on the unknown subcommand;
+      // the status-less report is best-effort and must never block statuses.
+      run("started", {
+        env: { PRAGMA_TEST_REJECT_SESSION_ID: "1" },
+        stdin: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          session_id: "session-a",
+          prompt: "Fix auth",
+        }),
+      });
+      run("stopped", {
+        env: { PRAGMA_TEST_REJECT_SESSION_ID: "1" },
+        stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "session-a" }),
+      });
+      expect(reportCalls()).toEqual([
+        "agent report --agent claude-code session-id --id session-a",
+        "agent report --agent claude-code started",
+        "agent report --agent claude-code session-name --name Fix auth",
+        "agent report --agent claude-code stopped",
+      ]);
+    });
   });
 
   itWithPython3("surfaces the transcript's assistant reply as a chat message on stopped", () => {
@@ -928,7 +1033,10 @@ describe("report.sh", () => {
             source: "clear",
           }),
         }),
-      ).toEqual(["agent report --agent claude-code started"]);
+      ).toEqual([
+        "agent report --agent claude-code session-id --id session-b",
+        "agent report --agent claude-code started",
+      ]);
       expect(existsSync(markerPath())).toBe(true);
     },
   );
@@ -947,8 +1055,10 @@ describe("report.sh", () => {
         }),
       }),
     ).toEqual([
+      "agent report --agent claude-code session-id --id session-a",
       "agent report --agent claude-code started",
       "agent report --agent claude-code stopped",
+      "agent report --agent claude-code session-id --id session-b",
       "agent report --agent claude-code cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
@@ -968,7 +1078,10 @@ describe("report.sh", () => {
           reason: "clear",
         }),
       }),
-    ).toEqual(["agent report --agent claude-code started"]);
+    ).toEqual([
+      "agent report --agent claude-code session-id --id session-b",
+      "agent report --agent claude-code started",
+    ]);
     expect(existsSync(markerPath())).toBe(true);
   });
 

@@ -1,8 +1,12 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   type AccountIdentity,
+  type AgentArgsBuilder,
+  type AgentMode,
+  type AgentPermissionMode,
   commandAndSkillDirs,
   slashCommandProvider,
   type AgentModelEntry,
@@ -25,6 +29,38 @@ const baseWatcher = createTuiWatcher({
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits";
+
+/**
+ * Cursor's unambiguous binary name; `--approve-mcps` skips the MCP approval
+ * prompt at session start. Both a launch and a resume start it.
+ */
+const CURSOR_COMMAND = ["cursor-agent", "--approve-mcps"];
+
+/** Primary modes (Shift+Tab in the launcher); the first (`agent`) is the default. */
+const CURSOR_MODES: AgentMode[] = [
+  { id: "agent", name: "Agent" },
+  { id: "plan", name: "Plan", description: "Read-only planning" },
+  { id: "ask", name: "Ask", description: "Q&A, read-only" },
+];
+
+/** Permission modes; the first (`force`) is the launch default every launch applies. */
+const CURSOR_PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "force", name: "Run everything" },
+  { id: "default", name: "Ask for approval" },
+];
+
+/**
+ * The option builders a launch and a resume share. Cursor has no separate
+ * reasoning flag (the effort is part of the model id), and `--model`, `--mode`,
+ * and `--force` are all top-level options of the `agent` command, so a resume
+ * replays the launch flags unchanged.
+ */
+const CURSOR_ARGS: AgentArgsBuilder = {
+  model: (modelId: string) => ["--model", modelId],
+  reasoning: () => [],
+  permissionMode: (permissionModeId: string) => (permissionModeId === "force" ? ["--force"] : []),
+  mode: (modeId: string) => (modeId === "agent" ? [] : ["--mode", modeId]),
+};
 
 /** Cursor Agent built-ins that take a prompt; project/user commands are discovered. */
 const BUILTIN_SLASH_COMMANDS = [
@@ -97,7 +133,27 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       name: "Cursor Agent",
       icon: () => null,
       iconPath: "assets/cursor.svg",
-      launch: { command: ["cursor-agent", "--approve-mcps"] },
+      launch: {
+        command: CURSOR_COMMAND,
+        // `cursor-agent --resume <chatId>` reopens exactly the chat the
+        // `sessionStart` hook reports as `conversation_id` (verified against
+        // Cursor Agent CLI 2026.10.16: the id names the persisted chat
+        // directory, and `--resume <chatId>` uses it verbatim). The callback
+        // owns the full argv, so the recorded launch selection is replayed.
+        resume: ({ harnessSessionId, selection }) => [
+          ...CURSOR_COMMAND,
+          "--resume",
+          harnessSessionId,
+          ...agentLaunchArgs(
+            {
+              args: CURSOR_ARGS,
+              modes: CURSOR_MODES,
+              permissionModes: CURSOR_PERMISSION_MODES,
+            },
+            selection,
+          ),
+        ],
+      },
       excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -111,23 +167,10 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
         ),
       // First entry is the default: `--force` runs commands unattended, which
       // is what the excluded `commandApproval` feature above relies on.
-      permissionModes: [
-        { id: "force", name: "Run everything" },
-        { id: "default", name: "Ask for approval" },
-      ],
-      modes: [
-        { id: "agent", name: "Agent" },
-        { id: "plan", name: "Plan", description: "Read-only planning" },
-        { id: "ask", name: "Ask", description: "Q&A, read-only" },
-      ],
+      permissionModes: CURSOR_PERMISSION_MODES,
+      modes: CURSOR_MODES,
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES),
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: () => [],
-        permissionMode: (permissionModeId: string) =>
-          permissionModeId === "force" ? ["--force"] : [],
-        mode: (modeId: string) => (modeId === "agent" ? [] : ["--mode", modeId]),
-      },
+      args: CURSOR_ARGS,
     }),
   ],
 });

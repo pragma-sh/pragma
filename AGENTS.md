@@ -332,11 +332,56 @@ than no guide.
   token, never the pairing token. SDK calls from terminals retain their tab attribution;
   gateway callers cannot claim desktop-user authority. Desktop previews use cancellable
   Tauri channels and never put image bytes on `computerActivity`.
+- Durable agent invocation records and auto-resume → host side
+  `crates/pragma-server/src/invocations.rs` (SQLite beside the socket) and
+  `agent_resume.rs` (prepare / restore / claim), CLI supervisor
+  `crates/pragma-cli/src/agent_run.rs`, desktop adapters in
+  `apps/pragma/src-tauri/src/agent_sessions.rs` + `apps/pragma/src/lib/terminal-manager.ts`,
+  and the plugin's `AgentDefinition.launch.resume` callback. See _Durable agent sessions
+  and recovery_ below.
 - Anything that differs between operating systems → `crates/pragma-platform`. Never a
   bare `#[cfg(unix)]` at the call site (see _Platform targets_).
 - macOS background webviews rely on `vendor/wry` honoring `.focused(false)` during
   construction. Keep its focus guards until upstream fixes unconditional app
   activation; see `vendor/wry/PRAGMA-PATCH.md`.
+
+## Durable agent sessions and recovery
+
+**Runtime status and recovery identity are different things.** Status dots, messages, and
+attention are ephemeral in-memory state; the _durable_ record is the host-owned invocation
+row plus the harness conversation id the integration last reported. Never store recovery
+identity in the client DB, localStorage, or a plugin.
+
+- **The host prepares a launch before its command is written.** A resume-capable agent's
+  launch is recorded in `agent-invocations.db` beside `daemon.sock` (SQLite, WAL,
+  owner-only) and wrapped in `pragma-cli agent run --run-id …`. The wrapper sets
+  `PRAGMA_AGENT_RUN_ID` in the child, reports `startRun` before the spawn and `finishRun`
+  only after the child's real exit (never from a cleared status or a watcher exiting), and
+  exits with the child's code. The desktop, SDK/CLI launches, phones, and fanout attempts
+  all use the same primitive.
+- **Only an interrupted, still-open session is restored.** The record must have been
+  `active` when its server stopped, carry a harness session id, and belong to a tab that is
+  still open and not tombstoned. `prepared` (never started), `ended` (child exited),
+  `superseded` (a newer launch in the tab), and deliberately closed/killed tabs are never
+  restored. Plain shells have no snapshot: a host restart ends them, and tabs reopen as
+  fresh shells. Manually typed agent commands are ordinary shell sessions too.
+- **The plugin owns the resume argv.** `launch.resume({ harnessSessionId, selection, cwd })`
+  returns the complete argv; the host appends no model, mode, prompt, startup-input, or
+  prelaunch args. A resume restores the conversation, not the original turn: prompts,
+  slash commands, and `!!` commands are not replayed. A missing callback or a resume error
+  leaves a `failed` record and surfaces an error — it never starts a fresh conversation.
+- **Official coverage is nine plugins, not every agent.** OpenCode, Claude Code, Cursor,
+  Codex, Pi, Grok, Kimi, Junie, and GitHub Copilot CLI declare resume; Prime Agent
+  deliberately does not (Pragma launches it with `--no-session`, so its in-memory session
+  has no file `--resume` could open). Limits that must not be overstated: OpenCode learns
+  the active conversation only from user-initiated activity, so a TUI switch with no
+  prompt cannot be observed; Pi reports its id only after the session file materializes
+  after the first assistant message.
+- **Updates preserve the workspace.** A successful restart-update quit closes no tabs and
+  kills no sessions. A relaunched desktop reattaches to PTYs that survived on the host;
+  when the server binary itself restarts, plain shells are gone and the host runs a
+  proactive pass that resumes eligible interrupted agent invocations. Never reintroduce an
+  all-tabs teardown on the update path.
 
 ## Common commands
 

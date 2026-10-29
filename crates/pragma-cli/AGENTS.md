@@ -14,6 +14,12 @@ pragma-cli whiteboard view <id> architecture.png
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 # Session name: status-less report that renames the hosting tab (user renames win).
 pragma-cli agent report --agent <id> session-name --name "<name>"
+# Harness session id: status-less report of the conversation id a resume continues.
+pragma-cli agent report --agent <id> session-id --id "<harness-session-id>"
+# Or forget it (new/unmaterialized session, deleted conversation): --clear instead of --id.
+pragma-cli agent report --agent <id> session-id --clear
+# Supervise one host-prepared invocation (written into the tab by prepareAgentLaunch).
+pragma-cli agent run --run-id <id> -- <argv...>
 # Command approval: report the command + a correlation id, then block for the verdict.
 pragma-cli agent report --agent <id> attention --kind command --command "<cmd>" --request-id <id>
 pragma-cli agent await-decision --agent <id> --request-id <id> [--timeout 300]
@@ -62,6 +68,49 @@ timeout can pass `--dismiss-output <value>`; dismissal then prints that value an
 subscribers; the waiting reporter — a harness input hook or a plugin watcher — delivers the
 text into the running agent's turn. It is fire-and-forget (no verdict to wait for) and is the
 CLI side of the SDK's `client.agents.connect(...).send(text)`.
+
+`agent report --agent <id> session-id --id <harness-session-id>` is the status-less report
+that stores the harness's own conversation id (Claude Code's session id, opencode's session
+id) so a crash/update resume continues the latest conversation; report it again whenever
+the harness switches sessions. Every report reads `PRAGMA_AGENT_RUN_ID` and carries it as
+`agentRunId`, so the host can attribute the id to the exact tracked run and reject a stale
+report from a superseded one. `session-id` is deliberately distinct from `session-name`:
+one stores the resume pointer, the other renames the tab.
+
+`session-id --clear` (mutually exclusive with `--id`, exactly one required) sends
+`clearHarnessSessionId: true` instead: the harness started a new, not-yet-materialized
+session (Pi) or the selected conversation was deleted (OpenCode), so the stored id must be
+forgotten and nothing may auto-resume it. Clearing wins over an id in the same report, is
+scoped to the run the report carries (`agentRunId`), and a stale run's clear cannot touch a
+newer one.
+
+`agent run --run-id <id> -- <argv…>` is the supervisor a tracked launch runs under (the
+host wraps a resume-capable agent's argv with it in `prepareAgentLaunch`); it is not meant
+to be run by hand. It inherits the terminal (the child owns stdin/stdout/stderr), sets
+`PRAGMA_AGENT_RUN_ID` in the child's environment, and exits with the child's code.
+
+Its host protocol is strict in three places. **The host must authorize the start before
+the child exists**: `startRun` has to succeed (a stale, closed, or session-less run id is
+rejected) or the child is never executed and the failure is surfaced. That reply also
+carries `env`, resolved from the record's saved account references; the wrapper applies it
+to the child directly, so the execution runs under the account the launch was prepared
+with even if the shell's spawn-time env timed out or a binding moved. The reply also
+carries the authorizing `serverBootId`, which the wrapper echoes on `finishRun`: a
+previous boot's late end report is rejected as stale instead of ending the record the
+restarted host is about to resume. **`finishRun` after the child's real exit is the only
+end signal** — never a cleared status or a watcher exiting. And **only an ordinary (code) exit is journaled, before the finish report is
+attempted**: the wrapper writes `agent-completions/<run-id>` (exit code as text,
+temp+rename, synced) first, so a host that dies mid-retry still sees the end. A signal
+death is deliberately never journaled — SIGHUP is what a killed host's terminal hangup
+delivers, and journaling it would suppress the recovery that should happen — and the
+wrapper exits with `128 + signal` so the cause reaches the shell. The server replays the
+journal before reconciling interrupted runs, and again immediately before a restore
+rotates an execution.
+
+On Unix it catches SIGINT/SIGTERM/SIGHUP so a Ctrl-C aimed at the agent's process group
+cannot kill the supervisor before it reports the exit; the child keeps default
+dispositions, so the TUI still receives Ctrl-C. Lifecycle reports are timeout-bounded and
+retry transient failures briefly; a stale run id is final and never retried.
 
 `agent verify` discovers the local gateway, launches fresh real-agent sessions from the
 plugin catalog, drives question/decision/abort scenarios over HTTP, and strictly parses
@@ -189,7 +238,8 @@ The CLI reads `PRAGMA_SERVER_SOCKET` first, falling back to the legacy
 `PRAGMA_DAEMON_SOCKET` during the transition. It also reads `PRAGMA_TAB_ID` and
 `PRAGMA_WORKTREE_ID`, connects to the existing `pragma-server` Unix socket,
 reads the `Hello` frame, writes one `AgentReport` frame, and exits after the
-frame is sent.
+frame is sent. `agent run` uses the same connection setup but speaks the `tabs`
+RPC (`startRun`/`finishRun`) around the supervised child.
 
 ## Staging
 

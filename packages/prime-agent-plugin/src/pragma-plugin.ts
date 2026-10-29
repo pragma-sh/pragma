@@ -14,6 +14,11 @@ export const primeAgentPlugin = createPiPragmaPlugin({
     name: "Prime Agent",
     iconPath: "assets/prime-butterfly.svg",
     command: ["prime-agent", "--no-session"],
+    // No `resumeFlag`: `--no-session` makes the session client-owned (which is
+    // what lets the daemon worker receive PRAGMA_* and report status), and that
+    // session lives only in memory — `prime-agent --resume <id>` resolves saved
+    // session files, and dropping `--no-session` to persist one would run a
+    // resident daemon session whose env is stripped of PRAGMA_*. See AGENTS.md.
     modelListCommand:
       'prime-agent model list 2>&1 || fnm exec --using default -- prime-agent model list 2>&1 || "$HOME/.bun/bin/prime-agent" model list 2>&1 || "${SHELL:-/bin/sh}" -lc \'prime-agent model list\' 2>&1',
     excludeFeatures: ["questions", "commandApproval", "subagents", "usageLimits"],

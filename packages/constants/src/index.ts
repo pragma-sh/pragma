@@ -58,6 +58,8 @@ export type {
   AgentAnswer,
   AgentInput,
   AgentInterrupt,
+  AgentLaunchSelection,
+  AgentResumeRequest,
   Tab,
   TabKind,
   DirEntry,

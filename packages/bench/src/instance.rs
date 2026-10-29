@@ -9,7 +9,6 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -30,9 +29,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How often progress is printed while waiting for a build.
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(15);
-
-/// Ceiling on the pre-flight connect that tests whether Vite's port is taken.
-const PORT_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Pause after asking the window to reload, before probing whether it is back.
 const RELOAD_SETTLE: Duration = Duration::from_secs(2);
@@ -86,8 +82,6 @@ impl DevInstance {
                     .to_string(),
             ));
         }
-        check_dev_port_free(&options.repo_root)?;
-
         let channel = pragma_protocol::dev_channel(&options.repo_root);
         let app_data_dir = app_data_dir()?;
         let socket = PragmaClient::new_local(LocalServerConfig::new(
@@ -410,9 +404,8 @@ impl Drop for DevInstance {
         // `kill_tree` reaches one generation on Unix (`pkill -P`), and this tree
         // is four deep: `bun run dev` → `bash -c` → `tauri dev` → the app, with
         // Vite alongside. Killing the supervisor reparents the rest to init,
-        // where they keep holding Vite's port — and the next run then refuses to
-        // start with "port 1420 is already in use", blaming a dev server the
-        // previous run was supposed to have taken with it.
+        // where they keep holding resources and repainting terminals after the
+        // previous run was supposed to have taken them with it.
         //
         // Leaves first, root last: `kill` prints "No such process" for a pid
         // that is already gone, so killing the supervisor first would fill the
@@ -523,55 +516,6 @@ fn reload_window(driver: &Driver) -> BenchResult<()> {
     })
 }
 
-/// Fails fast when another dev server already holds Vite's port.
-///
-/// Two `bun run dev` instances cannot coexist: `devUrl` pins a single port, so
-/// the second one's Vite exits and Tauri kills the build with
-/// `The "beforeDevCommand" terminated with a non-zero status code`. Without this
-/// check that shows up as a five-minute wait followed by "the dev instance
-/// exited", which names neither the cause nor the fix.
-fn check_dev_port_free(repo_root: &Path) -> BenchResult<()> {
-    let Some(port) = dev_url_port(repo_root) else {
-        return Ok(());
-    };
-    if port_is_served(port) {
-        return Err(BenchError::Setup(format!(
-            "port {port} is already in use, so a second dev server cannot start — \
-             quit the running `bun run dev` (or the dev app) and try again"
-        )));
-    }
-    Ok(())
-}
-
-/// Whether something answers on `port`, on either IP stack.
-///
-/// Connecting rather than binding, and on both loopback addresses: Vite listens
-/// on `localhost`, which macOS resolves to `::1` first, so a bind test against
-/// `127.0.0.1` alone happily succeeds while the port is very much taken.
-fn port_is_served(port: u16) -> bool {
-    const LOOPBACKS: [IpAddr; 2] = [
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(Ipv6Addr::LOCALHOST),
-    ];
-    LOOPBACKS.iter().any(|address| {
-        TcpStream::connect_timeout(&SocketAddr::new(*address, port), PORT_PROBE_TIMEOUT).is_ok()
-    })
-}
-
-/// The port `tauri.conf.json` expects Vite on. Read rather than hard-coded, so
-/// the benchmark cannot disagree with the config the build actually uses.
-fn dev_url_port(repo_root: &Path) -> Option<u16> {
-    let config = repo_root
-        .join("apps")
-        .join("pragma")
-        .join("src-tauri")
-        .join("tauri.conf.json");
-    let contents = fs::read_to_string(config).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    let url = value.pointer("/build/devUrl")?.as_str()?;
-    url.rsplit(':').next()?.trim_end_matches('/').parse().ok()
-}
-
 /// The OS directory Tauri resolves `appDataDir` to for this app.
 ///
 /// Tauri's rule on the two platforms the benchmark runs on: macOS keeps app
@@ -634,18 +578,5 @@ mod tests {
         // The order Drop reverses, so `tauri dev` must appear before the app.
         assert!(position(30) < position(40), "got {found:?}");
         assert!(position(20) < position(30), "got {found:?}");
-    }
-
-    #[test]
-    fn the_dev_port_comes_from_the_tauri_config() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("the crate sits two levels below the repo root");
-        assert!(
-            dev_url_port(root).is_some(),
-            "tauri.conf.json should still declare build.devUrl with a port"
-        );
-        assert_eq!(dev_url_port(Path::new("/nonexistent")), None);
     }
 }

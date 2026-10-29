@@ -55,7 +55,9 @@ packages/plugin/
   (or an "ask" selection can never remove it). `agentLaunchArgs` and `applySlashCommand`
   are the one implementation the desktop uses; the headless server mirrors them in
   `crates/pragma-server/src/agent_options.rs` from the catalog's resolved args — keep both
-  in step. `slashCommandProvider(builtins, sources, { acp, load })` merges, first name
+  in step. `modelFlagArgs` is the shared `--model <id>` pair for the harnesses that spell
+  their model option that way; a CLI with a different flag (`-m`) keeps its own mapping.
+  `slashCommandProvider(builtins, sources, { acp, load })` merges, first name
   winning: the built-ins, the tool's **ACP** list (`acp: { command }` starts its Agent
   Client Protocol server, opens a session, and reads `available_commands_update` — the
   tool's own list, skills included; `acp-discovery.ts`), a custom `load`, then markdown
@@ -63,6 +65,18 @@ packages/plugin/
   over guessed directories. A command whose TUI syntax differs sets its own `invocation`
   (Codex skills are `$name`). `modeProvider` scans agent profiles. Every step runs through
   `sdk.exec` as a POSIX shell script and degrades to nothing on failure.
+- **Resume is opt-in and full-argv.** An agent may declare
+  `launch.resume(request, ctx)` where `AgentResumeRequest` is
+  `{ harnessSessionId, selection, cwd }` — the id its own harness reported through the
+  SDK's `reportSessionId`, the original `AgentLaunchSelection`, and the session's cwd. The
+  callback returns the **complete** argv that resumes that session; the host appends no
+  model/mode/prompt args, so it must rebuild exactly what the original launch selected.
+  `launch.command` stays the fresh-launch argv, and catalog assembly sets
+  `CatalogAgent.supportsResume` only when the callback exists (an agent without it cannot
+  be resumed). The plugins sidecar rejects an argv that is empty, non-string, or carries
+  NUL/CR/LF before it can reach a shell. A plugin that starts a new conversation (`/new`)
+  before it knows the new id clears the stored pointer with
+  `reportSessionId({ id: null })`; the next known id is reported normally.
 - **`@` prompt context is one format everywhere.** `defineContextProvider` declares a
   source (`search` → items with `displayName`/`searchText`, `resolve` → text); the desktop
   merges plugin providers after its built-ins (`apps/pragma/src/lib/builtin-context-providers.ts`:

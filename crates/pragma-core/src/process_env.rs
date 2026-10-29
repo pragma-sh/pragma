@@ -43,13 +43,7 @@ pub fn find_executable(program: &str) -> Option<PathBuf> {
 /// (which can also be WSL's launcher).
 #[must_use]
 pub fn resolve_program(program: &str) -> Option<PathBuf> {
-    if let Some(path) = find_executable(program) {
-        return Some(path);
-    }
-    if cfg!(windows) && program == "sh" {
-        return pragma_platform::shell::find_git_bash();
-    }
-    None
+    pragma_platform::shell::resolve_program(program, &user_path())
 }
 
 /// Creates a `git` command with optional locks disabled.
@@ -100,25 +94,10 @@ fn user_path_from(current: &OsStr, home: Option<&Path>) -> OsString {
         push_path(&mut entries, home.join(".local/share/mise/shims"));
         push_path(&mut entries, home.join(".asdf/shims"));
         push_path(&mut entries, home.join(".local/share/pnpm"));
+    }
 
-        if cfg!(windows) {
-            // Windows puts per-user tools somewhere else entirely. A default Node
-            // install writes npm's global shims (`claude.cmd`, `opencode.cmd`, …)
-            // to `%APPDATA%\npm`, and winget/scoop shims live in their own dirs;
-            // none of them are on a GUI-launched host's PATH.
-            push_path(
-                &mut entries,
-                home.join("AppData").join("Roaming").join("npm"),
-            );
-            push_path(
-                &mut entries,
-                home.join("AppData")
-                    .join("Local")
-                    .join("Microsoft")
-                    .join("WindowsApps"),
-            );
-            push_path(&mut entries, home.join("scoop").join("shims"));
-        }
+    for path in pragma_platform::shell::user_tool_paths(home) {
+        push_path(&mut entries, path);
     }
 
     for path in [
@@ -197,23 +176,6 @@ mod tests {
         assert_eq!(pick(None, None), None);
     }
 
-    /// The user's home directory, however this platform spells it.
-    ///
-    /// Windows per-user tool directories are rooted at `USERPROFILE`, so they are
-    /// appended on every platform from the same `home` — a GUI-launched host on
-    /// Windows does not inherit the `PATH` an interactive shell would build.
-    #[cfg(windows)]
-    #[test]
-    fn user_path_includes_windows_tool_directories() {
-        let path = user_path_from(
-            &OsString::from(r"C:\Windows\system32"),
-            Some(Path::new(r"C:\Users\dev")),
-        );
-        let entries: Vec<PathBuf> = env::split_paths(&path).collect();
-        assert!(entries.contains(&PathBuf::from(r"C:\Users\dev\AppData\Roaming\npm")));
-        assert!(entries.contains(&PathBuf::from(r"C:\Users\dev\scoop\shims")));
-    }
-
     #[test]
     fn user_path_does_not_duplicate_entries() {
         let path = user_path_from(
@@ -237,6 +199,7 @@ mod tests {
         let executable = dir.path().join("agent");
         std::fs::write(&executable, format!("touch {}", marker.display()))
             .expect("seed executable candidate");
+        pragma_platform::perms::set_executable(&executable).expect("executable");
 
         assert_eq!(
             pragma_platform::shell::find_on_path_in("agent", dir.path().as_os_str()),

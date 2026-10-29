@@ -10,6 +10,7 @@ function harness() {
     cleared: vi.fn(async () => void events.push("cleared")),
     message: vi.fn(async () => {}),
     sessionName: vi.fn(async (name: string) => void events.push(`sessionName:${name}`)),
+    sessionId: vi.fn(async (id: string | null) => void events.push(`sessionId:${id ?? "null"}`)),
   };
   return { events, lifecycle: new PiLifecycleReporter(reporter) };
 }
@@ -83,5 +84,101 @@ describe("PiLifecycleReporter", () => {
     await lifecycle.clear();
     await lifecycle.nameSessionFromPrompt("Second session");
     expect(events).toEqual(["sessionName:First session", "cleared", "sessionName:Second session"]);
+  });
+});
+
+/** A session whose file Pi has written: its id is a resumable locator. */
+const materialized = (id: string) => ({ id, locator: id });
+/** A session Pi has not written yet: it has no resumable locator. */
+const pending = (id: string) => ({ id, locator: null });
+
+describe("PiLifecycleReporter session identity", () => {
+  it("reports each identity transition, including a return to a previous session", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(materialized("b"));
+    await lifecycle.identifySession(materialized("a"));
+    expect(events).toEqual(["sessionId:a", "sessionId:b", "sessionId:a"]);
+  });
+
+  it("keeps same-title sessions distinct by identity", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.nameSessionFromPrompt("Deploy the release");
+    await lifecycle.clear();
+    await lifecycle.identifySession(materialized("b"));
+    await lifecycle.nameSessionFromPrompt("Deploy the release");
+    expect(events).toEqual([
+      "sessionId:a",
+      "sessionName:Deploy the release",
+      "cleared",
+      "sessionId:b",
+      "sessionName:Deploy the release",
+    ]);
+  });
+
+  it("clears the stored conversation when the session changes to one with no file yet", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(pending("b"));
+    expect(events).toEqual(["sessionId:a", "sessionId:null"]);
+  });
+
+  it("does not clear again while the same pending session is observed", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(pending("b"));
+    await lifecycle.identifySession(pending("b"));
+    await lifecycle.identifySession(pending("b"));
+    expect(events).toEqual(["sessionId:a", "sessionId:null"]);
+  });
+
+  it("reports the id once the pending session's file materializes", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(pending("b"));
+    await lifecycle.identifySession(materialized("b"));
+    expect(events).toEqual(["sessionId:a", "sessionId:null", "sessionId:b"]);
+  });
+
+  it("never clears a known id when the same session's file is not found", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(pending("a"));
+    await lifecycle.identifySession(pending("a"));
+    expect(events).toEqual(["sessionId:a"]);
+  });
+
+  it("keeps the known id across a generic clear or shutdown", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.clear();
+    await lifecycle.identifySession(pending("a"));
+    await lifecycle.identifySession(materialized("a"));
+    expect(events).toEqual(["sessionId:a", "cleared"]);
+  });
+
+  it("reports a switch back to a previously seen session once it materializes", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.identifySession(materialized("a"));
+    await lifecycle.identifySession(pending("b"));
+    await lifecycle.identifySession(materialized("a"));
+    expect(events).toEqual(["sessionId:a", "sessionId:null", "sessionId:a"]);
+  });
+
+  it("reports Pi's own session name and lets it win over the prompt fallback", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.nameSession("Native name");
+    await lifecycle.nameSessionFromPrompt("Prompt line");
+    expect(events).toEqual(["sessionName:Native name"]);
+  });
+
+  it("lets the prompt name the session again once Pi clears its own name", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.nameSession("Native name");
+    await lifecycle.nameSession(undefined);
+    await lifecycle.nameSessionFromPrompt("Prompt line");
+    expect(events).toEqual(["sessionName:Native name", "sessionName:Prompt line"]);
   });
 });

@@ -107,6 +107,25 @@ opening turn, before grok has summarized anything. The name is reported only whe
 changes, so the tab is renamed once per title — typically once from the prompt, then once
 to grok's title when the first turn ends. Pragma preserves a manual tab rename regardless.
 
+## Session resume
+
+`report.sh` reports the harness session id (`pragma-cli agent report --agent grok
+session-id --id <sessionId>`) whenever the tab's session changes: on `SessionStart` (a new
+session, or a saved one reopened with `--resume` / `--continue` / the `/resume` picker)
+and on the first prompt that pins a session. The id comes from the payload's `sessionId`,
+falling back to `GROK_SESSION_ID`, and is reported only when it differs from the last
+reported one — a switch back to an earlier session (A -> B -> A) reports again, while a
+same-session prompt stays silent. Both events pass the existing parent pin first, so a
+subagent's own session id and a delayed `SessionEnd` from a superseded session are dropped
+before they can report or clear the tab.
+
+`launch.resume` returns the full literal argv `grok <model/reasoning/permission flags>
+--resume <session-id>`. Verified against `grok --help` on 1.0.62: `-r, --resume
+[<SESSION_ID_OR_TITLE>]` resumes by id (a UUID-shaped value is always an id), and without
+`--fork-session` the original session id is reused, so the id reported at launch remains
+the one to resume. The callback owns the whole argv — the host appends nothing — so it
+rebuilds the stored selection's flags itself.
+
 ## Assistant message streaming
 
 Grok records one `agent_message_chunk` per streamed delta in `updates.jsonl`. The

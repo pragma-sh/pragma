@@ -291,7 +291,7 @@
     "buttonLabel": "Install Update",
     "changelogLabel": "View changelog",
     "restartWarningTitle": "This update restarts the app server",
-    "restartWarningBody": "Pragma will close all open tabs and stop their terminal sessions, then relaunch. Save anything you need before installing.",
+    "restartWarningBody": "Pragma preserves your workspace across the relaunch. Terminals reconnect to sessions still running, eligible interrupted agent sessions resume, and plain shells start fresh.",
     "applyModes": [
       "reload",
       "restart"

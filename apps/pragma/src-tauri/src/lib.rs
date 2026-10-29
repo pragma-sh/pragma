@@ -5,6 +5,7 @@ mod accounts;
 mod agent_cli;
 mod agent_events;
 mod agent_notifications;
+mod agent_sessions;
 mod agent_sounds;
 mod ai;
 mod automations;
@@ -1136,28 +1137,6 @@ fn close_tab_record(app: &tauri::AppHandle, db: &Db, hosts: &Hosts, tab: &Tab) -
     db.delete_tab(&tab.id)
 }
 
-/// Closes every tab in every project, so a restart update relaunches into a
-/// clean workspace instead of reviving tabs whose sessions died with the app.
-/// Best effort per tab: one tab that fails to close never keeps the rest open.
-pub(crate) fn close_all_tabs(app: &tauri::AppHandle) {
-    let db = app.state::<Db>();
-    let hosts = app.state::<Hosts>();
-    let tabs = match db.list_all_tabs() {
-        Ok(tabs) => tabs,
-        Err(error) => {
-            eprintln!("update: could not list tabs to close: {error}");
-            return;
-        }
-    };
-    for tab in &tabs {
-        if let Err(error) = close_tab_record(app, &db, &hosts, tab) {
-            eprintln!("update: could not close tab {}: {error}", tab.id);
-        }
-    }
-    app.state::<workspace_mirror::WorkspacePublisher>()
-        .trigger();
-}
-
 #[tauri::command]
 fn rename_tab(
     db: tauri::State<'_, Db>,
@@ -1579,6 +1558,9 @@ pub fn run() {
             rename_tab,
             set_tab_title,
             set_tab_agent,
+            agent_sessions::prepare_agent_launch,
+            agent_sessions::restore_agent_session,
+            agent_sessions::session_restore_status,
             set_tab_url,
             list_splits,
             set_split_layout,

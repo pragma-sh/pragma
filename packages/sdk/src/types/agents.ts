@@ -66,6 +66,12 @@ export interface AgentEvent {
   status?: AgentStatus | null;
   /** Session display name last reported by the agent, when present. */
   sessionName?: string | null;
+  /** Opaque harness session id last reported by the agent, when present. */
+  harnessSessionId?: string | null;
+  /** Opaque Pragma run id carried by the report, when present. */
+  agentRunId?: string | null;
+  /** True when the report explicitly cleared the stored harness session id. */
+  clearHarnessSessionId?: boolean | null;
   attentionKind: AgentAttentionKind | null;
   /** The command awaiting approval when `attentionKind` is `command`. */
   command?: string | null;
@@ -140,6 +146,22 @@ export type ReportSessionNameOptions = Omit<ReportOptions, "kind"> & {
   /** The session's human-readable display name. */
   name: string;
 };
+
+/** Options for {@link reportSessionId}: the harness's own session id plus routing. */
+export interface ReportSessionIdOptions {
+  agent: string;
+  /**
+   * The harness's opaque session id for its active session, or `null` when the
+   * harness started a new conversation and has not reported its id yet — that
+   * explicitly clears the stored id so a resume cannot continue the previous
+   * conversation. An empty string makes no statement.
+   */
+  id: string | null;
+  worktreeId?: string;
+  client?: import("../client").PragmaClient;
+  env?: Record<string, string | undefined>;
+  signal?: AbortSignal;
+}
 
 export type ReportMessageOptions = Omit<ReportOptions, "kind"> & {
   message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId"> &

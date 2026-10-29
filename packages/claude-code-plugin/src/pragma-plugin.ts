@@ -1,11 +1,15 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
   type AccountIdentity,
   modeProvider,
+  modelFlagArgs,
   slashCommandProvider,
+  type AgentArgsBuilder,
   type AgentMode,
+  type AgentPermissionMode,
   type PluginContext,
   type PluginDefinition,
   type UsageLimit,
@@ -59,6 +63,30 @@ const HIDDEN_AGENTS = new Set(["statusline-setup"]);
  */
 const AGENT_PROBE = "claude -p --agent __pragma_list_agents__ ok 2>&1";
 
+/** Permission modes; the first (`auto`) is the launch default every launch applies. */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "auto", name: "Auto", description: "Classifier approves safe actions" },
+  { id: "manual", name: "Ask before actions" },
+  { id: "acceptEdits", name: "Accept edits" },
+  { id: "plan", name: "Plan mode", description: "Read-only planning" },
+  { id: "dontAsk", name: "Don't ask", description: "Deny anything not pre-approved" },
+  { id: "bypassPermissions", name: "Bypass permissions" },
+];
+
+/**
+ * The option builders a launch and a resume share. `--resume` is a top-level
+ * flag and `--model`, `--effort`, `--permission-mode`, and `--agent` are all
+ * top-level options (verified against `claude --help`, 2.1.302), so a resume
+ * replays the launch flags unchanged. Modes are asynchronous, so only an
+ * explicitly selected one is replayed.
+ */
+const AGENT_ARGS: AgentArgsBuilder = {
+  model: modelFlagArgs,
+  reasoning: (reasoningId: string) => ["--effort", reasoningId],
+  permissionMode: (permissionModeId: string) => ["--permission-mode", permissionModeId],
+  mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
+};
+
 /**
  * Pragma plugin for Claude Code, bundled to `dist/pragma-plugin.mjs` and loaded
  * by the pragma-plugins sidecar, the desktop webview, and the `pragma-watch`
@@ -106,7 +134,22 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       name: "Claude Code",
       icon: () => null,
       iconPath: "assets/claude-code.svg",
-      launch: { command: ["claude"] },
+      launch: {
+        command: ["claude"],
+        // `claude --resume <id>` reopens exactly that session id. The resumed
+        // session keeps its own conversation, so only the launch flags are
+        // replayed (the default `--permission-mode auto` included) and the
+        // original slash command/prompt are not.
+        resume: ({ harnessSessionId, selection }) => [
+          "claude",
+          "--resume",
+          harnessSessionId,
+          ...agentLaunchArgs(
+            { args: AGENT_ARGS, modes: [], permissionModes: PERMISSION_MODES },
+            selection,
+          ),
+        ],
+      },
       // `claude --model` takes aliases that always resolve to the newest model in
       // the family; `canonicalId` names that model so auto mode can find its
       // benchmarks. Update it when an alias moves to a new release.
@@ -137,14 +180,7 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
         },
       ],
       // First entry is the default: `auto` keeps unattended launches moving.
-      permissionModes: [
-        { id: "auto", name: "Auto", description: "Classifier approves safe actions" },
-        { id: "manual", name: "Ask before actions" },
-        { id: "acceptEdits", name: "Accept edits" },
-        { id: "plan", name: "Plan mode", description: "Read-only planning" },
-        { id: "dontAsk", name: "Don't ask", description: "Deny anything not pre-approved" },
-        { id: "bypassPermissions", name: "Bypass permissions" },
-      ],
+      permissionModes: PERMISSION_MODES,
       // `--agent` starts the session as one of the user's or project's agents.
       modes: loadClaudeAgents,
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES),
@@ -156,12 +192,7 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       // (`questions` stays enabled), but approvals are only exercisable when
       // a permission prompt actually fires, which the auto launch prevents.
       excludeFeatures: ["commandApproval"],
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: (reasoningId: string) => ["--effort", reasoningId],
-        permissionMode: (permissionModeId: string) => ["--permission-mode", permissionModeId],
-        mode: (modeId: string) => (modeId === DEFAULT_MODE ? [] : ["--agent", modeId]),
-      },
+      args: AGENT_ARGS,
     }),
   ],
 });

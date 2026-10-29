@@ -150,6 +150,21 @@ impl OutputCoalescer {
     }
 }
 
+/// The shell launch a session in `cwd` would resolve: the caller's profile
+/// wins, then the project's `terminal` block, then the global one, then the
+/// shipped default. Shared with launch preparation, so a command line quoted
+/// before the session exists matches the one it will actually run.
+pub(crate) fn resolve_session_shell(
+    cwd: &str,
+    requested_shell: Option<ShellProfile>,
+) -> shell::ShellLaunch {
+    let scopes = terminal_scopes(cwd);
+    let profile = requested_shell
+        .or_else(|| configured_profile(&scopes))
+        .unwrap_or_else(shell::default_profile);
+    shell::resolve_profile_launch(&profile, configured_shell(&scopes).as_deref())
+}
+
 pub struct Session {
     id: String,
     worktree_id: String,
@@ -157,6 +172,12 @@ pub struct Session {
     /// Absolute path the shell was launched from. Used to identify which
     /// sessions to terminate when their worktree is deleted on disk.
     cwd: String,
+    /// The shell program this session actually runs. A command typed into the
+    /// session has to be quoted the way *this* program parses it — resolving
+    /// the shell again at write time can disagree with the spawn (a project
+    /// `terminal.shell` override, a WSL backend, a platform default), and the
+    /// wrong quoting mangles every argument.
+    shell_program: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Option<PtyChild>>,
@@ -240,11 +261,8 @@ impl Session {
         })?;
         // The shell the caller picked wins; otherwise the project's `terminal`
         // block decides, then the global one, then the shipped default.
-        let scopes = terminal_scopes(&cwd);
-        let profile = requested_shell
-            .or_else(|| configured_profile(&scopes))
-            .unwrap_or_else(shell::default_profile);
-        let launch = shell::resolve_profile_launch(&profile, configured_shell(&scopes).as_deref());
+        let launch = resolve_session_shell(&cwd, requested_shell);
+        let shell_program = launch.program.clone();
         let mut command = CommandBuilder::new(&launch.program);
         command.args(&launch.args);
         command.cwd(&cwd);
@@ -282,6 +300,7 @@ impl Session {
             worktree_id,
             root_pid,
             cwd,
+            shell_program,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             child: Mutex::new(Some(child)),
@@ -614,6 +633,12 @@ impl Session {
     }
 
     /// Returns worktree owning this terminal session.
+    /// The shell program this session runs; command lines typed into it are
+    /// quoted for exactly this program.
+    pub fn shell_program(&self) -> &str {
+        &self.shell_program
+    }
+
     pub fn worktree_id(&self) -> &str {
         &self.worktree_id
     }
@@ -1320,7 +1345,7 @@ fn shell_in(terminal: Option<&serde_json::Value>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn pragma_cli_path() -> Option<PathBuf> {
+pub(crate) fn pragma_cli_path() -> Option<PathBuf> {
     // The desktop that spawned us knows exactly where it installed the helper —
     // it wrote the file — so trust that over re-deriving the layout. Deriving is
     // how Windows lost the helper entirely: a GUI-launched server has

@@ -1,9 +1,14 @@
 import {
+  agentLaunchArgs,
   defineAccounts,
   defineAgent,
   definePlugin,
+  modelFlagArgs,
   slashCommandProvider,
+  type AgentArgsBuilder,
   type AgentModelEntry,
+  type AgentPermissionMode,
+  type AgentResumeRequest,
   type PluginContext,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
@@ -32,6 +37,43 @@ const baseWatcher = createTuiWatcher({
   questionFinalizeKeys: "\r",
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
+
+/**
+ * Permission modes; the first, `default`, passes no flag so Grok's own config
+ * decides.
+ */
+const PERMISSION_MODES: AgentPermissionMode[] = [
+  { id: "default", name: "Use Grok config" },
+  { id: "acceptEdits", name: "Accept edits" },
+  { id: "auto", name: "Auto" },
+  { id: "plan", name: "Plan mode" },
+  { id: "dontAsk", name: "Don't ask" },
+  { id: "bypassPermissions", name: "Bypass permissions" },
+];
+
+/** Launch flags for a model/reasoning/permission selection. */
+const grokArgs: AgentArgsBuilder = {
+  model: modelFlagArgs,
+  reasoning: (reasoningId: string) => ["--reasoning-effort", reasoningId],
+  permissionMode: (permissionModeId: string) =>
+    permissionModeId === "default" ? [] : ["--permission-mode", permissionModeId],
+};
+
+/**
+ * Builds the full literal argv for resuming a recorded Grok session: the base
+ * command, the stored selection's model/reasoning/permission flags, and
+ * `--resume <session-id>`. Verified against `grok --help` (`-r, --resume
+ * [<SESSION_ID_OR_TITLE>]`): a UUID-shaped value is always an id, and a resume
+ * reuses the original session id unless `--fork-session` is passed.
+ */
+export function grokResume(request: AgentResumeRequest, _ctx: PluginContext): string[] {
+  return [
+    "grok",
+    ...agentLaunchArgs({ args: grokArgs, permissionModes: PERMISSION_MODES }, request.selection),
+    "--resume",
+    request.harnessSessionId,
+  ];
+}
 
 /** Grok built-ins worth starting a session with; skills and commands are discovered. */
 const BUILTIN_SLASH_COMMANDS = [
@@ -114,31 +156,18 @@ export const grokAgentPlugin: PluginDefinition = definePlugin({
       name: "Grok",
       icon: () => null,
       iconPath: "assets/grok.svg",
-      launch: { command: ["grok"] },
+      launch: { command: ["grok"], resume: grokResume },
       prefillDelayMs: PREFILL_DELAY_MS,
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: loadGrokModels,
-      // First entry is the default: no flag, so Grok's own config decides.
-      permissionModes: [
-        { id: "default", name: "Use Grok config" },
-        { id: "acceptEdits", name: "Accept edits" },
-        { id: "auto", name: "Auto" },
-        { id: "plan", name: "Plan mode" },
-        { id: "dontAsk", name: "Don't ask" },
-        { id: "bypassPermissions", name: "Bypass permissions" },
-      ],
+      permissionModes: PERMISSION_MODES,
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["grok", "agent", "stdio"] },
       }),
       // `commandApproval`: grok has no permission-request hook to block on.
       excludeFeatures: ["commandApproval"],
-      args: {
-        model: (modelId: string) => ["--model", modelId],
-        reasoning: (reasoningId: string) => ["--reasoning-effort", reasoningId],
-        permissionMode: (permissionModeId: string) =>
-          permissionModeId === "default" ? [] : ["--permission-mode", permissionModeId],
-      },
+      args: grokArgs,
     }),
   ],
 });

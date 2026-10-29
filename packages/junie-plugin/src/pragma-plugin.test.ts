@@ -1,7 +1,8 @@
+import type { PluginContext } from "@pragma-sh/plugin/catalog";
 import { describe, expect, it } from "vitest";
 
 import { collectAgentText, findResponse } from "./acp";
-import { parseJunieModels } from "./pragma-plugin";
+import { junieResume, parseJunieModels } from "./pragma-plugin";
 
 /** A trimmed `session/new` result in the shape Junie 26.8.3 answers with. */
 const SESSION_RESULT = {
@@ -78,5 +79,41 @@ describe("collectAgentText", () => {
       '{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Balance left: $1.00"}}}}',
     ].join("\n");
     expect(collectAgentText(stdout)).toBe("License: XBalance left: $1.00");
+  });
+});
+
+describe("junieResume", () => {
+  const ctx = {} as unknown as PluginContext;
+
+  it("builds the full literal argv with the stored selection's flags", () => {
+    expect(
+      junieResume(
+        {
+          harnessSessionId: "session-260806-104937-1ja5",
+          selection: {
+            modelId: "gemini-3-flash-preview",
+            reasoningId: "low",
+            permissionModeId: "brave",
+          },
+          cwd: "/repo",
+        },
+        ctx,
+      ),
+    ).toEqual([
+      "junie",
+      "--model",
+      "gemini-3-flash-preview",
+      "--effort",
+      "low",
+      "--brave",
+      "--session-id",
+      "session-260806-104937-1ja5",
+    ]);
+  });
+
+  it("resumes bare when no selection was stored", () => {
+    expect(
+      junieResume({ harnessSessionId: "session-x", selection: {}, cwd: "/repo" }, ctx),
+    ).toEqual(["junie", "--session-id", "session-x"]);
   });
 });

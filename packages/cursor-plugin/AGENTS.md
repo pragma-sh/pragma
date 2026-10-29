@@ -67,14 +67,34 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 
 ## Hook → status mapping
 
-| Cursor hook          | `report.sh` arg | Reports                                                                   |
-| -------------------- | --------------- | ------------------------------------------------------------------------- |
-| `sessionStart`       | `cleared`       | `cleared` (fresh session; clears stale dots)                              |
-| `sessionEnd`         | `cleared`       | `cleared`                                                                 |
-| `beforeSubmitPrompt` | `started`       | `started` + user prompt message; first prompt also derives `session-name` |
-| `afterAgentResponse` | `response`      | Assistant response message                                                |
-| `stop`               | `stopped`       | `stopped`; `cleared` when Cursor reports `aborted` or `error`             |
-| `postToolUse`        | `running`       | `started` **iff** turn marker exists (clears stale red)                   |
+| Cursor hook          | `report.sh` arg | Reports                                                                                            |
+| -------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `sessionStart`       | `cleared`       | `session-id` (from `conversation_id`) + `cleared` (fresh session)                                  |
+| `sessionEnd`         | `cleared`       | `cleared` only; a leaving session never repoints the tab's conversation                            |
+| `beforeSubmitPrompt` | `started`       | `started` + user prompt message; re-asserts `session-id`; first prompt also derives `session-name` |
+| `afterAgentResponse` | `response`      | Assistant response message                                                                         |
+| `stop`               | `stopped`       | `stopped`; `cleared` when Cursor reports `aborted` or `error`                                      |
+| `postToolUse`        | `running`       | `started` **iff** turn marker exists (clears stale red)                                            |
+
+## Session identity and resume
+
+`sessionStart` and `beforeSubmitPrompt` payloads carry Cursor's stable
+`conversation_id` (the CLI mirrors it as `session_id`; verified live against Cursor
+Agent CLI `2026.10.16`, where the id names the persisted chat directory under
+`~/.cursor/chats/<md5(cwd)>/<conversation_id>`). `report.sh` reports it status-lessly
+(`pragma-cli agent report --agent cursor session-id --id <id>`) and deduplicates repeats
+of the last id — A→B→A reports each switch, repeated turns of one session do not, and a
+session boundary resets the marker so a new process (a resume) reports again even for the
+same id. Only `sessionStart` and `beforeSubmitPrompt` report: a `sessionEnd` that arrives
+late must never repoint the tab at the conversation it left. Extraction falls back to a
+sed scrape, so identity reporting works without python3.
+
+`launch.resume` returns `["cursor-agent", "--approve-mcps", "--resume", <chatId>, …]`.
+`--resume [chatId]` takes the id verbatim (verified in the CLI's own chat-command source;
+`cursor-agent resume` without an id is the interactive "latest" form, and the fork
+message tells users to run `agent --resume <sessionId>`). The callback owns the full
+argv — the host appends no model, mode, or prompt args — so it replays the recorded
+launch selection (`--model`, `--mode`, `--force`).
 
 ## Command approval is unsupported
 

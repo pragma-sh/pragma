@@ -11,6 +11,10 @@ tab="${PRAGMA_TAB_ID:-unknown}"
 state_prefix="${TMPDIR:-/tmp}/pragma-cli-${agent}-${tab}"
 marker="${state_prefix}.active"
 session_name_marker="${state_prefix}.named"
+# The harness session id last reported to Pragma, so a session start or switch
+# reports it exactly once -- including a switch back to an earlier session
+# (A -> B -> A), which a seen-set would wrongly suppress.
+harness_session_file="${state_prefix}.harness-session"
 subagent_dir="${state_prefix}.subagents"
 subagent_count_file="${subagent_dir}/count"
 watcher_file="${state_prefix}.watcher"
@@ -22,6 +26,20 @@ watch_max="${PRAGMA_WATCH_MAX:-86400}"
 
 report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
+}
+
+# Reports the harness's own session id, which Pragma records on the run so a
+# later launch can resume it. Copilot delivers the id on both `sessionStart`
+# and `userPromptSubmitted` (and those two can arrive in either order), so both
+# report it. Deduping against the last *reported* id rather than a seen-set is
+# what keeps a switch back to an earlier session reporting again while a
+# same-session event stays silent.
+report_session_id() {
+  harness_id="$1"
+  [ -n "$harness_id" ] || return 0
+  [ "$(cat "$harness_session_file" 2>/dev/null)" = "$harness_id" ] && return 0
+  report session-id --id "$harness_id"
+  printf '%s' "$harness_id" >"$harness_session_file"
 }
 
 json_string() {
@@ -237,9 +255,19 @@ case "${1:-}" in
       exit 0
     fi
     clear_state
+    report_session_id "$session_id"
     report cleared
     ;;
   session-end)
+    input=$(cat)
+    session_id="$(json_string '.sessionId' "$input")"
+    # `/clear` dispatches the old session's sessionEnd detached: it can land
+    # after the replacement session already started. Only tear down state that
+    # still belongs to the ending session, so a delayed end cannot clear the
+    # new one (or roll the reported session back).
+    if [ -n "$session_id" ] && [ -f "$marker" ] && [ "$(marker_session)" != "$session_id" ]; then
+      exit 0
+    fi
     clear_state
     report cleared
     ;;
@@ -261,6 +289,7 @@ case "${1:-}" in
     # running. If it never starts, a message that lands just before agentStop
     # races Copilot's async transcript flush and is lost entirely.
     [ -n "$session_id" ] && start_transcript_watcher "$transcript" "$token"
+    report_session_id "$session_id"
     report started
     session_name_once "$prompt"
     content_message user "$prompt" "github-copilot-${token}-user"

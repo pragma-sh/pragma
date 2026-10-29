@@ -213,6 +213,66 @@ describe("cursor report.sh", () => {
     expect(messagePayloads()).toEqual(messagesBeforeClear);
   });
 
+  it("reports the conversation id from sessionStart", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "sessionStart", conversation_id: "conv-1" }),
+    });
+    expect(reportCalls()).toEqual([
+      "agent report --agent cursor session-id --id conv-1",
+      "agent report --agent cursor cleared",
+    ]);
+  });
+
+  it("falls back to the CLI's canonical session_id alias", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "sessionStart", session_id: "alias-1" }),
+    });
+    expect(reportCalls()).toEqual([
+      "agent report --agent cursor session-id --id alias-1",
+      "agent report --agent cursor cleared",
+    ]);
+  });
+
+  it("never reports an id for the session that is leaving", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "sessionEnd", conversation_id: "conv-1" }),
+    });
+    expect(reportCalls()).toEqual(["agent report --agent cursor cleared"]);
+  });
+
+  it("re-asserts the conversation id before activity, once per switch", () => {
+    run("started", { stdin: JSON.stringify({ conversation_id: "conv-1", prompt: "Fix auth" }) });
+    run("stopped");
+    run("started", { stdin: JSON.stringify({ conversation_id: "conv-1", prompt: "Next turn" }) });
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent cursor session-id --id conv-1",
+    ]);
+  });
+
+  it("reports a switch back to an earlier conversation", () => {
+    run("started", { stdin: JSON.stringify({ conversation_id: "a" }) });
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "sessionStart", conversation_id: "b" }),
+    });
+    run("started", { stdin: JSON.stringify({ conversation_id: "a" }) });
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent cursor session-id --id a",
+      "agent report --agent cursor session-id --id b",
+      "agent report --agent cursor session-id --id a",
+    ]);
+  });
+
+  it("reports a fresh id after sessionStart even when it matches the last one", () => {
+    run("started", { stdin: JSON.stringify({ conversation_id: "same" }) });
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "sessionStart", conversation_id: "same" }),
+    });
+    expect(reportCalls().filter((call) => call.includes(" session-id "))).toEqual([
+      "agent report --agent cursor session-id --id same",
+      "agent report --agent cursor session-id --id same",
+    ]);
+  });
+
   it("reports command attention with command + requestId only during a turn", () => {
     run("attention-command");
     expect(reportCalls()).toEqual([]);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reportAttention, reportStarted } from "./agents-client";
+import { reportAttention, reportSessionId, reportStarted } from "./agents-client";
 import { PragmaClient } from "./client";
 import { PRAGMA_ENV_KEYS } from "./env";
 
@@ -49,6 +49,191 @@ describe("agents", () => {
       tabId: "tab",
       status: "running",
       attentionKind: null,
+    });
+  });
+
+  it("carries the env run id on a normal status report", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportStarted({
+      agent: "opencode",
+      client,
+      env: {
+        [PRAGMA_ENV_KEYS.tabId]: "tab",
+        [PRAGMA_ENV_KEYS.worktreeId]: "worktree",
+        [PRAGMA_ENV_KEYS.agentRunId]: "run-1",
+      },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "opencode",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: "running",
+      attentionKind: null,
+      agentRunId: "run-1",
+    });
+  });
+
+  it("posts a status-less session id report with the env run id", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportSessionId({
+      agent: "claude-code",
+      id: "sess-1",
+      client,
+      env: {
+        [PRAGMA_ENV_KEYS.tabId]: "tab",
+        [PRAGMA_ENV_KEYS.worktreeId]: "worktree",
+        [PRAGMA_ENV_KEYS.agentRunId]: "run-1",
+      },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "claude-code",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: null,
+      attentionKind: null,
+      harnessSessionId: "sess-1",
+      agentRunId: "run-1",
+    });
+  });
+
+  it("omits the run id when the env has none", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportSessionId({
+      agent: "claude-code",
+      id: "sess-1",
+      client,
+      env: { [PRAGMA_ENV_KEYS.tabId]: "tab", [PRAGMA_ENV_KEYS.worktreeId]: "worktree" },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "claude-code",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: null,
+      attentionKind: null,
+      harnessSessionId: "sess-1",
+    });
+  });
+
+  it("clears the session id when id is null and carries the env run id", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportSessionId({
+      agent: "claude-code",
+      id: null,
+      client,
+      env: {
+        [PRAGMA_ENV_KEYS.tabId]: "tab",
+        [PRAGMA_ENV_KEYS.worktreeId]: "worktree",
+        [PRAGMA_ENV_KEYS.agentRunId]: "run-1",
+      },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "claude-code",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: null,
+      attentionKind: null,
+      clearHarnessSessionId: true,
+      agentRunId: "run-1",
+    });
+  });
+
+  it("clears without a run id when the env has none", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportSessionId({
+      agent: "claude-code",
+      id: null,
+      client,
+      env: { [PRAGMA_ENV_KEYS.tabId]: "tab", [PRAGMA_ENV_KEYS.worktreeId]: "worktree" },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "claude-code",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: null,
+      attentionKind: null,
+      clearHarnessSessionId: true,
+    });
+  });
+
+  it("clears through the AgentsClient method too", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await client.agents.reportSessionId({
+      agent: "claude-code",
+      id: null,
+      env: {
+        [PRAGMA_ENV_KEYS.tabId]: "tab",
+        [PRAGMA_ENV_KEYS.worktreeId]: "worktree",
+        [PRAGMA_ENV_KEYS.agentRunId]: "run-1",
+      },
+    });
+
+    expect(JSON.parse(body)).toEqual({
+      agent: "claude-code",
+      worktreeId: "worktree",
+      tabId: "tab",
+      status: null,
+      attentionKind: null,
+      clearHarnessSessionId: true,
+      agentRunId: "run-1",
     });
   });
 
@@ -138,6 +323,37 @@ describe("agents", () => {
     expect(JSON.parse(body)).toMatchObject({
       options: [{ label: "Postgres", description: "Client-server relational database" }],
     });
+  });
+
+  it("carries a multi-question wizard and omits empty lists", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportAttention({
+      agent: "cursor",
+      client,
+      kind: "question",
+      questions: [
+        { question: "Which database?", options: [{ label: "Postgres" }] },
+        { question: "Which region?" },
+      ],
+      options: [],
+      env: { [PRAGMA_ENV_KEYS.tabId]: "tab", [PRAGMA_ENV_KEYS.worktreeId]: "worktree" },
+    });
+
+    const report = JSON.parse(body) as Record<string, unknown>;
+    expect(report.questions).toEqual([
+      { question: "Which database?", options: [{ label: "Postgres" }] },
+      { question: "Which region?" },
+    ]);
+    expect(report).not.toHaveProperty("options");
   });
 
   it("posts a decision to the decisions route", async () => {

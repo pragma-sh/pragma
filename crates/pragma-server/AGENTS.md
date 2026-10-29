@@ -183,10 +183,89 @@ source of truth: on its next publish it **adopts** headless-created worktrees fr
 (see `adopt_headless_worktrees` in `apps/pragma/src-tauri/src/workspace_mirror.rs`);
 headless tab rows stay ephemeral until then.
 
-`ProtocolRpcMethod::Tabs` currently owns terminal agent metadata only. `setAgent`
-records the agent id and default title in the host snapshot; `listAgents` lets the
-desktop overlay that durable metadata over legacy local tab rows after restart. Do
-not add tab persistence back to the Tauri SQLite shell.
+`ProtocolRpcMethod::Tabs` owns terminal agent metadata and the durable
+agent-session lifecycle. `setAgent` records the agent id and default title in the host
+snapshot; `listAgents` lets the desktop overlay that durable metadata over legacy local
+tab rows after restart; `prepareAgentLaunch`, `restoreAgentSession`, and the CLI-internal
+`startRun`/`finishRun` drive crash/update resume (see below). Do not add tab persistence
+back to the Tauri SQLite shell.
+
+## Durable agent invocations (`invocations.rs`, `agent_resume.rs`)
+
+The `tabs` RPC's read-only `sessionRestoreStatus` returns a boot-scoped progress snapshot
+from `RestoreCoordinator`: attempts, running/completed state, errors, and whether the
+startup pass finished. Outcomes survive subscription races and desktop relaunches for the
+host boot, but are not persisted as recovery identity. Both proactive and on-demand
+restores update it; reading it never starts a restore.
+
+A resume-capable agent launch is **prepared by the owning host before its command is
+written**: `prepareAgentLaunch` records the invocation in SQLite beside the socket
+(`agent-invocations.db`, WAL, owner-only) and returns the argv wrapped in
+`pragma-cli agent run --run-id …` plus `commandLine`, that argv quoted for the shell the
+tab actually runs. A crash or native-update quit resumes the harness conversation the
+agent last reported; the headless launch path uses the same primitive. A pre-versioning
+database is migrated in one transaction, preserving every record's conversation context.
+
+- **One invocation, many executions, ordered by insertion.** The record keeps a stable
+  `invocation_id` and a rotating `run_id`. `latest_for_tab` orders by a monotonic `seq`
+  column, never `updated_at` (second precision would let a random run id decide which
+  launch is current). Every resume rotates to a fresh execution id, so a stale wrapper's
+  report names an id no row carries and is rejected; the record stays `interrupted` until
+  the resumed wrapper's `startRun` acknowledges the child, so a restore whose command
+  never ran is eligible again after the next start.
+- **Only an interrupted, still-open session is restored.** It must have been `active`
+  when its server stopped, carry a harness session id, and its tab must still be mirrored
+  and not tombstoned; `prepared`, `ended`, `superseded`, and closed tabs never restore.
+- **The plugin callback owns the argv.** The sidecar's `launch.resume` result is used
+  verbatim — no model args, startup input, or prompt is appended — and only the wrapped
+  resume command is typed. A missing callback or resume error marks the record `failed`
+  (keeping its harness id and selection for an explicit retry); nothing launches a fresh
+  or latest conversation in its place.
+- **References, never secrets.** The record stores the launch selection (with the
+  effective default mode and permission mode filled in) and the effective account
+  references (provider + account key). Resolution is strict: a failure at prepare,
+  restore, or start is an error, never a fallback to another login; empty references are
+  the explicit default provenance and never re-resolve the current binding.
+- **Session identity is per execution.** A report naming a different run begins with no
+  known conversation. `clearHarnessSessionId: true` (CLI `session-id --clear`; Pi's new
+  session, OpenCode's deleted conversation) wins over an id in the same report, clears
+  only the current execution (or, without a run id, the tab's newest record), is relayed
+  once in the live event, and is never stored as state — later status reports cannot
+  resurrect the cleared id. A status-less report keeps a pending attention payload and
+  does not reapply fanout statuses or notifications.
+- **`startRun` authorizes the execution and hands over the account env.** Before the
+  child exists the wrapper asks the host to authorize: the run id must be current, the
+  tab not tombstoned, and the tab's session still live (the mirror lags desktop tab
+  creation, so the live session is the open evidence; a delayed spawn after close must
+  not launch). The reply is `{ ok, env, serverBootId }`; the env is resolved now from the
+  saved references and the wrapper applies it to the child, so execution matches the
+  prepared account even if the shell's spawn-time env timed out or a binding moved.
+- **Lifecycle reports are bound to the authorizing boot.** `finishRun` carries the
+  boot id from the start reply; a mismatched (previous-boot) report is rejected as stale
+  before the record is touched. That closes the rapid-restart race where a SIGKILLed
+  host's signal-death wrapper keeps retrying `finishRun` under the still-current run id
+  and would otherwise end the record the new boot is about to resume. A legacy report
+  without a token keeps the old semantics.
+- **`ended` only from the supervised child's real exit.** A cleared status or a watcher
+  exiting never closes a record. `kill`, `close_tab`, `kill_for_cwd`, and a session
+  exiting on its own end every live record for the tab before teardown. An ordinary
+  (code) exit is journaled to `agent-completions/<run-id>` (temp+rename, synced)
+  **before** the finish retries, so a host that dies mid-retry still sees it; a signal
+  death is never journaled (SIGHUP is a killed host's hangup, and journaling it would
+  suppress recovery). Startup replays the journal before marking active records
+  interrupted, and a restore replays it again under the gate immediately before
+  rotating; a completion for the current execution aborts the restore.
+- **Restores are serialized per tab and reattach-first.** A live session always wins; a
+  per-tab coordinator makes a second caller wait for the winner's outcome (never a
+  `{restored:false}` that would make the desktop spawn a fresh shell), and a per-tab gate
+  makes revalidate → rotate → spawn → write atomic against a close, kill, session exit,
+  or new launch. Under the gate the record is revalidated and a live session re-checked
+  before rotating, so a delayed follower cannot rotate a live wrapper. `restoreAgentSession`
+  returns `{restored:false}` when nothing is eligible and an RPC error when an eligible
+  record could not resume.
+- **An unopenable store keeps the host up but never lies.** Preparation and restoration
+  fail with the storage cause (`invocation store unavailable: …`); there is no in-memory
+  stand-in that pretends the run is tracked.
 
 ## Automations are project-scoped (`automations.rs`)
 
@@ -400,6 +479,12 @@ click still sees the verdict without making approvals durable state.
 
 Free-form `AgentInput` always uses watcher delivery because each agent owns its TUI-specific
 submit keys and timing.
+
+An agent report may carry `harnessSessionId` (the harness's own conversation id) and
+`agentRunId` (`PRAGMA_AGENT_RUN_ID`, set by `pragma-cli agent run`); the server relays
+both on the `Agent` event and writes them onto the durable invocation record before
+anything is broadcast. A report with no status is a metadata update, never a fresh
+status: it does not reapply fanout member statuses or notifications.
 
 ## Watcher supervision (`watchers.rs`)
 

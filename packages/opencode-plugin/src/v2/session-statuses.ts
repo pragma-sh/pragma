@@ -86,6 +86,7 @@ export function createSessionStatuses(
       cleared: () => update(undefined),
       message: (message) => reporter.message(message),
       sessionName: (name) => reporter.sessionName(name),
+      sessionId: (id) => reporter.sessionId(id),
     };
   }
 

@@ -2481,8 +2481,35 @@
           },
           "uniqueItems": true
         },
+        "supportsResume": {
+          "type": "boolean",
+          "description": "True when the contributing plugin's agent declares a `launch.resume` callback, so the host may ask it to build the full argv that resumes a known harness session."
+        },
         "launch": {
           "$ref": "#/definitions/AgentLaunchConfig"
+        }
+      }
+    },
+    "AgentLaunchSelection": {
+      "title": "AgentLaunchSelection",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The launch-time choices a caller made for one agent; every field is optional. Shared by plugin `AgentDefinition` callbacks and `AgentResumeRequest.selection`, the selection of the launch a resume continues.",
+      "properties": {
+        "modelId": {
+          "type": ["string", "null"]
+        },
+        "reasoningId": {
+          "type": ["string", "null"]
+        },
+        "modeId": {
+          "type": ["string", "null"]
+        },
+        "permissionModeId": {
+          "type": ["string", "null"]
+        },
+        "slashCommand": {
+          "type": ["string", "null"]
         }
       }
     },
@@ -3727,6 +3754,38 @@
         "requestId": {
           "type": "string",
           "description": "Correlation id for a command-approval or question round-trip. The reporter sets it on a `command`/`question` attention report and waits for a matching AgentDecision/AgentAnswer before proceeding."
+        },
+        "harnessSessionId": {
+          "type": "string",
+          "description": "Opaque id of the harness's own session (Claude Code's session id, opencode's session id), reported by a status-less `reportSessionId`. Stored so a later launch can resume the session; never parsed by Pragma."
+        },
+        "agentRunId": {
+          "type": "string",
+          "description": "Opaque id Pragma assigned to the agent run that produced this report (`PRAGMA_AGENT_RUN_ID`), carried on every report from that run so clients can correlate events and resumable sessions."
+        },
+        "clearHarnessSessionId": {
+          "type": "boolean",
+          "description": "Explicitly forget the stored harness session id for this report's run (or, without an `agentRunId`, the tab's newest invocation): the harness started a new conversation and has not reported its id yet. `true` clears; absent or `false` makes no statement. When both this and `harnessSessionId` are present, clearing wins."
+        }
+      }
+    },
+    "AgentResumeRequest": {
+      "title": "AgentResumeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harnessSessionId", "selection", "cwd"],
+      "description": "What a resume needs: the harness's own session id (as last reported through `AgentReportPayload.harnessSessionId`), the original launch selection, and the working directory the session ran in. Passed to a plugin agent's `launch.resume` callback, which returns the full argv to launch.",
+      "properties": {
+        "harnessSessionId": {
+          "type": "string",
+          "description": "Opaque session id the harness itself reported; never parsed by Pragma."
+        },
+        "selection": {
+          "$ref": "#/definitions/AgentLaunchSelection"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Absolute working directory the session ran in."
         }
       }
     },
@@ -4949,7 +5008,7 @@
         },
         "restartWarningBody": {
           "type": "string",
-          "description": "Modal body warning that the app server restarts and terminals stop."
+          "description": "Modal body explaining what a restart preserves: the workspace stays, terminals reconnect to running sessions, eligible interrupted agent sessions resume, and plain shells start fresh."
         },
         "applyModes": {
           "type": "array",

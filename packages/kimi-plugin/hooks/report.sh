@@ -44,11 +44,28 @@ turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
 # Holds the session_id whose name was already reported, so each session (incl.
 # a resume switch to another session) names the tab exactly once.
 named_file="${state_dir}/pragma-cli-${agent}-${tab}.sessionname"
+# The harness session id last reported to Pragma, so a session start or switch
+# reports it exactly once -- including a switch back to an earlier session
+# (A -> B -> A), which a seen-set would wrongly suppress.
+harness_session_file="${state_dir}/pragma-cli-${agent}-${tab}.harness-session"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Kimi session (e.g. when pragma-cli or the server is unavailable).
 report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
+}
+
+# Reports the harness's own session id, which Pragma records on the run so a
+# later launch can resume it. Only authoritative start/switch events call this
+# (see the parent pin below). Deduping against the last *reported* id rather
+# than a seen-set is what keeps a switch back to an earlier session reporting
+# again while a same-session event stays silent.
+report_session_id() {
+  harness_id="$1"
+  [ -n "$harness_id" ] || return 0
+  [ "$(cat "$harness_session_file" 2>/dev/null)" = "$harness_id" ] && return 0
+  report session-id --id "$harness_id"
+  printf '%s' "$harness_id" >"$harness_session_file"
 }
 
 # Reports a coarse rich message. Hook payloads are intentionally not parsed
@@ -465,6 +482,17 @@ if [ -n "$hook_session_id" ] && [ -f "$session_file" ]; then
   parent_session_id="$(cat "$session_file" 2>/dev/null)"
   [ -z "$parent_session_id" ] || [ "$hook_session_id" = "$parent_session_id" ] || exit 0
 fi
+
+# The tab's harness session identity is authoritative only on `SessionStart`
+# and `UserPromptSubmit` -- the events that carry the id. Both have passed the
+# parent pin above, so a delayed event from a superseded session can never
+# report an id over the current one. Kimi subagents share the parent's
+# session_id, so there is no child id to isolate here.
+case "$hook_event_name" in
+  SessionStart | UserPromptSubmit)
+    report_session_id "$hook_session_id"
+    ;;
+esac
 
 case "${1:-}" in
   started)

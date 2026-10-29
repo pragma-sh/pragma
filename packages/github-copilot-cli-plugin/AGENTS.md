@@ -61,6 +61,22 @@ turn-abort hook. `sessionEnd(reason: "abort")` covers whole-session termination 
 Escape interruption of one turn. `abort` and `interrupt` stay explicitly excluded until
 a versioned, turn-scoped signal is empirically verified.
 
+## Session resume
+
+`report.sh` reports the harness session id (`pragma-cli agent report --agent
+github-copilot session-id --id <sessionId>`) from both `sessionStart` and
+`userPromptSubmitted`, because Copilot can fire them in either order and `sessionStart`
+fires on resume too. The id is reported only when it differs from the last reported one,
+so a switch back to an earlier session (A -> B -> A) reports again while a same-session
+event stays silent. A delayed `sessionEnd` is ignored while a different session's turn is
+active — `/clear` dispatches the old session's end detached, so it must not clear the
+replacement session.
+
+`launch.resume` returns the full literal argv `copilot --no-auto-update <selection flags>
+--resume=<id>`. Verified against `copilot --help` on 1.0.80: `-r, --resume[=value]`, with
+the documented form `copilot --resume=<session-id>`; the attached form is required because
+the value is optional and a space-separated id would be read as the prompt.
+
 ## Decisions and questions
 
 `permissionRequest` runs before Copilot's own permission service, including for tools its

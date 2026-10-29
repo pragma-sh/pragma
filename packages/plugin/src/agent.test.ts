@@ -4,9 +4,11 @@ import {
   agentLaunchArgs,
   applySlashCommand,
   defineAgent,
+  modelFlagArgs,
   resolveAgentOptions,
   slashCommandInvocation,
 } from "./agent";
+import type { AgentResumeRequest } from "./agent";
 import {
   markdownModes,
   modeProvider,
@@ -47,6 +49,13 @@ const agent = defineAgent({
 
 const ctx = { project: null } as unknown as PluginContext;
 
+/** The resume argv builder reused by the resume test. */
+const resumeWithSession = (request: AgentResumeRequest): string[] => [
+  "demo",
+  "--resume",
+  request.harnessSessionId,
+];
+
 describe("agentLaunchArgs", () => {
   it("applies the first mode and permission mode when none is selected", () => {
     expect(agentLaunchArgs(agent, null)).toEqual(["--agent", "build", "--yolo"]);
@@ -71,6 +80,25 @@ describe("agentLaunchArgs", () => {
         permissionModes: [{ id: "auto", name: "Auto" }],
       }),
     ).toEqual(["--agent", "x", "--yolo"]);
+  });
+});
+
+describe("modelFlagArgs", () => {
+  it("builds the --model pair the official CLIs accept", () => {
+    expect(modelFlagArgs("sonnet")).toEqual(["--model", "sonnet"]);
+  });
+});
+
+describe("agent resume", () => {
+  it("keeps launch.command and carries an opt-in resume callback", () => {
+    const resumable = defineAgent({
+      ...agent,
+      launch: { command: ["demo"], resume: resumeWithSession },
+    });
+    expect(resumable.launch.command).toEqual(["demo"]);
+    expect(resumable.launch.resume).toBe(resumeWithSession);
+    // Existing definitions stay valid: resume is optional.
+    expect(agent.launch.resume).toBeUndefined();
   });
 });
 

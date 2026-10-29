@@ -1640,6 +1640,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+dependencies = [
+ "dispatch2",
+ "nix 0.31.3",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ctutils"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6045,6 +6056,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "toon-format",
  "uuid",
@@ -6148,10 +6160,12 @@ dependencies = [
 name = "pragma-platform"
 version = "1.3.1"
 dependencies = [
+ "ctrlc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "pragma-constants",
+ "signal-hook",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.19",
@@ -6187,6 +6201,7 @@ dependencies = [
  "pragma-platform",
  "pragma-protocol",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",

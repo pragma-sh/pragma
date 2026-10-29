@@ -13,11 +13,26 @@ pragma-cli agent report --agent <id> attention \
   [--kind question|command] [--command <text>] [--question <text>] \
   [--options '<json-array>'] [--request-id <id>]
 pragma-cli agent report --agent <id> cleared [--worktree-id <id>]
+pragma-cli agent report --agent <id> session-name --name "<name>"
+pragma-cli agent report --agent <id> session-id --id "<harness-session-id>"
 ```
 
 `--options` is a JSON array of `{ "label": string, "description"?: string }`.
 Use `command` only with command attention and `question`/`options` only with question
-attention.
+attention. `session-name` renames the hosting tab; `session-id` stores the opaque harness
+conversation id a later resume continues. Both are status-less and should be reported on
+session create and switch. Every report from a tracked agent child carries the run id from
+`PRAGMA_AGENT_RUN_ID` as `agentRunId`.
+
+## Supervised Runs
+
+```sh
+pragma-cli agent run --run-id <id> -- <agent-argv...>
+```
+
+Internal. The host writes this wrapper around a resume-capable agent's launch; it sets
+`PRAGMA_AGENT_RUN_ID` in the child, reports the start before the spawn and the finish after
+the child's real exit, and exits with the child's code. Never invoke it by hand in a plugin.
 
 ## Rich Messages
 

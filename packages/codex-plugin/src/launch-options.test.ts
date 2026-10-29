@@ -35,6 +35,60 @@ describe("Codex launch options", () => {
     ]);
   });
 
+  it("resumes the exact session id with the launch flags, never the prompt", async () => {
+    const resume = agent.launch.resume;
+    expect(resume).toBeTypeOf("function");
+    expect(
+      await resume!(
+        {
+          harnessSessionId: "11111111-2222-3333-4444-555555555555",
+          selection: { modelId: "gpt-5.6-sol", reasoningId: "high", slashCommand: "review" },
+          cwd: "/repo",
+        },
+        emptyHost,
+      ),
+    ).toEqual([
+      "codex",
+      "--no-daemon",
+      "resume",
+      "11111111-2222-3333-4444-555555555555",
+      "--enable",
+      "default_mode_request_user_input",
+      "--model",
+      "gpt-5.6-sol",
+      "--config",
+      'model_reasoning_effort="high"',
+    ]);
+  });
+
+  it("replays an explicit permission mode on resume and applies no default", async () => {
+    expect(
+      await agent.launch.resume!(
+        { harnessSessionId: "s", selection: { permissionModeId: "on-request" }, cwd: "/repo" },
+        emptyHost,
+      ),
+    ).toEqual([
+      "codex",
+      "--no-daemon",
+      "resume",
+      "s",
+      "--enable",
+      "default_mode_request_user_input",
+      "--ask-for-approval",
+      "on-request",
+    ]);
+    expect(
+      await agent.launch.resume!({ harnessSessionId: "s", selection: {}, cwd: "/repo" }, emptyHost),
+    ).toEqual([
+      "codex",
+      "--no-daemon",
+      "resume",
+      "s",
+      "--enable",
+      "default_mode_request_user_input",
+    ]);
+  });
+
   it("reads the skills Codex resolved and invokes them with $", () => {
     const prompt = [
       {

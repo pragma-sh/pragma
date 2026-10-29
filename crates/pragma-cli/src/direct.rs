@@ -342,11 +342,22 @@ pub fn agent_report(
         "tabId": tab_id,
         "status": fields.status,
         "sessionName": fields.session_name,
+        "harnessSessionId": fields.harness_session_id,
+        "clearHarnessSessionId": fields.clear_harness_session_id,
         "attentionKind": fields.attention_kind,
         "command": fields.command,
         "question": fields.question,
         "requestId": fields.request_id,
     });
+    // Every report from a supervised run carries the run's id, so the host can
+    // reject a stale report from a superseded run and attribute the session id
+    // to the right invocation. Absent outside `pragma-cli agent run`.
+    if let Some(run_id) = std::env::var("PRAGMA_AGENT_RUN_ID")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        payload["agentRunId"] = serde_json::Value::String(run_id);
+    }
     // `options`/`questions` deserialize into plain Vecs server-side, so the
     // keys must be absent (not null) when no choices were passed.
     if let Some(raw) = &fields.options {
@@ -649,6 +660,8 @@ fn message_payload(args: &crate::cli::AgentMessageArgs) -> Result<String, CliErr
 struct ReportFields {
     status: Option<&'static str>,
     session_name: Option<String>,
+    harness_session_id: Option<String>,
+    clear_harness_session_id: Option<bool>,
     attention_kind: Option<&'static str>,
     command: Option<String>,
     question: Option<String>,
@@ -677,6 +690,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
         crate::cli::AgentReportCommand::Started => ReportFields {
             status: Some("running"),
             session_name: None,
+            harness_session_id: None,
+            clear_harness_session_id: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -688,6 +703,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
         crate::cli::AgentReportCommand::Stopped { worktree_id } => ReportFields {
             status: Some("done"),
             session_name: None,
+            harness_session_id: None,
+            clear_harness_session_id: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -706,6 +723,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
         } => ReportFields {
             status: Some("attention"),
             session_name: None,
+            harness_session_id: None,
+            clear_harness_session_id: None,
             attention_kind: kind.map(|k| match k {
                 crate::cli::AttentionKindArg::Question => "question",
                 crate::cli::AttentionKindArg::Command => "command",
@@ -720,6 +739,23 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
         crate::cli::AgentReportCommand::SessionName { name } => ReportFields {
             status: None,
             session_name: Some(name.clone()),
+            harness_session_id: None,
+            clear_harness_session_id: None,
+            attention_kind: None,
+            command: None,
+            question: None,
+            options: None,
+            questions: None,
+            request_id: None,
+            worktree_override: None,
+        },
+        crate::cli::AgentReportCommand::SessionId { id, clear } => ReportFields {
+            status: None,
+            session_name: None,
+            // A clear beats an id, and the two are mutually exclusive at the
+            // CLI, so only one of these is ever set.
+            harness_session_id: if *clear { None } else { id.clone() },
+            clear_harness_session_id: clear.then_some(true),
             attention_kind: None,
             command: None,
             question: None,
@@ -731,6 +767,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
         crate::cli::AgentReportCommand::Cleared { worktree_id } => ReportFields {
             status: Some("cleared"),
             session_name: None,
+            harness_session_id: None,
+            clear_harness_session_id: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -757,7 +795,30 @@ pub(crate) fn watch_grace() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_multi_questions, parse_question_options};
+    use super::{parse_multi_questions, parse_question_options, report_fields};
+
+    #[test]
+    fn a_session_id_report_carries_only_the_harness_id() {
+        let fields = report_fields(&crate::cli::AgentReportCommand::SessionId {
+            id: Some("session-abc".to_string()),
+            clear: false,
+        });
+        assert_eq!(fields.status, None, "a session id never changes the status");
+        assert_eq!(fields.harness_session_id.as_deref(), Some("session-abc"));
+        assert!(fields.clear_harness_session_id.is_none());
+        assert!(fields.session_name.is_none());
+    }
+
+    #[test]
+    fn a_clearing_session_id_report_carries_no_id() {
+        let fields = report_fields(&crate::cli::AgentReportCommand::SessionId {
+            id: None,
+            clear: true,
+        });
+        assert_eq!(fields.status, None);
+        assert!(fields.harness_session_id.is_none());
+        assert_eq!(fields.clear_harness_session_id, Some(true));
+    }
 
     #[test]
     fn parses_valid_question_options() {

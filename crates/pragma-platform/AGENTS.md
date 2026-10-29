@@ -22,7 +22,7 @@ target, return an `Err` that says so. Do not no-op.
 | `ipc`     | `std::os::unix::net`                                                          | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
 | `path`    | `std::fs::canonicalize`                                                       | …then strip the `\\?\` verbatim prefix                     |
 | `perms`   | `chmod` `0600`/`0700`                                                         | `icacls /inheritance:r /grant:r <user>:(F)`                |
-| `process` | `sysinfo`, `kill`, `pkill`, `ps`                                              | `sysinfo`, `taskkill`, `tasklist`                          |
+| `process` | `sysinfo`, `kill`, `pkill`, `ps`; `signal-hook` terminal signals              | `sysinfo`, `taskkill`, `tasklist`; `ctrlc` console events  |
 | `shell`   | `$SHELL`, else the constants default                                          | probe `pwsh.exe` then `powershell.exe`                     |
 | `wsl`     | no distributions, ever                                                        | parse `wsl.exe --list --verbose`                           |
 | `install` | `hdiutil`/`ditto` swap; `pkexec` pkg                                          | NSIS `-setup.exe /S` via PowerShell helper                 |
@@ -92,9 +92,30 @@ CREATE_NO_WINDOW`), used for children that must outlive the app — the server s
 from this process's process group. A short-lived query must not do that, and
 `DETACHED_PROCESS` must never be added (it makes Windows ignore `CREATE_NO_WINDOW`).
 
+`process::exit_signal` exposes a Unix child termination signal and returns `None` on Windows.
+`process::survive_terminal_signals` keeps a supervisor alive through terminal cancellation
+so it can report the child's real exit (`pragma-cli agent run` uses it). On Windows it
+registers a safe `ctrlc` handler, which wraps `SetConsoleCtrlHandler` and catches both
+Ctrl-C and Ctrl-Break. Control handlers are not inherited by children, and `ctrlc` does not
+use the special `SetConsoleCtrlHandler(NULL, TRUE)` ignore flag — that flag **is**
+inherited — so the agent's TUI still receives Ctrl-C. On Unix it registers
+SIGINT/SIGTERM/SIGHUP through the same platform seam.
+
+The Windows branch is **cross-compiled** (`cargo clippy --target x86_64-pc-windows-gnu`),
+not exercised in a live Windows console. Keeping the wrapper alive is also separate from
+classifying why the child ended: `std::process` exposes only `ExitStatus::code()` on
+Windows, so a child that dies from Ctrl-C commonly reports `STATUS_CONTROL_C_EXIT`
+(`0xC000013A`, which `ExitStatus::code()` returns as the `i32` `-1073741510`) and the
+supervisor treats it as an ordinary code exit — journaled and reported as `ended`. A
+host-forced kill that surfaces as code 1 is likewise indistinguishable from the child
+exiting 1 on its own. Neither case is guessed at today. A safe helper in this module could
+expose the control-C status constant for the supervisor to classify (that status is also
+reachable by a program deliberately calling `ExitProcess(0xC000013A)`); a forced code 1
+needs an out-of-band cause from the host, not a platform guess.
+
 **A resolved `.cmd`/`.bat` runs through `cmd.exe /C`.** `npm`, `npx`, and the agent CLIs
 installed from npm are batch shims on Windows, and `CreateProcess` cannot start one — it
-only creates PE images. `process::command` wraps them; pass it the _resolved_ path (see
+only creates PE images. Rust’s `Command` invokes `cmd.exe` and quotes its command line; pass it the _resolved_ path (see
 `pragma_core::process_env::command`), never a bare name, or the resolver hands back the
 extensionless POSIX script npm writes beside the shim. That combination is what made the
 official plugin installer report "npm not found" on Windows.
