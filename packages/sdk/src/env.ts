@@ -6,6 +6,7 @@ export const PRAGMA_ENV_KEYS: Readonly<{
   localGatewayToken: string;
   tabId: string;
   worktreeId: string;
+  agentRunId: string;
 }> = {
   gatewayUrl: "PRAGMA_GATEWAY_URL",
   gatewayToken: "PRAGMA_GATEWAY_TOKEN",
