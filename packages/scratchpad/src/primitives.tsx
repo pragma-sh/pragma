@@ -7,6 +7,7 @@ import type {
 } from "react";
 
 import { ensureScratchpadStyles } from "./styles";
+import { useLocalState } from "./local-state";
 
 /** Visual weight of a scratchpad {@link Button}. */
 export type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger";
@@ -58,19 +59,55 @@ export function Button({
 /** Scratchpad single-line input matching desktop shadcn input tokens. */
 export function Input({
   className,
+  defaultValue,
+  onChange,
+  value,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement>): React.JSX.Element {
   ensureScratchpadStyles();
-  return <input {...rest} className={classNames("pragma-input", className)} />;
+  const identity = rest.id ?? rest.name ?? rest["aria-label"];
+  const [saved, setSaved] = useLocalState(
+    defaultValue ?? "",
+    identity ? `input:${identity}` : undefined,
+  );
+  return (
+    <input
+      {...rest}
+      className={classNames("pragma-input", className)}
+      value={value ?? saved}
+      onChange={(event) => {
+        if (value === undefined) setSaved(event.target.value);
+        onChange?.(event);
+      }}
+    />
+  );
 }
 
 /** Scratchpad multiline input matching desktop shadcn textarea tokens. */
 export function Textarea({
   className,
+  defaultValue,
+  onChange,
+  value,
   ...rest
 }: TextareaHTMLAttributes<HTMLTextAreaElement>): React.JSX.Element {
   ensureScratchpadStyles();
-  return <textarea {...rest} className={classNames("pragma-textarea", className)} />;
+  const identity = rest.id ?? rest.name ?? rest["aria-label"];
+  const [saved, setSaved] = useLocalState(
+    defaultValue ?? "",
+    identity ? `textarea:${identity}` : undefined,
+  );
+  return (
+    <textarea
+      {...rest}
+      className={classNames("pragma-textarea", className)}
+      value={value ?? saved}
+      onChange={(event) => {
+        if (value === undefined) setSaved(event.target.value);
+        onChange?.(event);
+      }}
+    />
+  );
 }
 
 /** Props for {@link Progress}. */

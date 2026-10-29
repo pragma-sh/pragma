@@ -41,9 +41,12 @@ export interface ScratchpadFrameBridgeOptions {
   worktreeId: string;
   /** Changing document identity, used to drop subscriptions belonging to the old frame. */
   srcDoc: string | null;
+  storageKey: string;
   getAttachedAgentTabId: () => string | null;
   onRequestAgentAttachment: () => Promise<boolean>;
   onRenderError: (message: string) => void;
+  /** Reports the latest save outcome; `null` once a save succeeds. */
+  onStorageError: (message: string | null) => void;
   onResize: (height: number) => void;
 }
 
@@ -56,9 +59,11 @@ export function useScratchpadFrameBridge({
   token,
   worktreeId,
   srcDoc,
+  storageKey,
   getAttachedAgentTabId,
   onRequestAgentAttachment,
   onRenderError,
+  onStorageError,
   onResize,
 }: ScratchpadFrameBridgeOptions): void {
   const subscriptionsRef = useRef(new Map<string, string[]>());
@@ -172,6 +177,7 @@ export function useScratchpadFrameBridge({
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>): void => {
       if (event.source !== iframeRef.current?.contentWindow) return;
+      if (saveFrameState(event.data, token, storageKey, onStorageError)) return;
       if (applyNotice(event.data)) return;
       if (!isFrameRequest(event.data, token)) return;
       if (applySubscription(event.data)) return;
@@ -208,6 +214,36 @@ export function useScratchpadFrameBridge({
     // `post` closes over a ref, so it is stable across renders by construction.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+}
+
+/** Save only state messages from this frame; storage can be unavailable or full. */
+function saveFrameState(
+  value: unknown,
+  token: string,
+  storageKey: string,
+  onStorageError: (message: string | null) => void,
+): boolean {
+  if (
+    !matchesShape(value, {
+      channel: isOneOf("pragma-scratchpad"),
+      token: isOneOf(token),
+      type: isOneOf("local-state"),
+    })
+  )
+    return false;
+  const { state } = value as { state?: unknown };
+  if (state && typeof state === "object" && !Array.isArray(state)) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      onStorageError(null);
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      onStorageError(
+        `Answers could not be saved (${reason}) and may be lost when this scratchpad is reopened.`,
+      );
+    }
+  }
+  return true;
 }
 
 /** Progress entries for the requested tabs, preferring live status over the tab's own record. */

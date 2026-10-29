@@ -1553,6 +1553,12 @@ prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/c
 live in `@pragma-sh/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
 document contains MDX regions.
 
+Scratchpad tabs stay mounted when another tab in the same pane is selected. Built-in
+question, diff decision, and uncontrolled text input state is persisted on this device via
+the token-scoped frame bridge, keyed by worktree, file, and MDX block identity. Frames
+remain opaque-origin and never access localStorage directly. Editing a component's source
+changes its block identity; custom controlled state remains the author's responsibility.
+
 **Scratchpad exports** use the toolbar's **Export HTML** action in either mode. The
 live buffer is compiled with the existing `esbuild-wasm` pipeline (automatic JSX for
 imported TSX/JSX), with static media
