@@ -97,12 +97,15 @@ impl ActivityBus {
             .retain(|tx| tx.send(frame.clone()).is_ok());
     }
 
-    /// Subscribes, replaying `snapshot` first. The snapshot is computed by the
-    /// caller under no bus lock; an event emitted in between is delivered as a
-    /// delta, which the client applies on top.
+    /// Subscribes, replaying a snapshot first. The listener is registered
+    /// *before* `snapshot` runs (under no bus lock, since building it emits
+    /// nothing but reads state other emitters lock), so an event emitted while
+    /// it is built is never lost: it reaches the listener as a delta, which the
+    /// client applies on top. Deltas are idempotent, so one the snapshot
+    /// already reflects is harmless.
     pub fn subscribe(
         &self,
-        snapshot: serde_json::Value,
+        snapshot: impl FnOnce() -> serde_json::Value,
     ) -> (Vec<EventFrame>, Receiver<EventFrame>) {
         let (tx, rx) = mpsc::channel();
         if let Ok(mut inner) = self.inner.lock() {
@@ -111,7 +114,7 @@ impl ActivityBus {
         (
             vec![EventFrame::Snapshot {
                 subscription: ProtocolEventKind::ComputerActivity,
-                payload: snapshot,
+                payload: snapshot(),
             }],
             rx,
         )

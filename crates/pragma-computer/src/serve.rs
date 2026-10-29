@@ -141,7 +141,9 @@ pub fn run(
         HelperOp::Open(request) => acting(ctx, || backend.open(ctx, &request)),
         HelperOp::Focus(request) => acting(ctx, || backend.focus(ctx, &request)),
         HelperOp::Inspect(request) => to_value(backend.inspect(&request)),
-        HelperOp::Screenshot(request) => to_value(backend.screenshot(ctx, &request)),
+        HelperOp::Screenshot { request, hide_pids } => {
+            to_value(backend.screenshot(ctx, &request, &hide_pids))
+        }
         HelperOp::Resolve(request) => to_value(backend.resolve(&request)),
         HelperOp::Click(request) => acting(ctx, || backend.click(ctx, &request)),
         HelperOp::Type(request) => acting(ctx, || backend.type_text(ctx, &request)),

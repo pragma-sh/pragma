@@ -875,6 +875,7 @@ impl ComputerBackend for MacBackend {
         &mut self,
         ctx: &Context,
         request: &ComputerScreenshotRequest,
+        hide_pids: &[u64],
     ) -> ComputerResult<ComputerScreenshot> {
         if !objc2_core_graphics::CGPreflightScreenCaptureAccess() {
             return Err(permission_missing("screenRecording"));
@@ -917,6 +918,7 @@ impl ComputerBackend for MacBackend {
                 directory: ctx.screenshots_dir.clone(),
                 inline: request.base64 == Some(true),
             },
+            hide_pids,
         )
     }
 

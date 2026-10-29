@@ -109,23 +109,25 @@ pub struct CaptureOutput {
     pub inline: bool,
 }
 
-/// Captures `target` and writes it out.
+/// Captures `target` and writes it out. A display or region capture leaves
+/// out every window of `hide_pids`; a window capture is of one window only.
 pub fn capture(
     target: &CaptureTarget,
     output: &CaptureOutput,
+    hide_pids: &[u64],
 ) -> ComputerResult<ComputerScreenshot> {
     #[cfg(target_os = "macos")]
     let (image, frame) = if crate::macos::supports_screen_capture_kit() {
-        crate::macos::capture_image(target, output.max_width)?
+        crate::macos::capture_image(target, output.max_width, hide_pids)?
     } else {
-        grab(target)?
+        grab(target, hide_pids)?
     };
     #[cfg(not(target_os = "macos"))]
-    let (image, frame) = grab(target)?;
+    let (image, frame) = grab(target, hide_pids)?;
     encode(image, &frame, output)
 }
 
-fn grab(target: &CaptureTarget) -> ComputerResult<(RgbaImage, ComputerRect)> {
+fn grab(target: &CaptureTarget, hide_pids: &[u64]) -> ComputerResult<(RgbaImage, ComputerRect)> {
     match target {
         CaptureTarget::Window { raw_id, frame } => {
             let window = xcap::Window::all()
@@ -161,14 +163,17 @@ fn grab(target: &CaptureTarget) -> ComputerResult<(RgbaImage, ComputerRect)> {
             }
             .ok_or_else(|| failure(ComputerErrorCode::WindowNotFound, "no such display"))?;
             let frame = monitor_frame(&monitor)?;
-            Ok((monitor.capture_image().map_err(capture_error)?, frame))
+            let mut image = monitor.capture_image().map_err(capture_error)?;
+            redact(&mut image, &frame, hide_pids)?;
+            Ok((image, frame))
         }
         CaptureTarget::Region(region) => {
             let monitor = xcap::Monitor::from_point(to_i32(region.x), to_i32(region.y))
                 .map_err(capture_error)?;
             let display = monitor_frame(&monitor)?;
             let scale = f64::from(monitor.scale_factor().unwrap_or(1.0));
-            let image = monitor.capture_image().map_err(capture_error)?;
+            let mut image = monitor.capture_image().map_err(capture_error)?;
+            redact(&mut image, &display, hide_pids)?;
             // The monitor image is in pixels; the region is in screen units.
             let x = to_u32((region.x - display.x) * scale);
             let y = to_u32((region.y - display.y) * scale);
@@ -184,6 +189,46 @@ fn grab(target: &CaptureTarget) -> ComputerResult<(RgbaImage, ComputerRect)> {
             Ok((cropped, region.clone()))
         }
     }
+}
+
+/// Paints over every on-screen window of `hide_pids` in a capture of `area`.
+/// `xcap` cannot leave windows out of a monitor capture the way
+/// `ScreenCaptureKit` can, so they are blanked instead: a covered part of
+/// such a window is blanked too, which over-hides rather than leaks.
+fn redact(image: &mut RgbaImage, area: &ComputerRect, hide_pids: &[u64]) -> ComputerResult<()> {
+    if hide_pids.is_empty() || area.w <= 0.0 || area.h <= 0.0 {
+        return Ok(());
+    }
+    // Window and monitor frames share units, whatever DPI scaling makes of
+    // them, so the image's own ratio maps one onto the other.
+    let scale_x = f64::from(image.width()) / area.w;
+    let scale_y = f64::from(image.height()) / area.h;
+    for window in xcap::Window::all().map_err(capture_error)? {
+        if !window
+            .pid()
+            .is_ok_and(|pid| hide_pids.contains(&u64::from(pid)))
+            || window.is_minimized().unwrap_or(false)
+        {
+            continue;
+        }
+        // A hidden app's window whose place is unknown cannot be blanked, so
+        // the capture is refused rather than returned with it showing.
+        let (Ok(x), Ok(y), Ok(w), Ok(h)) =
+            (window.x(), window.y(), window.width(), window.height())
+        else {
+            return Err(capture_error("a protected window's frame is unknown"));
+        };
+        let left = to_u32((f64::from(x) - area.x) * scale_x).min(image.width());
+        let top = to_u32((f64::from(y) - area.y) * scale_y).min(image.height());
+        let right = to_u32((f64::from(x) + f64::from(w) - area.x) * scale_x).min(image.width());
+        let bottom = to_u32((f64::from(y) + f64::from(h) - area.y) * scale_y).min(image.height());
+        for py in top..bottom {
+            for px in left..right {
+                image.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn monitor_frame(monitor: &xcap::Monitor) -> ComputerResult<ComputerRect> {

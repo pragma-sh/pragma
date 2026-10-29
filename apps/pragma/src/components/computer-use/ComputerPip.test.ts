@@ -14,7 +14,12 @@ vi.mock("@/state/computer-use-store", async (importOriginal) => ({
   useComputerUse: () => ({ snapshot: null, cursors: {} }),
 }));
 
-import { ComputerPip, clampPosition, cursorInFrame } from "@/components/computer-use/ComputerPip";
+import {
+  ComputerPip,
+  clampPosition,
+  containedRect,
+  cursorInFrame,
+} from "@/components/computer-use/ComputerPip";
 
 afterEach(() => vi.useRealTimers());
 
@@ -46,6 +51,31 @@ describe("cursorInFrame", () => {
   it("returns null for a cursor outside the frame", () => {
     expect(cursorInFrame({ point: { x: 10, y: 10 } }, frame)).toBeNull();
     expect(cursorInFrame({ point: { x: 200, y: 100 } }, { ...frame, width: 0 })).toBeNull();
+  });
+});
+
+describe("containedRect", () => {
+  it("letterboxes a wide image above and below", () => {
+    expect(containedRect({ width: 400, height: 100 }, { width: 200, height: 200 })).toEqual({
+      left: 0,
+      top: 75,
+      width: 200,
+      height: 50,
+    });
+  });
+
+  it("pillarboxes a tall image at the sides", () => {
+    expect(containedRect({ width: 100, height: 400 }, { width: 200, height: 200 })).toEqual({
+      left: 75,
+      top: 0,
+      width: 50,
+      height: 200,
+    });
+  });
+
+  it("has no box for an empty image or panel", () => {
+    expect(containedRect({ width: 0, height: 100 }, { width: 200, height: 200 })).toBeNull();
+    expect(containedRect({ width: 100, height: 100 }, { width: 0, height: 200 })).toBeNull();
   });
 });
 

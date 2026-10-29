@@ -372,6 +372,11 @@ impl ComputerService {
 
     fn end_session(&self, id: &str, why: &str) -> Option<ComputerSession> {
         self.tasks.cancel_session(id);
+        self.sessions.lock().ok()?.by_id(id)?;
+        // Invalidate the session's helper generation before its leases go,
+        // so input still running (a long `type`) stops instead of outliving
+        // the session and its indicator. Session ids are never reused.
+        self.helper.set_session_paused(id, true);
         let ended = self.sessions.lock().ok()?.end(id)?;
         if let Ok(mut grants) = self.session_grants.lock() {
             grants.remove(&owner_key(&ended.owner));
@@ -404,8 +409,8 @@ impl ComputerService {
         &self,
         host: &dyn ComputerHost,
     ) -> (Vec<EventFrame>, std::sync::mpsc::Receiver<EventFrame>) {
-        let snapshot = serde_json::to_value(self.snapshot(host)).unwrap_or_default();
-        self.activity.subscribe(snapshot)
+        self.activity
+            .subscribe(|| serde_json::to_value(self.snapshot(host)).unwrap_or_default())
     }
 
     /// Dispatches one `computer` RPC.
@@ -504,22 +509,107 @@ impl ComputerService {
                 self.refuse_blocked(&snapshot.app)?;
                 to_value(&snapshot)
             }
-            ComputerOpRequest::Screenshot(request) => {
-                if request.app.is_some() || request.pid.is_some() {
-                    let resolved = self.resolve(ResolveRequest {
-                        app: request.app.clone(),
-                        pid: request.pid,
-                        ..ResolveRequest::default()
-                    })?;
-                    self.refuse_blocked(&resolved.app)?;
-                }
+            ComputerOpRequest::Screenshot(mut request) => {
+                let hide_pids = self.guard_capture(&mut request)?;
                 let shot: ComputerScreenshot =
-                    from_value(self.helper_call(HelperOp::Screenshot(request))?)?;
+                    from_value(self.helper_call(HelperOp::Screenshot { request, hide_pids })?)?;
                 self.remember_shot(&shot);
                 to_value(&shot)
             }
             other => Err(misrouted(&other)),
         }
+    }
+
+    /// Refuses a screenshot of a blocked app, checking the target the backends
+    /// actually capture (a region, else a display, else a window, else an
+    /// app's window), and names the processes a screen capture leaves out.
+    /// A request naming nothing captures the primary display on every
+    /// platform, so it never falls back to whichever window has focus.
+    fn guard_capture(
+        &self,
+        request: &mut ComputerScreenshotRequest,
+    ) -> Result<Vec<u64>, ComputerFailure> {
+        if request.region.is_none() && request.display.is_none() {
+            if let Some(window) = &request.window {
+                self.refuse_blocked_window(window, request.app.as_ref(), request.pid)?;
+                return Ok(Vec::new());
+            }
+            if request.app.is_some() || request.pid.is_some() {
+                let resolved = self.resolve(ResolveRequest {
+                    app: request.app.clone(),
+                    pid: request.pid,
+                    ..ResolveRequest::default()
+                })?;
+                self.refuse_blocked(&resolved.app)?;
+                return Ok(Vec::new());
+            }
+            let displays: Vec<pragma_constants::ComputerDisplay> =
+                from_value(self.helper_call(HelperOp::Displays)?)?;
+            request.display = displays
+                .into_iter()
+                .find(|display| display.primary)
+                .map(|display| display.id);
+        }
+        self.blocked_pids()
+    }
+
+    /// Refuses a capture of `window` when a blocked app owns it, or when it
+    /// is not the window of the app the request also names.
+    fn refuse_blocked_window(
+        &self,
+        window: &str,
+        app: Option<&String>,
+        pid: Option<u64>,
+    ) -> Result<(), ComputerFailure> {
+        let windows: Vec<pragma_constants::ComputerWindow> =
+            from_value(self.helper_call(HelperOp::Windows(ComputerWindowsRequest {
+                app: None,
+                pid: None,
+            }))?)?;
+        let owner = windows
+            .iter()
+            .find(|listed| listed.id == window)
+            .map(|listed| listed.pid)
+            .ok_or_else(|| {
+                failure(
+                    ComputerErrorCode::WindowNotFound,
+                    format!("no on-screen window `{window}`"),
+                )
+            })?;
+        let resolved = self.resolve(ResolveRequest {
+            pid: Some(owner),
+            ..ResolveRequest::default()
+        })?;
+        self.refuse_blocked(&resolved.app)?;
+        if app.is_some() || pid.is_some() {
+            let named = self.resolve(ResolveRequest {
+                app: app.cloned(),
+                pid,
+                ..ResolveRequest::default()
+            })?;
+            if named.app.pid != Some(owner) {
+                return Err(failure(
+                    ComputerErrorCode::InvalidPayload,
+                    format!("window `{window}` does not belong to {}", named.app.name),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Running apps agents may not read, by process.
+    fn blocked_pids(&self) -> Result<Vec<u64>, ComputerFailure> {
+        let apps: Vec<ComputerApp> =
+            from_value(self.helper_call(HelperOp::Apps(ComputerAppsRequest {
+                installed: None,
+                query: None,
+            }))?)?;
+        let extra = self.settings().blocked_apps;
+        Ok(apps
+            .iter()
+            .filter(|app| is_blocked(&identity(app), &extra))
+            .filter_map(|app| app.pid)
+            .collect())
     }
 
     /// Turns a mutating request into the target, wording, and helper call the
@@ -1105,6 +1195,25 @@ impl ComputerService {
         Ok(())
     }
 
+    /// Refuses to dispatch for a session that ended (closed tab, `end`, idle)
+    /// after the action began: a caller with no session is otherwise fine.
+    fn require_live_session(&self, session: &str) -> Result<(), ComputerFailure> {
+        let live = self
+            .sessions
+            .lock()
+            .map_err(|_| failure(ComputerErrorCode::Internal, "session lock poisoned"))?
+            .by_id(session)
+            .is_some();
+        if live {
+            Ok(())
+        } else {
+            Err(failure(
+                ComputerErrorCode::Stopped,
+                "The computer-use session ended before the action ran.",
+            ))
+        }
+    }
+
     /// Detects takeover between actions too, including while a model is deciding.
     fn check_user_takeover(&self) {
         if self.busy.load(Ordering::SeqCst) > 0 || self.stopped.load(Ordering::SeqCst) {
@@ -1208,6 +1317,7 @@ impl ComputerService {
         }
         self.preflight(host)?;
         self.check_caller_session(caller)?;
+        self.require_live_session(&session.id)?;
         self.tasks.check_guard(caller, task)?;
         let action_id = self.announce(
             &session,
@@ -1272,11 +1382,15 @@ impl ComputerService {
             target,
             verb,
             method,
-            helper_op,
+            mut helper_op,
         } = action;
         let settings = self.preflight(host)?;
         let resolved = self.resolve(target)?;
         self.refuse_blocked(&resolved.app)?;
+        // The checked, leased app is the one the helper acts on: left
+        // unpinned, `key` or `type` would re-resolve "frontmost" when it runs,
+        // after approval and queueing gave focus time to move.
+        pin_target(&mut helper_op, resolved.app.pid);
         let activity_target = activity_target(&resolved);
         let session = self.begin(host, &settings, caller, op, &activity_target)?;
         self.approve_sensitive(
@@ -1323,6 +1437,7 @@ impl ComputerService {
             .and_then(|_| {
                 let focus = matches!(helper_op, HelperOp::Focus(_));
                 self.check_caller_session(caller)?;
+                self.require_live_session(&session.id)?;
                 self.refuse_if_user_active(&resolved.app, &session.id)?;
                 let value = self.helper_call(HelperOp::InSession {
                     session: session.id.clone(),
@@ -1331,7 +1446,14 @@ impl ComputerService {
                 })?;
                 if focus {
                     // `focus` answers with the app and window it ended on.
-                    from_value::<Focused>(value).map(|_| Performed {
+                    let focused: Focused = from_value(value)?;
+                    if focused.app.pid != resolved.app.pid {
+                        return Err(failure(
+                            ComputerErrorCode::TargetChanged,
+                            format!("focus ended on {}, not the leased app", focused.app.name),
+                        ));
+                    }
+                    Ok(Performed {
                         method: ComputerMethod::Ax,
                         physical_cursor: false,
                         element: None,
@@ -1664,7 +1786,10 @@ impl ComputerService {
                 )),
                 base64: Some(true),
             };
-        let shot: ComputerScreenshot = from_value(self.helper_call(HelperOp::Screenshot(shot))?)?;
+        let shot: ComputerScreenshot = from_value(self.helper_call(HelperOp::Screenshot {
+            request: shot,
+            hide_pids: Vec::new(),
+        })?)?;
         // The PiP holds the bytes; the file is not needed once read.
         let _ = std::fs::remove_file(&shot.path);
         to_value(&shot)
@@ -1711,6 +1836,26 @@ fn resolve_caller(host: &dyn ComputerHost, caller: Option<ComputerCaller>) -> Co
             .and_then(|tab| host.agent_for_tab(tab));
     }
     caller
+}
+
+/// Points an action at the process the pipeline checked and leased. A request
+/// that already names a different process is the resolver's bug, never a
+/// retarget, so its own `pid` is overwritten rather than trusted.
+fn pin_target(op: &mut HelperOp, pid: Option<u64>) {
+    let Some(pid) = pid else {
+        return;
+    };
+    let slot = match op {
+        HelperOp::Focus(request) => &mut request.pid,
+        HelperOp::Click(request) => &mut request.pid,
+        HelperOp::Type(request) => &mut request.pid,
+        HelperOp::Key(request) => &mut request.pid,
+        HelperOp::Scroll(request) => &mut request.pid,
+        HelperOp::Move(request) => &mut request.pid,
+        HelperOp::Drag(request) => &mut request.pid,
+        _ => return,
+    };
+    *slot = Some(pid);
 }
 
 /// Describes the resolved target without exposing field contents.

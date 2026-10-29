@@ -644,12 +644,14 @@ pub fn supports_screen_capture_kit() -> bool {
 pub fn capture_image(
     target: &crate::capture::CaptureTarget,
     max_width: Option<u32>,
+    hide_pids: &[u64],
 ) -> crate::ComputerResult<(image::RgbaImage, pragma_constants::ComputerRect)> {
     use block2::RcBlock;
     use objc2_foundation::NSError;
     use objc2_screen_capture_kit::SCShareableContent;
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let target = target.clone();
+    let hide_pids = hide_pids.to_vec();
     let completion = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
             if !error.is_null() || content.is_null() {
@@ -657,7 +659,13 @@ pub fn capture_image(
                 return;
             }
             // SAFETY: ScreenCaptureKit lends content for the duration of this callback.
-            let result = capture_content(unsafe { &*content }, &target, max_width, tx.clone());
+            let result = capture_content(
+                unsafe { &*content },
+                &target,
+                &hide_pids,
+                max_width,
+                tx.clone(),
+            );
             if let Err(error) = result {
                 let _ = tx.send(Err(error));
             }
@@ -688,13 +696,14 @@ type CapturedImage = (image::RgbaImage, pragma_constants::ComputerRect);
 fn capture_content(
     content: &objc2_screen_capture_kit::SCShareableContent,
     target: &crate::capture::CaptureTarget,
+    hide_pids: &[u64],
     max_width: Option<u32>,
     tx: std::sync::mpsc::SyncSender<crate::ComputerResult<CapturedImage>>,
 ) -> crate::ComputerResult<()> {
     use block2::RcBlock;
     use objc2_foundation::NSError;
     use objc2_screen_capture_kit::SCScreenshotManager;
-    let (filter, frame, source) = capture_filter(content, target)?;
+    let (filter, frame, source) = capture_filter(content, target, hide_pids)?;
     let config = capture_configuration(&filter, &frame, source, max_width);
     let completion = RcBlock::new(
         move |image: *mut objc2_core_graphics::CGImage, error: *mut NSError| {
@@ -727,6 +736,7 @@ type CaptureFilter = (
 fn capture_filter(
     content: &objc2_screen_capture_kit::SCShareableContent,
     target: &crate::capture::CaptureTarget,
+    hide_pids: &[u64],
 ) -> crate::ComputerResult<CaptureFilter> {
     use crate::capture::CaptureTarget;
     use objc2::AllocAnyThread;
@@ -777,12 +787,15 @@ fn capture_filter(
             })?;
         let r = display.frame();
         // Recent macOS versions ignore NSWindow sharingType for SCK: exclude
-        // Pragma windows explicitly so the preview never captures its own overlay.
+        // Pragma windows explicitly so the preview never captures its own
+        // overlay, and every window of an app agents may not read.
         let excluded: Vec<_> = windows
             .iter()
             .filter(|w| {
-                w.owningApplication()
-                    .is_some_and(|a| a.bundleIdentifier().to_string().starts_with("com.pragma"))
+                w.owningApplication().is_some_and(|a| {
+                    a.bundleIdentifier().to_string().starts_with("com.pragma")
+                        || u64::try_from(a.processID()).is_ok_and(|pid| hide_pids.contains(&pid))
+                })
             })
             .collect();
         let excluded = NSArray::from_retained_slice(&excluded);

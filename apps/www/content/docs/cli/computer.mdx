@@ -40,15 +40,15 @@ other agents use those apps.
 
 ## Reading
 
-| Command                                                                                                                                             | What it does                                                                             |
-| --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `apps [--installed] [--query <text>]`                                                                                                               | Running apps, or installed ones.                                                         |
-| `windows [--app <app>]`                                                                                                                             | On-screen windows, front to back.                                                        |
-| `displays`                                                                                                                                          | Attached displays and their scale.                                                       |
-| `inspect [--app <app>] [--window <id>] [--query <text>] [--role <role>] [--max-nodes <n>] [--include-offscreen]`                                    | An accessibility snapshot of a window: element ids, roles, labels, values, and frames.   |
-| `screenshot [--app <app> \| --window <id> \| --display <id> \| --region x,y,w,h] [--format png\|jpeg] [--max-width <px>] [--out <path>] [--base64]` | Capture to an owner-only file. Prints its id, size, and path.                            |
-| `permissions [--request]`                                                                                                                           | Accessibility and Screen Recording status for the helper; `--request` shows the prompts. |
-| `status [--events]`                                                                                                                                 | Sessions, leases, prompts, helper health; `--events` streams activity.                   |
+| Command                                                                                                                                             | What it does                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `apps [--installed] [--query <text>]`                                                                                                               | Running apps, or installed ones.                                                                          |
+| `windows [--app <app>]`                                                                                                                             | On-screen windows, front to back.                                                                         |
+| `displays`                                                                                                                                          | Attached displays and their scale.                                                                        |
+| `inspect [--app <app>] [--window <id>] [--query <text>] [--role <role>] [--max-nodes <n>] [--include-offscreen]`                                    | An accessibility snapshot of a window: element ids, roles, labels, values, and frames.                    |
+| `screenshot [--app <app> \| --window <id> \| --display <id> \| --region x,y,w,h] [--format png\|jpeg] [--max-width <px>] [--out <path>] [--base64]` | Capture to an owner-only file (the primary display when nothing is named). Prints its id, size, and path. |
+| `permissions [--request]`                                                                                                                           | Accessibility and Screen Recording status for the helper; `--request` shows the prompts.                  |
+| `status [--events]`                                                                                                                                 | Sessions, leases, prompts, helper health; `--events` streams activity.                                    |
 
 `--app` takes a name (`Safari`), bundle id, or `app:` id, and defaults to the frontmost
 app. Element ids look like `s42:e12`: element 12 of snapshot 42. They stay valid for a

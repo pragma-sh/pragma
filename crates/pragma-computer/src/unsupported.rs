@@ -69,6 +69,7 @@ impl ComputerBackend for UnsupportedBackend {
         &mut self,
         _: &Context,
         _: &ComputerScreenshotRequest,
+        _: &[u64],
     ) -> ComputerResult<ComputerScreenshot> {
         Err(unsupported())
     }

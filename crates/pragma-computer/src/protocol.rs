@@ -38,7 +38,13 @@ pub enum HelperOp {
     Open(ComputerOpenRequest),
     Focus(ComputerFocusRequest),
     Inspect(ComputerInspectRequest),
-    Screenshot(ComputerScreenshotRequest),
+    Screenshot {
+        request: ComputerScreenshotRequest,
+        /// Processes whose windows a display or region capture leaves out:
+        /// the apps agents may not read. The server decides which they are.
+        #[serde(default, rename = "hidePids", skip_serializing_if = "Vec::is_empty")]
+        hide_pids: Vec<u64>,
+    },
     Resolve(ResolveRequest),
     Click(ComputerClickRequest),
     Type(ComputerTypeRequest),

@@ -95,6 +95,7 @@ objc2-foundation = { version = "0.3", optional = true, default-features = false,
 ] }
 objc2-screen-capture-kit = { version = "0.3", default-features = false, features = [
   "std",
+  "libc",
   "SCShareableContent",
   "SCScreenshotManager",
   "SCStream",

@@ -250,11 +250,13 @@ pub trait ComputerBackend {
     fn focus(&mut self, ctx: &Context, request: &ComputerFocusRequest) -> ComputerResult<Focused>;
     /// An accessibility snapshot.
     fn inspect(&mut self, request: &ComputerInspectRequest) -> ComputerResult<ComputerSnapshot>;
-    /// A capture, written to a file.
+    /// A capture, written to a file. A display or region capture leaves out
+    /// every window of `hide_pids`.
     fn screenshot(
         &mut self,
         ctx: &Context,
         request: &ComputerScreenshotRequest,
+        hide_pids: &[u64],
     ) -> ComputerResult<ComputerScreenshot>;
     /// What an action would touch.
     fn resolve(&mut self, request: &ResolveRequest) -> ComputerResult<Resolved>;

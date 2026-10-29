@@ -303,6 +303,7 @@ impl ComputerBackend for FakeBackend {
         &mut self,
         ctx: &Context,
         request: &ComputerScreenshotRequest,
+        hide_pids: &[u64],
     ) -> ComputerResult<ComputerScreenshot> {
         // A real 1×1 PNG, so a test that opens the file gets an image; the
         // fake never needs the native capture stack.
@@ -313,6 +314,9 @@ impl ComputerBackend for FakeBackend {
             0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
             0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
         ];
+        if !hide_pids.is_empty() {
+            self.record(format!("screenshot hiding {hide_pids:?}"));
+        }
         let id = format!("shot_{}", uuid::Uuid::new_v4().simple());
         let path = ctx.screenshots_dir.join(format!("{id}.png"));
         std::fs::create_dir_all(&ctx.screenshots_dir)
@@ -400,7 +404,11 @@ impl ComputerBackend for FakeBackend {
 
     fn key(&mut self, ctx: &Context, request: &ComputerKeyRequest) -> ComputerResult<Performed> {
         ctx.stop.check()?;
-        self.record(format!("key {}", request.chords.join(" ")));
+        let target = request
+            .pid
+            .map(|pid| format!(" @{pid}"))
+            .unwrap_or_default();
+        self.record(format!("key {}{target}", request.chords.join(" ")));
         Ok(Performed {
             method: ComputerMethod::Keys,
             physical_cursor: false,

@@ -550,6 +550,7 @@ impl ComputerBackend for WindowsBackend {
         &mut self,
         ctx: &Context,
         request: &ComputerScreenshotRequest,
+        hide_pids: &[u64],
     ) -> ComputerResult<ComputerScreenshot> {
         let target = if let Some(region) = &request.region {
             CaptureTarget::Region(region.clone())
@@ -585,6 +586,7 @@ impl ComputerBackend for WindowsBackend {
                 directory: ctx.screenshots_dir.clone(),
                 inline: request.base64 == Some(true),
             },
+            hide_pids,
         )
     }
     fn resolve(&mut self, request: &ResolveRequest) -> ComputerResult<Resolved> {

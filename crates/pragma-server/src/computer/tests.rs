@@ -1179,3 +1179,110 @@ fn open_timeout_covers_the_catalog_and_the_window_wait() {
         + pragma_constants::CONSTANTS.computer.action_timeout_ms.get();
     assert!(timeout >= std::time::Duration::from_millis(budget));
 }
+
+fn blocking_safari() -> Value {
+    json!({ "computerUse": {
+        "enabled": true,
+        "access": { "agents": { "*": "allow" }, "sensitive": "allow" },
+        "blockedApps": ["mac:com.apple.safari"],
+    } })
+}
+
+#[test]
+fn a_blocked_window_cannot_be_captured_by_id() {
+    let w = world(Some(blocking_safari()));
+    let safari_window = json!({ "op": "screenshot", "window": "win:mac:4343" });
+    assert_eq!(
+        w.code(&agent("t1"), safari_window),
+        ComputerErrorCode::BlockedApp
+    );
+    // An allowed app named alongside does not vouch for another app's window.
+    assert_eq!(
+        w.code(
+            &agent("t1"),
+            json!({ "op": "screenshot", "app": "TextEdit", "window": "win:mac:4343" })
+        ),
+        ComputerErrorCode::BlockedApp
+    );
+    w.call(
+        &agent("t1"),
+        json!({ "op": "screenshot", "window": "win:mac:4242" }),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_window_must_belong_to_the_app_named_with_it() {
+    let w = world(Some(enabled_allowing_agents()));
+    assert_eq!(
+        w.code(
+            &agent("t1"),
+            json!({ "op": "screenshot", "app": "TextEdit", "window": "win:mac:4343" })
+        ),
+        ComputerErrorCode::InvalidPayload
+    );
+}
+
+#[test]
+fn screen_captures_leave_out_blocked_apps() {
+    let w = world(Some(blocking_safari()));
+    for request in [
+        json!({ "op": "screenshot" }),
+        json!({ "op": "screenshot", "display": "display:mac:1" }),
+        // A region wins over a window in every backend, so it is a screen capture.
+        json!({ "op": "screenshot", "window": "win:mac:4242", "region": { "x": 0, "y": 0, "w": 10, "h": 10 } }),
+    ] {
+        w.log.lock().unwrap().clear();
+        w.call(&agent("t1"), request).unwrap();
+        assert_eq!(
+            w.log.lock().unwrap().as_slice(),
+            ["screenshot hiding [4343]"]
+        );
+    }
+}
+
+#[test]
+fn untargeted_input_goes_to_the_app_that_was_checked() {
+    let w = world(Some(enabled_allowing_agents()));
+    w.call(&agent("t1"), json!({ "op": "key", "chords": ["enter"] }))
+        .unwrap();
+    assert_eq!(w.log.lock().unwrap().as_slice(), ["key enter @4242"]);
+}
+
+#[test]
+fn ending_a_session_stops_its_native_work() {
+    let w = world(Some(enabled_allowing_agents()));
+    w.call(
+        &agent("t1"),
+        json!({ "op": "key", "app": "TextEdit", "chords": ["enter"] }),
+    )
+    .unwrap();
+    let session = w.call(&user(), json!({ "op": "status" })).unwrap()["sessions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    w.service.end_tab("t1");
+    // An action still dispatched under the ended session is refused by the helper.
+    let stale = w.service.helper_call(HelperOp::InSession {
+        session: session.clone(),
+        pid: None,
+        action: Box::new(HelperOp::Ping),
+    });
+    assert_eq!(stale.unwrap_err().code, ComputerErrorCode::UserTakeover);
+    assert_eq!(
+        w.service.require_live_session(&session).unwrap_err().code,
+        ComputerErrorCode::Stopped
+    );
+}
+
+#[test]
+fn subscribing_never_loses_an_event_emitted_during_the_snapshot() {
+    let bus = ActivityBus::default();
+    let (_, events) = bus.subscribe(|| {
+        bus.emit(super::activity::event(
+            ComputerActivityType::ApprovalRequested,
+        ));
+        Value::Null
+    });
+    assert!(events.try_recv().is_ok());
+}

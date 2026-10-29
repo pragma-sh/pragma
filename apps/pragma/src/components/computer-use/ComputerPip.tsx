@@ -256,24 +256,63 @@ function PipFrame({
   cursor: ComputerCursor | undefined;
   frame: ComputerScreenshot;
 }) {
+  const box = useElementSize<HTMLDivElement>();
   const position = cursor ? cursorInFrame(cursor, frame) : null;
+  // `object-contain` letterboxes the image, so the cursor is placed within
+  // the image's fitted bounds, not the whole panel.
+  const fitted = box.size ? containedRect(frame, box.size) : null;
   return (
     <div className="relative h-full w-full">
-      <div className="absolute inset-0">
+      <div className="absolute inset-0" ref={box.ref}>
         <img
           alt="What the agent sees"
           className="h-full w-full object-contain"
           src={`data:image/${frame.format};base64,${frame.base64 ?? ""}`}
         />
-        {position ? (
+        {position && fitted ? (
           <MousePointer2
             className="absolute size-4 fill-primary text-primary-foreground drop-shadow"
-            style={{ left: `${position.left}%`, top: `${position.top}%` }}
+            style={{
+              left: fitted.left + (position.left / 100) * fitted.width,
+              top: fitted.top + (position.top / 100) * fitted.height,
+            }}
           />
         ) : null}
       </div>
     </div>
   );
+}
+
+type Size = { width: number; height: number };
+
+/** The element's content size, kept current as it resizes. */
+function useElementSize<T extends HTMLElement>(): {
+  ref: (element: T | null) => void;
+  size: Size | null;
+} {
+  const [element, ref] = useState<T | null>(null);
+  const [size, setSize] = useState<Size | null>(null);
+  useEffect(() => {
+    if (!element) return;
+    const measure = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return { ref, size };
+}
+
+/** Where an `object-contain` image of `image`'s size is drawn inside `box`, in pixels. */
+export function containedRect(
+  image: Size,
+  box: Size,
+): (Size & { left: number; top: number }) | null {
+  if (image.width <= 0 || image.height <= 0 || box.width <= 0 || box.height <= 0) return null;
+  const scale = Math.min(box.width / image.width, box.height / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  return { left: (box.width - width) / 2, top: (box.height - height) / 2, width, height };
 }
 
 /** Stands in for the frame: why there is none yet, and the fix when it is a grant. */
