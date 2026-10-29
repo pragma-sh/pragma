@@ -168,6 +168,6 @@ you unlock.
 
 ## Platform limits
 
-Windows keyboard and pointer fallbacks bring the target forward and may move your pointer. Invoke and value patterns can work in the background. Holding keys or mouse buttons in the target app pauses the task until you resume; Windows takeover detection does not currently identify a recently completed scroll. A refused foreground request returns `targetChanged`; an elevated target returns `targetElevated` rather than attempting to bypass Windows permissions.
+Windows keyboard and pointer fallbacks bring the target forward and may move your pointer. Invoke and value patterns can work in the background. Pressing a key, clicking, dragging, or scrolling in the target app pauses the task until you resume; the agent's own input never counts. A refused foreground request returns `targetChanged`; an elevated target returns `targetElevated` rather than attempting to bypass Windows permissions.
 
 Applications with incomplete accessibility trees may need direct CLI actions or a human handoff. Image and bounding-box support in the System 1 client is experimental and opt-in; autonomous tasks do not use it by default. The signed release helper and mixed-display/fullscreen behavior still require the native release-validation matrix.

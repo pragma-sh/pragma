@@ -5,12 +5,16 @@ use crate::snapshot::RawNode;
 use crate::{failure, ComputerResult};
 use pragma_constants::{ComputerErrorCode, ComputerMouseButton, ComputerPoint, ComputerRect};
 use std::mem::size_of;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Once, OnceLock};
+use std::time::Instant;
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, POINT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken,
     QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -27,16 +31,19 @@ use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
+    SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
     KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_HWHEEL,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
     MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, VIRTUAL_KEY,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
-    SetForegroundWindow, ShowWindow, SwitchToThisWindow, WindowFromPoint, SW_RESTORE,
-    SW_SHOWNORMAL,
+    BringWindowToTop, CallNextHookEx, GetCursorPos, GetForegroundWindow, GetMessageW,
+    GetWindowThreadProcessId, IsIconic, SetForegroundWindow, SetWindowsHookExW, ShowWindow,
+    SwitchToThisWindow, WindowFromPoint, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG,
+    MSLLHOOKSTRUCT, SW_RESTORE, SW_SHOWNORMAL, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
 pub type Element = IUIAutomationElement;
@@ -486,17 +493,132 @@ pub fn point_pid(point: &ComputerPoint) -> Option<u64> {
     }
     (pid != 0).then_some(u64::from(pid))
 }
-pub fn held_keyboard() -> bool {
-    // SAFETY: GetAsyncKeyState takes a scalar VK; this reads current key-down state only.
-    (8..=254)
-        .filter(|key| !matches!(key, 0x01..=0x06))
-        .any(|key| unsafe { GetAsyncKeyState(key) } < 0)
+// ------------------------------------------------------------------ physical input
+//
+// `GetAsyncKeyState` cannot tell our own `SendInput` events from the user's, so
+// a held Ctrl in a chord, or a button that had not yet been released, read as
+// the user taking over. Low-level hooks see the `INJECTED` flag instead.
+
+static INPUT_HOOKS: Once = Once::new();
+static HOOKS_READY: AtomicBool = AtomicBool::new(false);
+static INPUT_EPOCH: OnceLock<Instant> = OnceLock::new();
+/// Milliseconds after `INPUT_EPOCH`, plus one; zero means never seen.
+static LAST_KEY: AtomicU64 = AtomicU64::new(0);
+static LAST_POINTER: AtomicU64 = AtomicU64::new(0);
+/// Physically held mouse buttons, so a drag counts while the pointer moves.
+static HELD_BUTTONS: AtomicU8 = AtomicU8::new(0);
+
+fn mark(slot: &AtomicU64) {
+    let elapsed = INPUT_EPOCH.get_or_init(Instant::now).elapsed().as_millis();
+    slot.store(
+        u64::try_from(elapsed).unwrap_or(u64::MAX - 1) + 1,
+        Ordering::Relaxed,
+    );
 }
-pub fn held_pointer() -> bool {
-    // SAFETY: scalar mouse VKs; pointer movement itself never counts as takeover.
-    [1, 2, 4, 5, 6]
-        .into_iter()
-        .any(|key| unsafe { GetAsyncKeyState(key) } < 0)
+
+fn seconds_since(slot: &AtomicU64) -> Option<f64> {
+    let at = slot.load(Ordering::Relaxed).checked_sub(1)?;
+    let now = u64::try_from(INPUT_EPOCH.get()?.elapsed().as_millis()).ok()?;
+    // Millisecond counts stay far below f64's exact-integer range.
+    #[allow(clippy::cast_precision_loss)]
+    Some(now.saturating_sub(at) as f64 / 1000.0)
+}
+
+/// Starts the hook thread once; physical input before this is not seen.
+pub fn watch_physical_input() {
+    INPUT_HOOKS.call_once(|| {
+        INPUT_EPOCH.get_or_init(Instant::now);
+        let spawned = std::thread::Builder::new()
+            .name("pragma-input-hooks".into())
+            .spawn(run_input_hooks);
+        drop(spawned);
+    });
+}
+
+fn run_input_hooks() {
+    // SAFETY: the hook procedures are `extern "system"` with the HOOKPROC
+    // signature; the module handle names this executable. Low-level hooks are
+    // called on this thread, which must therefore pump messages for its life.
+    let installed = unsafe {
+        let module = GetModuleHandleW(PCWSTR::null()).ok().map(Into::into);
+        SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0).is_ok()
+            && SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), module, 0).is_ok()
+    };
+    if !installed {
+        return;
+    }
+    HOOKS_READY.store(true, Ordering::SeqCst);
+    let mut msg = MSG::default();
+    // SAFETY: writable stack MSG; this thread owns no windows, so this only
+    // dispatches the hook callbacks until the process exits.
+    while unsafe { GetMessageW(&raw mut msg, None, 0, 0) }.0 > 0 {}
+    HOOKS_READY.store(false, Ordering::SeqCst);
+}
+
+unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        // SAFETY: for HC_ACTION, lparam points to a KBDLLHOOKSTRUCT valid for this call.
+        let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+        let down = matches!(u32::try_from(wparam.0), Ok(WM_KEYDOWN | WM_SYSKEYDOWN));
+        if down && info.flags.0 & LLKHF_INJECTED.0 == 0 {
+            mark(&LAST_KEY);
+        }
+    }
+    // SAFETY: forwards the unmodified arguments Windows gave us.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        // SAFETY: for HC_ACTION, lparam points to an MSLLHOOKSTRUCT valid for this call.
+        let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+        if info.flags & LLMHF_INJECTED == 0 {
+            physical_mouse(u32::try_from(wparam.0).unwrap_or_default());
+        }
+    }
+    // SAFETY: forwards the unmodified arguments Windows gave us.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+fn physical_mouse(message: u32) {
+    let (bit, down) = match message {
+        WM_LBUTTONDOWN => (1, true),
+        WM_LBUTTONUP => (1, false),
+        WM_RBUTTONDOWN => (2, true),
+        WM_RBUTTONUP => (2, false),
+        WM_MBUTTONDOWN => (4, true),
+        WM_MBUTTONUP => (4, false),
+        WM_XBUTTONDOWN => (8, true),
+        WM_XBUTTONUP => (8, false),
+        WM_MOUSEWHEEL | WM_MOUSEHWHEEL => (0, false),
+        // Pointer movement alone never counts; a drag with a held button does.
+        WM_MOUSEMOVE if HELD_BUTTONS.load(Ordering::Relaxed) != 0 => (0, false),
+        _ => return,
+    };
+    if down {
+        HELD_BUTTONS.fetch_or(bit, Ordering::Relaxed);
+    } else {
+        HELD_BUTTONS.fetch_and(!bit, Ordering::Relaxed);
+    }
+    mark(&LAST_POINTER);
+}
+
+/// Seconds since the last physical (never injected) key press; `None` when unknown.
+pub fn physical_keyboard_seconds() -> Option<f64> {
+    watch_physical_input();
+    HOOKS_READY
+        .load(Ordering::SeqCst)
+        .then(|| seconds_since(&LAST_KEY))
+        .flatten()
+}
+
+/// Seconds since the last physical click, drag, or scroll; `None` when unknown.
+pub fn physical_pointer_seconds() -> Option<f64> {
+    watch_physical_input();
+    HOOKS_READY
+        .load(Ordering::SeqCst)
+        .then(|| seconds_since(&LAST_POINTER))
+        .flatten()
 }
 
 // Win32 coordinates are signed physical pixels. Saturation/rounding matches the API.

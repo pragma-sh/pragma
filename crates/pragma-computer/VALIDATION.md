@@ -59,6 +59,6 @@ the test passes with the patch and unmodified tao.
   fixtures prove request/answer handling, not model accuracy.
 - Preview CPU/RSS against the plan's budgets before enabling continuous native capture.
 
-Windows takeover currently detects held keys/buttons, not recently completed wheel
-input. Images/box answers are opt-in client capabilities; autonomous vision fallback
+Windows takeover counts only physical (non-injected) key presses, clicks, drags, and
+scrolls, read through low-level input hooks. Images/box answers are opt-in client capabilities; autonomous vision fallback
 is disabled. These limits are also stated in the public guide.

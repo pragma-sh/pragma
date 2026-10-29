@@ -28,6 +28,8 @@ pub struct WindowsBackend {
 }
 impl WindowsBackend {
     pub fn new() -> Self {
+        // Hook now, so input the user makes before the first probe is seen.
+        ffi::watch_physical_input();
         Self {
             api: ffi::Automation::new(),
             ring: SnapshotRing::default(),
@@ -878,8 +880,8 @@ fn refuse_minimized(window: &ComputerWindow) -> ComputerResult<()> {
 pub(super) fn user_activity(pid: Option<u64>) -> Option<UserActivity> {
     let point = ffi::pointer()?;
     Some(UserActivity {
-        keyboard_seconds: ffi::held_keyboard().then_some(0.0),
-        pointer_seconds: ffi::held_pointer().then_some(0.0),
+        keyboard_seconds: ffi::physical_keyboard_seconds(),
+        pointer_seconds: ffi::physical_pointer_seconds(),
         target_frontmost: ffi::foreground_pid() == pid,
         pointer_over_target: ffi::point_pid(&point) == pid,
     })

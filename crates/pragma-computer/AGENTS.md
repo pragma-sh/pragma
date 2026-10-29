@@ -148,7 +148,7 @@ Agents name an app "notepad" while xcap names its window after the executable pa
 `matches_app` also matches the file stem — that is what lets `open` reuse a running window
 instead of launching another copy and then waiting out its launch timeout.
 
-Windows takeover currently detects held keys/buttons, not recent wheel events. Foreground and capture behavior must be exercised on Windows 10/11 with mixed DPI; passing a source cross-check is not that validation.
+Windows takeover reads `WH_KEYBOARD_LL`/`WH_MOUSE_LL` hooks on a helper thread that drop `INJECTED` events. Never go back to `GetAsyncKeyState`: it reports the helper's own `SendInput` keys and buttons, so a chord's held Ctrl paused every task in Notepad as a user takeover. Foreground and capture behavior must be exercised on Windows 10/11 with mixed DPI; passing a source cross-check is not that validation.
 
 Session cancellation uses `inSession` and reader-thread `setSessionPaused`. `StopFlag` captures a session epoch when queued: pause/resume invalidates older actions without stopping other sessions. Native event-boundary checks also probe physical input in the target pid; the server turns `userTakeover` into a durable pause. Keep modifier/button releases unconditional when interrupted.
 
