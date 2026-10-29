@@ -109,6 +109,7 @@ than no guide.
 ├── crates/
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
+│   ├── pragma-computer/         # Computer-use backends + the `pragma-computer` helper → see crates/pragma-computer/AGENTS.md
 │   ├── pragma-core/             # Host business logic boundary → see crates/pragma-core/AGENTS.md
 │   ├── pragma-gateway/          # Localhost HTTP gateway → see crates/pragma-gateway/AGENTS.md
 │   ├── pragma-platform/         # OS seams: IPC, permissions, processes, shells → see crates/pragma-platform/AGENTS.md
@@ -315,6 +316,22 @@ than no guide.
   bridges → `crates/pragma-client`; localhost HTTP/JSON translation →
   `crates/pragma-gateway`; host business logic → `crates/pragma-core`; wire framing →
   `crates/pragma-protocol`; CLI/status reporting → `crates/pragma-cli`.
+- Computer use (reading and controlling other desktop apps) → native calls in
+  `crates/pragma-computer` (run in the supervised `pragma-computer` helper),
+  pure rules in `crates/pragma-core/src/computer.rs` and `computer_task.rs`, sessions/leases/policy/
+  approvals and the `computer` RPC + `computerActivity` stream in
+  `crates/pragma-server/src/computer/`. The CLI (`pragma-cli computer`) and the
+  desktop (in-app picture-in-picture panel, per-display cursor overlay windows, approvals, Settings → Computer Use) are callers
+  of the same RPC. Off unless the global `computerUse.enabled` is true; acting
+  needs the desktop open; only the desktop (`caller.kind = user`) may approve,
+  pause, stop, or read frames.
+  Durable tasks live in `computer/tasks.rs` (metadata, volatile inputs) and
+  `computer/tasks/runner.rs` (observe/decide/validate/act/verify); the long-lived
+  `pragma-ai computer-decide` sidecar keeps System 1 calls in `packages/ai-helpers`.
+  The gateway's computer RPC and activity subscription require the owner-only local
+  token, never the pairing token. SDK calls from terminals retain their tab attribution;
+  gateway callers cannot claim desktop-user authority. Desktop previews use cancellable
+  Tauri channels and never put image bytes on `computerActivity`.
 - Durable agent invocation records and auto-resume → host side
   `crates/pragma-server/src/invocations.rs` (SQLite beside the socket) and
   `agent_resume.rs` (prepare / restore / claim), CLI supervisor
@@ -324,6 +341,9 @@ than no guide.
   and recovery_ below.
 - Anything that differs between operating systems → `crates/pragma-platform`. Never a
   bare `#[cfg(unix)]` at the call site (see _Platform targets_).
+- macOS background webviews rely on `vendor/wry` honoring `.focused(false)` during
+  construction. Keep its focus guards until upstream fixes unconditional app
+  activation; see `vendor/wry/PRAGMA-PATCH.md`.
 
 ## Durable agent sessions and recovery
 
@@ -785,11 +805,18 @@ on every target:
 | `disk`    | Bytes a file occupies on disk and hard-link identity (storage accounting)          |
 | `dock`    | The dock / taskbar icon menu: macOS dock menu, Windows jump list, Linux `.desktop` |
 
-**`unsafe` is denied workspace-wide, with exactly one documented exception:** the `dock`
+**`unsafe` is denied workspace-wide, with exactly two documented exceptions:** the `dock`
 seam, which has no safe binding (an Objective-C method added to tao's app delegate on
-macOS, COM on Windows). The workspace lint is `deny` rather than `forbid` only so that one
-module can carry `#[allow(unsafe_code)]`. Do not add another without the owner's sign-off
-and a `// SAFETY:` comment on every block.
+macOS, COM on Windows), and computer use's FFI modules `crates/pragma-computer/src/{macos,windows}/ffi.rs`
+(Accessibility/ScreenCaptureKit callbacks and UI Automation/SendInput). The workspace lint is `deny` rather
+than `forbid` only so those modules can carry `#[allow(unsafe_code)]`. Do not add another
+without the owner's sign-off and a `// SAFETY:` comment on every block.
+
+**`vendor/tauri-plugin-decorum` is a patched copy of 1.1.1**, wired in through
+`[patch.crates-io]` in the root `Cargo.toml`: upstream's global `on_window_ready` hook
+dereferences the traffic-light buttons of every window and aborts the app when a
+borderless window (the computer-use cursor overlay) opens. See its `PRAGMA-PATCH.md`;
+drop both once upstream guards the null buttons.
 
 Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:
 

@@ -17,6 +17,7 @@
     "no-underscore-dangle": ["error", { "allow": ["__PRAGMA__", "__apiVersion"] }]
   },
   "ignorePatterns": [
+    "vendor/**",
     "**/dist/**",
     "**/target/**",
     "**/.turbo/**",

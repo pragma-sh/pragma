@@ -270,6 +270,7 @@
       "dependencies": {
         "@earendil-works/pi-ai": "0.79.10",
         "@earendil-works/pi-coding-agent": "0.79.10",
+        "@pragma-sh/constants": "workspace:*",
         "@pragma-sh/sidecar-kit": "workspace:*",
         "@pragma-sh/system1": "workspace:*",
         "yaml": "^2.9.0",

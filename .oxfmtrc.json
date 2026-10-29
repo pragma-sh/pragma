@@ -1,5 +1,6 @@
 {
   "ignorePatterns": [
+    "vendor/**",
     "**/src/generated/**",
     "**/src-tauri/gen/**",
     "**/.next/**",

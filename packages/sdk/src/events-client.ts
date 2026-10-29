@@ -29,6 +29,7 @@ export class EventsClient {
     const suffix = query.toString() ? `?${query}` : "";
     const response = await this.transport.raw(`${routes.subscription(event)}${suffix}`, {
       signal: options.signal,
+      localOnly: event === "computerActivity",
     });
     for await (const line of ndjsonStream<{ type?: string }>(response, options.signal)) {
       // The gateway interleaves `{"type":"ready"}` keepalive lines with real

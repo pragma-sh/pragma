@@ -69,6 +69,11 @@ fn run(args: Args) -> GatewayResult<()> {
         read_or_create_token(&token_path)?
     };
     let config = GatewayConfig::new(socket_path, args.port, token, discovery_path);
+    let local_token = read_or_create_token(
+        &config
+            .socket_path
+            .with_file_name(CONSTANTS.gateway.local_token_file.as_str()),
+    )?;
 
     let previous_port = remove_stale_or_refuse(
         &config.discovery_path,
@@ -84,6 +89,7 @@ fn run(args: Args) -> GatewayResult<()> {
         &GatewayDiscovery {
             port,
             token: config.token.clone(),
+            local_token: Some(local_token.clone()),
             pid: std::process::id(),
             protocol_version: client.protocol_version().to_string(),
         },
@@ -120,6 +126,7 @@ fn run(args: Args) -> GatewayResult<()> {
     let state = AppState {
         client,
         token: config.token,
+        local_token,
         gateway_version: env!("CARGO_PKG_VERSION"),
         pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
         devices,

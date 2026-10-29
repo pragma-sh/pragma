@@ -229,3 +229,7 @@ try {
 
 - Documentation: https://pragma-app.sh/docs
 - Source: https://github.com/pragma-sh/pragma/tree/main/packages/sdk
+
+## Local computer use
+
+`client.computer` mirrors [`computer` CLI operations](computer-use.md), decodes screenshots to bytes, and owns durable task run/task/wait/resume/cancel helpers. It requires a separate `localToken` or `PRAGMA_LOCAL_GATEWAY_TOKEN`; never expose that credential through mobile pairing. Terminal calls retain tab attribution. Awaiting with an aborted signal stops waiting, not the host task; call `cancel` to stop future steps and `end` to release app leases. `PragmaComputerError` carries the host's domain code and recovery hint. Screen content stays untrusted data.

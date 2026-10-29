@@ -189,5 +189,8 @@ have only forward slashes`) when bunup walked that workspace-symlinked
 - Streaming uses NDJSON over `fetch`/`ReadableStream`, not SSE or WebSockets.
 - Future follow-up: `pragma-cli` could target the gateway later, but today it still
   talks directly to `pragma-server`.
-- Follow-up not implemented without owner sign-off: Pragma terminal sessions do not yet
-  inject `PRAGMA_GATEWAY_URL` / `PRAGMA_GATEWAY_TOKEN`.
+- Local terminal sessions inject gateway URL/token and an optional separate local computer-use token from the owner-only discovery file.
+
+## Computer use
+
+`client.computer` mirrors direct actions and durable run/task/wait/resume/cancel operations. It requires `localToken` (or `PRAGMA_LOCAL_GATEWAY_TOKEN`) and preserves terminal attribution from env through `env.ts`. Screenshot bytes decode to `Uint8Array`; activity streams also use the local credential. `PragmaComputerError` exposes the host's domain code, retryability and hint. Cancelling a wait does not cancel the host task. Always end the session when finished.

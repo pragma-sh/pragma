@@ -16,7 +16,20 @@ pub fn rpc(
     matched: &RouteMatch,
 ) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
     let method = parse_method(&param(matched, "method")?).ok_or(GatewayError::NotFound)?;
-    let payload: Value = read_json(request)?;
+    let mut payload: Value = read_json(request)?;
+    if method == ProtocolRpcMethod::Computer {
+        // Gateway credentials never convey desktop-user authority. In particular,
+        // an SDK caller cannot approve itself by supplying caller.kind = user.
+        let object = payload.as_object_mut().ok_or_else(|| {
+            GatewayError::InvalidPayload("computer request must be an object".to_string())
+        })?;
+        let caller = object.get("caller");
+        let attributed = caller.filter(|caller| caller["kind"] == "agentTab")
+            .and_then(|caller| caller["tabId"].as_str().map(|tab| serde_json::json!({"kind":"agentTab","tabId":tab,"worktreeId":caller["worktreeId"]})))
+            .unwrap_or_else(||serde_json::json!({"kind":"sdk"}));
+        // Agent ids are resolved on the host; user/plugin authority is never accepted.
+        object.insert("caller".to_string(), attributed);
+    }
     let response = state.client.rpc(method, payload)?;
     json_response(200, &response)
 }
@@ -43,6 +56,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "scripts" => ProtocolRpcMethod::Scripts,
         "ports" => ProtocolRpcMethod::Ports,
         "accounts" => ProtocolRpcMethod::Accounts,
+        "computer" => ProtocolRpcMethod::Computer,
         _ => return None,
     })
 }

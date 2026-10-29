@@ -32,7 +32,8 @@
       "manifestFile": "manifest.json",
       "resourceDir": "web"
     },
-    "keepAwake": true
+    "keepAwake": true,
+    "localTokenFile": "gateway-local-token"
   },
   "platform": {
     "defaultBackend": "native",
@@ -101,7 +102,7 @@
       "questionTitle": "{agent} is waiting for an answer",
       "commandTitle": "{agent} wants to run a command",
       "locationSeparator": " / ",
-      "tabSuffix": " · tab \"{tab}\"",
+      "tabSuffix": " \u00b7 tab \"{tab}\"",
       "unknownLocation": "Open Pragma to continue."
     }
   },
@@ -177,7 +178,8 @@
       "ports",
       "sessions",
       "scripts",
-      "accounts"
+      "accounts",
+      "computer"
     ],
     "events": [
       "agentStatus",
@@ -189,7 +191,8 @@
       "automationPending",
       "automationsChanged",
       "workspace",
-      "fanouts"
+      "fanouts",
+      "computerActivity"
     ],
     "errors": [
       "invalidPayload",
@@ -391,14 +394,14 @@
       "What are we going to ship in {location}?",
       "What will we create in {location}?",
       "What should we make next in {location}?",
-      "Ready when you are — what should we build in {location}?"
+      "Ready when you are \u2014 what should we build in {location}?"
     ],
     "generic": [
       "What should we build?",
       "What are we going to ship?",
       "What will we create?",
       "What should we make next?",
-      "Ready when you are — what should we build?"
+      "Ready when you are \u2014 what should we build?"
     ]
   },
   "storage": {
@@ -516,5 +519,277 @@
       "debounceMs": 750,
       "errorBackoffMs": 60000
     }
+  },
+  "computer": {
+    "helperName": "pragma-computer",
+    "macHelperBundleId": "com.pragma.computer-use",
+    "macHelperAppName": "Pragma Computer Use",
+    "grantsFile": "computer-grants.json",
+    "screenshotsDirectory": "computer/screenshots",
+    "screenshotTtlMs": 86400000,
+    "idleTimeoutMs": 120000,
+    "inputMutexWaitMs": 5000,
+    "approvalTimeoutMs": 120000,
+    "snapshotTtlMs": 60000,
+    "snapshotRingSize": 32,
+    "maxNodes": 4000,
+    "walkBudgetMs": 600,
+    "minElementPoints": 4,
+    "maxOffscreenElements": 50,
+    "labelMaxChars": 80,
+    "appLaunchWaitMs": 15000,
+    "actionTimeoutMs": 10000,
+    "typeChunkUnits": 20,
+    "cursorLeadMs": 150,
+    "helperRestartBackoffMs": [
+      1000,
+      2000,
+      5000
+    ],
+    "blockedApps": [
+      "mac:com.apple.keychainaccess",
+      "mac:com.apple.securityagent",
+      "mac:com.apple.loginwindow",
+      "mac:com.apple.systempreferences",
+      "mac:com.apple.settings.privacysecurity.extension",
+      "mac:com.1password.1password",
+      "mac:com.bitwarden.desktop",
+      "mac:com.lastpass.lastpassmacdesktop",
+      "mac:com.apple.passwords",
+      "win:consent.exe",
+      "win:logonui.exe",
+      "win:credentialuibroker.exe",
+      "win:1password.exe",
+      "win:bitwarden.exe",
+      "win:keepass.exe"
+    ],
+    "sensitiveLabels": [
+      "delete",
+      "remove",
+      "erase",
+      "send",
+      "submit",
+      "pay",
+      "buy",
+      "purchase",
+      "order",
+      "confirm",
+      "install",
+      "allow",
+      "grant",
+      "transfer",
+      "publish",
+      "sign out",
+      "log out"
+    ],
+    "commands": [
+      {
+        "op": "apps",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "windows",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "displays",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "open",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "focus",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "always",
+        "desktopOnly": false
+      },
+      {
+        "op": "inspect",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "screenshot",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "click",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "pointer",
+        "desktopOnly": false
+      },
+      {
+        "op": "type",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "pointer",
+        "desktopOnly": false
+      },
+      {
+        "op": "key",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "always",
+        "desktopOnly": false
+      },
+      {
+        "op": "scroll",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "pointer",
+        "desktopOnly": false
+      },
+      {
+        "op": "move",
+        "mutating": true,
+        "lease": false,
+        "inputLock": "pointer",
+        "desktopOnly": false
+      },
+      {
+        "op": "drag",
+        "mutating": true,
+        "lease": true,
+        "inputLock": "always",
+        "desktopOnly": false
+      },
+      {
+        "op": "status",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "end",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "permissions",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "frame",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "approve",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": true
+      },
+      {
+        "op": "pause",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": true
+      },
+      {
+        "op": "unpause",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": true
+      },
+      {
+        "op": "stop",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": true
+      },
+      {
+        "op": "run",
+        "mutating": true,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "resume",
+        "mutating": true,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "cancel",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      },
+      {
+        "op": "task",
+        "mutating": false,
+        "lease": false,
+        "inputLock": "none",
+        "desktopOnly": false
+      }
+    ],
+    "tasksFile": "computer-tasks.json",
+    "taskHistoryLimit": 200,
+    "taskRetentionMs": 604800000,
+    "taskMaxSteps": 25,
+    "taskMaxTimeMs": 300000,
+    "taskMaxModelCalls": 30,
+    "taskMaxInputChars": 16384,
+    "taskMaxActive": 8,
+    "nextConfidence": 0.55,
+    "itemConfidence": 0.5,
+    "itemMargin": 0.15,
+    "achievedConfidence": 0.8,
+    "taskKeys": [
+      "enter",
+      "escape",
+      "tab",
+      "shift+tab",
+      "mod+l",
+      "mod+f",
+      "mod+a",
+      "left",
+      "right",
+      "up",
+      "down",
+      "page_down",
+      "space"
+    ],
+    "pipFrameIntervalMs": 200,
+    "pipFrameWidth": 480,
+    "pipExpandedFrameWidth": 1280,
+    "localGatewayTokenEnv": "PRAGMA_LOCAL_GATEWAY_TOKEN",
+    "taskRecordLimit": 64
   }
 }

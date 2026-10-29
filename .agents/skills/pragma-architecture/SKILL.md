@@ -20,6 +20,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `hooks/` — React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss).
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
+  - `lib/external-store.ts` — synchronous snapshots and stable subscriptions shared by frontend stores.
 - `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons, `agent_sessions.rs` for host-routed launch preparation/restore).
 - `crates/pragma-cli/` — `pragma-cli` helper CLI that external agents call from terminals.
 - `crates/pragma-client/` — Rust native-client transport, frame I/O, and SSH streamlocal bridge.
@@ -115,3 +116,49 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 8. **Sweeping refactors for clarity are welcome** — this project is early.
 
 Full details: see `AGENTS.md` at the repo root.
+
+Computer tasks follow the host-owned pattern: `computer/tasks.rs` stores redacted metadata and volatile values, `computer/tasks/runner.rs` validates decisions around the direct-action pipeline, and `pragma-ai computer-decide` supplies bounded Jev choices. Gateway computer RPC/activity require a distinct owner-only local credential; loopback is not a local identity signal. The SDK mirrors these calls; desktop JPEG preview channels keep pixels out of activity events.
+
+Missing computer-use OS grants raise a host approval before native target resolution,
+even for already allowed callers. The desktop's `use-computer-permissions` and
+`ComputerPermissionControls` share setup between Settings and the approval popup;
+poll without prompting, request only on a button press, then require an explicit
+Pragma approval once macOS grants are enabled.
+
+An explicit macOS Screen Recording request must open its System Settings pane if
+the native request returns denied (the OS may not repeat its initial prompt).
+Passive checks and Accessibility-only requests must not open that pane.
+
+The host tracks desktop controllers by connection identity, with the newest active
+and older live connections as standbys. Cleanup removes only that connection;
+only an active disconnect fails pending controls, then the latest standby resumes.
+Computer use's `desktopConnected` must follow these live connections, never an OS
+process check. Acknowledge controller registration so reconnect can republish workspace state.
+
+macOS helper bundles are staged and signed by `apps/pragma/src-tauri/scripts/stage-macos-helper.ts`, then copied to `Contents/Helpers`. Tauri custom files are not recursively signed; preserve that signing order and temporary-keychain cleanup.
+
+The helper's cursor artwork is `crates/pragma-computer/icons/icon.svg`, generated
+into ICNS/ICO with the Tauri CLI (commands in that crate's AGENTS.md). Stage the
+macOS icon and Info.plist before signing, and include both in the bundle-cache hash;
+Windows embeds the ICO through `windows.rc`.
+
+Successful helper dev signing persists the chosen identity in the gitignored
+`apps/pragma/src-tauri/dev-signing-identity.local`; explicit
+`PRAGMA_DEV_SIGNING_IDENTITY` overrides it. Preserve this across rebuilds so a
+different launching shell does not silently replace a certificate with ad hoc signing.
+
+The computer PiP's Focus app arrow uses the host's desktop-only `focusSession` control and the same session lease as its preview. Only an unknown-operation rejection falls back to `status` plus `pragma-platform::desktop::focus_app` for older daemons; never use an agent action that acquires a competing lease. macOS overlay construction relies on `vendor/wry` honoring `.focused(false)`; early creation alone cannot prevent focus theft when computer use is enabled mid-run.
+
+Preview startup must tolerate UI overlays/HMR ahead of the native binary:
+`streamComputerFrames` falls back to immediate, sequential `computer_rpc` frame polling
+only when `computer_start_preview` is unknown. Both paths release on hide or minimize
+and suppress frames arriving after cancellation.
+Check native permissions before starting captures, rechecking a missing macOS grant
+once while idle so the host can replace a helper with cached denial. Never restart
+the helper on every frame or prompt for OS permissions automatically.
+The PiP rechecks permissions on a bounded interval during capture failures and
+recognizes explicit Screen Recording errors independently of the status lookup.
+Clear stale frames so the recovery button remains visible; request the grant only
+on a button press, with `permission: "screenRecording"`.
+
+Computer-use pause/takeover is host-owned durable `paused` task state plus a session latch. The helper guards session epochs between native events; pause/resume must not revive queued actions. Per-session Stop releases leases but retains a `stopped` pause latch for the desktop Restart control. CLI callers must ask the user to resume/restart before continuing.

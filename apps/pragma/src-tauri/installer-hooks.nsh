@@ -35,6 +35,7 @@ Var PragmaSidecarRunning
   !insertmacro ${_ACTION} "pragma-server.exe"
   !insertmacro ${_ACTION} "pragma-gateway.exe"
   !insertmacro ${_ACTION} "pragma-cli.exe"
+  !insertmacro ${_ACTION} "pragma-computer.exe"
   !insertmacro ${_ACTION} "pragma-ai.exe"
   !insertmacro ${_ACTION} "pragma-github.exe"
   !insertmacro ${_ACTION} "pragma-watch.exe"

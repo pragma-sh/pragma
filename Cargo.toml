@@ -4,6 +4,7 @@ members = [
   "apps/pragma/src-tauri",
   "crates/pragma-cli",
   "crates/pragma-client",
+  "crates/pragma-computer",
   "crates/pragma-core",
   "crates/pragma-gateway",
   "crates/pragma-platform",
@@ -35,13 +36,20 @@ thiserror = "2"
 tokio = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# tauri-plugin-decorum 1.1.1 aborts the app when any borderless window opens;
+# see vendor/tauri-plugin-decorum/PRAGMA-PATCH.md. Remove once upstream fixes it.
+[patch.crates-io]
+tauri-plugin-decorum = { path = "vendor/tauri-plugin-decorum" }
+# wry activates macOS apps even for hidden, unfocused cursor overlays.
+# See vendor/wry/PRAGMA-PATCH.md; remove when upstream honors `focused`.
+wry = { path = "vendor/wry" }
+
 # Consistent lint policy across the whole Rust workspace.
 # Crates opt in with `[lints] workspace = true`.
 [workspace.lints.rust]
-# `deny`, not `forbid`, so exactly one module can opt out with a documented
-# `#[allow(unsafe_code)]`: `pragma-platform`'s `dock` seam, which has no safe
-# binding (an Objective-C runtime method on macOS, COM on Windows). Any other
-# `allow(unsafe_code)` needs the same justification and owner sign-off.
+# `deny`, not `forbid`, so documented dock and computer-use FFI boundaries
+# can opt out with `#[allow(unsafe_code)]` and a SAFETY comment on every block.
+# Any additional unsafe boundary needs the same justification and owner sign-off.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

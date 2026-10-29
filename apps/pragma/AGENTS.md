@@ -1289,6 +1289,9 @@ with the agent's display name, and shell OSC titles are ignored entirely. Agent
 
 **CLI-driven tab/worktree mutations:** brokered `pragma-cli` commands are executed by
 `src-tauri/src/control.rs`, then emit `worktreeChanged` / `tabsChanged` Tauri events.
+The host uses the newest desktop connection as controller and retains older live
+connections as standbys. Closing either instance must leave a surviving desktop
+registered; `desktopConnected` reflects this channel's connections, not running processes.
 `workspace-context.tsx` listens for those events and refreshes the selected project's
 SQLite snapshot; `tabOpened` also selects the target worktree/tab so CLI-opened tabs are
 visible immediately. `tabOpenedBackground` (mobile agent launches) refreshes without
@@ -2064,3 +2067,41 @@ Card-driven navigation (`openCardWorktree`) switches to `mode: "normal"` and lea
 exits without that return affordance. The always-mounted `WorkspaceDialogs` hosts the
 `NewAgentSessionDialog` + its deep-link listener (moved out of `ProjectSidebar`) so
 `pragma://open` works in both modes.
+
+Computer preview: `computer_start_preview`/`computer_stop_preview` own one cancellable JPEG channel per desktop window. The React panel releases it on hide, minimize and worktree changes, and never restarts on each cursor pulse. Preview pixels never enter `computerActivity`; that stream contains only session/task metadata. macOS helper staging is `src-tauri/scripts/stage-macos-helper.ts`: debug bundles are ad hoc, signed release helpers use a temporary certificate keychain and are copied through `tauri.macos.conf.json` into `Contents/Helpers` before outer-app signing.
+
+UI overlays and HMR may run ahead of the native desktop. If `computer_start_preview`
+is unknown, `streamComputerFrames` immediately polls the existing desktop `computer_rpc`
+frame operation instead. Keep captures sequential, retry while launch acquires its app,
+and suppress late frames after release; other startup errors must not trigger this fallback.
+Before starting either path, check permissions; if macOS reports a missing grant,
+recheck once while the helper is idle so the host can refresh cached denial. Do not
+repeat that refresh on every frame or request OS permission dialogs automatically.
+During capture failures, `use-computer-permissions` rechecks status on a bounded
+interval. Explicit Screen Recording errors must show the permission button even if
+status is stale or unavailable; clear an old frame so it cannot hide recovery.
+Request OS access only from the button, with `permission: "screenRecording"`.
+
+The computer PiP stays compact; its **Focus app** arrow calls the desktop-only `focusSession` computer RPC to bring the previewed app forward without changing the agent session or pause state. If an older persistent daemon rejects that unknown operation, the desktop resolves the current preview lease's pid through `status` and uses `pragma-platform::desktop::focus_app`; other errors are preserved. Never fall back to the agent `focus` action, which would compete for its lease. Cursor overlays use `.focused(false)` and `.focusable(false)`; `vendor/wry` makes the macOS constructor honor the first setting. Creating and showing overlays must preserve focus, including on first use and when enabled mid-run.
+
+Native focus regression (interactive macOS desktop): `PRAGMA_NATIVE_FOCUS_TEST=1 cargo test -p pragma --test macos_background_webview`. It creates a temporary main window, restores the original foreground app, then creates and shows click-through overlays. It runs on the OS main thread and starts no Pragma server. A normal startup window matters: otherwise AppKit can defer launch activation until the first overlay is displayed, testing startup rather than a running desktop. Without the opt-in variable it skips, so ordinary CI does not depend on WindowServer access.
+
+Computer pause/takeover freezes cursor updates and displays **Task paused**. A session with `pauseReason: stopped` has released its leases and cancelled its task but stays in the PiP with **Restart**, so fresh CLI calls cannot bypass user control. Resume/Restart unlocks the host session; the caller resumes a paused durable task or starts a new cancelled one.
+
+Computer approvals check OS grants first. `use-computer-permissions` polls missing
+grants and refreshes on focus; `ComputerPermissionControls` supplies the same two
+buttons in Settings and the setup popup. Prompt only on button presses, using the
+`permissions` RPC's optional `permission` selector. Once granted, show the existing
+Pragma approval; never automatically answer it.
+
+The computer-use helper's cursor icon lives in `crates/pragma-computer/icons/`.
+macOS staging copies `icon.icns` into the helper's resources before signing and
+hashes both the icon and Info.plist in its bundle cache; Windows embeds `icon.ico`
+through the helper's `windows.rc`. Keep the SVG as the editable source.
+
+Helper staging remembers a successful `PRAGMA_DEV_SIGNING_IDENTITY` in the
+gitignored `src-tauri/dev-signing-identity.local`. Explicit environment values
+win; later dev builds reuse that certificate even from a different terminal.
+
+Shared synchronous frontend snapshot stores use `src/lib/external-store.ts` for
+stable subscriptions and change notification; keep domain state in its owning store.

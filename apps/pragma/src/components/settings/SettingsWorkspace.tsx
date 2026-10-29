@@ -9,6 +9,7 @@ import {
   HardDrive,
   Keyboard,
   LogOut,
+  MousePointer2,
   Palette,
   PanelLeft,
   RefreshCw,
@@ -24,6 +25,7 @@ import { toast } from "sonner";
 import {
   constants,
   type AgentStatusSettings,
+  type ComputerUseSettings,
   type GitHubAuthMethod,
   type GitHubSettings,
   type TerminalSettings,
@@ -38,6 +40,7 @@ import { PragmaGoSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AccountsSection } from "@/components/settings/AccountsSection";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
+import { ComputerUseSection } from "@/components/settings/ComputerUseSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
@@ -88,6 +91,7 @@ type BuiltinSection =
   | "ai"
   | "mobile"
   | "automations"
+  | "computerUse"
   | "sidebar"
   | "other";
 
@@ -117,6 +121,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "ai",
   "mobile",
   "automations",
+  "computerUse",
   "sidebar",
   "other",
 ]);
@@ -159,6 +164,7 @@ interface PragmaConfig {
   terminal?: TerminalSettings;
   storage?: StorageSettings;
   system1?: System1Settings;
+  computerUse?: ComputerUseSettings;
   [key: string]: unknown;
 }
 
@@ -592,6 +598,13 @@ function GlobalSettingsNavigation({
         Automations
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "computerUse"}
+        icon={<MousePointer2 />}
+        onClick={() => setSection("computerUse")}
+      >
+        Computer Use
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "sidebar"}
         icon={<PanelLeft />}
         onClick={() => setSection("sidebar")}
@@ -781,6 +794,17 @@ function SettingsContent({
             projectId={projectId}
             scope={scope}
             settings={loaded.value.agentStatus ?? {}}
+          />
+        ) : null}
+        {loaded && section === "computerUse" && scope === "global" ? (
+          <ComputerUseSection
+            persist={(patch) =>
+              persist((current) => ({
+                ...current,
+                computerUse: { ...current.computerUse, ...patch },
+              }))
+            }
+            settings={loaded.value.computerUse ?? {}}
           />
         ) : null}
         {loaded && section === "github" && scope === "global" ? (

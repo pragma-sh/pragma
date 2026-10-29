@@ -119,6 +119,12 @@ pub struct LocalServerConfig {
     /// `PRAGMA_RESOURCE_DIR` so it can resolve staged watcher bundles for
     /// headless agent launches. `None` outside a bundled app (tests, CLI).
     resource_dir: Option<PathBuf>,
+    /// Absolute path of the `pragma-cli` helper the app installed, forwarded to
+    /// the spawned server as `PRAGMA_CLI_PATH`. The server puts it on every
+    /// session's `PATH`; the app that wrote the file is the only authoritative
+    /// source for where it lives — re-deriving it from `HOME` is how Windows
+    /// lost it (a GUI-launched process has `USERPROFILE`, never `HOME`).
+    cli_path: Option<PathBuf>,
 }
 
 impl LocalServerConfig {
@@ -137,7 +143,16 @@ impl LocalServerConfig {
             workspace_root,
             debug,
             resource_dir,
+            cli_path: None,
         }
+    }
+
+    /// Names the installed `pragma-cli` helper, so the server it spawns puts it
+    /// on every session's `PATH` instead of guessing at the install location.
+    #[must_use]
+    pub fn with_cli_path(mut self, cli_path: Option<PathBuf>) -> Self {
+        self.cli_path = cli_path;
+        self
     }
 }
 
@@ -812,6 +827,9 @@ impl PragmaClient {
             .stdin(Stdio::null());
         if let Some(resource_dir) = &config.resource_dir {
             command.env("PRAGMA_RESOURCE_DIR", resource_dir);
+        }
+        if let Some(cli_path) = &config.cli_path {
+            command.env("PRAGMA_CLI_PATH", cli_path);
         }
         if let Ok(log_file) = std::fs::OpenOptions::new()
             .create(true)

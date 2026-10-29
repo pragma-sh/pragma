@@ -42,6 +42,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { Separator } from "@/components/ui/separator";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { ComputerUseIndicator } from "@/components/computer-use/ComputerUseIndicator";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { editorLaunchers } from "@/lib/editor-launchers";
 import { type GitHubPrLifecycle } from "@/lib/github";
@@ -872,6 +873,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
         trailing={
           <>
             <ShortcutHint value={shortcutHint} />
+            <ComputerUseIndicator worktreeId={worktreeId} />
             <FanoutIndicator label={label} worktreeId={worktreeId} />
             {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
             <WorktreeRowActions

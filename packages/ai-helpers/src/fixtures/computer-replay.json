@@ -1,0 +1,281 @@
+[
+  {
+    "name": "synthetic-click_item",
+    "request": {
+      "instruction": "Click Save",
+      "snapshot": {
+        "id": "s1",
+        "app": {
+          "id": "editor",
+          "name": "Editor",
+          "running": true,
+          "frontmost": true
+        },
+        "elements": [
+          {
+            "id": "s1:e1",
+            "key": "save",
+            "role": "button",
+            "label": "Save",
+            "enabled": true,
+            "focused": false,
+            "editable": false,
+            "secure": false,
+            "actions": ["press"],
+            "onScreen": true,
+            "path": [0],
+            "depth": 1
+          }
+        ],
+        "truncated": false,
+        "nodeCount": 1,
+        "elapsedMs": 1,
+        "createdAt": 1,
+        "untrusted": true
+      },
+      "apps": [],
+      "variables": [],
+      "history": [],
+      "tried": []
+    },
+    "response": {
+      "model": "synthetic-fixture",
+      "answers": {
+        "next": {
+          "type": "choice",
+          "choice": "click_item",
+          "probabilities": {
+            "click_item": 1,
+            "request_text": 0,
+            "press_key": 0,
+            "scroll_down": 0,
+            "scroll_up": 0,
+            "wait_for_change": 0,
+            "done": 0,
+            "stuck": 0
+          },
+          "confidence": 1
+        },
+        "achieved": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "key": {
+          "type": "choice",
+          "choice": "enter",
+          "probabilities": {
+            "enter": 1,
+            "escape": 0,
+            "tab": 0,
+            "shift+tab": 0,
+            "mod+l": 0,
+            "mod+f": 0,
+            "mod+a": 0,
+            "left": 0,
+            "right": 0,
+            "up": 0,
+            "down": 0,
+            "page_down": 0,
+            "space": 0
+          },
+          "confidence": 1
+        },
+        "item": {
+          "type": "choice",
+          "choice": "s1:e1",
+          "probabilities": {
+            "s1:e1": 1
+          },
+          "confidence": 1
+        }
+      }
+    },
+    "expectedKind": "click_item"
+  },
+  {
+    "name": "synthetic-request_text",
+    "request": {
+      "instruction": "Click Save",
+      "snapshot": {
+        "id": "s1",
+        "app": {
+          "id": "editor",
+          "name": "Editor",
+          "running": true,
+          "frontmost": true
+        },
+        "elements": [
+          {
+            "id": "s1:e1",
+            "key": "save",
+            "role": "button",
+            "label": "Save",
+            "enabled": true,
+            "focused": false,
+            "editable": false,
+            "secure": false,
+            "actions": ["press"],
+            "onScreen": true,
+            "path": [0],
+            "depth": 1
+          }
+        ],
+        "truncated": false,
+        "nodeCount": 1,
+        "elapsedMs": 1,
+        "createdAt": 1,
+        "untrusted": true
+      },
+      "apps": [],
+      "variables": [],
+      "history": [],
+      "tried": []
+    },
+    "response": {
+      "model": "synthetic-fixture",
+      "answers": {
+        "next": {
+          "type": "choice",
+          "choice": "request_text",
+          "probabilities": {
+            "click_item": 0,
+            "request_text": 1,
+            "press_key": 0,
+            "scroll_down": 0,
+            "scroll_up": 0,
+            "wait_for_change": 0,
+            "done": 0,
+            "stuck": 0
+          },
+          "confidence": 1
+        },
+        "achieved": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "key": {
+          "type": "choice",
+          "choice": "enter",
+          "probabilities": {
+            "enter": 1,
+            "escape": 0,
+            "tab": 0,
+            "shift+tab": 0,
+            "mod+l": 0,
+            "mod+f": 0,
+            "mod+a": 0,
+            "left": 0,
+            "right": 0,
+            "up": 0,
+            "down": 0,
+            "page_down": 0,
+            "space": 0
+          },
+          "confidence": 1
+        },
+        "item": {
+          "type": "choice",
+          "choice": "s1:e1",
+          "probabilities": {
+            "s1:e1": 1
+          },
+          "confidence": 1
+        }
+      }
+    },
+    "expectedKind": "request_text"
+  },
+  {
+    "name": "synthetic-done",
+    "request": {
+      "instruction": "Click Save",
+      "snapshot": {
+        "id": "s1",
+        "app": {
+          "id": "editor",
+          "name": "Editor",
+          "running": true,
+          "frontmost": true
+        },
+        "elements": [
+          {
+            "id": "s1:e1",
+            "key": "save",
+            "role": "button",
+            "label": "Save",
+            "enabled": true,
+            "focused": false,
+            "editable": false,
+            "secure": false,
+            "actions": ["press"],
+            "onScreen": true,
+            "path": [0],
+            "depth": 1
+          }
+        ],
+        "truncated": false,
+        "nodeCount": 1,
+        "elapsedMs": 1,
+        "createdAt": 1,
+        "untrusted": true
+      },
+      "apps": [],
+      "variables": [],
+      "history": [],
+      "tried": []
+    },
+    "response": {
+      "model": "synthetic-fixture",
+      "answers": {
+        "next": {
+          "type": "choice",
+          "choice": "done",
+          "probabilities": {
+            "click_item": 0,
+            "request_text": 0,
+            "press_key": 0,
+            "scroll_down": 0,
+            "scroll_up": 0,
+            "wait_for_change": 0,
+            "done": 1,
+            "stuck": 0
+          },
+          "confidence": 1
+        },
+        "achieved": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "key": {
+          "type": "choice",
+          "choice": "enter",
+          "probabilities": {
+            "enter": 1,
+            "escape": 0,
+            "tab": 0,
+            "shift+tab": 0,
+            "mod+l": 0,
+            "mod+f": 0,
+            "mod+a": 0,
+            "left": 0,
+            "right": 0,
+            "up": 0,
+            "down": 0,
+            "page_down": 0,
+            "space": 0
+          },
+          "confidence": 1
+        },
+        "item": {
+          "type": "choice",
+          "choice": "s1:e1",
+          "probabilities": {
+            "s1:e1": 1
+          },
+          "confidence": 1
+        }
+      }
+    },
+    "expectedKind": "done"
+  }
+]

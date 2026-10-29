@@ -127,6 +127,24 @@ passed as `--agentId`, matching status reports and mobile interjections.
 
 ## Workspace mirror store
 
+Computer-use dispatch checks OS permissions before native target resolution when a
+desktop is connected. Missing macOS grants raise a pending caller approval even for
+an already allowed caller; the desktop collects OS grants before showing Pragma's
+approval buttons. Denied callers never trigger setup; diagnostics remain available.
+
+Verify this against the running host's Hello `buildId`, not just a rebuilt desktop:
+dev relaunches preserve a compatible older daemon. Compare the id with the SHA-256
+of the new server binary. Restarting the host closes terminal sessions; get user
+approval if any are live, and target only the affected worktree's dev channel.
+
+Desktop controller connections are tracked by socket identity in `registry.rs`.
+The newest connection handles brokered controls; older connected desktops remain
+standbys. Disconnecting a standby must not clear the active controller or fail its
+pending requests. Disconnecting the active one fails its pending requests and
+resumes the newest surviving connection. `RegisterController` is acknowledged before
+reading replies, so the desktop can republish its workspace after reconnecting.
+Computer use's `desktopConnected` is based on this registry, never on process names.
+
 `registry.rs` caches the latest `WorkspaceSnapshot` (projects/worktrees/tabs) the
 desktop app publishes via `RequestKind::PublishWorkspace`. The desktop routes each
 project's snapshot to its owning host. `publish_workspace` preserves daemon-owned
@@ -371,6 +389,25 @@ not be reparented as orphans. As a second line of defense, long-lived Bun hosts 
 supervisor stdin EOF as a cleanup-and-exit signal. The client never unlinks `server.lock`;
 the kernel releasing its advisory lock is what makes replacement safe.
 
+## Session environment
+
+A session inherits the server's environment with `PATH` prefixed by the directory
+holding `pragma-cli`, and `PRAGMA_CLI` naming that helper. Agents and terminal users
+resolve `pragma-cli` from it, so losing it silently breaks every plugin's status
+reporting.
+
+- The desktop hands us the helper's absolute path as **`PRAGMA_CLI_PATH`** when it
+  spawns the server — it installed the file, so it is the only authority. Prefer
+  that; `pragma_cli_path()` falls back to `PRAGMA_SERVER_CHANNEL` +
+  `PRAGMA_APP_DATA_DIR` / home for hosts that spawn the server another way (relay,
+  SSH).
+- Derive home through `pragma_core::process_env::home_dir()`, never a literal
+  `std::env::var("HOME")`: a GUI-launched Windows process has `USERPROFILE` and no
+  `HOME`, so the literal lookup dropped `~/.local/bin` from every Windows session
+  and `pragma-cli` was "not recognized".
+- Name the helper with `sidecar::executable_name("pragma-cli")`; the suffix-less
+  path does not exist on Windows.
+
 ## Wire Protocol
 
 Terminal output is raw bytes end-to-end. Every frame is:
@@ -481,3 +518,20 @@ session records its root shell PID; `ports.rs` walks current process ancestry an
 that shell or descendants before joining listener PIDs to tab/worktree ids. This ancestry
 filter is the security and UX boundary: never return unattributed host listeners, Pragma
 internals, or daemonized processes reparented outside the tab's process tree.
+
+## Computer tasks
+
+`computer/helper.rs` remembers reported OS permissions. A permission recheck after a missing macOS grant restarts the helper only when no native requests are pending, because AX trust denial is cached per process. Join the old stdout reader before registering replacement requests; stale replies and timeouts must not update or kill a replacement process. Granted helpers stay running. The helper's stderr is drained always: its last line is attached to the `helperUnavailable` failure every waiting caller receives, because a release helper aborts without leaving a WER report. `timeout_for` budgets an `open` for both the Start-menu catalog lookup and the window wait; budgeting only the wait killed a helper that was still working.
+
+`computer/tasks.rs` persists owner-only task metadata and keeps all input values in memory; `tasks/runner.rs` runs the bounded observe/decide/validate/act/verify loop. Native actions go back through the same pipeline as direct CLI operations. A task generation is checked before actions and again after approvals, so cancelled/replaced decisions cannot execute. Model waits poll cancellation and respect the remaining wall-clock budget. Unfinished records reload as resumable `interrupted` failures; variables must be supplied again. `requestId` deduplicates starts per owner. `end`, tab close, and emergency stop cancel owned work.
+
+Browser navigation without a full supplied HTTP(S) URL asks for `url`; missing text
+asks for `text`. Input handoffs carry a summary/question and `requestedInputs`, and
+resume clears that stale handoff text. A `request_text` decision is a non-native
+handoff even at low confidence; uncertainty must not turn that question into failure.
+
+`computer/decide.rs` keeps one NDJSON `pragma-ai computer-decide` child per active task. Keys go only over stdin and provider errors are redacted. Terminal sessions inherit the discovery file's optional local gateway token via `constants.computer.localGatewayTokenEnv`; it is separate from the pairing token and never returned by pairing APIs.
+
+The desktop-only `focusSession` computer control resolves the same session lease as `frame` and calls the native focus helper. It preserves session ownership, leases, pause state, and action counts; agent/script callers are refused.
+
+Desktop pause/takeover invalidates task generations and persists `paused` (resumable); CLI/SDK waits return instead of parking a worker. Only desktop unpause unlocks the caller, then CLI `resume` restarts its worker. Per-session Stop cancels tasks and releases leases but retains a paused session with reason `stopped` for the panel's Restart control; paused sessions never idle-expire. Check caller/session and generation again after cursor lead and approvals. Poll physical takeover between actions/model waits; all actions, including AX, participate. Native helper `inSession`/`setSessionPaused` interrupt only that session between events.

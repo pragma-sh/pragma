@@ -1,3 +1,4 @@
+import type { ComputerDecision } from "@pragma-sh/constants";
 /**
  * Prompt text for Pragma's built-in AI features. Kept here so prompts are
  * versioned in one place and unit-testable, separate from the SDK plumbing.
@@ -585,3 +586,16 @@ export function cleanConflictVerification(
     return answer;
   });
 }
+
+export const COMPUTER_ACTIONS: Record<ComputerDecision["kind"], string> = {
+  click_item: "Click an enabled, offered element to advance the goal",
+  type_variable: "Enter one supplied variable into an editable offered element",
+  request_text: "The next field needs text the caller has not supplied",
+  press_key: "Press one of the offered safe keyboard chords",
+  scroll_down: "Find more content by scrolling down",
+  scroll_up: "Find earlier content by scrolling up",
+  switch_app: "Continue in another offered application",
+  wait_for_change: "The app is loading; wait for the screen to change",
+  done: "Visible evidence proves the goal is complete",
+  stuck: "No offered action can advance the goal safely",
+};

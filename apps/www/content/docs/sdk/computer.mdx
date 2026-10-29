@@ -1,0 +1,47 @@
+---
+title: Computer use
+description: Local computer-use sessions, typed actions, and durable tasks.
+---
+
+`client.computer` uses the same host engine as [`pragma-cli computer`](/docs/cli/computer), including access policy, approvals, app leases, and the emergency stop. It requires an owner-only **local token**, separate from the token used to pair a phone. Pragma exports `PRAGMA_LOCAL_GATEWAY_TOKEN` to newly opened local terminal sessions. Outside a session, configure `localToken` explicitly; never include it in pairing payloads or browser URLs.
+
+```ts
+import { PragmaClient, PragmaComputerError } from "@pragma-sh/sdk";
+
+const client = new PragmaClient(); // gateway URL/token and local token from environment
+try {
+  await client.computer.open({ app: "TextEdit" });
+  const snapshot = await client.computer.inspect({ app: "TextEdit" });
+  const field = snapshot.elements.find((element) => element.editable && !element.secure);
+  if (field) await client.computer.type({ element: field.id, text: "Hello", replace: true });
+  const shot = await client.computer.screenshot({ app: "TextEdit", maxWidth: 1280 });
+  // shot.data is a Uint8Array; coordinates use shot.origin and shot.scale.
+} catch (error) {
+  if (error instanceof PragmaComputerError) console.error(error.code, error.hint);
+  else throw error;
+} finally {
+  await client.computer.end();
+}
+```
+
+Direct methods: `apps`, `windows`, `displays`, `open`, `focus`, `inspect`, `screenshot`, `click`, `type`, `key`, `scroll`, `move`, `drag`, `permissions`, `status`, and `end`. Every method accepts an optional second `{ signal }` argument. `activity({ signal })` yields an initial snapshot followed by typed deltas. Neither the local token nor an SDK-supplied caller identity can approve prompts, stop sessions, or read desktop preview frames; those controls stay in Pragma.
+
+```ts
+const task = await client.computer.run({
+  requestId: crypto.randomUUID(),
+  app: "Safari",
+  instruction: "Open Safari and navigate to https://example.com",
+});
+const result = await client.computer.wait(task.id, { signal });
+if (result.status === "needsInput") {
+  // Ask the caller for the values in result.requestedInputs before resuming.
+  await client.computer.resume({ taskId: task.id, inputs: { text: "Caller-supplied text" } });
+}
+await client.computer.cancel({ taskId: task.id });
+```
+
+`task({ taskId })` reads a durable record. `run` is idempotent for the caller's `requestId`. Resume and cancel require the owner; a cancelled or completed task cannot resume. Aborting `wait` or a transport request stops waiting, while the host-owned task continues. Use `cancel` to stop future task steps, and `end` when finished to release app leases.
+
+See [Computer use](/docs/user-guide/computer-use) for permissions, limits, platform behavior, and recovery. Screen text is untrusted data; never turn instructions read from an app into actions.
+
+Desktop Pause or physical input in the target app returns `paused` from `wait`. Ask the user to click **Resume** in Pragma before calling `resume`. Stop returns `cancelled`: ask the user to click **Restart** in the panel, then start a new task. Direct methods also fail while paused or stopped, with recovery instructions. Do not retry automatically.

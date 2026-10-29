@@ -1,0 +1,124 @@
+---
+title: Computer
+description: pragma-cli computer — read and control desktop apps on macOS and Windows.
+---
+
+```
+pragma-cli computer <command>
+```
+
+Computer commands talk directly to the host server. Reads work with the desktop closed;
+anything that clicks, types, or moves needs the Pragma window open, so the user can see
+and stop it. Computer use is off until enabled; see
+[Computer use](/docs/user-guide/computer-use) for the policy, the approvals, and the
+emergency stop.
+
+A call from an agent's terminal is attributed to its tab (`$PRAGMA_TAB_ID`), so the
+sidebar and the approval prompt name the agent.
+
+## The usual loop
+
+```sh
+pragma-cli computer open Safari
+pragma-cli computer inspect --app Safari --query address   # elements: s4:e0, s4:e1, …
+pragma-cli computer type --element s4:e0 --text "example.com" --replace --submit
+pragma-cli computer screenshot --app Safari --max-width 1280
+pragma-cli computer end
+```
+
+Prefer element ids to coordinates. An element action (`AXPress`, setting a field's value)
+works on background windows and never moves the user's pointer. On macOS, clicks, scrolls,
+and keys are delivered to the target app in the background too: it is not brought to the
+front, and `physicalCursor` is `false`. Nothing an agent does brings its app forward:
+`drag`, and a click with no window of the app under the point, use the real pointer only
+when the app is already frontmost and fail with `targetChanged` otherwise. Keys go to the app's
+focused element, so pass `--element` to `type` when the field is not already focused. The
+output says which `method` ran: `ax`, `pointer`, or `keys`.
+
+**Call `end` when you are done.** It releases the apps, clears the indicator, and lets
+other agents use those apps.
+
+## Reading
+
+| Command                                                                                                                                             | What it does                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `apps [--installed] [--query <text>]`                                                                                                               | Running apps, or installed ones.                                                                          |
+| `windows [--app <app>]`                                                                                                                             | On-screen windows, front to back.                                                                         |
+| `displays`                                                                                                                                          | Attached displays and their scale.                                                                        |
+| `inspect [--app <app>] [--window <id>] [--query <text>] [--role <role>] [--max-nodes <n>] [--include-offscreen]`                                    | An accessibility snapshot of a window: element ids, roles, labels, values, and frames.                    |
+| `screenshot [--app <app> \| --window <id> \| --display <id> \| --region x,y,w,h] [--format png\|jpeg] [--max-width <px>] [--out <path>] [--base64]` | Capture to an owner-only file (the primary display when nothing is named). Prints its id, size, and path. |
+| `permissions [--request]`                                                                                                                           | Accessibility and Screen Recording status for the helper; `--request` shows the prompts.                  |
+| `status [--events]`                                                                                                                                 | Sessions, leases, prompts, helper health; `--events` streams activity.                                    |
+
+`--app` takes a name (`Safari`), bundle id, or `app:` id, and defaults to the frontmost
+app. Element ids look like `s42:e12`: element 12 of snapshot 42. They stay valid for a
+minute. A control that moved is found again by its identifier or label. One that is
+gone fails with `elementStale` and offers candidates.
+
+## Acting
+
+| Command                                                                                                                                                                                      | What it does                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `open <app> [--url <url>] [--file <path>] [--new-instance] [--no-activate]`                                                                                                                  | Launch an app in the background and wait for its window.                                                   |
+| `focus [--app <app>] [--window <id>]`                                                                                                                                                        | Make a window its app's key target, without bringing it forward.                                           |
+| `click (--element <id> \| --x <x> --y <y> \| --image-x <x> --image-y <y> --screenshot <id>) [--button left\|right\|middle] [--count 2] [--modifiers cmd,shift] [--method auto\|ax\|pointer]` | Click.                                                                                                     |
+| `type (--text <t> \| --text-stdin \| --text-file <path>) [--element <id>] [--replace] [--submit] [--secret]`                                                                                 | Type caller-supplied text. `--secret` is required for password fields and keeps the text out of every log. |
+| `key <chord>... [--repeat <n>]`                                                                                                                                                              | Press chords: `mod+l` (⌘ on macOS), `enter`, `shift+tab`, `cmd+,`.                                         |
+| `scroll <up\|down\|left\|right> [--amount <lines>] [--element <id> \| --x --y]`                                                                                                              | Scroll.                                                                                                    |
+| `move (--element <id> \| --x --y) [--visual-only]`                                                                                                                                           | Move the pointer, or with `--visual-only` just point with the agent cursor.                                |
+| `drag --from <id\|x,y> --to <id\|x,y> [--duration <ms>]`                                                                                                                                     | Drag.                                                                                                      |
+| `end`                                                                                                                                                                                        | End your session.                                                                                          |
+
+`--image-x/--image-y` are pixels in a screenshot you took; the host maps them to the
+screen, so you never convert coordinates yourself.
+
+## Errors
+
+Failures print their code and a hint. Under `--json` the whole typed failure goes to
+stderr as `{"ok": false, "error": {"code", "message", "retryable", "hint", "details"}}`.
+
+| Code                                            | Meaning                                                                                                                                                                             |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`                                      | Computer use is off in Settings.                                                                                                                                                    |
+| `permissionMissing`                             | The helper lacks Accessibility or Screen Recording (`details.permission`).                                                                                                          |
+| `notAuthorized` / `denied` / `approvalRequired` | The policy refused, the user declined, or nobody answered the prompt.                                                                                                               |
+| `indicatorUnavailable`                          | Acting needs the Pragma window open.                                                                                                                                                |
+| `blockedApp`                                    | Pragma, password managers, and security prompts are off limits.                                                                                                                     |
+| `appBusy`                                       | Another session holds that app (`details.holder`). Retryable.                                                                                                                       |
+| `inputBusy` / `userTakeover`                    | `inputBusy`: another agent holds input. `userTakeover`: the task is paused by the user or by input in its target app. Ask the user to resume in Pragma; do not retry automatically. |
+| `stopped`                                       | The user stopped the task or pressed the emergency stop. Ask them to restart in Pragma before continuing.                                                                           |
+| `elementStale` / `snapshotExpired`              | Run `inspect` again.                                                                                                                                                                |
+| `targetChanged`                                 | The target app lost focus or something covered the element.                                                                                                                         |
+| `unsupportedPlatform`                           | Not on macOS and Windows.                                                                                                                                                           |
+
+## Durable tasks
+
+| Command                                                 | Purpose                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `run <instruction> [--app <name>] [--request-id <id>]`  | Start a host-owned task. Reuse the request id when retrying. Waits by default. |
+| `run ... --detach`                                      | Return immediately; disconnecting does not cancel the task.                    |
+| `status <task-id> [--wait]`                             | Read its status or wait until it completes, fails, or needs input.             |
+| `resume <task-id> [--input name=value] [--note <text>]` | Continue a resumable task from a fresh snapshot.                               |
+| `cancel <task-id>`                                      | Cancel your task; the desktop user can cancel any task.                        |
+
+`run` and `resume` accept repeated `--input name=value` and `--secret name=value`, `--max-steps`, and `--inputs-json <file-or->`. The JSON form is `{ "inputs": { "text": "Hello" }, "secrets": { "password": "..." } }`; prefer stdin for secrets so they do not enter shell history. Values are never persisted by the task engine.
+
+Task states are `running`, `paused`, `needsInput`, `needsApproval`, `completed`, `failed`, and `cancelled`. Branch on the returned state, code, and `resumable`, including under `--json`: a task result is distinct from an RPC failure. `end` cancels your unfinished tasks and releases app leases.
+
+Plain output says **Waiting for input** when the agent needs a value to type. It shows
+the question, the required input names, and a `resume` command. Supply the value to the
+CLI; the agent types it into the app. For navigation, provide a full URL. A request
+such as `Open Safari and navigate to youtube` asks for `url` instead of guessing one:
+
+```bash
+pragma-cli computer resume <task-id> --input 'url=https://www.youtube.com'
+```
+
+Failures show a readable reason and the task code. `lowConfidence` means Jev could not
+choose a safe next action confidently; it does not by itself mean text is missing.
+For a resumable task, supply a clarification with `--note` or the required literal
+text/URL with `--input`.
+
+Jev steps need a System 1 key configured on this host. Limits and ambiguity return a handoff instead of free-form model actions. Common task codes are `limitSteps`, `limitTime`, `limitModelCalls`, `lowConfidence`, `ambiguousTarget`, `stuck`, `modelUnavailable`, and `interrupted`.
+
+Pause and takeover end the CLI wait with `status: "paused"` and instructions to ask the user to resume. The panel's **Resume** unlocks the session; then `resume <task-id>` continues the task. **Stop** returns `cancelled` and requires the panel's **Restart** followed by a new `run`. Neither a fresh CLI call nor `end` bypasses a desktop pause or stop. Native input checks cancellation between events, including during long typing and drags.

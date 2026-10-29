@@ -6,6 +6,8 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 export interface PragmaClientConfig {
   baseUrl?: string;
   token?: string;
+  /** Owner-only credential for computer use. Never supplied by mobile pairing. */
+  localToken?: string;
   fetch?: FetchLike;
   headers?: Record<string, string>;
 }
@@ -16,6 +18,8 @@ export interface RequestOptions {
   rawBody?: Uint8Array;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /** Requires the local computer-use credential instead of the pairing token. */
+  localOnly?: boolean;
 }
 
 export class Transport {
@@ -23,6 +27,7 @@ export class Transport {
   readonly token: string;
   readonly fetch: FetchLike;
   readonly headers: Record<string, string>;
+  readonly localToken: string | undefined;
 
   constructor(config: PragmaClientConfig = {}) {
     const { baseUrl, token } = requireGatewayConfig(config);
@@ -30,6 +35,7 @@ export class Transport {
     this.token = token;
     this.fetch = requireFetch(config.fetch);
     this.headers = config.headers ?? {};
+    this.localToken = config.localToken ?? readEnv(PRAGMA_ENV_KEYS.localGatewayToken);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -41,18 +47,14 @@ export class Transport {
   }
 
   async raw(path: string, options: RequestOptions = {}): Promise<Response> {
+    const token = options.localOnly ? this.localToken : this.token;
+    if (!token) throw new PragmaTransportError("Computer use requires a local gateway token");
     const headers: Record<string, string> = {
       ...this.headers,
       ...options.headers,
-      authorization: `Bearer ${this.token}`,
+      authorization: `Bearer ${token}`,
     };
-    let body: BodyInit | undefined;
-    if (options.rawBody) {
-      body = options.rawBody as unknown as BodyInit;
-    } else if (options.body !== undefined) {
-      headers["content-type"] = headers["content-type"] ?? "application/json";
-      body = JSON.stringify(options.body);
-    }
+    const body = requestBody(options, headers);
     let response: Response;
     try {
       response = await this.fetch(urlFor(this.baseUrl, path), {
@@ -116,4 +118,14 @@ async function gatewayError(response: Response): Promise<PragmaGatewayError> {
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function requestBody(
+  options: RequestOptions,
+  headers: Record<string, string>,
+): BodyInit | undefined {
+  if (options.rawBody) return options.rawBody as unknown as BodyInit;
+  if (options.body === undefined) return undefined;
+  headers["content-type"] ??= "application/json";
+  return JSON.stringify(options.body);
 }

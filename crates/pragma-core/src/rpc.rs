@@ -21,6 +21,7 @@ pub fn protocol_error_code(error: &CoreError) -> ProtocolErrorCode {
 pub fn method_name(method: ProtocolRpcMethod) -> &'static str {
     match method {
         ProtocolRpcMethod::Git => "git",
+        ProtocolRpcMethod::Computer => "computer",
         ProtocolRpcMethod::Filesystem => "filesystem",
         ProtocolRpcMethod::Database => "database",
         ProtocolRpcMethod::Kanban => "kanban",

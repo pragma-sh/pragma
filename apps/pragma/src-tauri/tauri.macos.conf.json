@@ -17,5 +17,12 @@
         "hiddenTitle": true
       }
     ]
+  },
+  "bundle": {
+    "macOS": {
+      "files": {
+        "Helpers/Pragma Computer Use.app": "binaries/Pragma Computer Use.app"
+      }
+    }
   }
 }

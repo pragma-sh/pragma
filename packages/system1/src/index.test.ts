@@ -181,3 +181,55 @@ describe("checkEndpoint", () => {
     ).resolves.toBe("jev-1.13.0");
   });
 });
+
+describe("experimental images and boxes", () => {
+  it("rejects boxes outside the image and preserves missing confidence", () => {
+    const questions = { target: { type: "box" as const, instructions: "Save button" } };
+    const result = parseEvaluateResponse(questions, {
+      answers: { target: { type: "box", box: { top: 0.1, bottom: 0.3, left: 0.2, right: 0.5 } } },
+    });
+    expect(result.answers.target.confidence).toBeNull();
+    expect(() =>
+      parseEvaluateResponse(questions, {
+        answers: { target: { type: "box", box: { top: -1, bottom: 0.3, left: 0.2, right: 0.5 } } },
+      }),
+    ).toThrow("malformed");
+  });
+  it("requires an explicit image opt-in before sending bytes", async () => {
+    const mock = vi.fn();
+    await expect(
+      evaluate({
+        endpoint,
+        questions: { target: { type: "box", instructions: "button" } },
+        state: "screen",
+        fetch: mock,
+      }),
+    ).rejects.toThrow("experimentalImages");
+    expect(mock).not.toHaveBeenCalled();
+  });
+  it("encodes referenced PNG bytes as multipart and sets the experimental header", async () => {
+    const mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({
+        "TypeSafe-Danger-Zone-Images": "true",
+        "content-type": expect.stringContaining("multipart/form-data"),
+      });
+      if (!(init?.body instanceof Blob)) throw new Error("Expected multipart Blob");
+      const body = await init.body.text();
+      expect(body).toContain('name="request"');
+      expect(body).toContain('"<screen>":{"type":"image","part":"asset-0"}');
+      expect(body).toContain('filename="asset-0"');
+      return jsonResponse({ answers: { ready: { type: "noul", noul: 0.9 } } });
+    });
+    await evaluate({
+      endpoint,
+      state: "See <screen>",
+      questions: { ready: { type: "noul", instructions: "Ready?" } },
+      assets: {
+        "<screen>": { type: "image", data: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) },
+      },
+      experimentalImages: true,
+      fetch: mock,
+    });
+    expect(mock).toHaveBeenCalledOnce();
+  });
+});

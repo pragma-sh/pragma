@@ -14,10 +14,11 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The ten seams
+## The seams
 
 | Module    | Unix                                                                          | Windows                                                    |
 | --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `desktop` | Explicit app focus by pid through AppKit on macOS; unsupported on Linux       | `WScript.Shell.AppActivate`                                |
 | `ipc`     | `std::os::unix::net`                                                          | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
 | `path`    | `std::fs::canonicalize`                                                       | …then strip the `\\?\` verbatim prefix                     |
 | `perms`   | `chmod` `0600`/`0700`                                                         | `icacls /inheritance:r /grant:r <user>:(F)`                |
@@ -218,6 +219,10 @@ every path through environment variables, never interpolation, so nothing needs 
 (`--ignored`); the POSIX helper's swap and restore are unit-tested on every Unix.
 
 ## Adding a seam
+
+`desktop::focus_app` is user navigation only. The desktop's compatibility path for
+older computer-use daemons resolves the pid from a live session snapshot; it never
+creates an agent session, takes a lease, or synthesizes input.
 
 1. Add the module here with a real implementation for every target.
 2. Put any tunable default in `@pragma-sh/constants` under `platform`, not in Rust.

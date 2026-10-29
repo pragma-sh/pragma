@@ -8,8 +8,14 @@ use crate::pty::{cargo_executable, executable_name, sidecar_executable, workspac
 
 const PATH_WARNING_EVENT: &str = "pragma:agent-cli-path-warning";
 
-/// Ensures this app channel's `pragma-cli` helper is installed.
-pub fn ensure_installed(app: &AppHandle, data_dir: &Path, channel: &str) -> AppResult<()> {
+/// Ensures this app channel's `pragma-cli` helper is installed, returning the
+/// path it lives at.
+///
+/// The returned path is authoritative: it is forwarded to the spawned server as
+/// `PRAGMA_CLI_PATH` so sessions put *this* helper on their `PATH` rather than
+/// re-deriving the install location (which is how Windows lost it — see
+/// [`pragma_platform::path::home_dir`]).
+pub fn ensure_installed(app: &AppHandle, data_dir: &Path, channel: &str) -> AppResult<PathBuf> {
     let home = app.path().home_dir()?;
     let bin_dir = install_bin_dir(&home, data_dir, channel);
     std::fs::create_dir_all(&bin_dir)?;
@@ -21,7 +27,7 @@ pub fn ensure_installed(app: &AppHandle, data_dir: &Path, channel: &str) -> AppR
     if channel == "pragma" && !path_contains(&bin_dir) {
         let _ = app.emit(PATH_WARNING_EVENT, bin_dir.to_string_lossy().to_string());
     }
-    Ok(())
+    Ok(destination)
 }
 
 fn install_bin_dir(home: &Path, data_dir: &Path, channel: &str) -> PathBuf {

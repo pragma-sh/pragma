@@ -188,3 +188,7 @@ catalog/apply calls without entering HTTP logs or proxied HTML. Agent launch is 
 headless through the existing control path. HTML receives the draggable design brush before page scripts;
 ordinary assets and redirects remain on the generated tunnel origin. WebSocket/HMR
 upgrades are not proxied by the current `tiny_http` transport.
+
+## Local computer-use scope
+
+The owner-only discovery file also carries `localToken`, persisted separately in `constants.gateway.localTokenFile`. Only that token reaches `POST /v1/rpc/computer` or `GET /v1/subscriptions/computerActivity`. Both ordinary and local tokens serve ordinary routes; paired clients never receive the local token. Scope applies before dispatch, including the low-level RPC/subscription escape hatches. Computer payloads retain terminal-tab attribution but discard claimed user/plugin authority and supplied agent ids; the host resolves the agent. Never infer local trust from loopback: tunnels also arrive there.

@@ -87,6 +87,360 @@ pub enum TopCommand {
         #[command(subcommand)]
         whiteboard: WhiteboardCommand,
     },
+    /// Read and control desktop apps (macOS): accessibility snapshots,
+    /// screenshots, clicks, typing, and keys. Off until enabled in Pragma.
+    Computer {
+        #[command(subcommand)]
+        computer: ComputerCommand,
+    },
+}
+
+// -------------------------- computer --------------------------
+
+/// Computer-use commands talk directly to `pragma-server`. Reads work with the
+/// app closed; anything that clicks, types, or moves needs the Pragma window
+/// open so the user can see and stop it. Call `computer end` when done.
+#[derive(Debug, Subcommand)]
+pub enum ComputerCommand {
+    /// Running apps, or installed ones with `--installed`.
+    Apps(ComputerAppsArgs),
+    /// On-screen windows, optionally of one app.
+    Windows(ComputerAppArgs),
+    /// Attached displays and their scale.
+    Displays,
+    /// Launch an app in the background (a running one is left where it is).
+    Open(ComputerOpenArgs),
+    /// Make an app's window its target for keys, without bringing it forward.
+    Focus(ComputerFocusArgs),
+    /// An accessibility snapshot: the elements you can click and type into.
+    Inspect(ComputerInspectArgs),
+    /// Capture a window, an app's front window, a display, or a region.
+    Screenshot(ComputerScreenshotArgs),
+    /// Click an element (preferred) or a point.
+    Click(ComputerClickArgs),
+    /// Type text into the focused field or an element.
+    Type(ComputerTypeArgs),
+    /// Press keys and chords (`mod+l`, `enter`, `shift+tab`).
+    Key(ComputerKeyArgs),
+    /// Scroll an element, a point, or the app's front window.
+    Scroll(ComputerScrollArgs),
+    /// Move the pointer, or with `--visual-only` just point with the overlay.
+    Move(ComputerMoveArgs),
+    /// Drag between two elements or points.
+    Drag(ComputerDragArgs),
+    /// Your session, leases, approvals, and the helper's health.
+    Status(ComputerStatusArgs),
+    /// Run a durable, bounded computer task. Text must come from supplied inputs.
+    Run(ComputerRunArgs),
+    /// Resume a task after supplying missing inputs or a caller note.
+    Resume(ComputerResumeArgs),
+    /// Cancel one of your tasks. Already performed actions are kept.
+    Cancel { task_id: String },
+    /// End your session: release its apps and clear the indicator.
+    End,
+    /// The helper's Accessibility and Screen Recording permissions.
+    Permissions(ComputerPermissionsArgs),
+}
+
+/// Names the app an operation targets.
+#[derive(Debug, Args)]
+pub struct ComputerAppArgs {
+    /// App name, bundle id, `app:` id, or path. Defaults to the frontmost app.
+    #[arg(long)]
+    pub app: Option<String>,
+    /// Target the app with this process id.
+    #[arg(long)]
+    pub pid: Option<u64>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerAppsArgs {
+    /// Installed apps instead of running ones.
+    #[arg(long)]
+    pub installed: bool,
+    /// Keep apps whose name or bundle id contains this text.
+    #[arg(long)]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerOpenArgs {
+    /// App name, bundle id, or path.
+    #[arg(value_name = "APP")]
+    pub app: String,
+    /// Start a second instance instead of re-activating a running one.
+    #[arg(long)]
+    pub new_instance: bool,
+    /// Accepted for older scripts: an agent's app is never brought to the front.
+    #[arg(long, hide = true)]
+    pub no_activate: bool,
+    /// How long to wait for its first window, in milliseconds.
+    #[arg(long, value_name = "MS")]
+    pub wait_ready: Option<u64>,
+    /// Open this URL with the app.
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Open this file with the app.
+    #[arg(long)]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerFocusArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// A `win:` id from `computer windows`.
+    #[arg(long)]
+    pub window: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerInspectArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// A `win:` id; defaults to the app's focused window.
+    #[arg(long)]
+    pub window: Option<String>,
+    /// Keep elements whose label, value, or identifier contains this text.
+    #[arg(long)]
+    pub query: Option<String>,
+    /// Keep elements with this role (`button`, `textField`, `link`, …).
+    #[arg(long)]
+    pub role: Option<String>,
+    /// Stop descending past this depth.
+    #[arg(long)]
+    pub max_depth: Option<u64>,
+    /// Visit at most this many nodes.
+    #[arg(long)]
+    pub max_nodes: Option<u64>,
+    /// Also list elements scrolled out of view (they can still be pressed).
+    #[arg(long)]
+    pub include_offscreen: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerScreenshotArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// A `win:` id.
+    #[arg(long)]
+    pub window: Option<String>,
+    /// A `display:` id; the main display when nothing else is named.
+    #[arg(long)]
+    pub display: Option<String>,
+    /// A screen region as `x,y,w,h`.
+    #[arg(long, value_name = "X,Y,W,H")]
+    pub region: Option<String>,
+    /// Write the image here.
+    #[arg(long)]
+    pub out: Option<String>,
+    /// `png` (default) or `jpeg`.
+    #[arg(long)]
+    pub format: Option<String>,
+    /// Downscale to at most this many pixels wide.
+    #[arg(long)]
+    pub max_width: Option<u64>,
+    /// Include the image inline as base64.
+    #[arg(long)]
+    pub base64: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerClickArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// An element id from `inspect` (`s42:e12`).
+    #[arg(long, conflicts_with_all = ["x", "image_x"])]
+    pub element: Option<String>,
+    /// Screen x.
+    #[arg(long, requires = "y", allow_negative_numbers = true)]
+    pub x: Option<f64>,
+    /// Screen y.
+    #[arg(long, requires = "x", allow_negative_numbers = true)]
+    pub y: Option<f64>,
+    /// x in a screenshot's pixels (needs `--screenshot`).
+    #[arg(long, requires_all = ["image_y", "screenshot"])]
+    pub image_x: Option<f64>,
+    /// y in a screenshot's pixels (needs `--screenshot`).
+    #[arg(long, requires_all = ["image_x", "screenshot"])]
+    pub image_y: Option<f64>,
+    /// The screenshot id `--image-x`/`--image-y` refer to.
+    #[arg(long)]
+    pub screenshot: Option<String>,
+    /// `left` (default), `right`, or `middle`.
+    #[arg(long)]
+    pub button: Option<String>,
+    /// Click this many times (2 for a double click).
+    #[arg(long)]
+    pub count: Option<u64>,
+    /// Hold modifiers while clicking (`cmd`, `shift`, …).
+    #[arg(long, value_delimiter = ',')]
+    pub modifiers: Vec<String>,
+    /// `auto` (default), `ax`, or `pointer`.
+    #[arg(long)]
+    pub method: Option<String>,
+}
+
+// Each flag is an independent switch on the command line; clap's derive maps
+// them one to one, and grouping them into enums would only obscure `--help`.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Args)]
+pub struct ComputerTypeArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// The text to type.
+    #[arg(long, conflicts_with_all = ["text_stdin", "text_file"])]
+    pub text: Option<String>,
+    /// Read the text from stdin (any characters, newlines included).
+    #[arg(long)]
+    pub text_stdin: bool,
+    /// Read the text from a file.
+    #[arg(long)]
+    pub text_file: Option<String>,
+    /// An element id to type into; defaults to the focused field.
+    #[arg(long)]
+    pub element: Option<String>,
+    /// Replace the field's contents instead of adding to them.
+    #[arg(long)]
+    pub replace: bool,
+    /// The text is a secret: needed for password fields, never shown anywhere.
+    #[arg(long)]
+    pub secret: bool,
+    /// `auto` (default), `ax`, or `keys`.
+    #[arg(long)]
+    pub method: Option<String>,
+    /// Press Enter afterwards.
+    #[arg(long)]
+    pub submit: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerKeyArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// Chords to press in order: `mod+l`, `enter`, `shift+tab`, `cmd+,`.
+    #[arg(value_name = "CHORD", required = true)]
+    pub chords: Vec<String>,
+    /// Press the whole sequence this many times.
+    #[arg(long)]
+    pub repeat: Option<u64>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerScrollArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// `up`, `down`, `left`, or `right`.
+    #[arg(value_name = "DIRECTION")]
+    pub direction: String,
+    /// Lines to scroll (default 3).
+    #[arg(long)]
+    pub amount: Option<u64>,
+    /// Scroll the element with this id.
+    #[arg(long)]
+    pub element: Option<String>,
+    /// Screen x to scroll at.
+    #[arg(long, requires = "y", allow_negative_numbers = true)]
+    pub x: Option<f64>,
+    /// Screen y to scroll at.
+    #[arg(long, requires = "x", allow_negative_numbers = true)]
+    pub y: Option<f64>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerMoveArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// Move to the element with this id.
+    #[arg(long)]
+    pub element: Option<String>,
+    /// Screen x.
+    #[arg(long, requires = "y", allow_negative_numbers = true)]
+    pub x: Option<f64>,
+    /// Screen y.
+    #[arg(long, requires = "x", allow_negative_numbers = true)]
+    pub y: Option<f64>,
+    /// Point with the overlay cursor only; the real pointer stays put.
+    #[arg(long)]
+    pub visual_only: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerDragArgs {
+    #[command(flatten)]
+    pub target: ComputerAppArgs,
+    /// Where to press: an element id or `x,y`.
+    #[arg(long, allow_hyphen_values = true)]
+    pub from: String,
+    /// Where to release: an element id or `x,y`.
+    #[arg(long, allow_hyphen_values = true)]
+    pub to: String,
+    /// How long the drag takes, in milliseconds.
+    #[arg(long, value_name = "MS")]
+    pub duration: Option<u64>,
+    /// Hold modifiers while dragging.
+    #[arg(long, value_delimiter = ',')]
+    pub modifiers: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerStatusArgs {
+    /// Read one durable task instead of the global activity snapshot.
+    pub task_id: Option<String>,
+    /// Wait until this task completes, fails, or needs input.
+    #[arg(long, requires = "task_id")]
+    pub wait: bool,
+    /// Print the current state, then stream every activity event until Ctrl-C.
+    #[arg(long)]
+    pub events: bool,
+}
+
+/// Caller-supplied task variables. Secret values are never persisted by the host.
+#[derive(Debug, Args)]
+pub struct ComputerTaskInputs {
+    /// Literal name=value pairs (repeatable).
+    #[arg(long = "input")]
+    pub inputs: Vec<String>,
+    /// Secret name=value pairs (repeatable); prefer --inputs-json to avoid shell history.
+    #[arg(long = "secret")]
+    pub secrets: Vec<String>,
+    /// JSON file with inputs and secrets maps, or - to read stdin.
+    #[arg(long)]
+    pub inputs_json: Option<String>,
+    /// Maximum total steps, including those already performed.
+    #[arg(long)]
+    pub max_steps: Option<u64>,
+    /// Return immediately; the host continues the task.
+    #[arg(long)]
+    pub detach: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerRunArgs {
+    pub instruction: String,
+    #[arg(long)]
+    pub app: Option<String>,
+    /// Reuse this id when retrying a request to avoid duplicate tasks.
+    #[arg(long)]
+    pub request_id: Option<String>,
+    #[command(flatten)]
+    pub inputs: ComputerTaskInputs,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerResumeArgs {
+    pub task_id: String,
+    #[arg(long)]
+    pub note: Option<String>,
+    #[command(flatten)]
+    pub inputs: ComputerTaskInputs,
+}
+
+#[derive(Debug, Args)]
+pub struct ComputerPermissionsArgs {
+    /// Show the OS permission prompts (or open System Settings).
+    #[arg(long)]
+    pub request: bool,
 }
 
 // -------------------------- whiteboard --------------------------

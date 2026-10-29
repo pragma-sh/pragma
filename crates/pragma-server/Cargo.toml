@@ -15,6 +15,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 netstat2 = { workspace = true }
 portable-pty = "0.8"
+pragma-computer = { path = "../pragma-computer", default-features = false }
 pragma-constants = { path = "../../packages/constants" }
 pragma-core = { path = "../pragma-core" }
 pragma-platform = { path = "../pragma-platform" }

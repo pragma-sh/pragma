@@ -253,3 +253,16 @@ sidecar. The app installs/updates it to `~/.local/bin/pragma-cli` on startup.
 Most GUI-required commands broker through the running app via `pragma-server`.
 Commands that do not need the app (`tab read`, `agent status`, and
 `agent report`) talk directly to the server.
+
+Computer tasks: `computer run <instruction> [--app] [--request-id] [--detach]`, `resume <task-id>`, `status <task-id> [--wait]`, and `cancel <task-id>` are direct host RPCs. Inputs are repeatable name=value pairs or JSON `{inputs,secrets}` from `--inputs-json <file-or->`; prefer stdin for secrets. Run waits by default, but a killed CLI only disconnects. A task result is returned as structured state, distinct from an RPC failure; inspect `status`, `code` and `resumable`. `end` cancels unfinished work and releases leases.
+
+Human task output must show the reason/code for failures and **Waiting for input** for
+`needsInput`, including the question, required names/options, and a resume command.
+Keep JSON/TOON payloads unchanged. Suggested commands use placeholders, never supplied
+values; secrets and names with shell syntax use the stdin JSON handoff.
+
+When verifying a freshly built CLI directly, unset `PRAGMA_CLI`: `session_cli.rs`
+otherwise delegates even an explicit `target/debug/pragma-cli` path to that session's
+installed binary. Set `PRAGMA_SERVER_SOCKET` explicitly for the intended dev channel.
+
+Desktop pause/takeover returns `paused` immediately from task waits and asks the user to Resume in Pragma before `computer resume`. Desktop Stop cancels the task and requires the user's Restart followed by a new run. Do not hide either outcome behind an automatic retry.

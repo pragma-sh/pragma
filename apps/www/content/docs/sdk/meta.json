@@ -1,6 +1,6 @@
 {
   "title": "SDK",
-  "description": "@pragma-sh/sdk — the typed TypeScript client for a Pragma host.",
+  "description": "@pragma-sh/sdk \u2014 the typed TypeScript client for a Pragma host.",
   "icon": "SquareCode",
   "root": true,
   "pages": [
@@ -11,6 +11,7 @@
     "fanouts",
     "scratchpads",
     "whiteboards",
+    "computer",
     "host-actions",
     "workspace"
   ]

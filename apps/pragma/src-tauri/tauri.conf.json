@@ -56,6 +56,7 @@
       "binaries/pragma-server",
       "binaries/pragma-gateway",
       "binaries/pragma-cli",
+      "binaries/pragma-computer",
       "binaries/pragma-ai",
       "binaries/pragma-github",
       "binaries/pragma-watch",

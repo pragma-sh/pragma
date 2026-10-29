@@ -19,11 +19,13 @@
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint .",
-    "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-ai"
+    "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-ai",
+    "computer:eval": "bun scripts/computer-eval.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.79.10",
     "@earendil-works/pi-coding-agent": "0.79.10",
+    "@pragma-sh/constants": "workspace:*",
     "@pragma-sh/sidecar-kit": "workspace:*",
     "@pragma-sh/system1": "workspace:*",
     "yaml": "^2.9.0"

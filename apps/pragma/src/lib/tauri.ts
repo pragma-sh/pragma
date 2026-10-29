@@ -1,6 +1,11 @@
 import type { AutoSelectProviderUsage } from "@pragma-sh/accounts-view";
+import { constants } from "@pragma-sh/constants";
 import type {
   AgentProgressEstimate,
+  ComputerActivityEvent,
+  ComputerActivitySnapshot,
+  ComputerPermissions,
+  ComputerScreenshot,
   Fanout,
   ScratchpadFile,
   FanoutPickResult,
@@ -51,6 +56,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
+import { errorMessage } from "@/lib/errors";
 
 export type { OpenPort, ShellProfile, WslDistroList } from "@pragma-sh/constants";
 
@@ -2571,4 +2577,112 @@ export function baseFileDiff(
 /** Lists a worktree's managed scratchpads with their full MDX source. */
 export function listScratchpadFiles(worktreeId: string): Promise<ScratchpadFile[]> {
   return invoke<ScratchpadFile[]>("list_scratchpad_files", { worktreeId });
+}
+
+// ------------------------------- computer use --------------------------------
+
+/**
+ * Sends one `computer` RPC to the local host as the desktop user.
+ *
+ * The Rust side always overwrites the caller with `user`, so approvals, pause,
+ * and the stop can only come from this window — never from an agent's CLI.
+ */
+export function computerRpc<T>(payload: Record<string, unknown>): Promise<T> {
+  return invoke<T>("computer_rpc", { payload });
+}
+
+/**
+ * Streams the visible desktop preview; release it when hidden or switching worktrees.
+ * `onFailure` hears why a capture produced no frame (a missing grant, no app yet).
+ */
+export async function streamComputerFrames(
+  session: string,
+  maxWidth: number,
+  onFrame: (frame: ComputerScreenshot) => void,
+  onFailure: (message: string) => void = () => {},
+): Promise<() => void> {
+  await refreshComputerPreviewPermissions();
+  const frames = new Channel<ComputerScreenshot>();
+  const failures = new Channel<string>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes only onmessage.
+  frames.onmessage = onFrame;
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes only onmessage.
+  failures.onmessage = onFailure;
+  let streamId: string;
+  try {
+    streamId = await invoke<string>("computer_start_preview", {
+      session,
+      maxWidth,
+      frames,
+      failures,
+    });
+  } catch (error) {
+    // UI overlays/HMR can update the panel before the native desktop restarts.
+    // Older desktops already expose the same session frames through computer_rpc.
+    if (errorMessage(error) !== "Command computer_start_preview not found") throw error;
+    return pollComputerFrames(session, maxWidth, onFrame, onFailure);
+  }
+  return () => {
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes only onmessage.
+    frames.onmessage = () => {};
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes only onmessage.
+    failures.onmessage = () => {};
+    void invoke("computer_stop_preview", { streamId }).catch(() => {});
+  };
+}
+
+/** Refreshes a stale macOS permission result once, before captures start queueing. */
+async function refreshComputerPreviewPermissions(): Promise<void> {
+  try {
+    const permissions = await computerRpc<ComputerPermissions>({ op: "permissions" });
+    if (
+      permissions.platform === "macos" &&
+      (permissions.accessibility !== "granted" || permissions.screenRecording !== "granted")
+    ) {
+      // The first check records the denial. Rechecking lets the host refresh an
+      // idle helper, since macOS can cache denial after the user grants access.
+      await computerRpc<ComputerPermissions>({ op: "permissions" });
+    }
+  } catch {
+    // Capture retries still recover if the host is temporarily unavailable.
+  }
+}
+
+/** Compatibility preview for desktops without the native frame channel. */
+function pollComputerFrames(
+  session: string,
+  maxWidth: number,
+  onFrame: (frame: ComputerScreenshot) => void,
+  onFailure: (message: string) => void,
+): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pull = async () => {
+    try {
+      const frame = await computerRpc<ComputerScreenshot>({ op: "frame", session, maxWidth });
+      if (!stopped) onFrame(frame);
+    } catch (error) {
+      // A session starts before launch acquires its app; keep trying until ready.
+      if (!stopped) onFailure(errorMessage(error));
+    } finally {
+      if (!stopped) timer = setTimeout(() => void pull(), constants.computer.pipFrameIntervalMs);
+    }
+  };
+  void pull();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}
+
+/** One message on the computer-use activity bridge. */
+export type ComputerActivityMessage =
+  | { kind: "snapshot"; payload: ComputerActivitySnapshot }
+  | { kind: "delta"; payload: ComputerActivityEvent };
+
+/** Subscribes to the local host's computer-use activity (snapshot, then deltas). */
+export function onComputerActivity(
+  handler: (message: ComputerActivityMessage) => void,
+): Promise<UnlistenFn> {
+  return listen<ComputerActivityMessage>("pragma:computer", (event) => handler(event.payload));
 }

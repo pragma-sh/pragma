@@ -1,7 +1,16 @@
+import { constants } from "@pragma-sh/constants";
 /** Environment variable names used by the gateway SDK. */
-export const PRAGMA_ENV_KEYS = {
+export const PRAGMA_ENV_KEYS: Readonly<{
+  gatewayUrl: string;
+  gatewayToken: string;
+  localGatewayToken: string;
+  tabId: string;
+  worktreeId: string;
+  agentRunId: string;
+}> = {
   gatewayUrl: "PRAGMA_GATEWAY_URL",
   gatewayToken: "PRAGMA_GATEWAY_TOKEN",
+  localGatewayToken: constants.computer.localGatewayTokenEnv,
   tabId: "PRAGMA_TAB_ID",
   worktreeId: "PRAGMA_WORKTREE_ID",
   /** Opaque id Pragma assigns to one agent run; carried on every report from it. */
@@ -24,4 +33,12 @@ export function hasPragmaEnvironment(env?: PragmaEnv): boolean {
     readEnv(PRAGMA_ENV_KEYS.tabId, env) &&
     readEnv(PRAGMA_ENV_KEYS.worktreeId, env),
   );
+}
+
+/** Attribute local SDK computer use to its hosting terminal when available. */
+export function computerCaller(): import("@pragma-sh/constants").ComputerCaller {
+  const tabId = readEnv(PRAGMA_ENV_KEYS.tabId);
+  return tabId
+    ? { kind: "agentTab", tabId, worktreeId: readEnv(PRAGMA_ENV_KEYS.worktreeId) }
+    : { kind: "sdk" };
 }

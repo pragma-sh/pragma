@@ -25,7 +25,11 @@ permissions:
 jobs:
   rust-windows:
     name: Rust on Windows (clippy, test)
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       # No apt step and no GTK/WebKit: the Windows webview is WebView2, which

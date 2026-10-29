@@ -95,15 +95,25 @@ impl PtyClient {
     /// Builds a managed-local client for this app instance channel.
     /// `resource_dir` is the app's bundled resource directory, forwarded to the
     /// spawned server so headless launches can resolve staged watcher bundles.
-    pub fn new(app_data_dir: PathBuf, channel: String, resource_dir: Option<PathBuf>) -> Self {
+    /// `cli_path` is the `pragma-cli` helper this app installed, forwarded so the
+    /// server can put it on every session's `PATH`.
+    pub fn new(
+        app_data_dir: PathBuf,
+        channel: String,
+        resource_dir: Option<PathBuf>,
+        cli_path: Option<PathBuf>,
+    ) -> Self {
         Self {
-            inner: PragmaClient::new_local(LocalServerConfig::new(
-                app_data_dir,
-                channel,
-                workspace_root(),
-                cfg!(debug_assertions),
-                resource_dir.clone(),
-            )),
+            inner: PragmaClient::new_local(
+                LocalServerConfig::new(
+                    app_data_dir,
+                    channel,
+                    workspace_root(),
+                    cfg!(debug_assertions),
+                    resource_dir.clone(),
+                )
+                .with_cli_path(cli_path),
+            ),
             session_streams: Arc::new(Mutex::new(HashMap::new())),
             file_streams: Arc::new(Mutex::new(HashMap::new())),
             resource_dir,
@@ -787,6 +797,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/pragma-test"),
             "pragma".to_string(),
             None,
+            None,
         );
         let socket = client.socket_path();
         let log = client.log_path();
@@ -799,6 +810,7 @@ mod tests {
         let client = PtyClient::new(
             std::path::PathBuf::from("/tmp/pragma-test"),
             "pragma-dev-abc123".to_string(),
+            None,
             None,
         );
         let socket = client.socket_path();
@@ -873,7 +885,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let prev = std::env::var_os("XDG_RUNTIME_DIR");
         std::env::remove_var("XDG_RUNTIME_DIR");
-        let client = PtyClient::new(dir.path().to_path_buf(), "pragma".to_string(), None);
+        let client = PtyClient::new(dir.path().to_path_buf(), "pragma".to_string(), None, None);
         assert_eq!(client.read_log().expect("read empty log"), "");
         std::fs::create_dir_all(client.log_path().parent().expect("log dir"))
             .expect("create channel dir");

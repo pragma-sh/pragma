@@ -35,7 +35,8 @@
     "storage",
     "projects",
     "accounts",
-    "system1"
+    "system1",
+    "computer"
   ],
   "properties": {
     "app": {
@@ -130,6 +131,9 @@
     },
     "system1": {
       "$ref": "#/definitions/System1"
+    },
+    "computer": {
+      "$ref": "#/definitions/ComputerDefaults"
     }
   },
   "definitions": {
@@ -143,7 +147,7 @@
       "title": "GitHubPullRequest",
       "type": "object",
       "additionalProperties": false,
-      "description": "The pull request associated with a worktree's branch, found by repository plus exact head branch — which is what makes one opened outside Pragma appear.",
+      "description": "The pull request associated with a worktree's branch, found by repository plus exact head branch \u2014 which is what makes one opened outside Pragma appear.",
       "required": ["number", "title", "url", "state", "headBranch", "baseBranch"],
       "properties": {
         "number": {
@@ -200,7 +204,7 @@
       "title": "TerminalViewportPolicy",
       "type": "object",
       "additionalProperties": false,
-      "description": "Bounds for temporary exclusive ownership of a session's PTY grid. A second client (a phone) attaching to a session the desktop is already showing has to resize the shared PTY to its own much smaller viewport; a lease makes that ownership explicit and, crucially, time-bounded — iOS can suspend an app before any client-side cleanup runs, so the host, not the client, is what restores the desktop's size.",
+      "description": "Bounds for temporary exclusive ownership of a session's PTY grid. A second client (a phone) attaching to a session the desktop is already showing has to resize the shared PTY to its own much smaller viewport; a lease makes that ownership explicit and, crucially, time-bounded \u2014 iOS can suspend an app before any client-side cleanup runs, so the host, not the client, is what restores the desktop's size.",
       "required": ["leaseMs", "renewIntervalMs", "sweepIntervalMs"],
       "properties": {
         "leaseMs": {
@@ -449,7 +453,8 @@
         "fanouts",
         "sessions",
         "scripts",
-        "accounts"
+        "accounts",
+        "computer"
       ]
     },
     "ProtocolEventKind": {
@@ -466,7 +471,8 @@
         "automationPending",
         "automationsChanged",
         "workspace",
-        "fanouts"
+        "fanouts",
+        "computerActivity"
       ]
     },
     "ProtocolErrorCode": {
@@ -635,7 +641,7 @@
     },
     "FanoutMemberSelector": {
       "title": "FanoutMemberSelector",
-      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid — sampling one model twice is a supported use.",
+      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid \u2014 sampling one model twice is a supported use.",
       "type": "object",
       "additionalProperties": false,
       "required": ["selector"],
@@ -693,7 +699,7 @@
         },
         "runtimeAgentId": {
           "type": "string",
-          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site — the host resolves it from the plugin's watcher metadata."
+          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site \u2014 the host resolves it from the plugin's watcher metadata."
         },
         "modelId": {
           "type": ["string", "null"]
@@ -1099,7 +1105,7 @@
     },
     "FanoutMemberRequest": {
       "title": "FanoutMemberRequest",
-      "description": "Addresses one member of one fanout — used by retry and pick.",
+      "description": "Addresses one member of one fanout \u2014 used by retry and pick.",
       "type": "object",
       "additionalProperties": false,
       "required": ["memberId"],
@@ -1461,7 +1467,7 @@
       "properties": {
         "oauthClientId": {
           "type": "string",
-          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret — a distributed desktop app can't keep one secret."
+          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret \u2014 a distributed desktop app can't keep one secret."
         },
         "scopes": {
           "type": "array",
@@ -1636,7 +1642,7 @@
       "title": "BranchSyncStatus",
       "type": "object",
       "additionalProperties": false,
-      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch — the create-PR pre-flight.",
+      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch \u2014 the create-PR pre-flight.",
       "required": ["branch", "ahead", "behind", "hasUpstream"],
       "properties": {
         "branch": {
@@ -1684,7 +1690,7 @@
         },
         "parentBranch": {
           "type": ["string", "null"],
-          "description": "The branch of the worktree's parent worktree — the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
+          "description": "The branch of the worktree's parent worktree \u2014 the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
         }
       }
     },
@@ -1833,7 +1839,7 @@
       "properties": {
         "fileName": {
           "type": "string",
-          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme — the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
+          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme \u2014 the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
         },
         "modes": {
           "type": "array",
@@ -1859,13 +1865,14 @@
         "deviceHeaders",
         "push",
         "web",
-        "keepAwake"
+        "keepAwake",
+        "localTokenFile"
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
         "apiVersion": {
           "type": "string",
-          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value — a client that never launches cannot be updated first."
+          "description": "SemVer of the client-facing gateway HTTP contract, advertised in the pairing payload so a remote client can reject an incompatible host before it stores a connection. Deliberately NOT `daemon.protocolVersion`: that one is the internal daemon frame protocol and is bumped by every desktop release, whereas Pragma Go and the web build embed their copy of this value at build time and ship on their own cadence. Comparison is exact equality, so bump this only on a breaking change to the `/v1` API, and only in the same release as a client build that embeds the new value \u2014 a client that never launches cannot be updated first."
         },
         "discoveryFile": {
           "type": "string",
@@ -1912,6 +1919,10 @@
         "keepAwake": {
           "type": "boolean",
           "description": "Default for keeping the host awake while remote access is on, so system sleep does not interrupt a Pragma Go pairing. Users override it with gateway.keepAwake in the global config file; pragma-server holds the sleep inhibitor alongside the tunnel."
+        },
+        "localTokenFile": {
+          "type": "string",
+          "description": "Owner-only computer-use gateway credential; never paired."
         }
       }
     },
@@ -1959,7 +1970,7 @@
         "presenceTtlMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed — the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
+          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed \u2014 the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
         },
         "tokenPrefixes": {
           "type": "array",
@@ -1984,7 +1995,7 @@
         },
         "defaultUrlPattern": {
           "type": "string",
-          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://…\"` log and plain `https://…` URLs (e.g. cloudflared)."
+          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://\u2026\"` log and plain `https://\u2026` URLs (e.g. cloudflared)."
         }
       }
     },
@@ -2158,7 +2169,7 @@
         },
         "unknownLocation": {
           "type": "string",
-          "description": "Body used when neither the project nor the worktree could be resolved — a report can arrive for a worktree the client has not loaded yet."
+          "description": "Body used when neither the project nor the worktree could be resolved \u2014 a report can arrive for a worktree the client has not loaded yet."
         }
       }
     },
@@ -2282,7 +2293,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["isWindows", "distros"],
-      "description": "Result of probing WSL availability on the host that owns a worktree — the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
+      "description": "Result of probing WSL availability on the host that owns a worktree \u2014 the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
       "properties": {
         "isWindows": {
           "type": "boolean",
@@ -4087,7 +4098,7 @@
         },
         "diffCommit": {
           "type": ["string", "null"],
-          "description": "Commit hash a commit-scoped diff tab shows (first parent → commit); null for range diffs and non-diff tabs."
+          "description": "Commit hash a commit-scoped diff tab shows (first parent \u2192 commit); null for range diffs and non-diff tabs."
         },
         "prNumber": {
           "type": ["integer", "null"],
@@ -4166,7 +4177,7 @@
     },
     "DiffSide": {
       "title": "DiffSide",
-      "description": "Which axis of change a diff/listing record refers to. committed (base branch → HEAD), staged (HEAD → index), and unstaged (index → working tree) are the three listing axes. worktree (base branch → working tree) is the unified review side every Changes-sidebar click opens — it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
+      "description": "Which axis of change a diff/listing record refers to. committed (base branch \u2192 HEAD), staged (HEAD \u2192 index), and unstaged (index \u2192 working tree) are the three listing axes. worktree (base branch \u2192 working tree) is the unified review side every Changes-sidebar click opens \u2014 it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
       "type": "string",
       "enum": ["committed", "staged", "unstaged", "worktree"]
     },
@@ -4536,7 +4547,7 @@
         },
         "branchName": {
           "type": "string",
-          "description": "Branch the card targets — an existing project worktree branch or a new one to create."
+          "description": "Branch the card targets \u2014 an existing project worktree branch or a new one to create."
         },
         "prompt": {
           "type": "string"
@@ -5021,7 +5032,7 @@
       "title": "StorageDefaults",
       "type": "object",
       "additionalProperties": false,
-      "description": "Shipped defaults for the Settings → Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
+      "description": "Shipped defaults for the Settings \u2192 Storage page: what the host-side worktree scan reports, which gitignored folders it refuses to offer for deletion, and the storage reminder's default cadence. Users tune the reminder through the `storage` block of the global `.pragma/config.json` (`StorageSettings`).",
       "required": [
         "largeFileMinBytes",
         "largeFileLimit",
@@ -5972,6 +5983,2060 @@
         "model": {
           "type": "string",
           "description": "Model route that host expects."
+        }
+      }
+    },
+    "ComputerOp": {
+      "title": "ComputerOp",
+      "description": "One operation of the `computer` RPC. The names match the `pragma-cli computer` verbs and the SDK `client.computer` methods one for one.",
+      "type": "string",
+      "enum": [
+        "apps",
+        "windows",
+        "displays",
+        "open",
+        "focus",
+        "inspect",
+        "screenshot",
+        "click",
+        "type",
+        "key",
+        "scroll",
+        "move",
+        "drag",
+        "status",
+        "end",
+        "permissions",
+        "frame",
+        "approve",
+        "pause",
+        "unpause",
+        "stop",
+        "run",
+        "resume",
+        "cancel",
+        "task"
+      ]
+    },
+    "ComputerInputLock": {
+      "title": "ComputerInputLock",
+      "description": "Whether an operation takes the host's short input mutex. `pointer` takes it only when the operation falls back to moving the physical cursor or posting key events.",
+      "type": "string",
+      "enum": ["none", "pointer", "always"]
+    },
+    "ComputerCommandSpec": {
+      "title": "ComputerCommandSpec",
+      "description": "One row of the computer-use command registry: what an operation may do and which locks it needs. The server, the CLI help, and the docs all read this one table.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "mutating", "lease", "inputLock", "desktopOnly"],
+      "properties": {
+        "op": {
+          "$ref": "#/definitions/ComputerOp"
+        },
+        "mutating": {
+          "type": "boolean",
+          "description": "True when the operation changes UI state. Mutating operations need an enabled policy, a granted caller, and a connected desktop app."
+        },
+        "lease": {
+          "type": "boolean",
+          "description": "True when the operation takes the exclusive per-app lease for the caller's session."
+        },
+        "inputLock": {
+          "$ref": "#/definitions/ComputerInputLock"
+        },
+        "desktopOnly": {
+          "type": "boolean",
+          "description": "True when only the desktop user may call it (approvals, emergency stop)."
+        }
+      }
+    },
+    "ComputerDefaults": {
+      "title": "ComputerDefaults",
+      "description": "Shipped defaults and limits for computer use. Both `pragma-server` and the desktop read these instead of hard-coding either side.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "helperName",
+        "macHelperBundleId",
+        "macHelperAppName",
+        "grantsFile",
+        "screenshotsDirectory",
+        "screenshotTtlMs",
+        "idleTimeoutMs",
+        "inputMutexWaitMs",
+        "approvalTimeoutMs",
+        "snapshotTtlMs",
+        "snapshotRingSize",
+        "maxNodes",
+        "walkBudgetMs",
+        "minElementPoints",
+        "maxOffscreenElements",
+        "labelMaxChars",
+        "appLaunchWaitMs",
+        "actionTimeoutMs",
+        "typeChunkUnits",
+        "cursorLeadMs",
+        "helperRestartBackoffMs",
+        "blockedApps",
+        "sensitiveLabels",
+        "commands",
+        "tasksFile",
+        "taskHistoryLimit",
+        "taskRetentionMs",
+        "taskMaxSteps",
+        "taskMaxTimeMs",
+        "taskMaxModelCalls",
+        "taskMaxInputChars",
+        "taskMaxActive",
+        "nextConfidence",
+        "itemConfidence",
+        "itemMargin",
+        "achievedConfidence",
+        "taskKeys",
+        "pipFrameIntervalMs",
+        "pipFrameWidth",
+        "pipExpandedFrameWidth",
+        "localGatewayTokenEnv",
+        "taskRecordLimit"
+      ],
+      "properties": {
+        "helperName": {
+          "type": "string",
+          "description": "The native helper's executable base name (suffixed per platform)."
+        },
+        "macHelperBundleId": {
+          "type": "string",
+          "description": "Bundle identifier of the macOS helper app, which carries its own Accessibility and Screen Recording grants."
+        },
+        "macHelperAppName": {
+          "type": "string",
+          "description": "Name of the macOS helper app bundle (without `.app`) that wraps the helper executable beside the server; the name System Settings shows."
+        },
+        "grantsFile": {
+          "type": "string",
+          "description": "Owner-only record of persisted caller grants, written beside the server socket."
+        },
+        "screenshotsDirectory": {
+          "type": "string",
+          "description": "Owner-only directory, under the server directory, that screenshots are written to."
+        },
+        "screenshotTtlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a written screenshot is kept before the host deletes it."
+        },
+        "idleTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "A session that performs no action for this long ends on its own."
+        },
+        "inputMutexWaitMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long an action waits for the input mutex before failing with `inputBusy`."
+        },
+        "approvalTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a pending approval waits for the desktop user before it is treated as denied."
+        },
+        "snapshotTtlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long an accessibility snapshot's element ids stay resolvable."
+        },
+        "snapshotRingSize": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Snapshots kept per host; older ones expire early."
+        },
+        "maxNodes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on accessibility nodes visited per snapshot."
+        },
+        "walkBudgetMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on time spent walking one accessibility tree."
+        },
+        "minElementPoints": {
+          "type": "number",
+          "description": "Elements smaller than this in either dimension are pruned."
+        },
+        "maxOffscreenElements": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Off-screen elements kept per snapshot when the caller asks for them."
+        },
+        "labelMaxChars": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Element labels and values are truncated to this many characters."
+        },
+        "appLaunchWaitMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long `open` waits for an app to show a window."
+        },
+        "actionTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on one helper operation."
+        },
+        "typeChunkUnits": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "UTF-16 units per synthetic keyboard event while typing. The stop flag is checked between chunks."
+        },
+        "cursorLeadMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long the host waits after announcing a pointer action before performing it, so the overlay cursor shows intent first."
+        },
+        "helperRestartBackoffMs": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Delays between helper restarts after a crash. After the last one the helper is reported unavailable."
+        },
+        "blockedApps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "App identifiers (`mac:<bundle id>`, `win:<exe name>`) no caller may control. Pragma's own identifiers are always added by the host."
+        },
+        "sensitiveLabels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Lower-case words that mark a control as sensitive: clicking one needs approval."
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerCommandSpec"
+          },
+          "description": "The command registry."
+        },
+        "tasksFile": {
+          "type": "string"
+        },
+        "taskHistoryLimit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskRetentionMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskMaxSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskMaxTimeMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskMaxModelCalls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskMaxInputChars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "taskMaxActive": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nextConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "itemConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "itemMargin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "achievedConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "taskKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pipFrameIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipFrameWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipExpandedFrameWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "localGatewayTokenEnv": {
+          "type": "string"
+        },
+        "taskRecordLimit": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputerErrorCode": {
+      "title": "ComputerErrorCode",
+      "description": "Machine-readable computer-use failure codes, shared by the CLI exit path, the SDK `PragmaComputerError`, and the desktop.",
+      "type": "string",
+      "enum": [
+        "permissionMissing",
+        "notAuthorized",
+        "disabled",
+        "blockedApp",
+        "approvalRequired",
+        "denied",
+        "indicatorUnavailable",
+        "appBusy",
+        "inputBusy",
+        "userTakeover",
+        "stopped",
+        "appNotFound",
+        "windowNotFound",
+        "windowMinimized",
+        "elementNotFound",
+        "elementStale",
+        "snapshotExpired",
+        "targetChanged",
+        "targetElevated",
+        "secureInputActive",
+        "timeout",
+        "helperUnavailable",
+        "unsupportedPlatform",
+        "invalidPayload",
+        "internal"
+      ]
+    },
+    "ComputerFailure": {
+      "title": "ComputerFailure",
+      "description": "A typed computer-use failure. It rides in the RPC error details so every caller branches on `code`, not on message text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ComputerErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "hint": {
+          "type": "string",
+          "description": "A next step for the caller, in plain words."
+        },
+        "details": {
+          "type": "object",
+          "description": "Code-specific context: the lease holder, the missing permission, fresh candidates for a stale element."
+        }
+      }
+    },
+    "ComputerCallerKind": {
+      "title": "ComputerCallerKind",
+      "description": "Who is asking. Attribution, not authentication: every caller runs as the same OS user, so the policy and the human approvals are the boundary.",
+      "type": "string",
+      "enum": ["agentTab", "plugin", "sdk", "user"]
+    },
+    "ComputerCaller": {
+      "title": "ComputerCaller",
+      "description": "The identity a computer-use request is attributed to. The CLI fills it from `PRAGMA_TAB_ID` / `PRAGMA_WORKTREE_ID`; the host resolves the agent from the tab.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ComputerCallerKind"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display name for the sidebar, PiP, and approval prompt."
+        }
+      }
+    },
+    "ComputerPoint": {
+      "title": "ComputerPoint",
+      "description": "A point in screen space: top-left-origin points on macOS, physical virtual-screen pixels on Windows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "ComputerRect": {
+      "title": "ComputerRect",
+      "description": "A rectangle in screen space.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number"
+        },
+        "h": {
+          "type": "number"
+        },
+        "displayId": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerDisplay": {
+      "title": "ComputerDisplay",
+      "description": "One attached display.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "frame", "scale", "primary"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`display:mac:<CGDirectDisplayID>` or `display:win:<device name>`."
+        },
+        "frame": {
+          "$ref": "#/definitions/ComputerRect"
+        },
+        "scale": {
+          "type": "number",
+          "description": "Image pixels per screen unit."
+        },
+        "primary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerApp": {
+      "title": "ComputerApp",
+      "description": "A running or installed application.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "running", "frontmost"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable across launches: `app:mac:<bundle id>` or `app:win:<AUMID or exe path>`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "frontmost": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "True when the host refuses to control it."
+        }
+      }
+    },
+    "ComputerWindow": {
+      "title": "ComputerWindow",
+      "description": "A top-level window. Window text is untrusted screen content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "appId",
+        "appName",
+        "pid",
+        "title",
+        "frame",
+        "focused",
+        "minimized",
+        "onScreen"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`win:mac:<CGWindowID>` or `win:win:<HWND hex>`; valid while the window lives."
+        },
+        "appId": {
+          "type": "string"
+        },
+        "appName": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/definitions/ComputerRect"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "minimized": {
+          "type": "boolean"
+        },
+        "onScreen": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerElement": {
+      "title": "ComputerElement",
+      "description": "One accessibility element in a snapshot. `id` (`s42:e12`) carries its snapshot and is revalidated on use; `key` correlates the same control across snapshots.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "key",
+        "role",
+        "label",
+        "enabled",
+        "focused",
+        "editable",
+        "secure",
+        "actions",
+        "onScreen",
+        "path",
+        "depth"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "description": "Normalised role: `button`, `textField`, `link`, \u2026."
+        },
+        "subrole": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "description": "Never read for secure fields."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "secure": {
+          "type": "boolean"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "frame": {
+          "$ref": "#/definitions/ComputerRect"
+        },
+        "onScreen": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Child indexes from the window root."
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ComputerSnapshot": {
+      "title": "ComputerSnapshot",
+      "description": "A pruned accessibility snapshot of one window. Every label and value in it is untrusted screen content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "app",
+        "elements",
+        "truncated",
+        "nodeCount",
+        "elapsedMs",
+        "createdAt",
+        "untrusted"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`s<seq>`; valid until it expires or is pushed out of the ring."
+        },
+        "app": {
+          "$ref": "#/definitions/ComputerApp"
+        },
+        "window": {
+          "$ref": "#/definitions/ComputerWindow"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerElement"
+          }
+        },
+        "focusedElementId": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the node or time budget stopped the walk early."
+        },
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nodes visited, including pruned ones."
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "untrusted": {
+          "type": "boolean",
+          "description": "Always true: a reminder that screen text is data, never instructions."
+        },
+        "url": {
+          "type": "string",
+          "description": "Observed browser address; untrusted screen data, never an instruction."
+        }
+      }
+    },
+    "ComputerImageFormat": {
+      "title": "ComputerImageFormat",
+      "description": "Encoded screenshot format.",
+      "type": "string",
+      "enum": ["png", "jpeg"]
+    },
+    "ComputerScreenshot": {
+      "title": "ComputerScreenshot",
+      "description": "A captured image. `screen = origin + imagePixel / scale`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "width", "height", "origin", "scale", "format", "bytes"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Screenshot id, accepted by `click --screenshot` for image-space coordinates."
+        },
+        "path": {
+          "type": "string",
+          "description": "Owner-only file the image was written to."
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "$ref": "#/definitions/ComputerPoint"
+        },
+        "scale": {
+          "type": "number"
+        },
+        "format": {
+          "$ref": "#/definitions/ComputerImageFormat"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "base64": {
+          "type": "string",
+          "description": "Present only when the caller asked for inline bytes."
+        }
+      }
+    },
+    "ComputerPermissionState": {
+      "title": "ComputerPermissionState",
+      "description": "One OS permission, as the helper sees it.",
+      "type": "string",
+      "enum": ["granted", "denied", "notDetermined", "notApplicable"]
+    },
+    "ComputerPermissions": {
+      "title": "ComputerPermissions",
+      "description": "OS grants for the helper identity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "supported", "accessibility", "screenRecording"],
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "accessibility": {
+          "$ref": "#/definitions/ComputerPermissionState"
+        },
+        "screenRecording": {
+          "$ref": "#/definitions/ComputerPermissionState"
+        }
+      }
+    },
+    "ComputerHelperState": {
+      "title": "ComputerHelperState",
+      "description": "Supervision state of the native helper process.",
+      "type": "string",
+      "enum": ["stopped", "starting", "ready", "restarting", "unavailable", "unsupported"]
+    },
+    "ComputerHelperStatus": {
+      "title": "ComputerHelperStatus",
+      "description": "The helper's health, as the server last saw it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/ComputerHelperState"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "message": {
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/definitions/ComputerPermissions"
+        }
+      }
+    },
+    "ComputerLease": {
+      "title": "ComputerLease",
+      "description": "An exclusive per-app lease held by one session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appKey", "appName", "acquiredAt"],
+      "properties": {
+        "appKey": {
+          "type": "string",
+          "description": "Bundle id / AUMID / exe path, lower-cased."
+        },
+        "appName": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "acquiredAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ComputerPauseReason": {
+      "title": "ComputerPauseReason",
+      "description": "Why a session is paused.",
+      "type": "string",
+      "enum": ["user", "takeover", "stopped"]
+    },
+    "ComputerSession": {
+      "title": "ComputerSession",
+      "description": "One owner's computer-use session: its leases and activity. Ends on `end`, idle timeout, owner tab close, or the emergency stop. A per-session Stop releases leases and retains a paused restart latch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "leases", "startedAt", "lastActionAt", "actionCount", "paused"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`cs_<uuid>`."
+        },
+        "owner": {
+          "$ref": "#/definitions/ComputerCaller"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "leases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerLease"
+          }
+        },
+        "startedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastActionAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "pauseReason": {
+          "$ref": "#/definitions/ComputerPauseReason"
+        },
+        "lastDescription": {
+          "type": "string",
+          "description": "What the session did last, for the sidebar and PiP."
+        }
+      }
+    },
+    "ComputerActivityType": {
+      "title": "ComputerActivityType",
+      "description": "Kinds of computer-use activity event. Every caller's operations emit the same ones. `cursorMoved` re-places a session's overlay cursor between actions, as its target window moves or is covered; it is not kept in the event history.",
+      "type": "string",
+      "enum": [
+        "sessionStarted",
+        "sessionPaused",
+        "sessionResumed",
+        "sessionEnded",
+        "actionStarted",
+        "actionCompleted",
+        "actionFailed",
+        "cursorMoved",
+        "approvalRequested",
+        "approvalResolved",
+        "helperState",
+        "leaseDenied",
+        "stopped",
+        "taskChanged"
+      ]
+    },
+    "ComputerTarget": {
+      "title": "ComputerTarget",
+      "description": "What an action is aimed at. Labels are untrusted and truncated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "appName": {
+          "type": "string"
+        },
+        "windowId": {
+          "type": "string"
+        },
+        "elementId": {
+          "type": "string"
+        },
+        "elementLabel": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerPointer": {
+      "title": "ComputerPointer",
+      "description": "Where the overlay cursor should travel for an action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "leadMs"],
+      "properties": {
+        "from": {
+          "$ref": "#/definitions/ComputerPoint"
+        },
+        "to": {
+          "$ref": "#/definitions/ComputerPoint"
+        },
+        "displayId": {
+          "type": "string"
+        },
+        "window": {
+          "$ref": "#/definitions/ComputerRect",
+          "description": "The target window's frame. The overlay draws the cursor only inside it, so it never appears over another app."
+        },
+        "covered": {
+          "type": "boolean",
+          "description": "True when another app's window covers the point (the action is delivered in the background); the overlay hides the cursor there."
+        },
+        "leadMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ComputerMethod": {
+      "title": "ComputerMethod",
+      "description": "How an action was (or should be) performed. `ax` uses the element's accessibility action and never moves the physical cursor; `pointer` and `keys` post synthetic input.",
+      "type": "string",
+      "enum": ["auto", "ax", "pointer", "keys"]
+    },
+    "ComputerApprovalDecision": {
+      "title": "ComputerApprovalDecision",
+      "description": "The desktop user's answer to an approval prompt.",
+      "type": "string",
+      "enum": ["once", "session", "always", "deny"]
+    },
+    "ComputerApproval": {
+      "title": "ComputerApproval",
+      "description": "A pending request for the desktop user to allow a caller or a sensitive action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "caller", "op", "reason", "sensitive", "requestedAt", "expiresAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/definitions/ComputerCaller"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "#/definitions/ComputerOp"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why approval is needed, in plain words."
+        },
+        "sensitive": {
+          "type": "boolean",
+          "description": "True when the prompt is for one sensitive control (a Delete or Send button, a password field) rather than for access as a whole; it can only be allowed once."
+        },
+        "target": {
+          "$ref": "#/definitions/ComputerTarget"
+        },
+        "requestedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ComputerActivityEvent": {
+      "title": "ComputerActivityEvent",
+      "description": "One delta on the `computerActivity` stream.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "at", "type"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "$ref": "#/definitions/ComputerActivityType"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "actionId": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/definitions/ComputerCaller"
+        },
+        "op": {
+          "$ref": "#/definitions/ComputerOp"
+        },
+        "target": {
+          "$ref": "#/definitions/ComputerTarget"
+        },
+        "pointer": {
+          "$ref": "#/definitions/ComputerPointer"
+        },
+        "method": {
+          "$ref": "#/definitions/ComputerMethod"
+        },
+        "physicalCursor": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/definitions/ComputerFailure"
+        },
+        "session": {
+          "$ref": "#/definitions/ComputerSession"
+        },
+        "approval": {
+          "$ref": "#/definitions/ComputerApproval"
+        },
+        "helper": {
+          "$ref": "#/definitions/ComputerHelperStatus"
+        },
+        "task": {
+          "$ref": "#/definitions/ComputerTask"
+        }
+      }
+    },
+    "ComputerActivitySnapshot": {
+      "title": "ComputerActivitySnapshot",
+      "description": "The `computerActivity` snapshot, and the `status` result: the whole live picture.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "desktopConnected",
+        "sessions",
+        "approvals",
+        "helper",
+        "stopped",
+        "lastSeq"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether computer use is enabled in the global `computerUse` settings."
+        },
+        "desktopConnected": {
+          "type": "boolean",
+          "description": "Whether a desktop app is connected to show the indicator; mutating actions need it."
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerSession"
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerApproval"
+          }
+        },
+        "helper": {
+          "$ref": "#/definitions/ComputerHelperStatus"
+        },
+        "stopped": {
+          "type": "boolean",
+          "description": "True while the emergency stop is latched; cleared by `unpause`."
+        },
+        "lastSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerTask"
+          }
+        }
+      }
+    },
+    "ComputerActionResult": {
+      "title": "ComputerActionResult",
+      "description": "The outcome of one mutating action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "actionId", "method", "physicalCursor", "elapsedMs"],
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "actionId": {
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/definitions/ComputerMethod"
+        },
+        "physicalCursor": {
+          "type": "boolean"
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "app": {
+          "$ref": "#/definitions/ComputerApp"
+        },
+        "window": {
+          "$ref": "#/definitions/ComputerWindow"
+        },
+        "element": {
+          "$ref": "#/definitions/ComputerElement"
+        }
+      }
+    },
+    "ComputerAccess": {
+      "title": "ComputerAccess",
+      "description": "Policy for one caller: ask the desktop user, allow without asking, or refuse.",
+      "type": "string",
+      "enum": ["ask", "allow", "deny"]
+    },
+    "ComputerAccessPolicy": {
+      "title": "ComputerAccessPolicy",
+      "description": "Per-caller access policy. Agent and plugin maps take `*` as the fallback key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "agents": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ComputerAccess"
+          }
+        },
+        "plugins": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ComputerAccess"
+          }
+        },
+        "sdk": {
+          "$ref": "#/definitions/ComputerAccess"
+        },
+        "sensitive": {
+          "$ref": "#/definitions/ComputerAccess"
+        }
+      }
+    },
+    "ComputerUseSettings": {
+      "title": "ComputerUseSettings",
+      "description": "The `computerUse` block of the global `.pragma/config.json`. Off unless `enabled` is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "access": {
+          "$ref": "#/definitions/ComputerAccessPolicy"
+        },
+        "blockedApps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra app identifiers to block. Pragma's own entry cannot be removed."
+        },
+        "idleTimeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "showCursor": {
+          "type": "boolean",
+          "description": "Whether the overlay cursor is drawn. Defaults to true."
+        }
+      }
+    },
+    "ComputerAppsRequest": {
+      "title": "ComputerAppsRequest",
+      "description": "`apps`: running apps, or installed ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerWindowsRequest": {
+      "title": "ComputerWindowsRequest",
+      "description": "`windows`: top-level windows, optionally for one app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ComputerOpenRequest": {
+      "title": "ComputerOpenRequest",
+      "description": "`open`: launch or re-activate an app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newInstance": {
+          "type": "boolean"
+        },
+        "activate": {
+          "type": "boolean",
+          "description": "Bring the app to the front. Defaults to false, and only the desktop user can set it: an agent's app is never brought forward."
+        },
+        "waitReadyMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "url": {
+          "type": "string",
+          "description": "Open this URL with the app."
+        },
+        "file": {
+          "type": "string",
+          "description": "Open this file with the app."
+        }
+      }
+    },
+    "ComputerFocusRequest": {
+      "title": "ComputerFocusRequest",
+      "description": "`focus`: make a window its app's target for keys and clicks, without bringing it to the front.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "activate": {
+          "type": "boolean",
+          "description": "Also bring the app to the front. Only honoured for the desktop user; an agent's app is never brought forward."
+        },
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window": {
+          "type": "string",
+          "description": "A `win:` id."
+        }
+      }
+    },
+    "ComputerInspectRequest": {
+      "title": "ComputerInspectRequest",
+      "description": "`inspect`: an accessibility snapshot of a window (the frontmost window of the app when none is named).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window": {
+          "type": "string",
+          "description": "A `win:` id."
+        },
+        "query": {
+          "type": "string",
+          "description": "Keep only elements whose label, value, or identifier contains this text."
+        },
+        "role": {
+          "type": "string"
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxNodes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "includeOffscreen": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerScreenshotRequest": {
+      "title": "ComputerScreenshotRequest",
+      "description": "`screenshot`: capture a window, an app's frontmost window, a display, or a region.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window": {
+          "type": "string",
+          "description": "A `win:` id."
+        },
+        "display": {
+          "type": "string"
+        },
+        "region": {
+          "$ref": "#/definitions/ComputerRect"
+        },
+        "out": {
+          "type": "string",
+          "description": "Write the image here instead of the owner-only screenshots directory."
+        },
+        "format": {
+          "$ref": "#/definitions/ComputerImageFormat"
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "base64": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerMouseButton": {
+      "title": "ComputerMouseButton",
+      "description": "A mouse button.",
+      "type": "string",
+      "enum": ["left", "right", "middle"]
+    },
+    "ComputerClickRequest": {
+      "title": "ComputerClickRequest",
+      "description": "`click`: an element (preferred) or a point.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "element": {
+          "type": "string",
+          "description": "An element id from a snapshot (`s42:e12`)."
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "imageX": {
+          "type": "number"
+        },
+        "imageY": {
+          "type": "number"
+        },
+        "screenshot": {
+          "type": "string",
+          "description": "The screenshot id `imageX`/`imageY` are relative to."
+        },
+        "button": {
+          "$ref": "#/definitions/ComputerMouseButton"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "method": {
+          "$ref": "#/definitions/ComputerMethod"
+        },
+        "allowOutsideWindow": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerTypeRequest": {
+      "title": "ComputerTypeRequest",
+      "description": "`type`: enter caller-supplied text. The text is never logged unless the caller opts in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        },
+        "element": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "boolean",
+          "description": "Replace the field's value instead of appending."
+        },
+        "secret": {
+          "type": "boolean",
+          "description": "Redact everywhere; required for secure fields."
+        },
+        "method": {
+          "$ref": "#/definitions/ComputerMethod"
+        },
+        "submit": {
+          "type": "boolean",
+          "description": "Press Enter afterwards."
+        }
+      }
+    },
+    "ComputerKeyRequest": {
+      "title": "ComputerKeyRequest",
+      "description": "`key`: press chords (`mod+l`, `enter`, `shift+tab`) in the app's focused element.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chords"],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputerScrollDirection": {
+      "title": "ComputerScrollDirection",
+      "description": "A scroll direction.",
+      "type": "string",
+      "enum": ["up", "down", "left", "right"]
+    },
+    "ComputerScrollRequest": {
+      "title": "ComputerScrollRequest",
+      "description": "`scroll`: scroll an element or the point under it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction"],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "element": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "direction": {
+          "$ref": "#/definitions/ComputerScrollDirection"
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputerMoveRequest": {
+      "title": "ComputerMoveRequest",
+      "description": "`move`: move the pointer, or with `visualOnly` only the overlay cursor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "element": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "visualOnly": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerDragRequest": {
+      "title": "ComputerDragRequest",
+      "description": "`drag`: press at `from`, move to `to`, release. Each end is an element id or `x,y`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "App name, `app:` id, bundle id, AUMID, or exe path."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ComputerEndRequest": {
+      "title": "ComputerEndRequest",
+      "description": "`end`: end the caller's session (or the named one, from the desktop).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "session": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerPermissionKind": {
+      "title": "ComputerPermissionKind",
+      "description": "The macOS grant to prompt for; status always includes both grants.",
+      "type": "string",
+      "enum": ["accessibility", "screenRecording"]
+    },
+    "ComputerPermissionsRequest": {
+      "title": "ComputerPermissionsRequest",
+      "description": "`permissions`: OS grants, and with `request` the OS prompt or the System Settings pane. Set permission to prompt for one grant; omit it to request both.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "request": {
+          "type": "boolean"
+        },
+        "permission": {
+          "$ref": "#/definitions/ComputerPermissionKind"
+        }
+      }
+    },
+    "ComputerFrameRequest": {
+      "title": "ComputerFrameRequest",
+      "description": "`frame`: a small JPEG of the window a session is controlling, for the PiP.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session"],
+      "properties": {
+        "session": {
+          "type": "string"
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputerApproveRequest": {
+      "title": "ComputerApproveRequest",
+      "description": "`approve`: the desktop user's answer to a pending approval.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval", "decision"],
+      "properties": {
+        "approval": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/definitions/ComputerApprovalDecision"
+        }
+      }
+    },
+    "ComputerSessionRequest": {
+      "title": "ComputerSessionRequest",
+      "description": "`pause` / `unpause` / `stop`: desktop controls. Without `session` they apply to every session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "session": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerTaskStatus": {
+      "title": "ComputerTaskStatus",
+      "type": "string",
+      "enum": [
+        "running",
+        "paused",
+        "needsInput",
+        "needsApproval",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "ComputerTaskBudgets": {
+      "title": "ComputerTaskBudgets",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTimeMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxModelCalls": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ComputerRunRequest": {
+      "title": "ComputerRunRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "instruction"],
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "budgets": {
+          "$ref": "#/definitions/ComputerTaskBudgets"
+        }
+      }
+    },
+    "ComputerResumeRequest": {
+      "title": "ComputerResumeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId"],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "budgets": {
+          "$ref": "#/definitions/ComputerTaskBudgets"
+        }
+      }
+    },
+    "ComputerTaskRequest": {
+      "title": "ComputerTaskRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId"],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerRequestedInput": {
+      "title": "ComputerRequestedInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "secret", "kind"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["text", "choice"]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ComputerTaskStep": {
+      "title": "ComputerTaskStep",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "at", "action", "changed"],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "screenHash": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ComputerTask": {
+      "title": "ComputerTask",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "requestId",
+        "owner",
+        "instruction",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "steps",
+        "modelCalls",
+        "budgets",
+        "resumable",
+        "variableNames",
+        "secretNames"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/definitions/ComputerCaller"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ComputerTaskStatus"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerTaskStep"
+          }
+        },
+        "modelCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgets": {
+          "$ref": "#/definitions/ComputerTaskBudgets"
+        },
+        "resumable": {
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "requestedInputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerRequestedInput"
+          }
+        },
+        "variableNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "secretNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lastSnapshotId": {
+          "type": "string"
+        }
+      }
+    },
+    "ComputerDecisionKind": {
+      "title": "ComputerDecisionKind",
+      "type": "string",
+      "enum": [
+        "click_item",
+        "type_variable",
+        "request_text",
+        "press_key",
+        "scroll_down",
+        "scroll_up",
+        "switch_app",
+        "wait_for_change",
+        "done",
+        "stuck"
+      ]
+    },
+    "ComputerDecision": {
+      "title": "ComputerDecision",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "confidence", "achieved"],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ComputerDecisionKind"
+        },
+        "item": {
+          "type": "string"
+        },
+        "variable": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "itemConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "itemMargin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "achieved": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ComputerDecideRequest": {
+      "title": "ComputerDecideRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruction", "snapshot", "apps", "variables", "history", "tried"],
+      "properties": {
+        "instruction": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/ComputerSnapshot"
+        },
+        "apps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerApp"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComputerTaskStep"
+          }
+        },
+        "tried": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

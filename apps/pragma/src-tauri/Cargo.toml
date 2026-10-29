@@ -56,6 +56,7 @@ tauri = { version = "2.11.2", features = [
 tauri-plugin-decorum = "1.1.1"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2.7.1"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 xcap = { version = "0.6", features = ["image"] }
 tauri-plugin-log = "2"
@@ -76,6 +77,19 @@ tauri = { version = "2.11.2", features = ["test"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gtk = "0.18"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSWorkspace",
+  "NSRunningApplication",
+  "libc",
+] }
+
+# AppKit/webview construction must run on the OS main thread.
+[[test]]
+name = "macos_background_webview"
+harness = false
 
 # Native menus must be exercised on the OS main thread, not a libtest worker.
 [[test]]
