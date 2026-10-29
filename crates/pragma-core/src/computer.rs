@@ -1278,7 +1278,7 @@ mod tests {
         let moved = track_cursor(&[listed("w1", 300.0, 200.0, 400.0, 300.0)], &anchor).unwrap();
         assert_eq!(moved.point, ComputerPoint { x: 350.0, y: 220.0 });
         assert!(!moved.covered);
-        assert_eq!(moved.window.unwrap().x, 300.0);
+        assert!((moved.window.unwrap().x - 300.0).abs() < f64::EPSILON);
     }
 
     #[test]

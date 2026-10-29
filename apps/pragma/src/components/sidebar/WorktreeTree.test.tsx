@@ -80,6 +80,7 @@ vi.mock("@/lib/tauri", () => ({
   worktreesMergedStatus: (...args: unknown[]) => worktreesMergedStatusMock(...args),
   restoreFanoutTab: (...args: unknown[]) => restoreFanoutTabMock(...args),
   githubRepoRef: vi.fn().mockResolvedValue(null),
+  onComputerActivity: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@/lib/file-watch", () => ({
