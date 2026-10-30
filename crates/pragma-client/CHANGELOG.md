@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.3.1...pragma-client-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+
+
+### Bug Fixes
+
+* **server:** find pragma-cli for session PATH on Windows ([50d2cbe](https://github.com/pragma-sh/pragma/commit/50d2cbe90e15ec17e24a79a67b641a97244f16b2))
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.3.0...pragma-client-v1.3.1) (2026-10-17)
 
 

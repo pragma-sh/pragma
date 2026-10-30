@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/bench-v1.1.3...bench-v1.2.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **pragma:** isolate the dev server port per worktree ([4dd37c3](https://github.com/pragma-sh/pragma/commit/4dd37c3fae653999f654c5d8397d93380d11cf8a))
+
 ## [1.1.3](https://github.com/pragma-sh/pragma/compare/bench-v1.1.2...bench-v1.1.3) (2026-10-17)
 
 ## [1.1.2](https://github.com/pragma-sh/pragma/compare/bench-v1.1.1...bench-v1.1.2) (2026-10-10)

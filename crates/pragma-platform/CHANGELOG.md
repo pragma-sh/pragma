@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.3.1...pragma-platform-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+
+
+### Bug Fixes
+
+* **cli:** detect child signals across platforms ([101e56c](https://github.com/pragma-sh/pragma/commit/101e56c7af8d8e5c38c0ed5553f2c1d573cc6ab9))
+* merge main to restore CI ([03f5aa1](https://github.com/pragma-sh/pragma/commit/03f5aa16c9d429ca567a7219184d67eb97412d0b))
+* **platform:** resolve executable paths reliably ([2929fff](https://github.com/pragma-sh/pragma/commit/2929fff302af59ed93423ef356797c08012ec482))
+* **platform:** return the real casing of a Windows PATH match ([d160847](https://github.com/pragma-sh/pragma/commit/d16084773f4a894005ef150facbec6a658fc4ef5))
+* **platform:** return the real casing of a Windows PATH match ([6ea3d67](https://github.com/pragma-sh/pragma/commit/6ea3d67edaa6e183dfaeeb49ef3f2d685fbe903f))
+* **plugins:** find npm and agent CLIs on Windows ([7e9f02e](https://github.com/pragma-sh/pragma/commit/7e9f02e743cfae032f6349b2d5053bf6a798058e))
+* **plugins:** find npm and agent CLIs on Windows ([613ae2b](https://github.com/pragma-sh/pragma/commit/613ae2b8c4b76b15edb354d8e2ed98a8db4c6eab))
+* **windows:** install official plugins and list agent plugins ([bd867f9](https://github.com/pragma-sh/pragma/commit/bd867f9da40d20a6247972544425da77d79c43e1))
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.3.0...pragma-platform-v1.3.1) (2026-10-17)
 
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.3.1...plugin-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **plugin:** add suggested draft providers ([438de7e](https://github.com/pragma-sh/pragma/commit/438de7e1ed8b39e65689d9470c3da1c9d14633c8))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+
+
+### Bug Fixes
+
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.3.1 to ^1.4.0
+    * @pragma-sh/sdk bumped from ^1.3.1 to ^1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/plugin-v1.3.0...plugin-v1.3.1) (2026-10-17)
 
 
