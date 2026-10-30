@@ -243,6 +243,13 @@ apps/www/
   and points in one column, media in the other — on one surface, with one `FeaturePoint`
   style. `flip` is the only prop that varies between them, and the page alternates it so
   the media walks right, left, right down the page. That is the whole vocabulary.
+- **New feature captures share their assets.** The live board uses the
+  `public/media/live-agent-board.webp` overview and `agent-board-*.webp` close-ups
+  across the homepage, user guide, and computer-use/live-board blog post. Prefer
+  focused screenshots when a full-window recording makes controls too small to read.
+  `MediaVideo` accepts an optional screenshot
+  `poster`; supply one for new recordings so reduced-motion readers and unloaded
+  videos still show the product. Keep captions beside the clips for article players.
 - **Do not add a treatment for one section.** This page has been through the other version
   of this: five layout variants, three backdrop patterns, three bullet styles, and an
   alternating tone, all cycled so that no two neighbours matched. It read as scatter, not
