@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.3.1...pragma-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+* **pragma:** drive board cards from live worktrees and fanouts ([2ebcfc0](https://github.com/pragma-sh/pragma/commit/2ebcfc0d31f20f48c025d86304170db16ab09eea))
+* **pragma:** embed a worktree preview in the agent board ([f574c3c](https://github.com/pragma-sh/pragma/commit/f574c3ce080498855cd16e908e0597366a0c0826))
+* **pragma:** fan out from agent board drafts ([1192d41](https://github.com/pragma-sh/pragma/commit/1192d416239c368a739f216a692bfcbcd612bc91))
+* **pragma:** isolate the dev server port per worktree ([4dd37c3](https://github.com/pragma-sh/pragma/commit/4dd37c3fae653999f654c5d8397d93380d11cf8a))
+* **pragma:** model the agent board from live worktrees ([357ccea](https://github.com/pragma-sh/pragma/commit/357cceaf88cbaab4974dd67eaf18aaac6ed56e87))
+* **pragma:** persist project board preferences ([48c598c](https://github.com/pragma-sh/pragma/commit/48c598c56a279d87e4567635d428e08b0834f013))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+* **pragma:** render the live agent board full frame ([5126c49](https://github.com/pragma-sh/pragma/commit/5126c49a6dfadf8395647a9bf6729959229363d6))
+* **pragma:** show and control computer use from the desktop ([be87fe7](https://github.com/pragma-sh/pragma/commit/be87fe7e413de8c88467f6f97fff7a511cb0d91b))
+* **pragma:** suggest drafts for the agent board ([edcc953](https://github.com/pragma-sh/pragma/commit/edcc953daa25635e83b0dac673ec56afdbd9bf63))
+
+
+### Bug Fixes
+
+* **ci:** gate native menu regression test to Unix ([dbfa007](https://github.com/pragma-sh/pragma/commit/dbfa0079561e6ee1d984b166169a19880cb0018d))
+* **ci:** mock onComputerActivity in WorktreeTree test and avoid float equality in clippy ([2c5dc69](https://github.com/pragma-sh/pragma/commit/2c5dc693dfc57e48ff7c2e5b10f4c859165dcd2b))
+* **computer:** close capture, retarget, and session-end gaps ([8bd450a](https://github.com/pragma-sh/pragma/commit/8bd450ae5c4fee638a6c1b7520481bbf1802bfb9))
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+* merge main to restore CI ([03f5aa1](https://github.com/pragma-sh/pragma/commit/03f5aa16c9d429ca567a7219184d67eb97412d0b))
+* **pragma:** bound the plugin lock fetch so onboarding cannot hang ([4aff2d7](https://github.com/pragma-sh/pragma/commit/4aff2d7ef255ade2f7ee295159af5497d6f1c25f))
+* **pragma:** bound the plugin lock fetch so onboarding cannot hang ([cf47cbd](https://github.com/pragma-sh/pragma/commit/cf47cbd44166c46000042a467f4e0d8a883d5fa7))
+* **pragma:** keep computer use in-app and survive borderless windows ([092839b](https://github.com/pragma-sh/pragma/commit/092839b7e1496e63a9e141581c0702196aabae76))
+* **pragma:** keep the dev-port probe private ([51373f8](https://github.com/pragma-sh/pragma/commit/51373f81f8ffe2741da193605a66bad9ce719d55))
+* **pragma:** repair agent board navigation and suggestion loading ([3f5e56b](https://github.com/pragma-sh/pragma/commit/3f5e56b26fb7639025390288f15253e4bd2de1a5))
+* **pragma:** restore Linux native window menu ([449a3cc](https://github.com/pragma-sh/pragma/commit/449a3cc165e6941a111001533322bc40985c0e09))
+* **pragma:** restore the Linux native Window menu ([55659ac](https://github.com/pragma-sh/pragma/commit/55659ac7d324e925edfb2a8947eb1abe5349aec0))
+* **scratchpad:** key saved state per block and control ([03b226f](https://github.com/pragma-sh/pragma/commit/03b226f0f265145a7c22c8af06731f43df4e994b))
+* **scratchpad:** retain interactive state ([c0d2697](https://github.com/pragma-sh/pragma/commit/c0d2697840721e22a65c730d34321d196e3196c4))
+* **scratchpad:** retain interactive state ([9aace1d](https://github.com/pragma-sh/pragma/commit/9aace1d4b2f91a80c681b67d0d106fc914266fb3))
+* **windows:** install official plugins and list agent plugins ([bd867f9](https://github.com/pragma-sh/pragma/commit/bd867f9da40d20a6247972544425da77d79c43e1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/scratchpad bumped to 1.4.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.3.0...pragma-v1.3.1) (2026-10-17)
 
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.2.1...codex-plugin-v1.3.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+
+
+### Bug Fixes
+
+* **codex-plugin:** launch codex with --no-daemon ([071ed06](https://github.com/pragma-sh/pragma/commit/071ed06d26ab075caa831c45d0324b894e45a14a))
+* **codex-plugin:** launch codex with --no-daemon ([3242f0f](https://github.com/pragma-sh/pragma/commit/3242f0fb74791b9536fe58a92240870abd2e2927))
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/watcher-kit bumped to 1.4.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.2.0...codex-plugin-v1.2.1) (2026-10-17)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.3.1...ai-helpers-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/sidecar-kit bumped to 1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/ai-helpers-v1.3.0...ai-helpers-v1.3.1) (2026-10-17)
 
 

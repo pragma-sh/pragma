@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.3.1...pragma-server-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+* **pragma:** show and control computer use from the desktop ([be87fe7](https://github.com/pragma-sh/pragma/commit/be87fe7e413de8c88467f6f97fff7a511cb0d91b))
+* **server:** add the computer-use engine behind the computer RPC ([6583114](https://github.com/pragma-sh/pragma/commit/658311414310a27e1fa478a0a2a5a6d10603b7c6))
+
+
+### Bug Fixes
+
+* **agent-resume:** preserve retryable failures ([4b1d8cd](https://github.com/pragma-sh/pragma/commit/4b1d8cd7f4faab63719736172eb1192835a8997d))
+* **computer:** close capture, retarget, and session-end gaps ([8bd450a](https://github.com/pragma-sh/pragma/commit/8bd450ae5c4fee638a6c1b7520481bbf1802bfb9))
+* **computer:** take the foreground and reuse open windows on Windows ([d1c5255](https://github.com/pragma-sh/pragma/commit/d1c52553090a9c5a92b12502098af8b487d1c947))
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+* **pragma:** keep computer use in-app and survive borderless windows ([092839b](https://github.com/pragma-sh/pragma/commit/092839b7e1496e63a9e141581c0702196aabae76))
+* **pragma:** run the dev computer-use helper from its own app bundle ([1db1d4e](https://github.com/pragma-sh/pragma/commit/1db1d4e7bd29ce15c780b9e868e72701649e7b8e))
+* **server:** find pragma-cli for session PATH on Windows ([50d2cbe](https://github.com/pragma-sh/pragma/commit/50d2cbe90e15ec17e24a79a67b641a97244f16b2))
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.3.0...pragma-server-v1.3.1) (2026-10-17)
 
 

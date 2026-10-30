@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.1.3...opencode-plugin-v1.2.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **opencode-plugin:** manage OpenCode v2 accounts and usage ([fca0dbd](https://github.com/pragma-sh/pragma/commit/fca0dbde8acde50c3dcaddd0c287aec44ee22736))
+* **opencode-plugin:** support the OpenCode v2 plugin API ([9448c24](https://github.com/pragma-sh/pragma/commit/9448c245ab3fdbb360412bc58dac9aeedd5bfc94))
+* **opencode-plugin:** support the OpenCode v2 plugin API, accounts, and usage ([4185f14](https://github.com/pragma-sh/pragma/commit/4185f14c1b3b89a2f796848aac03079df78ad6e7))
+
+
+### Bug Fixes
+
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+* **opencode-plugin:** surface subagent permission and question prompts ([8a3fb58](https://github.com/pragma-sh/pragma/commit/8a3fb58d4f7511019236530685b3e4f6988e48c2))
+* **opencode-plugin:** track each OpenCode 2 session and keep upgraded logins bound ([470eb5c](https://github.com/pragma-sh/pragma/commit/470eb5caead089995978fe42abea346ef71568a9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.4.0
+    * @pragma-sh/sdk bumped to 1.4.0
+    * @pragma-sh/watcher-kit bumped to 1.4.0
+
 ## [1.1.3](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.1.2...opencode-plugin-v1.1.3) (2026-10-17)
 
 

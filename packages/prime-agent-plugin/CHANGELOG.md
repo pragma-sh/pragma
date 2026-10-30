@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.1.3...prime-agent-plugin-v1.2.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/pi-plugin bumped to 1.2.0
+
 ## [1.1.3](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.1.2...prime-agent-plugin-v1.1.3) (2026-10-17)
 
 

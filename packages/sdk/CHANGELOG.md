@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/sdk-v1.3.1...sdk-v1.4.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+
+
+### Bug Fixes
+
+* **sdk:** declare agentRunId in the env key type ([3723104](https://github.com/pragma-sh/pragma/commit/3723104c5af125e62d31b6ca32e44b08160f2996))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/constants bumped to 1.4.0
+    * @pragma-sh/scratchpad-contract bumped to 1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/sdk-v1.3.0...sdk-v1.3.1) (2026-10-17)
 
 

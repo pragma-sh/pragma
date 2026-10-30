@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.3.1...scratchpad-v1.4.0) (2026-10-30)
+
+
+### Bug Fixes
+
+* **scratchpad:** key saved state per block and control ([03b226f](https://github.com/pragma-sh/pragma/commit/03b226f0f265145a7c22c8af06731f43df4e994b))
+* **scratchpad:** retain interactive state ([c0d2697](https://github.com/pragma-sh/pragma/commit/c0d2697840721e22a65c730d34321d196e3196c4))
+* **scratchpad:** retain interactive state ([9aace1d](https://github.com/pragma-sh/pragma/commit/9aace1d4b2f91a80c681b67d0d106fc914266fb3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sdk bumped from ^1.3.1 to ^1.4.0
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.3.0...scratchpad-v1.3.1) (2026-10-17)
 
 
