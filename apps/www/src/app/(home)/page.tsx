@@ -105,29 +105,72 @@ export default function HomePage() {
       <FeatureSection
         id="board"
         flip
-        title="From task to pull request without leaving one screen"
-        description="The board is a high-level alternative to managing agents through terminal tabs: turn tasks into cards, track progress across worktrees, and review results in one place."
-        media={<MediaVideo src="/media/agent-board.mp4" />}
+        title="Your whole project, on one live board"
+        description="A full-window view of your prompts, running agents, fanouts, and pull requests. The board follows the worktrees you already have, so every card stays connected to the work."
+        media={
+          <MediaImage
+            src="/media/live-agent-board.webp"
+            alt="The full-window board with Drafts, In progress, Review needed, and Completed columns"
+            width={5120}
+            height={1120}
+          />
+        }
         points={
           <>
-            <FeaturePoint title="Cards, not tabs.">
-              A project-scoped board of prompts with enforced transitions: draft, in progress,
-              review needed, completed.
+            <FeaturePoint title="A board that follows reality.">
+              Existing worktrees appear automatically. Open a running card to use its live
+              terminals, or review a pull request and its diffs right from the board.
             </FeaturePoint>
-            <FeaturePoint title="Background launches.">
-              Sessions spawn straight into the host server, so the board stays up while agents work;
-              open a card later and the scrollback is all there.
+            <FeaturePoint title="Start with a suggestion, or race a few agents.">
+              Turn a GitHub issue or plugin suggestion into a draft. Launch one agent, or fan out
+              into several attempts and compare the results before keeping a winner.
             </FeaturePoint>
-            <FeaturePoint title="Finish in one action.">
-              Commit everything, draft the pull request with AI, push, and open it — the card keeps
-              the PR number.
+            <FeaturePoint title="Keep your project in view.">
+              Group cards with categories, launch agents in the background, and take work through
+              Drafts, In progress, Review needed, and Completed without juggling terminal tabs.
             </FeaturePoint>
           </>
         }
       />
 
       <FeatureSection
+        id="computer-use"
+        title="Universal computer use, for the agents you already run"
+        description="Give your coding agents a way to read the screen, click, and type in other apps. Pragma provides the shared controls on macOS and Windows, with a live view of what each agent is doing."
+        media={
+          <MediaImage
+            src="/media/computer-use-cursor.webp"
+            alt="Pragma's Calculator preview with the agent cursor and paused controls"
+            width={640}
+            height={472}
+          />
+        }
+        points={
+          <>
+            <FeaturePoint title="One interface across agents.">
+              Agents use pragma-cli to inspect apps and act on observed controls, or hand Pragma a
+              bounded task. Connect System 1 for tasks that need it to choose the next step.
+            </FeaturePoint>
+            <FeaturePoint title="Watch without losing your place.">
+              A picture-in-picture preview follows the selected worktree. On macOS, ordinary clicks
+              and typing can happen in the background while you work in another app.
+            </FeaturePoint>
+            <FeaturePoint title="You keep control.">
+              Off until you enable it, with access approvals, exclusive app leases, and Pause and
+              Stop controls. Interacting with the agent's target app pauses its task.
+            </FeaturePoint>
+          </>
+        }
+        actions={
+          <Button asChild variant="secondary" className="pill-cta">
+            <Link href="/docs/user-guide/computer-use">Explore computer use</Link>
+          </Button>
+        }
+      />
+
+      <FeatureSection
         id="fanout"
+        flip
         title="Race your agents, keep the winner"
         description="One prompt, several isolated attempts under a coordination parent. Compare them side by side and merge the one that actually worked."
         background={
@@ -154,7 +197,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="git"
-        flip
         title="Review code before it leaves your machine"
         description="Staged, unstaged, and committed changes with one unified diff per file, right beside the terminal the agent wrote them in."
         media={
@@ -185,6 +227,7 @@ export default function HomePage() {
 
       <FeatureSection
         id="github"
+        flip
         title="Ship the pull request without leaving the worktree"
         description="Pragma signs in to GitHub once, then the whole pull-request lifecycle — open, review, discuss, fix — happens beside the worktree the code came from."
         background={
@@ -215,7 +258,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="ai"
-        flip
         title="Your key, your account, wired into the app"
         description="Pragma's own AI is small on purpose: it writes the commit, drafts the pull request, edits the file under your cursor, and answers the quick question — using your provider credentials. Add a System 1 model like TypeSafe's Jev and it makes the fast calls too."
         media={<MediaVideo src="/media/ai.mp4" />}
@@ -245,6 +287,7 @@ export default function HomePage() {
 
       <FeatureSection
         id="accounts"
+        flip
         title="Every agent account, one menu away"
         description="See every account your agents sign in to, how much of each plan is left, and which account each agent launches with — then change it in a click."
         media={
@@ -279,7 +322,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="editing"
-        flip
         title="Enough editor to never break flow"
         description="A file tree, a real code editor, a markdown WYSIWYG, and viewers for the things agents leave behind — then one click into the editor you actually live in."
         media={<MediaVideo src="/media/files.mp4" />}
@@ -307,6 +349,7 @@ export default function HomePage() {
 
       <FeatureSection
         id="extend"
+        flip
         title="A plugin API, not a settings page"
         description="Pragma's own agent integrations are plugins. Everything they use is public, so anything you build sits at the same level as what ships."
         media={<CodeCard title="review-queue/src/index.tsx" code={PLUGIN_SOURCE} />}
@@ -330,7 +373,6 @@ export default function HomePage() {
 
       <FeatureSection
         id="cli"
-        flip
         title="Agents that operate the workspace itself"
         description="pragma-cli and @pragma-sh/sdk make Pragma scriptable, so an agent can create the worktree, launch a peer, compare attempts, and publish a document for you to read."
         media={<TerminalCard title="agent@worktree — fan/8fa2" lines={CLI_LINES} />}
@@ -354,6 +396,7 @@ export default function HomePage() {
 
       <FeatureSection
         id="go"
+        flip
         title="Your workspace, from the couch"
         description="Turn on the tunnel and the local gateway becomes reachable from your phone — or from any browser, over a link you can share."
         media={

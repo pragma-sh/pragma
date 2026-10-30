@@ -101,10 +101,13 @@ function MediaFrame({
 /** A looping screen recording presented in the shared landing-page media frame. */
 export function MediaVideo({
   src,
+  poster,
   className,
   aspect,
 }: {
   src: string;
+  /** Product still shown before playback, including when reduced motion is enabled. */
+  poster?: string;
   className?: string;
   /** Frame shape; the phone and the wide band need something other than 16:9. */
   aspect?: MediaAspect;
@@ -145,6 +148,7 @@ export function MediaVideo({
     <MediaFrame className={cn("md:scale-105 lg:scale-110", className)} aspect={aspect}>
       <video
         ref={videoRef}
+        poster={poster}
         aria-hidden
         className="block h-auto w-full"
         loop
