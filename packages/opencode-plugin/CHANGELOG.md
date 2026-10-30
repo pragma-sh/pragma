@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.1](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.2.0...opencode-plugin-v1.2.1) (2026-10-30)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.4.1
+    * @pragma-sh/sdk bumped to 1.4.1
+    * @pragma-sh/watcher-kit bumped to 1.4.1
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.1.3...opencode-plugin-v1.2.0) (2026-10-30)
 
 
