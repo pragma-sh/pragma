@@ -107,14 +107,7 @@ export default function HomePage() {
         flip
         title="Your whole project, on one live board"
         description="A full-window view of your prompts, running agents, fanouts, and pull requests. The board follows the worktrees you already have, so every card stays connected to the work."
-        media={
-          <MediaImage
-            src="/media/live-agent-board.webp"
-            alt="The full-window board with Drafts, In progress, Review needed, and Completed columns"
-            width={5120}
-            height={1120}
-          />
-        }
+        media={<MediaVideo src="/media/agent-board.mp4" />}
         points={
           <>
             <FeaturePoint title="A board that follows reality.">
