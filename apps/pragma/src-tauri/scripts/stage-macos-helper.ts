@@ -58,12 +58,24 @@ const digest = createHash("sha256")
   .update(readFileSync(icon))
   .digest("hex");
 const stamp = join(root, "target", profile, ".pragma-computer-bundle.sha");
-const command = (args: string[]) => {
+const command = (args: string[], { showStderr = false } = {}) => {
   const result = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
-  // Never render arguments or subprocess output: security commands carry secrets.
-  if (result.exitCode !== 0)
-    throw new Error(`${args[0]} failed while signing the computer-use helper`);
+  // Never render arguments, and render subprocess output only when the caller
+  // knows it carries no secret: `security` commands take passwords as arguments.
+  if (result.exitCode !== 0) {
+    const detail = showStderr ? `: ${result.stderr.toString().trim()}` : "";
+    throw new Error(`${args[0]} failed while signing the computer-use helper${detail}`);
+  }
+  return result.stdout.toString();
 };
+// `codesign` resolves an identity only through the user keychain search list,
+// even when `--keychain` names the file, so a keychain missing from the list
+// fails with "no identity found". Tauri's own signer adds its keychain the same way.
+const searchList = () =>
+  command(["security", "list-keychains", "-d", "user"])
+    .split("\n")
+    .map((line) => line.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
 if (
   !existsSync(executable) ||
   !existsSync(bundledIcon) ||
@@ -80,6 +92,7 @@ if (
   const certificate = distribution ? process.env.APPLE_CERTIFICATE : undefined;
   let temporary: string | undefined;
   let keychain: string | undefined;
+  let originalSearchList: string[] | undefined;
   try {
     if (certificate) {
       temporary = mkdtempSync(join(tmpdir(), "pragma-helper-sign-"));
@@ -110,21 +123,31 @@ if (
         password,
         keychain,
       ]);
+      originalSearchList = searchList();
+      command(["security", "list-keychains", "-d", "user", "-s", ...originalSearchList, keychain]);
     }
-    command([
-      "codesign",
-      "--force",
-      "--sign",
-      identity,
-      "--identifier",
-      constants.computer.macHelperBundleId,
-      ...(distribution ? ["--options", "runtime", "--timestamp"] : []),
-      ...(keychain ? ["--keychain", keychain] : []),
-      bundle,
-    ]);
-    command(["codesign", "--verify", "--strict", bundle]);
+    command(
+      [
+        "codesign",
+        "--force",
+        "--sign",
+        identity,
+        "--identifier",
+        constants.computer.macHelperBundleId,
+        ...(distribution ? ["--options", "runtime", "--timestamp"] : []),
+        ...(keychain ? ["--keychain", keychain] : []),
+        bundle,
+      ],
+      { showStderr: true },
+    );
+    command(["codesign", "--verify", "--strict", bundle], { showStderr: true });
     writeFileSync(stamp, digest);
   } finally {
+    if (originalSearchList)
+      Bun.spawnSync(["security", "list-keychains", "-d", "user", "-s", ...originalSearchList], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
     if (keychain)
       Bun.spawnSync(["security", "delete-keychain", keychain], { stdout: "pipe", stderr: "pipe" });
     if (temporary) rmSync(temporary, { recursive: true, force: true });
