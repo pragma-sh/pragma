@@ -1,5 +1,7 @@
 # Changelog
 
+## [1.2.1](https://github.com/pragma-sh/pragma/compare/bench-v1.2.0...bench-v1.2.1) (2026-10-30)
+
 ## [1.2.0](https://github.com/pragma-sh/pragma/compare/bench-v1.1.3...bench-v1.2.0) (2026-10-30)
 
 
