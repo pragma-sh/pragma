@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.2](https://github.com/pragma-sh/pragma/compare/plugins-host-v1.4.1...plugins-host-v1.4.2) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **plugins-host:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.2
+    * @pragma-sh/plugin bumped to 1.4.2
+    * @pragma-sh/sdk bumped to 1.4.2
+    * @pragma-sh/sidecar-kit bumped to 1.4.2
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/plugins-host-v1.4.0...plugins-host-v1.4.1) (2026-10-30)
 
 

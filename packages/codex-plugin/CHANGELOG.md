@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.2](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.3.1...codex-plugin-v1.3.2) (2026-10-31)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.4.2
+    * @pragma-sh/watcher-kit bumped to 1.4.2
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.3.0...codex-plugin-v1.3.1) (2026-10-30)
 
 

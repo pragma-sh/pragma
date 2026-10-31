@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.2](https://github.com/pragma-sh/pragma/compare/github-helpers-v1.4.1...github-helpers-v1.4.2) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **github-helpers:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.4.2
+    * @pragma-sh/sidecar-kit bumped to 1.4.2
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/github-helpers-v1.4.0...github-helpers-v1.4.1) (2026-10-30)
 
 

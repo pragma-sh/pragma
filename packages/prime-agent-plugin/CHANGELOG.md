@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.2](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.2.1...prime-agent-plugin-v1.2.2) (2026-10-31)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/pi-plugin bumped to 1.2.2
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/prime-agent-plugin-v1.2.0...prime-agent-plugin-v1.2.1) (2026-10-30)
 
 
