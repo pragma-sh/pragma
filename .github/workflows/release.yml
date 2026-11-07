@@ -112,6 +112,14 @@ jobs:
         # verbatim, and tauri treats a literal `--` as "pass the rest to cargo", which
         # dies with `unexpected argument '--bundles' found`.
         run: bun run --filter pragma tauri build ${{ matrix.bundles }}
+      # The server binary this installer ships, started for real before anything
+      # is published — until now nothing here ever ran it. Same check as CI's
+      # `windows-server-smoke`, with the same limit: the runner's Windows build is
+      # older than the one #212 needs, so it guards start-up generally, not #212.
+      - name: Smoke-test the shipped server (Windows)
+        if: ${{ startsWith(matrix.platform, 'windows-') }}
+        shell: pwsh
+        run: ./scripts/windows-server-smoke.ps1 -Server target/release/pragma-server.exe -StandardUser
       - name: Normalize installer name
         shell: bash
         env:
