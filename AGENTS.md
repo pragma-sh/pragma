@@ -272,7 +272,7 @@ than no guide.
   `packages/sdk`, not a per-client reimplementation.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma-sh/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
-- A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
+- A pure-TS sample/exercise plugin (sidebar tab, sidebar card, worktree section, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma-sh/dev-test-plugin`).
 - Fanout orchestration (one prompt into several isolated attempts, then keeping
   one) lives on the host: the durable record and the state machine in

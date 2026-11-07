@@ -319,10 +319,13 @@ interface WorkspaceContextValue extends WorkspaceState {
   openDaemonLogTab: () => Promise<void>;
   /** Opens (or focuses) a plugin-defined web view tab. */
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
-  /** Opens (or focuses) a managed scratchpad tab for a worktree-relative MDX file. */
-  openScratchpadFile: (filePath: string, title: string) => Promise<void>;
-  /** Opens (or focuses) a host-owned whiteboard by id. */
-  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
+  /**
+   * Opens (or focuses) a managed scratchpad tab for a worktree-relative MDX file,
+   * in `worktreeId` (selecting it) or else the selected worktree.
+   */
+  openScratchpadFile: (filePath: string, title: string, worktreeId?: string) => Promise<void>;
+  /** Opens (or focuses) a host-owned whiteboard by id, in `worktreeId` or the selected worktree. */
+  openWhiteboard: (whiteboardId: string, title: string, worktreeId?: string) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
@@ -3152,6 +3155,11 @@ type OpenDedupedTabRequest = {
   match: (tab: Tab, target: TabTarget) => boolean;
   create: (target: TabTarget) => Promise<Tab>;
   paneId?: string;
+  /**
+   * Opens the tab in this worktree of the selected project, selecting it, instead
+   * of in the selected worktree.
+   */
+  worktreeId?: string;
   /** When set, a missing worktree throws with this message instead of silently returning. */
   requireTargetError?: string;
   /** Rethrow creation failures after reporting them, for callers that await success. */
@@ -3168,20 +3176,35 @@ function useOpenDedupedTab(
 ): (request: OpenDedupedTabRequest) => Promise<void> {
   const { selectedProjectId, selectedWorktreeByProject, tabs } = state;
   return useCallback(
-    async ({ match, create, paneId, requireTargetError, rethrow }: OpenDedupedTabRequest) => {
-      const target = activeTabTarget(selectedProjectId, selectedWorktreeByProject);
+    async ({
+      match,
+      create,
+      paneId,
+      worktreeId,
+      requireTargetError,
+      rethrow,
+    }: OpenDedupedTabRequest) => {
+      const target =
+        worktreeId && selectedProjectId
+          ? { projectId: selectedProjectId, worktreeId }
+          : activeTabTarget(selectedProjectId, selectedWorktreeByProject);
       if (!target) {
         if (requireTargetError) throw new Error(requireTargetError);
         return;
       }
+      const selectTarget = () => {
+        if (worktreeId) dispatch({ type: "select-worktree", ...target });
+      };
       const existing = tabs.find((tab) => match(tab, target));
       if (existing) {
+        selectTarget();
         dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
         return;
       }
       try {
         const tab = await create(target);
         dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+        selectTarget();
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
         if (rethrow) throw cause;
@@ -3205,9 +3228,9 @@ function useTabOpeners(
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   openDaemonLogTab: () => Promise<void>;
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
-  openScratchpadFile: (filePath: string, title: string) => Promise<void>;
+  openScratchpadFile: (filePath: string, title: string, worktreeId?: string) => Promise<void>;
   createWhiteboard: (paneId?: string) => Promise<void>;
-  openWhiteboard: (whiteboardId: string, title: string) => Promise<void>;
+  openWhiteboard: (whiteboardId: string, title: string, worktreeId?: string) => Promise<void>;
 } {
   const openDedupedTab = useOpenDedupedTab(state, dispatch);
 
@@ -3311,8 +3334,9 @@ function useTabOpeners(
   );
 
   const openScratchpadFile = useCallback(
-    (filePath: string, title: string) =>
+    (filePath: string, title: string, targetWorktreeId?: string) =>
       openDedupedTab({
+        worktreeId: targetWorktreeId,
         match: (tab, { worktreeId }) =>
           tab.kind === "scratchpad" && tab.worktreeId === worktreeId && tab.filePath === filePath,
         create: ({ worktreeId }) => openScratchpadTabCommand(worktreeId, filePath, title),
@@ -3338,8 +3362,9 @@ function useTabOpeners(
   );
 
   const openWhiteboard = useCallback(
-    (whiteboardId: string, title: string) =>
+    (whiteboardId: string, title: string, targetWorktreeId?: string) =>
       openDedupedTab({
+        worktreeId: targetWorktreeId,
         match: (tab, { worktreeId }) =>
           tab.kind === "whiteboard" &&
           tab.worktreeId === worktreeId &&

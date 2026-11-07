@@ -46,9 +46,8 @@ vi.mock("@/hooks/use-project-cycle", () => ({
   }),
 }));
 
-vi.mock("@/plugins/rendering", () => ({
-  RenderPluginContribution: () => null,
-  usePluginSidebarCards: () => [],
+vi.mock("@/components/sidebar/PluginSidebarCards", () => ({
+  PluginSidebarCards: () => null,
 }));
 
 vi.mock("@/components/sidebar/WorktreeTree", () => ({
@@ -67,7 +66,6 @@ vi.mock("@/state/updates-context", () => ({
     install: vi.fn(),
   }),
 }));
-vi.mock("@/components/sidebar/OpenPortsCard", () => ({ OpenPortsCard: () => null }));
 vi.mock("@/components/dialogs/CreateProjectDialog", () => ({ CreateProjectDialog: () => null }));
 vi.mock("@/components/dialogs/InitGitDialog", () => ({
   InitGitDialog: (props: { projectId: string | null; onInitialized?: () => void }) => {

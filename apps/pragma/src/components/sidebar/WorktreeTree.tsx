@@ -3,6 +3,7 @@ import {
   forwardRef,
   Fragment,
   type ComponentPropsWithoutRef,
+  type ReactNode,
   type RefObject,
   useCallback,
   useContext,
@@ -45,7 +46,7 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { ComputerUseIndicator } from "@/components/computer-use/ComputerUseIndicator";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { editorLaunchers } from "@/lib/editor-launchers";
-import { type GitHubPrLifecycle } from "@/lib/github";
+import { type ChecksStatus, type GitHubPrLifecycle } from "@/lib/github";
 import { useWorktreePrLifecycles } from "@/hooks/use-worktree-pr-lifecycles";
 import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { worktreesMergedStatus } from "@/lib/tauri";
@@ -71,6 +72,7 @@ import {
   WorktreeRowDetails,
 } from "@/components/sidebar/WorktreeRowDetails";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
+import { useWorktreeRowSections } from "@/components/sidebar/worktree-sections/WorktreeSections";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
 import { useFanouts } from "@/state/fanouts-context";
@@ -131,9 +133,13 @@ function applyMergedStatusFailure(
 /** Lifecycles whose PR is still open, so its number is worth showing on the row. */
 const OPEN_PR_LIFECYCLES: ReadonlySet<GitHubPrLifecycle> = new Set(["open", "draft", "merging"]);
 
-/** PR numbers by worktree id, for the detailed row layout. Provided by the tree
- *  so the number is not threaded through every row like the lifecycle is. */
-const WorktreePrNumbersContext = createContext<Readonly<Record<string, number>>>({});
+/** PR numbers and CI rollups by worktree id, for the detailed row layout.
+ *  Provided by the tree so they are not threaded through every row like the
+ *  lifecycle is. */
+const WorktreePrsContext = createContext<{
+  numbers: Readonly<Record<string, number>>;
+  checks: Readonly<Record<string, ChecksStatus["state"]>>;
+}>({ numbers: {}, checks: {} });
 
 /**
  * Icon color for the worktree merge glyph from PR lifecycle:
@@ -544,9 +550,11 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   );
   const hidden = worktrees.filter((w) => w.hidden);
   const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
-  const { prLifecycleByWorktreeId, prNumberByWorktreeId } = useWorktreePrLifecycles(
-    worktrees,
-    authenticated,
+  const { prLifecycleByWorktreeId, prNumberByWorktreeId, prChecksByWorktreeId } =
+    useWorktreePrLifecycles(worktrees, authenticated);
+  const prs = useMemo(
+    () => ({ numbers: prNumberByWorktreeId, checks: prChecksByWorktreeId }),
+    [prNumberByWorktreeId, prChecksByWorktreeId],
   );
   const { fanouts } = useFanouts();
   // Attempts are rendered under their fanout group, not as ordinary children:
@@ -576,7 +584,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   }
 
   return (
-    <WorktreePrNumbersContext.Provider value={prNumberByWorktreeId}>
+    <WorktreePrsContext.Provider value={prs}>
       <WorktreeTreeContent
         hidden={hidden}
         mergedByWorktreeId={mergedByWorktreeId}
@@ -587,7 +595,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
         shortcutOrder={shortcutOrder}
         tree={tree}
       />
-    </WorktreePrNumbersContext.Provider>
+    </WorktreePrsContext.Provider>
   );
 }
 
@@ -660,6 +668,8 @@ interface WorktreeRowLabelState {
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
   shortcutHint: string | null;
   worktreeId: string;
+  /** Section chips and expanded bodies, from {@link useWorktreeRowSections}. */
+  sections: ReactNode | undefined;
 }
 
 interface WorktreeRowLabelActions {
@@ -804,21 +814,33 @@ function WorktreeRowActions({
 
 /**
  * The detailed layout's extra lines for a row — open PR number, git action or
- * "Ready for PR", agents — or undefined in the compact layout or when there is
- * nothing to add.
+ * "Ready for PR", agents, then its section chips — or undefined in the compact
+ * layout or when there is nothing to add.
  */
-function useWorktreeRowDetailsSlot(worktreeId: string, prLifecycle: GitHubPrLifecycle | undefined) {
+function useWorktreeRowDetailsSlot(
+  worktreeId: string,
+  prLifecycle: GitHubPrLifecycle | undefined,
+  sections: ReactNode | undefined,
+) {
   const compact = useCompactWorktreeRows();
-  const prNumbers = useContext(WorktreePrNumbersContext);
+  const prs = useContext(WorktreePrsContext);
   const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
   // Only a live PR suppresses "Ready for PR"; a closed or merged one is history.
   const data = useWorktreeRowDetails(
     worktreeId,
-    prOpen ? (prNumbers[worktreeId] ?? null) : null,
+    prOpen ? (prs.numbers[worktreeId] ?? null) : null,
     prOpen,
+    prOpen ? (prs.checks[worktreeId] ?? null) : null,
   );
-  if (compact || !hasWorktreeRowDetails(data)) return undefined;
-  return <WorktreeRowDetails data={data} worktreeId={worktreeId} />;
+  if (compact) return undefined;
+  const details = hasWorktreeRowDetails(data);
+  if (!details && !sections) return undefined;
+  return (
+    <>
+      {details ? <WorktreeRowDetails data={data} worktreeId={worktreeId} /> : null}
+      {sections}
+    </>
+  );
 }
 
 /** The row's visible label: expand caret, branch icon, name/rename input, actions. */
@@ -848,7 +870,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       openDelete,
     } = actions;
     const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
-    const details = useWorktreeRowDetailsSlot(worktreeId, prLifecycle);
+    const details = useWorktreeRowDetailsSlot(worktreeId, prLifecycle, row.sections);
     return (
       <WorktreeRowFrame
         details={details}
@@ -1026,9 +1048,11 @@ function WorktreeRow({
     toggleExpanded,
     WorktreeIcon,
   } = useWorktreeRow(node, onCreateChild, mergedByWorktreeId, prLifecycleByWorktreeId);
+  const sections = useWorktreeRowSections(node.worktree, label, selected);
 
   return (
     <div>
+      {sections.probes}
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <WorktreeRowLabel
@@ -1055,6 +1079,7 @@ function WorktreeRow({
               shortcutHint,
               WorktreeIcon,
               worktreeId: node.worktree.id,
+              sections: sections.panel,
             }}
           />
         </ContextMenuTrigger>
