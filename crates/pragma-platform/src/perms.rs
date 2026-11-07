@@ -1,9 +1,13 @@
 //! Owner-only files and directories.
 //!
 //! Pragma writes several secrets to disk: the GitHub token, the gateway bearer
-//! token, the paired-device list, and the server's own socket. On Unix these
-//! have always been `0600` (`0700` for directories). This module is what keeps
-//! that promise on Windows too.
+//! token, the paired-device list, and the directory holding the server's
+//! socket. On Unix these have always been `0600` (`0700` for directories). This
+//! module is what keeps that promise on Windows too.
+//!
+//! Never pass a socket itself to [`restrict_to_owner`]: on Windows an `AF_UNIX`
+//! socket is a reparse point that neither `fs::metadata` nor `icacls` can open
+//! (error 1920). `ipc::bind` restricts the socket's directory instead.
 //!
 //! Windows has no mode bits, so the equivalent is an access-control list that
 //! removes inherited entries and grants the owning user full control and

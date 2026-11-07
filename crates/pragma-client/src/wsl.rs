@@ -119,7 +119,8 @@ pub fn default_bootstrap_command() -> String {
 ///
 /// The distribution name is sanitised because it is user-supplied and lands in
 /// a filesystem path: a name carrying a separator would otherwise place the
-/// socket outside `state_dir`.
+/// socket outside `state_dir`. Binding makes `state_dir` owner-only, so it must
+/// be a directory the app owns.
 #[must_use]
 pub fn socket_path_for(state_dir: &std::path::Path, distro: &str) -> PathBuf {
     let sanitized: String = distro
@@ -194,10 +195,20 @@ async fn run_bridge(
     ready_tx: mpsc::SyncSender<Result<(), WslError>>,
 ) -> Result<(), WslError> {
     // Start (or confirm) the Linux server before advertising the socket, so the
-    // first client to connect does not race the server's startup.
-    bootstrap(&distro.name, &config.bootstrap_command).await?;
-
-    let mut listener = bridge::bind_local_socket(&config.local_socket_path)?;
+    // first client to connect does not race the server's startup. A setup
+    // failure is handed to the waiting caller rather than returned, which would
+    // only drop the sender and surface as a bare `NotReady`.
+    let setup = async {
+        bootstrap(&distro.name, &config.bootstrap_command).await?;
+        Ok::<_, WslError>(bridge::bind_local_socket(&config.local_socket_path)?)
+    };
+    let mut listener = match setup.await {
+        Ok(listener) => listener,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error));
+            return Ok(());
+        }
+    };
     let _ = ready_tx.send(Ok(()));
 
     let distro = Arc::new(distro.name);
