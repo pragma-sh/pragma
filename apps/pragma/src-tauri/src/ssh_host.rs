@@ -523,12 +523,17 @@ fn host_id(request: &RemoteConnectRequest) -> String {
 /// socket stays private on Windows, where the `AF_UNIX` entry itself cannot be
 /// given an ACL (#212) — and the shared temporary directory must not be.
 fn local_socket_path(host_id: &str) -> std::path::PathBuf {
-    let sanitized: String = host_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    // A fixed-width digest keeps the path length independent of the host and
+    // user names, so a long name can never push it past the socket limit.
+    let digest = Sha256::digest(host_id.as_bytes());
+    let mut short = String::with_capacity(12);
+    for byte in digest.iter().take(6) {
+        let _ = write!(short, "{byte:02x}");
+    }
     std::env::temp_dir()
-        .join(format!("pragma-remote-{sanitized}"))
+        .join(format!("pragma-remote-{short}"))
         .join(pragma_platform::ipc::socket_file_name())
 }
 
@@ -596,6 +601,18 @@ mod tests {
         assert_eq!(dir.parent(), Some(std::env::temp_dir().as_path()));
         assert!(dir
             .file_name()
-            .is_some_and(|name| name == "pragma-remote-ssh___ada_example_com_22"));
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("pragma-remote-") && name.len() == 14 + 12));
+    }
+
+    /// The path length must not depend on the host or user name length.
+    #[test]
+    fn a_very_long_host_name_still_gives_an_addressable_socket_path() {
+        let host = format!("ssh://{}@{}:22", "u".repeat(200), "h".repeat(200));
+        let path = local_socket_path(&host);
+        assert_eq!(
+            path.as_os_str().len(),
+            local_socket_path("ssh://a@b:22").as_os_str().len()
+        );
     }
 }

@@ -84,6 +84,21 @@ fn restrict_to_owner_inner(path: &Path, is_dir: bool) -> io::Result<()> {
         format!("{principal}:(F)")
     };
 
+    // Drop every explicit grant first: `/grant:r` only replaces the owner's own
+    // entry, so an account granted access earlier would otherwise keep it.
+    let reset = command("icacls").arg(path).arg("/reset").output()?;
+    if !reset.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "could not reset the access list of {}: icacls exited with {}: {}",
+                path.display(),
+                reset.status,
+                String::from_utf8_lossy(&reset.stderr).trim()
+            ),
+        ));
+    }
+
     let output = command("icacls")
         .arg(path)
         .arg("/inheritance:r")

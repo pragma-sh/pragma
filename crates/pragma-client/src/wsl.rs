@@ -198,11 +198,7 @@ async fn run_bridge(
     // first client to connect does not race the server's startup. A setup
     // failure is handed to the waiting caller rather than returned, which would
     // only drop the sender and surface as a bare `NotReady`.
-    let setup = async {
-        bootstrap(&distro.name, &config.bootstrap_command).await?;
-        Ok::<_, WslError>(bridge::bind_local_socket(&config.local_socket_path)?)
-    };
-    let mut listener = match setup.await {
+    let mut listener = match prepare_bridge(&config, &distro.name).await {
         Ok(listener) => listener,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
@@ -222,6 +218,16 @@ async fn run_bridge(
             }
         });
     }
+}
+
+/// Starts the Linux server and binds the local socket — everything that must
+/// succeed before the bridge is ready.
+async fn prepare_bridge(
+    config: &WslBridgeConfig,
+    distro: &str,
+) -> Result<pragma_platform::ipc::LocalListener, WslError> {
+    bootstrap(distro, &config.bootstrap_command).await?;
+    Ok(bridge::bind_local_socket(&config.local_socket_path)?)
 }
 
 /// Runs one relay process inside the distribution and pumps a connection through it.
@@ -295,6 +301,31 @@ async fn bootstrap(distro: &str, command: &str) -> Result<(), WslError> {
 
 #[cfg(test)]
 mod tests {
+    /// A setup failure must reach the caller as itself, not as `NotReady`
+    /// (#212). Off Windows there is no `wsl.exe`, so the bootstrap fails.
+    #[test]
+    fn a_setup_failure_is_reported_not_swallowed() {
+        let distro: pragma_constants::WslDistro = serde_json::from_value(serde_json::json!({
+            "name": "Ubuntu", "running": true, "version": 2, "default": true
+        }))
+        .expect("a distribution");
+        let config = super::WslBridgeConfig {
+            distro: None,
+            local_socket_path: std::path::PathBuf::from("/nonexistent/daemon.sock"),
+            bootstrap_command: "true".to_string(),
+        };
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime
+            .block_on(super::run_bridge(config, distro, tx))
+            .expect("run_bridge reports setup errors through the channel");
+        let reported = rx.try_recv().expect("the setup result was sent");
+        assert!(reported.is_err(), "setup must fail and say so");
+    }
+
     /// The bootstrap must pin the channel and clear `XDG_RUNTIME_DIR`, or the
     /// server binds a socket the relay then cannot find.
     #[test]

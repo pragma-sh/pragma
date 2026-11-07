@@ -358,3 +358,30 @@ async fn connect_agent(
         })?;
     Ok(AgentClient::connect(pipe))
 }
+
+#[cfg(test)]
+mod tests {
+    /// A setup failure must reach the caller as itself, not as `NotReady`
+    /// (#212). Connecting to a port nobody listens on fails immediately.
+    #[test]
+    fn a_setup_failure_is_reported_not_swallowed() {
+        let port = {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a free port");
+            listener.local_addr().expect("an address").port()
+        };
+        let config = super::SshBridgeConfig {
+            host: "127.0.0.1".to_string(),
+            port,
+            user: "nobody".to_string(),
+            auth: super::RemoteAuth::None,
+            remote_socket_path: "/nonexistent".to_string(),
+            local_socket_path: std::path::PathBuf::from("/nonexistent/daemon.sock"),
+            bootstrap_command: "true".to_string(),
+        };
+        let error = super::start_ssh_bridge(config).expect_err("nothing is listening");
+        assert!(
+            !matches!(error, super::SshBridgeError::NotReady),
+            "the real cause must surface, got: {error}"
+        );
+    }
+}
