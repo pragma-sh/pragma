@@ -187,6 +187,12 @@ have only forward slashes`) when bunup walked that workspace-symlinked
 - `env.ts` is the only SDK file that touches process env, and it must use guarded
   `globalThis.process?.env` access.
 - Streaming uses NDJSON over `fetch`/`ReadableStream`, not SSE or WebSockets.
+- **Every event stream goes through `typedEventStream` with an allowlist of its
+  event types** (`streaming.ts`). The gateway writes a `{"type":"ready"}` keepalive
+  at attach and every 20s, and a newer host may add types; a raw `ndjsonStream`
+  yields both to callers that dispatch on `type`, which is how Pragma Go's terminal
+  wedged at "Connecting…" (#213). The allowlist is an `EventTypes<T>` record, so
+  adding a variant to an event union without listing it fails typecheck.
 - Future follow-up: `pragma-cli` could target the gateway later, but today it still
   talks directly to `pragma-server`.
 - Local terminal sessions inject gateway URL/token and an optional separate local computer-use token from the owner-only discovery file.

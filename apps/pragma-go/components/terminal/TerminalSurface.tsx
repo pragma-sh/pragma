@@ -5,7 +5,8 @@ import { Alert, KeyboardAvoidingView, Linking, Platform, View } from "react-nati
 import { Text } from "@/components/ui/text";
 import { TerminalKeyBar, controlByte } from "@/components/terminal/TerminalKeyBar";
 import { TerminalWebView, type TerminalViewHandle } from "@/components/terminal/TerminalWebView";
-import { useTerminalSession, type TerminalStatus } from "@/lib/use-terminal-session";
+import type { TerminalStatus } from "@/lib/terminal-events";
+import { useTerminalSession } from "@/lib/use-terminal-session";
 
 interface TerminalSurfaceProps {
   /** Host session to attach to. An agent tab is a terminal session too. */
