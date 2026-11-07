@@ -189,6 +189,10 @@ the explicit close on its row.
   surface** (status line + renderer + key bar), used by the terminal screen and
   by the agent view's Terminal tab. Add terminal behaviour there, not in a
   screen, or the two drift.
+- **Stream events are applied by the pure `lib/terminal-events.ts`**, which ignores
+  any `type` it has no own handler for. The SDK already drops gateway keepalives,
+  but an unguarded handler-map dispatch throws on one before replay and the retry
+  loop then hits it forever (#213); keep the guard.
 - **Renderer commands are gated on the document's `ready` message**
   (`lib/terminal-command-queue.ts`, used by both `TerminalWebView` twins).
   `injectJavaScript` and `postMessage` are both dropped by a document that has

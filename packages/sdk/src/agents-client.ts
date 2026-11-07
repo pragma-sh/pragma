@@ -12,7 +12,7 @@ import type {
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 import { routes } from "./routes";
-import { ndjsonStream } from "./streaming";
+import { type EventTypes, typedEventStream } from "./streaming";
 import { Transport } from "./transport";
 import type {
   AgentConnection,
@@ -25,6 +25,16 @@ import type {
   ReportSessionIdOptions,
   ReportSessionNameOptions,
 } from "./types/agents";
+
+/** The agent event types the agent stream yields; keepalives are dropped. */
+const AGENT_STREAM_EVENT_TYPES: EventTypes<AgentStreamEvent> = {
+  agent: true,
+  agentMessage: true,
+  agentDecision: true,
+  agentAnswer: true,
+  agentInput: true,
+  agentInterrupt: true,
+};
 
 /** Agent status gateway namespace. */
 export class AgentsClient {
@@ -257,7 +267,7 @@ export class AgentsClient {
     options: { signal?: AbortSignal } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const response = await this.transport.raw(routes.agentEvents, { signal: options.signal });
-    yield* ndjsonStream<AgentStreamEvent>(response, options.signal);
+    yield* typedEventStream<AgentStreamEvent>(response, AGENT_STREAM_EVENT_TYPES, options.signal);
   }
 
   /**

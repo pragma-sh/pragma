@@ -2,7 +2,7 @@
 import type { SessionInfo, ViewportLease } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
-import { ndjsonStream } from "./streaming";
+import { type EventTypes, typedEventStream } from "./streaming";
 import type { Transport } from "./transport";
 import type {
   SessionEvent,
@@ -10,6 +10,15 @@ import type {
   SpawnSessionResponse,
   StreamOptions,
 } from "./types/sessions";
+
+/** The session event types {@link SessionsClient.attach} yields. */
+const SESSION_EVENT_TYPES: EventTypes<SessionEvent> = {
+  output: true,
+  replay: true,
+  title: true,
+  exit: true,
+  echoMode: true,
+};
 
 /** PTY session gateway namespace. */
 export class SessionsClient {
@@ -33,12 +42,13 @@ export class SessionsClient {
    * at and whether the client must reset. Pass `cursor` to resume a stream this
    * same renderer was reading; pass `cols`/`rows` only when this client owns
    * the viewport, since attaching with a size resizes the shared PTY.
+   * Gateway keepalives and event types this client does not know are dropped.
    */
   async *attach(sessionId: string, options: StreamOptions = {}): AsyncGenerator<SessionEvent> {
     const response = await this.transport.raw(attachRoute(sessionId, options), {
       signal: options.signal,
     });
-    yield* ndjsonStream<SessionEvent>(response, options.signal);
+    yield* typedEventStream<SessionEvent>(response, SESSION_EVENT_TYPES, options.signal);
   }
 
   write(
