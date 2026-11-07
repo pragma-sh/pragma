@@ -38,6 +38,17 @@ describe("startRefreshLoop", () => {
     stop();
   });
 
+  it("keeps automation watches polling while hidden when requested", () => {
+    setDocumentHidden(true);
+    const refresh = vi.fn();
+    const stop = startRefreshLoop(refresh, 1000, { whileHidden: true });
+    vi.advanceTimersByTime(2000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    stop();
+    vi.advanceTimersByTime(2000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+  });
+
   it("refreshes on window focus and stops cleanly", () => {
     const refresh = vi.fn();
     const stop = startRefreshLoop(refresh, 1000);

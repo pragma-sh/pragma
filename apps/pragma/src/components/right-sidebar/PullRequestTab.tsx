@@ -8,19 +8,15 @@ import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { ViewPullRequestView } from "@/components/github/ViewPullRequestView";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { useMergeSettle } from "@/components/right-sidebar/use-merge-settle";
-import { findPullRequestForBranch, getPullRequest, type PullRequestSummary } from "@/lib/github";
+import {
+  GITHUB_PR_REFRESH_INTERVAL_MS,
+  findPullRequestForBranch,
+  getPullRequest,
+  type PullRequestSummary,
+} from "@/lib/github";
 import { type AiPullRequestDraft, githubRepoRef } from "@/lib/tauri";
 import { useGitHub } from "@/state/github-context";
 import { useWorkspace } from "@/state/workspace-context";
-
-/**
- * How often the Pull Request subtab re-resolves its state while mounted. GitHub
- * has no push channel here, so we poll like `ChangesTab` — but at a slower beat,
- * since each refresh is a remote API round-trip subject to rate limits and PR
- * state changes far less often than the working tree. Cached responses make
- * each tick cheap when nothing changed.
- */
-const PR_REFRESH_INTERVAL_MS = 10_000;
 
 /**
  * The Pull Request subtab controller. Resolves, in order:
@@ -146,7 +142,7 @@ function PullRequestResolver({
     hasResolved.current = false;
     // Poll with force=false so cache serves stale-while-revalidate; the loop
     // still revalidates in the background on every tick + window focus.
-    const stopRefresh = startRefreshLoop(() => refresh(false), PR_REFRESH_INTERVAL_MS);
+    const stopRefresh = startRefreshLoop(() => refresh(false), GITHUB_PR_REFRESH_INTERVAL_MS);
     return () => {
       active.current = false;
       stopRefresh();

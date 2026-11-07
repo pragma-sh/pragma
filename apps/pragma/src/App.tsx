@@ -1,3 +1,4 @@
+import { CiWatchMonitor } from "@/components/github/CiWatchMonitor";
 import { MotionConfig } from "motion/react";
 
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
@@ -43,6 +44,7 @@ function App() {
                             <WorktreeCreationProvider>
                               <UpdatesProvider>
                                 <WorkspaceShell />
+                                <CiWatchMonitor />
                                 <OnboardingModal />
                                 <WorkspaceTour />
                                 <AgentPluginInstallPrompt />
