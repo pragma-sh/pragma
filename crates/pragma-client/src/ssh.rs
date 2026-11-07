@@ -10,6 +10,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
+use pragma_platform::ipc::LocalListener;
 use russh::client::{self, Config, Handle, Handler};
 use russh::keys::agent::client::AgentClient;
 use russh::keys::agent::AgentIdentity;
@@ -143,20 +144,44 @@ async fn run_bridge(
     config: SshBridgeConfig,
     ready_tx: mpsc::SyncSender<Result<(), SshBridgeError>>,
 ) -> Result<(), SshBridgeError> {
+    // Every setup failure is handed to the waiting caller. Returning it with `?`
+    // instead only dropped the sender, so the caller saw a bare
+    // "did not become ready" and the real cause went to an unread stderr (#212).
+    let (handle, listener) = match prepare_bridge(&config).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error));
+            return Ok(());
+        }
+    };
+    let _ = ready_tx.send(Ok(()));
+    serve_bridge(handle, listener, config.remote_socket_path).await
+}
+
+/// Connects, authenticates, bootstraps the remote server, and binds the local
+/// socket — everything that must succeed before the bridge is ready.
+async fn prepare_bridge(
+    config: &SshBridgeConfig,
+) -> Result<(Handle<TrustServerKey>, LocalListener), SshBridgeError> {
     let mut handle = connect(&config.host, config.port).await?;
     authenticate(&mut handle, &config.user, &config.auth).await?;
     bootstrap(&handle, &config.bootstrap_command).await?;
-
     // `bind_local_socket` restricts the socket to its owner on every platform.
-    let mut listener = bridge::bind_local_socket(&config.local_socket_path)?;
-    let _ = ready_tx.send(Ok(()));
+    let listener = bridge::bind_local_socket(&config.local_socket_path)?;
+    Ok((handle, listener))
+}
 
+async fn serve_bridge(
+    handle: Handle<TrustServerKey>,
+    mut listener: LocalListener,
+    remote_socket_path: String,
+) -> Result<(), SshBridgeError> {
     let handle = Arc::new(handle);
     loop {
         let (local_stream, next) = bridge::accept(listener).await?;
         listener = next;
         let handle = Arc::clone(&handle);
-        let remote_socket_path = config.remote_socket_path.clone();
+        let remote_socket_path = remote_socket_path.clone();
         tokio::spawn(async move {
             let Ok(channel) = handle
                 .channel_open_direct_streamlocal(remote_socket_path)
@@ -332,4 +357,31 @@ async fn connect_agent(
             ))
         })?;
     Ok(AgentClient::connect(pipe))
+}
+
+#[cfg(test)]
+mod tests {
+    /// A setup failure must reach the caller as itself, not as `NotReady`
+    /// (#212). Connecting to a port nobody listens on fails immediately.
+    #[test]
+    fn a_setup_failure_is_reported_not_swallowed() {
+        let port = {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a free port");
+            listener.local_addr().expect("an address").port()
+        };
+        let config = super::SshBridgeConfig {
+            host: "127.0.0.1".to_string(),
+            port,
+            user: "nobody".to_string(),
+            auth: super::RemoteAuth::None,
+            remote_socket_path: "/nonexistent".to_string(),
+            local_socket_path: std::path::PathBuf::from("/nonexistent/daemon.sock"),
+            bootstrap_command: "true".to_string(),
+        };
+        let error = super::start_ssh_bridge(config).expect_err("nothing is listening");
+        assert!(
+            !matches!(error, super::SshBridgeError::NotReady),
+            "the real cause must surface, got: {error}"
+        );
+    }
 }

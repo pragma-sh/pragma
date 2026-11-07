@@ -41,21 +41,21 @@ const PUMP_QUEUE_DEPTH: usize = 64;
 /// Binds the bridge's local socket, replacing any stale one left behind.
 ///
 /// A socket file with nobody behind it is debris from a killed bridge; a socket
-/// that still answers belongs to a live one and must not be evicted.
+/// that still answers belongs to a live one and must not be evicted. The
+/// socket's directory is made owner-only by `ipc::bind`, so it must be one the
+/// bridge owns — never the shared temporary directory itself.
 pub fn bind_local_socket(path: &Path) -> std::io::Result<LocalListener> {
     ipc::check_socket_path(path)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if path.exists() {
-        if ipc::connect(path).is_ok() {
-            return Err(std::io::Error::new(
+    ipc::remove_stale_socket(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AddrInUse {
+            std::io::Error::new(
                 std::io::ErrorKind::AddrInUse,
                 format!("a bridge is already serving on {}", path.display()),
-            ));
+            )
+        } else {
+            error
         }
-        std::fs::remove_file(path)?;
-    }
+    })?;
     ipc::bind(path)
 }
 
@@ -200,6 +200,27 @@ mod tests {
 
         let listener = bind_local_socket(&path).expect("a stale socket file must not block a bind");
         drop(listener);
+    }
+
+    /// The same with a real socket left by a bridge that died — on Windows an
+    /// `AF_UNIX` reparse point, which `Path::exists` used to report as absent.
+    #[test]
+    fn a_dead_bridge_socket_is_replaced() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("bridge.sock");
+        drop(bind_local_socket(&path).expect("first bridge"));
+
+        let _listener = bind_local_socket(&path).expect("a dead socket must not block a bind");
+    }
+
+    #[test]
+    fn a_live_bridge_socket_is_not_evicted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("bridge.sock");
+        let _serving = bind_local_socket(&path).expect("first bridge");
+
+        let error = bind_local_socket(&path).expect_err("a serving bridge keeps its socket");
+        assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
     }
 
     /// The bridge is a byte pipe: whatever the remote sends must arrive at the

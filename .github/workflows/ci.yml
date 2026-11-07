@@ -57,6 +57,38 @@ jobs:
         env:
           PRAGMA_TEST_PTY: "1"
 
+  # Starts the real pragma-server.exe on a fresh data directory, as the runner's
+  # admin account *and* as a newly created standard user, restarts it over the
+  # socket a forced kill leaves behind, and checks another account cannot connect.
+  # Nothing else in CI or the release ever starts the server on Windows. Runs on
+  # stable and on the release's pinned toolchain — keep that in step with
+  # `toolchain:` in release.yml.
+  #
+  # Known limit: it does NOT reproduce #212. That failure needs Windows build
+  # 26300+; the hosted images are 26100 (Server 2025) and 26200 (Windows 11 ARM),
+  # where the pre-fix server passes this check in every configuration.
+  windows-server-smoke:
+    name: Windows server smoke (${{ matrix.runner }}, rust ${{ matrix.toolchain }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+        toolchain: [stable, 1.96.0]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-smoke-${{ matrix.toolchain }}
+      - name: Build pragma-server
+        run: cargo build -p pragma-server
+      - name: Smoke-test the server (admin and standard user)
+        shell: pwsh
+        run: ./scripts/windows-server-smoke.ps1 -Server target/debug/pragma-server.exe -StandardUser
+
   build:
     name: Build app (${{ matrix.platform }})
     needs: [rust-windows]

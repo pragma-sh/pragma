@@ -664,11 +664,21 @@ GitHub's latest release and a client may have skipped a required native release.
 
 **CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
 Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
-runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the
+runners are x86*64/arm64 Linux — so everything that can run on Linux (commitlint, the
 TypeScript checks, the Rust checks, the Linux app build) lives in
 `.rwx/ci.yml`, and the
 macOS and Windows builds plus the Windows Rust suite stay in
 `.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
+`windows-server-smoke` (`scripts/windows-server-smoke.ps1`) starts the real
+`pragma-server.exe` as the runner's admin \_and* as a fresh standard user, restarts it
+over a stale socket, and checks another account cannot connect — on stable and on the
+release's pinned toolchain (keep its matrix in step with `release.yml`). The release
+runs the same script on the shipped binary before publishing. **It cannot reproduce
+#212**: that needs Windows build 26300+, and the hosted images are 26100/26200, where
+the pre-fix server passes. A Windows bug tied to a newer build needs a real machine.
+`Start-Process -Credential` passes the parent's environment, so the script rebuilds
+`USERNAME`/`USERDOMAIN`/`TEMP` for the standard account — `perms` grants the ACL by
+`USERNAME`, and a stale value locks the real owner out (10013).
 Linux Rust tests run under Xvfb so the native GTK menu regression test executes
 rather than skipping for lack of a display; keep `xvfb` and `xauth` in the system packages.
 That regression test (`linux_window_menu`) is Unix-only and no-ops on Windows — a Tauri
