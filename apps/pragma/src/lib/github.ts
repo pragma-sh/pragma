@@ -1082,6 +1082,49 @@ export const getChecksStatus = defineCachedRepoRead(
   { ttlMs: 15_000 },
 );
 
+interface PullRequestChecksRollupResponse {
+  repository: {
+    pullRequest: {
+      commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+    } | null;
+  } | null;
+}
+
+const PULL_REQUEST_CHECKS_ROLLUP_QUERY = `
+  query ($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+`;
+
+/**
+ * GitHub's own CI rollup for a PR's head commit — the same state GitHub draws
+ * beside the PR — in one GraphQL call, so the sidebar can poll it for every
+ * worktree without the two REST calls {@link getChecksStatus} makes. Read from
+ * the PR's base repository, where a cross-fork PR's checks run.
+ */
+export async function getPullRequestChecksState(
+  repo: GitHubRepoRef,
+  pr: Pick<PullRequestSummary, "number" | "baseRepo">,
+): Promise<ChecksStatus["state"]> {
+  const target = pr.baseRepo ?? { owner: repo.owner, repo: repo.repo };
+  return cachedRepoFetch(
+    githubCacheKeys(target).checksRollup(pr.number),
+    async (octokit) => {
+      const data = await octokit.graphql<PullRequestChecksRollupResponse>(
+        PULL_REQUEST_CHECKS_ROLLUP_QUERY,
+        { owner: target.owner, repo: target.repo, number: pr.number },
+      );
+      const head = data.repository?.pullRequest?.commits.nodes[0]?.commit;
+      return toChecksState(head?.statusCheckRollup?.state ?? null);
+    },
+    { ttlMs: 15_000 },
+  );
+}
+
 /** Merges a pull request with the given strategy (default: a merge commit). */
 export async function mergePullRequest(
   repo: GitHubRepoRef,

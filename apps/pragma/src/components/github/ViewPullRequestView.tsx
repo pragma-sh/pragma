@@ -3,9 +3,10 @@ import { errorMessage } from "@/lib/errors";
 
 import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma-sh/constants";
 import { Icon } from "@iconify/react";
-import { Check, CheckCircle2, ChevronUp, CircleDot, Loader2, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronUp, CircleDot, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { ChecksStateIcon } from "@/components/github/ChecksStateIcon";
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import {
@@ -491,14 +492,7 @@ function CommentCard({ comment }: { comment: IssueComment }) {
 
 /** One clickable commit log entry, arranged like GitHub's PR timeline event. */
 function CommitCard({ commit }: { commit: PullRequestCommit }) {
-  const status =
-    commit.status === "success" ? (
-      <Check aria-label="Checks passed" className="size-4 text-success" />
-    ) : commit.status === "failure" ? (
-      <X aria-label="Checks failed" className="size-4 text-destructive" />
-    ) : commit.status === "pending" ? (
-      <CircleDot aria-label="Checks pending" className="size-4 text-warning" />
-    ) : null;
+  const status = commit.status === "none" ? null : <ChecksStateIcon state={commit.status} />;
 
   return (
     <button
