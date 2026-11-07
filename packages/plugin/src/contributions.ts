@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { getBridge } from "./bridge";
-import type { PluginContext } from "./types";
+import type { PluginContext, PluginWorktree } from "./types";
 
 /** An icon contributed alongside a sidebar tab, command, or agent. */
 export type PluginIcon = ComponentType<{ className?: string }>;
@@ -109,10 +109,21 @@ export function defineTopperItem<TConfig = unknown>(
   return input;
 }
 
+/**
+ * A hook the host runs to badge a sidebar card or worktree section. It returns
+ * the number shown on the badge; `0` hides the contribution and `null` means
+ * "not known yet", which hides it too, so nothing flashes empty while loading.
+ * It is a React hook: call other hooks (`useSdkQuery`, …) unconditionally.
+ */
+export type PluginCountHook<TArgs extends unknown[] = []> = (...args: TArgs) => number | null;
+
 /** A card contributed to the project sidebar. */
 export interface SidebarCardDefinition<TConfig = unknown> {
   title: string;
+  icon?: PluginIcon;
   component: PluginComponent;
+  /** Badge count; when given, a `0`/`null` count hides the card. */
+  useCount?: PluginCountHook;
   when?: PluginWhen<TConfig>;
 }
 
@@ -120,6 +131,36 @@ export interface SidebarCardDefinition<TConfig = unknown> {
 export function defineSidebarCard<TConfig = unknown>(
   input: SidebarCardDefinition<TConfig>,
 ): SidebarCardDefinition<TConfig> {
+  return input;
+}
+
+/** Callback context for a worktree section: the plugin context plus the row's worktree. */
+export interface WorktreeSectionContext<TConfig = unknown> extends PluginContext<TConfig> {
+  worktree: PluginWorktree;
+}
+
+/**
+ * A subsection contributed to every worktree row in the project sidebar. Each
+ * row with a nonzero count shows a chip; clicking it expands the body inline.
+ */
+export interface WorktreeSectionDefinition<TConfig = unknown> {
+  id: string;
+  title: string;
+  icon?: PluginIcon;
+  /** Expanded body. Reads its row with `useWorktree()`; mounted only while expanded. */
+  component: PluginComponent;
+  /**
+   * Runs for every visible row. A `0`/`null` count hides the section for that
+   * row; omit it to always show the chip, unbadged.
+   */
+  useCount?: PluginCountHook<[worktree: PluginWorktree]>;
+  when?: (ctx: WorktreeSectionContext<TConfig>) => boolean;
+}
+
+/** Declares a worktree-row section contribution. */
+export function defineWorktreeSection<TConfig = unknown>(
+  input: WorktreeSectionDefinition<TConfig>,
+): WorktreeSectionDefinition<TConfig> {
   return input;
 }
 

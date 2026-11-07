@@ -10,5 +10,6 @@ describe("plugin", () => {
       "Board Drafts",
       "Diagnostics",
     ]);
+    expect(plugin.ui?.worktreeSections?.map((section) => section.id)).toEqual(["uncommitted"]);
   });
 });

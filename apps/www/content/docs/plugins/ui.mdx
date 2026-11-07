@@ -34,11 +34,57 @@ Tabs render in the project sidebar and receive the project context through the
 ## Sidebar cards
 
 ```tsx
-sidebarCards: [defineSidebarCard({ title: "Alerts", component: AlertsCard })];
+sidebarCards: [
+  defineSidebarCard({
+    title: "Alerts",
+    icon: BellIcon, // optional
+    component: AlertsCard,
+    useCount: () => useAlerts().length, // optional badge; 0 or null hides the card
+  }),
+];
 ```
 
-Collapsible cards below the worktree tree, next to the built-in Ports and Scratchpads
-cards.
+Collapsible cards below the worktree tree. `useCount` is a React hook the host runs even
+while the card is hidden, so call other hooks in it freely. A card with a `useCount`
+shows its count as a badge, and is hidden while the count is `0` or `null` (not known yet).
+Leave it out and the card always shows.
+
+## Worktree sections
+
+```tsx
+import { defineWorktreeSection, useSdkQuery, useWorktree } from "@pragma-sh/plugin";
+
+function FailingChecks() {
+  const worktree = useWorktree(); // the row this body is expanded under
+  return <ChecksList branch={worktree.branch} />;
+}
+
+worktreeSections: [
+  defineWorktreeSection({
+    id: "ci",
+    title: "CI",
+    icon: CheckIcon, // optional
+    component: FailingChecks,
+    useCount: (worktree) =>
+      useSdkQuery((sdk) => failingChecks(sdk, worktree.branch), [worktree.branch]).data?.length ??
+      null,
+    when: (ctx) => !ctx.worktree.isMain,
+  }),
+];
+```
+
+A subsection under every worktree row in the sidebar, where Pragma's own Ports,
+Whiteboards, and Scratchpads live. Each row gets a chip for the section; clicking it
+expands `component` inline under that row.
+
+- **`useCount(worktree)`** runs for every visible row, as a React hook. A `0` or `null`
+  count hides the section on that row, so a worktree with nothing to show stays quiet.
+  Leave it out and the chip always shows, unbadged.
+- **`component`** mounts only while expanded, so it can do the expensive work. It reads its
+  row with **`useWorktree()`**: `{ id, projectId, title, branch, path, isMain, selected }`.
+- **`when(ctx)`** sees the row as `ctx.worktree`, on top of the usual plugin context.
+
+Sections show in the detailed row layout only. Rows in the compact layout stay one line.
 
 ## Settings pages
 

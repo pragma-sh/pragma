@@ -13,6 +13,7 @@ import type {
   PluginProject,
   PluginQueryResult,
   PluginSessionSummary,
+  PluginWorktree,
 } from "./types";
 
 /**
@@ -44,6 +45,7 @@ export interface PragmaHooksBridge {
     tabId?: string | null,
   ) => PluginQueryResult<AgentMessage[]>;
   useSessions: () => PluginQueryResult<PluginSessionSummary[]>;
+  useWorktree: () => PluginWorktree;
 }
 
 /** This plugin's config, already validated against its `config` schema. */
@@ -59,6 +61,11 @@ export function useSdk(): PragmaClient {
 /** The active project, or `null` when no project is selected. */
 export function useProject(): PluginProject | null {
   return getBridge().hooks.useProject();
+}
+
+/** The worktree this component renders under. Only available inside a worktree section. */
+export function useWorktree(): PluginWorktree {
+  return getBridge().hooks.useWorktree();
 }
 
 /** The host's current color theme. */

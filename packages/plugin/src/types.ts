@@ -8,6 +8,19 @@ export interface PluginProject {
   path: string;
 }
 
+/** A worktree a plugin is rendered against, such as the row a worktree section sits in. */
+export interface PluginWorktree {
+  id: string;
+  projectId: string;
+  /** Display label: the worktree's title, or its branch when untitled. */
+  title: string;
+  branch: string;
+  path: string;
+  isMain: boolean;
+  /** Whether this is the worktree currently selected in the sidebar. */
+  selected: boolean;
+}
+
 /** Options for {@link PluginContext.notify} / `useNotify()`. */
 export interface PluginNotifyOptions {
   variant?: "info" | "success" | "warning" | "error";
