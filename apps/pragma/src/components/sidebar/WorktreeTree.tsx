@@ -813,6 +813,18 @@ function WorktreeRowActions({
 }
 
 /**
+ * A row's detail data, fed the PR number and CI rollup only while its PR is open:
+ * only a live PR suppresses "Ready for PR"; a closed or merged one is history.
+ */
+function useOpenPrRowDetails(worktreeId: string, prLifecycle: GitHubPrLifecycle | undefined) {
+  const prs = useContext(WorktreePrsContext);
+  const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
+  const number = prOpen ? (prs.numbers[worktreeId] ?? null) : null;
+  const checks = prOpen ? (prs.checks[worktreeId] ?? null) : null;
+  return useWorktreeRowDetails(worktreeId, number, prOpen, checks);
+}
+
+/**
  * The detailed layout's extra lines for a row — open PR number, git action or
  * "Ready for PR", agents, then its section chips — or undefined in the compact
  * layout or when there is nothing to add.
@@ -823,15 +835,7 @@ function useWorktreeRowDetailsSlot(
   sections: ReactNode | undefined,
 ) {
   const compact = useCompactWorktreeRows();
-  const prs = useContext(WorktreePrsContext);
-  const prOpen = prLifecycle !== undefined && OPEN_PR_LIFECYCLES.has(prLifecycle);
-  // Only a live PR suppresses "Ready for PR"; a closed or merged one is history.
-  const data = useWorktreeRowDetails(
-    worktreeId,
-    prOpen ? (prs.numbers[worktreeId] ?? null) : null,
-    prOpen,
-    prOpen ? (prs.checks[worktreeId] ?? null) : null,
-  );
+  const data = useOpenPrRowDetails(worktreeId, prLifecycle);
   if (compact) return undefined;
   const details = hasWorktreeRowDetails(data);
   if (!details && !sections) return undefined;

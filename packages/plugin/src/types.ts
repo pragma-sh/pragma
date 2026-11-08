@@ -9,13 +9,11 @@ export interface PluginProject {
 }
 
 /** A worktree a plugin is rendered against, such as the row a worktree section sits in. */
-export interface PluginWorktree {
-  id: string;
+export interface PluginWorktree extends Pick<PluginProject, "id" | "path"> {
   projectId: string;
   /** Display label: the worktree's title, or its branch when untitled. */
   title: string;
   branch: string;
-  path: string;
   isMain: boolean;
   /** Whether this is the worktree currently selected in the sidebar. */
   selected: boolean;
