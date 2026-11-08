@@ -741,6 +741,16 @@ without updating this guide and CI.
 - **Linux** builds need the GTK/WebKit system libraries — see the `rust`/`build` jobs in
   CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
   `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
+- **macOS window chrome follows the linked SDK, not the running OS.** AppKit reads the
+  SDK recorded in the binary's `LC_BUILD_VERSION`, so a build linked against an older
+  SDK keeps the old traffic-light buttons and titlebar on macOS 27. That is why the
+  Apple Silicon release and CI builds run on the `xcode-27` image with an explicit
+  `scripts/macos-sdk.sh select`, followed by `macos-sdk.sh verify`, which fails the job
+  if the binary is not linked against SDK 27 or newer. Intel stays on `macos-15-intel`,
+  because macOS 27 does not run on Intel Macs. A local `bun run dev` links whatever SDK
+  your installed Xcode ships, so you only see the new chrome locally once you install
+  Xcode 27 (`vtool -show-build <binary>` shows which SDK a binary links). The new chrome
+  needs no Tauri change.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers x64 on the
   GitHub-hosted `windows-latest` image and ARM64 on `windows-11-arm`; releases use the

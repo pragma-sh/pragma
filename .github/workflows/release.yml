@@ -44,8 +44,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          # AppKit draws the macOS 27 window chrome (traffic lights, titlebar) only
+          # for binaries linked against the macOS 27 SDK, so Apple Silicon builds on
+          # the Xcode 27 image; `scripts/macos-sdk.sh verify` fails the release otherwise.
+          # Intel stays on macos-15-intel: macOS 27 does not run on Intel Macs, and
+          # no Xcode 27 image exists for that architecture.
+          - runner: xcode-27
             platform: darwin-aarch64
+            xcode: "27.1"
+            min_sdk: "27"
             source: target/release/bundle/dmg/*.dmg
             extension: dmg
           - runner: macos-15-intel
@@ -85,6 +92,9 @@ jobs:
         with:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@v2
+      - name: Select Xcode
+        if: ${{ matrix.xcode }}
+        run: ./scripts/macos-sdk.sh select ${{ matrix.xcode }}
       - run: bun install --frozen-lockfile
       - name: Require update signing keys
         shell: bash
@@ -112,6 +122,9 @@ jobs:
         # verbatim, and tauri treats a literal `--` as "pass the rest to cargo", which
         # dies with `unexpected argument '--bundles' found`.
         run: bun run --filter pragma tauri build ${{ matrix.bundles }}
+      - name: Verify linked macOS SDK
+        if: ${{ matrix.min_sdk }}
+        run: ./scripts/macos-sdk.sh verify target/release/pragma ${{ matrix.min_sdk }}
       # The server binary this installer ships, started for real before anything
       # is published — until now nothing here ever ran it. Same check as CI's
       # `windows-server-smoke`, with the same limit: the runner's Windows build is
