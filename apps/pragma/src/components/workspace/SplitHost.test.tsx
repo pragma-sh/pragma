@@ -10,6 +10,12 @@ import type { AgentConfig } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
+vi.mock("@/components/scratchpad/ScratchpadView", () => ({
+  ScratchpadView: ({ tab: scratchpad }: { tab: Tab }) => (
+    <input aria-label={`Scratchpad ${scratchpad.id}`} />
+  ),
+}));
+
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
 
 function tab(id: string): Tab {
@@ -274,6 +280,39 @@ afterEach(() => {
 });
 
 describe("SplitHost", () => {
+  it("keeps a visited scratchpad mounted when switching tabs", async () => {
+    const originalRoot = mockWorkspace.splitRoot;
+    mockWorkspace.tabs = [{ ...tab("scratch"), kind: "scratchpad" }, tab("terminal")];
+    mockWorkspace.splitRoot = {
+      kind: "pane",
+      id: "pane-only",
+      tabIds: ["scratch", "terminal"],
+      activeTabId: "scratch",
+    };
+    const view = render(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    const input = await screen.findByLabelText("Scratchpad scratch");
+    await userEvent.type(input, "draft");
+    mockWorkspace.splitRoot = { ...mockWorkspace.splitRoot, activeTabId: "terminal" };
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(input).toHaveValue("draft");
+    expect(input.closest('[aria-hidden="true"]')).not.toBeNull();
+    mockWorkspace.splitRoot = { ...mockWorkspace.splitRoot, activeTabId: "scratch" };
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(screen.getByLabelText("Scratchpad scratch")).toBe(input);
+    mockWorkspace.splitRoot = originalRoot;
+  });
   it("keeps visited terminals mounted when switching tabs in a pane", () => {
     const originalRoot = mockWorkspace.splitRoot;
     const originalActiveTabId = mockWorkspace.activeTabId;

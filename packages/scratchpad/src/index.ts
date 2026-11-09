@@ -21,6 +21,10 @@ export interface ScratchpadWhiteboardSnapshot {
 
 /** Host bridge installed only inside a rendered Pragma scratchpad. */
 export interface ScratchpadBridge {
+  /** Device-local state for built-in controls, scoped to this rendered block. */
+  getLocalState?(key: string): unknown;
+  /** Saves device-local state for built-in controls. */
+  setLocalState?(key: string, value: unknown): void;
   /** False in standalone exports, which cannot send feedback to agents. */
   agentFeedbackEnabled?: boolean;
   /** Delivers text, or reports a missing attachment or reader cancellation. */

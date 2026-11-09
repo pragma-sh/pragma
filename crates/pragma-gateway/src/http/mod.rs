@@ -30,6 +30,8 @@ pub struct AppState {
     pub client: GatewayClient,
     /// Bearer token.
     pub token: String,
+    /// Owner-only credential required by computer-use routes.
+    pub local_token: String,
     /// Gateway package version.
     pub gateway_version: &'static str,
     /// Recently spawned session streams, kept briefly to cover race-to-attach.
@@ -118,11 +120,8 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
         .match_route(&method, &url)
         .ok_or(GatewayError::NotFound)?;
 
-    if !is_public(matched.id) && !authorized(&request, &state.token) {
-        request.respond(with_cors(
-            error_response(&GatewayError::Unauthorized).boxed(),
-        ))?;
-        return Ok(());
+    if !route_authorized(&request, state, &matched) {
+        return respond_json(request, Err(GatewayError::Unauthorized));
     }
     if !is_public(matched.id) {
         if let Ok(devices) = state.devices.lock() {
@@ -213,6 +212,26 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
     }
 }
 
+/// Scope checks apply to both RPC and subscription escape hatches.
+fn computer_route(matched: &router::RouteMatch) -> bool {
+    (matched.id == "rpc"
+        && matched
+            .params
+            .get("method")
+            .is_some_and(|v| v == "computer"))
+        || (matched.id == "subscriptions.events"
+            && matched
+                .params
+                .get("event")
+                .is_some_and(|v| v == "computerActivity"))
+}
+
+fn route_authorized(request: &Request, state: &AppState, matched: &router::RouteMatch) -> bool {
+    is_public(matched.id)
+        || authorized(request, &state.local_token)
+        || (!computer_route(matched) && authorized(request, &state.token))
+}
+
 /// Sends a route's outcome to the client: the successful response, or the
 /// error as a JSON `ErrorBody` with the error's HTTP status. Route failures
 /// must never drop the request — a dropped `tiny_http` request turns into an
@@ -259,7 +278,21 @@ pub fn read_body(request: &mut Request) -> GatewayResult<Vec<u8>> {
 mod tests {
     use tiny_http::Response;
 
-    use super::{allowed_headers, preflight_response, with_cors};
+    use super::{allowed_headers, computer_route, preflight_response, with_cors};
+
+    #[test]
+    fn computer_rpc_and_activity_are_local_only() {
+        let router = super::router::gateway_router();
+        for (method, path) in [
+            ("POST", "/v1/rpc/computer"),
+            ("GET", "/v1/subscriptions/computerActivity"),
+        ] {
+            assert!(computer_route(&router.match_route(method, path).unwrap()));
+        }
+        assert!(!computer_route(
+            &router.match_route("POST", "/v1/rpc/git").unwrap()
+        ));
+    }
 
     fn header_value(response: &tiny_http::ResponseBox, field: &'static str) -> Option<String> {
         response

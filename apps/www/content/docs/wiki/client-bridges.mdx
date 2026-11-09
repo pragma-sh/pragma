@@ -37,7 +37,9 @@ through SSH streamlocal forwarding:
 
 1. Authenticate (agent → key+passphrase → password), run a bootstrap command that
    ensures the remote server (right binary, right version), and bind a **local**
-   owner-only socket.
+   owner-only socket in a private per-host directory
+   (`<temp>/pragma-remote-<host>/daemon.sock`). A setup failure is reported as the
+   real error, not as "did not become ready".
 2. Each local connection opens one `channel_open_direct_streamlocal` to the remote
    socket; a pump copies raw bytes. **No reframing, no interpretation** — the local
    endpoint behaves exactly like the remote socket.

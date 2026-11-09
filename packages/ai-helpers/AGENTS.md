@@ -317,3 +317,7 @@ all workspace `test` scripts use `bun --bun vitest run` for consistency.
 In a **debug** build the Rust app runs `src/cli.ts` directly via `bun`; a
 **release** build runs the compiled `dist/pragma-ai` staged beside the app
 binary. Test changes end-to-end through both paths when touching `cli.ts`.
+
+## Computer decisions
+
+`computer-use.ts` builds bounded independent choices from a native snapshot and named variables, excluding secure controls and variable values. One request asks next action, target, key, app, and completion evidence. It rejects unoffered choices; the Rust host separately checks confidence, item margin, budgets and policy. `pragma-ai computer-decide` is long-lived NDJSON with correlated ids; stdin EOF exits and errors never echo payloads or keys. `computer:eval [file]` replays normalized snapshots plus recorded answers offline; bundled synthetic fixtures validate the contract, not model accuracy or native behavior.

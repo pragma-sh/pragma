@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/www-v1.4.0...www-v1.5.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** restore interrupted agent sessions ([af35a59](https://github.com/pragma-sh/pragma/commit/af35a59337f956ad308ade261028bea6bf6884fa))
+* **agents:** restore interrupted agent sessions ([6daf5c6](https://github.com/pragma-sh/pragma/commit/6daf5c62f4edcb5e3f3d81173cf745b0fa7316ed))
+* **computer:** add computer use — agent control of desktop apps across the stack ([9f56035](https://github.com/pragma-sh/pragma/commit/9f56035729e37c7372052abb37af0a098adb3746))
+* **computer:** add tasks and Windows support ([ab50c12](https://github.com/pragma-sh/pragma/commit/ab50c1230ce4b1d8490988456f01b09b0beb7fb5))
+* **opencode-plugin:** support the OpenCode v2 plugin API, accounts, and usage ([4185f14](https://github.com/pragma-sh/pragma/commit/4185f14c1b3b89a2f796848aac03079df78ad6e7))
+* **plugin:** add suggested draft providers ([438de7e](https://github.com/pragma-sh/pragma/commit/438de7e1ed8b39e65689d9470c3da1c9d14633c8))
+* **pragma:** rebuild the agent board on live worktrees and suggestions ([839054c](https://github.com/pragma-sh/pragma/commit/839054c24f02f2e0c1ba6bafd956f5bb335bdb46))
+* **www:** update landing page for computer use and the live board ([47a482b](https://github.com/pragma-sh/pragma/commit/47a482bfa9c8d5f8fa9f19b4b9f3168a6f278803))
+* **www:** update the landing page for computer use and the live board ([676f70a](https://github.com/pragma-sh/pragma/commit/676f70a3e67a60e8ea9f74974ff89278a5712c7c))
+
+
+### Bug Fixes
+
+* **computer:** close capture, retarget, and session-end gaps ([8bd450a](https://github.com/pragma-sh/pragma/commit/8bd450ae5c4fee638a6c1b7520481bbf1802bfb9))
+* **computer:** detect Windows takeover from physical input only ([cb8cf38](https://github.com/pragma-sh/pragma/commit/cb8cf38f80c2bc1765991b50cbc415f46113efa0))
+* **computer:** make the macOS helper its own permission identity ([dedea83](https://github.com/pragma-sh/pragma/commit/dedea836eaeb9f8102117c286f448519a036f378))
+* merge main and repair CI checks ([74bae31](https://github.com/pragma-sh/pragma/commit/74bae319ba4157c1f964993bb6054a2eb526c302))
+* **pragma:** keep computer use in-app and survive borderless windows ([092839b](https://github.com/pragma-sh/pragma/commit/092839b7e1496e63a9e141581c0702196aabae76))
+* **pragma:** restore the Linux native Window menu ([55659ac](https://github.com/pragma-sh/pragma/commit/55659ac7d324e925edfb2a8947eb1abe5349aec0))
+* **scratchpad:** retain interactive state ([c0d2697](https://github.com/pragma-sh/pragma/commit/c0d2697840721e22a65c730d34321d196e3196c4))
+* **scratchpad:** retain interactive state ([9aace1d](https://github.com/pragma-sh/pragma/commit/9aace1d4b2f91a80c681b67d0d106fc914266fb3))
+* **www:** restore the full-height agent board video on the landing page ([7496624](https://github.com/pragma-sh/pragma/commit/7496624f65b07f6cb5fb1e511a123f1ac6749752))
+
 ## [1.4.0](https://github.com/pragma-sh/pragma/compare/www-v1.3.0...www-v1.4.0) (2026-10-17)
 
 

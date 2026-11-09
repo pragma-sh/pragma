@@ -623,6 +623,7 @@ describe("agents connect", () => {
   });
 
   it("yields only events routed to the connected agent + tab", async () => {
+    const keepalive = JSON.stringify({ type: "ready" });
     const mine = JSON.stringify({
       type: "agentMessage",
       message: { agent: "opencode", worktreeId: "worktree", tabId: "tab", id: "m1" },
@@ -643,7 +644,9 @@ describe("agents connect", () => {
       baseUrl: "http://127.0.0.1:1",
       token: "token",
       fetch: async () =>
-        ndjsonResponse(`${mine}\n${otherTab}\n${otherAgent}\n${interruptOtherTab}\n`),
+        ndjsonResponse(
+          `${keepalive}\n${mine}\n${keepalive}\n${otherTab}\n${otherAgent}\n${interruptOtherTab}\n`,
+        ),
     });
 
     const connection = await client.agents.connect({

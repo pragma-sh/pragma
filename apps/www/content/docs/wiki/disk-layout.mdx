@@ -15,13 +15,17 @@ use `pragma-dev-<hash>`.
 | `daemon.sock`            | The owner-only Unix socket.                                                                |
 | `server.lock`            | `flock` target; contains the server pid. Never deleted.                                    |
 | `server.log`             | Server stdout/stderr (Troubleshooting → Open Server Logs).                                 |
-| `gateway.json`           | `{ port, token, pid, protocolVersion }` discovery file (0600).                             |
+| `gateway.json`           | `{ port, token, localToken, pid, protocolVersion }` discovery file (0600).                 |
+| `gateway-local-token`    | Separate owner-only computer-use credential; never paired.                                 |
 | `gateway-token`          | Persistent bearer token (0600).                                                            |
 | `gateway-devices.json`   | Authenticated mobile installs + push tokens.                                               |
 | `gateway.log`            | Gateway stdout/stderr.                                                                     |
 | `workspace.json`         | Persisted workspace snapshot (headless launches with the app closed).                      |
 | `plugin-roots.json`      | Registered project roots for the plugin catalog.                                           |
 | `agent-invocations.db`   | Durable agent invocations + harness session ids for auto-resume (SQLite, WAL, owner-only). |
+| `computer-tasks.json`    | Durable task metadata; input values stay in memory.                                        |
+| `computer-grants.json`   | Remembered computer-use grants.                                                            |
+| `computer/screenshots/`  | Owner-only captures, swept after their TTL.                                                |
 | `fanouts.json`           | Durable fanout records (0600, atomic writes).                                              |
 | `whiteboards.db`         | Worktree-scoped Excalidraw boards (SQLite; scenes stored losslessly).                      |
 | `automations-state.json` | Per-content-hash trust verdicts for automations.                                           |
@@ -79,6 +83,7 @@ Set in every Pragma terminal session (plus extras noted):
 | `PRAGMA_TAB_ID`                                | Current tab/session id.                                                             |
 | `PRAGMA_WORKTREE_ID`                           | Owning worktree id.                                                                 |
 | `PRAGMA_SERVER_SOCKET`                         | Server socket path (CLI target). `PRAGMA_DAEMON_SOCKET` is the legacy alias.        |
+| `PRAGMA_LOCAL_GATEWAY_TOKEN`                   | Local computer-use credential; omitted from mobile pairing.                         |
 | `PRAGMA_GATEWAY_URL` / `PRAGMA_GATEWAY_TOKEN`  | HTTP gateway endpoint + bearer token (SDK target).                                  |
 | `PRAGMA_CLI`                                   | Installed CLI binary path.                                                          |
 | `PRAGMA_AGENT_RUN_ID`                          | Set only in the child of a tracked agent launch, so its reports carry `agentRunId`. |

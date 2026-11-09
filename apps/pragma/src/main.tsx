@@ -9,12 +9,16 @@ import { isMacPlatform } from "@/lib/platform";
 import "@/plugins/bootstrap-bridge";
 import "@/lib/brand-icons";
 import "./index.css";
+import { CursorOverlay } from "@/components/computer-use/CursorOverlay";
 import { MiniApp } from "@/components/mini/MiniApp";
+import { parseComputerWindowRoute } from "@/lib/computer-window";
 import { isMiniWindowLabel } from "@/lib/mini-window";
 import App from "./App.tsx";
 
 /** A Pragma Mini window runs the same bundle and renders its own lean root. */
 const isMiniWindow = isMiniWindowLabel(getCurrentWindow().label);
+/** So does each computer-use cursor overlay window (one per display). */
+const computerRoute = parseComputerWindowRoute(window.location.hash);
 
 // macOS gets a native NSVisualEffectView behind the window plus inset traffic
 // lights (see src-tauri/window_chrome.rs). The `.vibrancy` class lets the project
@@ -23,7 +27,7 @@ const isMiniWindow = isMiniWindowLabel(getCurrentWindow().label);
 // traffic lights. Native fullscreen has no traffic lights, so shrink that inset
 // to a small top margin that aligns sidebar content with the top bar. Other platforms keep an
 // opaque rail and standard decorations.
-if (isMacPlatform()) {
+if (isMacPlatform() && !computerRoute) {
   const root = document.documentElement;
   root.classList.add("vibrancy");
   const appWindow = getCurrentWindow();
@@ -52,13 +56,18 @@ primeNotificationPermission();
 // Let the gateway know when this window is in front, so a paired phone is not
 // pushed an alert the user is already reading here. The main window speaks for
 // the app; a mini window reporting its own focus would contradict it.
-if (!isMiniWindow) {
+if (!isMiniWindow && !computerRoute) {
   startGatewayPresenceReporting();
+}
+
+function Root() {
+  if (computerRoute?.kind === "overlay") return <CursorOverlay origin={computerRoute.origin} />;
+  return isMiniWindow ? <MiniApp /> : <App />;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {isMiniWindow ? <MiniApp /> : <App />}
+    <Root />
     <Toaster />
   </StrictMode>,
 );

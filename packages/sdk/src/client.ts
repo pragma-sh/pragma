@@ -1,5 +1,6 @@
 import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma-sh/constants";
 
+import { ComputerClient } from "./computer-client";
 import { AccountsClient } from "./accounts-client";
 import { AgentsClient } from "./agents-client";
 import { AiClient } from "./ai-client";
@@ -28,6 +29,8 @@ import { WorkspaceClient } from "./workspace-client";
 export class PragmaClient {
   /** Host-owned account providers: logins, bindings, usage, and launch env. */
   readonly accounts: AccountsClient;
+  /** Local computer use; requires a localToken. */
+  readonly computer: ComputerClient;
   readonly fs: FsClient;
   readonly git: GitClient;
   readonly exec: ExecClient;
@@ -60,6 +63,7 @@ export class PragmaClient {
     this.agents = new AgentsClient(this.transport);
     this.assets = new AssetsClient(this.transport);
     this.events = new EventsClient(this.transport);
+    this.computer = new ComputerClient(this.transport, this.events);
     this.workspace = new WorkspaceClient(this.events);
     this.fanouts = new FanoutsClient(this.transport, this.events);
     this.push = new PushClient(this.transport);

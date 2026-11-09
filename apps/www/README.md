@@ -44,3 +44,20 @@ Fumadocs compiles the post, the newest date is featured at
 the new route.
 
 See `AGENTS.md` for the full layout and conventions.
+
+## Feature captures
+
+The computer-use/live-board post shares real dev-app captures with the homepage:
+
+- `public/media/live-agent-board.webp`: agent-test-sandbox with two saved drafts and
+  three existing review worktrees; the other 33 worktrees were hidden, not deleted.
+- `public/media/agent-board-*.webp`: focused screenshots of the draft cards, saved
+  prompt editor, and fanout configuration. The homepage pairs the overview with the draft-card close-up;
+  the article and guide show the overview and editor details separately.
+- `public/media/computer-use.webp`: the Calculator preview and its paused controls.
+  `computer-use-cursor.webp` is a close-up cropped from the same screenshot, including
+  the visible cursor. The homepage uses this still.
+
+These were captured through Codex computer use and cropped to keep the relevant controls
+readable. The full-window computer-use still is retained for the article cover. No agent
+was launched to create the board's sample drafts.

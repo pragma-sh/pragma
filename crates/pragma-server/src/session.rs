@@ -275,6 +275,9 @@ impl Session {
         if let Some(gateway) = gateway_env(server_socket) {
             command.env("PRAGMA_GATEWAY_URL", gateway.url);
             command.env("PRAGMA_GATEWAY_TOKEN", gateway.token);
+            if let Some(token) = gateway.local_token {
+                command.env(&CONSTANTS.computer.local_gateway_token_env, token);
+            }
         }
         if let Some(cli_path) = pragma_cli_path() {
             command.env("PRAGMA_CLI", &cli_path);
@@ -1260,12 +1263,15 @@ fn frame_output_bytes(frame: &EventFrame) -> usize {
 struct GatewayDiscovery {
     port: u16,
     token: String,
+    #[serde(default)]
+    local_token: Option<String>,
     protocol_version: String,
 }
 
 struct GatewayEnv {
     url: String,
     token: String,
+    local_token: Option<String>,
 }
 
 fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
@@ -1280,6 +1286,7 @@ fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
     Some(GatewayEnv {
         url: format!("http://127.0.0.1:{}", discovery.port),
         token: discovery.token,
+        local_token: discovery.local_token,
     })
 }
 
@@ -1339,12 +1346,24 @@ fn shell_in(terminal: Option<&serde_json::Value>) -> Option<String> {
 }
 
 pub(crate) fn pragma_cli_path() -> Option<PathBuf> {
-    let channel = std::env::var_os("PRAGMA_SERVER_CHANNEL");
-    pragma_cli_path_from(
-        channel.as_deref(),
-        std::env::var_os("PRAGMA_APP_DATA_DIR"),
-        std::env::var_os("HOME"),
-    )
+    // The desktop that spawned us knows exactly where it installed the helper —
+    // it wrote the file — so trust that over re-deriving the layout. Deriving is
+    // how Windows lost the helper entirely: a GUI-launched server has
+    // `USERPROFILE` but never `HOME`, so this resolved to nothing and every
+    // session inherited a `PATH` without `~/.local/bin`.
+    supplied_cli_path(std::env::var_os("PRAGMA_CLI_PATH").as_deref()).or_else(|| {
+        let channel = std::env::var_os("PRAGMA_SERVER_CHANNEL");
+        pragma_cli_path_from(
+            channel.as_deref(),
+            std::env::var_os("PRAGMA_APP_DATA_DIR"),
+            pragma_core::process_env::home_dir().map(PathBuf::into_os_string),
+        )
+    })
+}
+
+/// The helper path the host handed us in `PRAGMA_CLI_PATH`, when it named one.
+fn supplied_cli_path(value: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    value.filter(|path| !path.is_empty()).map(PathBuf::from)
 }
 
 fn pragma_cli_path_from(
@@ -1352,16 +1371,19 @@ fn pragma_cli_path_from(
     app_data_dir: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
 ) -> Option<PathBuf> {
+    let name = crate::sidecar::executable_name("pragma-cli");
     if let Some(channel) = channel.filter(|channel| *channel != "pragma") {
         return app_data_dir
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from)
             .map(|dir| dir.join(channel))
-            .map(|dir| dir.join("bin/pragma-cli"));
+            .map(|dir| dir.join("bin"))
+            .map(|dir| dir.join(&name));
     }
     home.filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
-        .map(|dir| dir.join(".local/bin/pragma-cli"))
+        .map(|dir| dir.join(".local").join("bin"))
+        .map(|dir| dir.join(&name))
 }
 
 fn path_with_cli_dir(cli_path: &Path) -> String {
@@ -1387,14 +1409,14 @@ fn path_with_cli_dir_from(cli_path: &Path, existing: Option<std::ffi::OsString>)
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::mpsc::{self, TryRecvError, TrySendError};
 
     use super::{
         configured_profile, configured_shell, fan_out, gateway_env, path_with_cli_dir_from,
-        pragma_cli_path_from, shell, terminal_block, thread, Duration, Instant, OscChunk,
-        OscParser, OutputCoalescer, OutputMsg, Scrollback, Session, SessionError, ShellProfile,
-        OSC_PENDING_MAX_BYTES, OSC_TITLE_MAX_BYTES, OUTPUT_CHANNEL_CAPACITY,
+        pragma_cli_path_from, shell, supplied_cli_path, terminal_block, thread, Duration, Instant,
+        OscChunk, OscParser, OutputCoalescer, OutputMsg, Scrollback, Session, SessionError,
+        ShellProfile, OSC_PENDING_MAX_BYTES, OSC_TITLE_MAX_BYTES, OUTPUT_CHANNEL_CAPACITY,
     };
     use pragma_constants::CONSTANTS;
     use pragma_protocol::EventFrame;
@@ -2126,13 +2148,14 @@ mod tests {
 
     #[test]
     fn cli_path_is_global_for_prod_and_instance_scoped_for_dev() {
+        let name = crate::sidecar::executable_name("pragma-cli");
         assert_eq!(
             pragma_cli_path_from(
                 Some(std::ffi::OsStr::new("pragma")),
                 Some("/data/prod".into()),
                 Some("/home/test".into()),
             ),
-            Some(Path::new("/home/test/.local/bin/pragma-cli").to_path_buf())
+            Some(Path::new("/home/test/.local/bin").join(&name))
         );
         assert_eq!(
             pragma_cli_path_from(
@@ -2140,8 +2163,23 @@ mod tests {
                 Some("/data".into()),
                 Some("/home/test".into()),
             ),
-            Some(Path::new("/data/pragma-dev-abc/bin/pragma-cli").to_path_buf())
+            Some(Path::new("/data/pragma-dev-abc/bin").join(&name))
         );
+    }
+
+    /// The desktop hands the server the path it actually wrote, so the session
+    /// `PATH` never depends on guessing the layout (Windows has no `HOME`, which
+    /// is how `pragma-cli` went missing from every Windows session).
+    #[test]
+    fn supplied_cli_path_wins_and_blank_is_ignored() {
+        assert_eq!(
+            supplied_cli_path(Some(std::ffi::OsStr::new(
+                "/Users/test/.local/bin/pragma-cli"
+            ))),
+            Some(PathBuf::from("/Users/test/.local/bin/pragma-cli"))
+        );
+        assert_eq!(supplied_cli_path(Some(std::ffi::OsStr::new(""))), None);
+        assert_eq!(supplied_cli_path(None), None);
     }
 
     /// A real PTY, so the lease's resizes hit an actual grid rather than a stub.

@@ -35,3 +35,5 @@ bun run typecheck
 bun run test
 bun run lint
 ```
+
+Experimental `box` answers validate normalized edges and nullable confidence. PNG/JPEG image assets use a multipart request and the TypeSafe image opt-in header; both require `experimentalImages: true`. Assets must be referenced by name in state/questions. This support does not turn on autonomous vision fallback in computer tasks.

@@ -17,6 +17,7 @@ mod agent_verify;
 mod broker;
 mod cli;
 mod commands;
+mod computer;
 mod direct;
 mod fanout;
 mod output;
@@ -40,6 +41,12 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(CliError::AppNotRunning) => {
             eprintln!("error: {CliError}", CliError = CliError::AppNotRunning);
+            ExitCode::FAILURE
+        }
+        Err(CliError::Computer(failure)) if out.is_structured() => {
+            // Scripts branch on the code, so structured output keeps the
+            // whole typed failure, on stderr like every other error.
+            eprintln!("{}", serde_json::json!({ "ok": false, "error": failure }));
             ExitCode::FAILURE
         }
         Err(CliError::Config(message)) => {
@@ -82,6 +89,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
         },
         TopCommand::Fanout { fanout } => fanout::run(fanout, out),
         TopCommand::Whiteboard { whiteboard } => whiteboard::run(whiteboard, out),
+        TopCommand::Computer { computer } => computer::run(computer, out),
         TopCommand::Scratchpad { scratchpad } => match scratchpad {
             ScratchpadCommand::Create(args) => commands::scratchpad_create(args, out),
         },

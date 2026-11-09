@@ -3,7 +3,7 @@ title: Agent board
 description: Turn tasks into cards and take them from prompt to pull request without leaving one screen.
 ---
 
-<video src="/media/agent-board.mp4" controls muted loop playsInline />
+![The redesigned board with draft prompts and existing worktrees in separate workflow columns](/media/live-agent-board.webp)
 
 The agent board is a high-level alternative to managing agents through terminal tabs.
 Toggle it with **Board** in the toolbar (Escape exits, the header shows **Exit agent
@@ -42,6 +42,8 @@ for its details. A **PR #N** badge remains visible while agents work on a PR bra
   comments. Clicking a file in the PR sidebar opens that file in the regular workspace.
 - Other idle cards open their regular worktree directly.
 
+![A close-up of the prompt editor, showing the branch, agent, and saved prompt](/media/agent-board-draft-editor.webp)
+
 ## Suggested drafts
 
 Sources you have connected can propose drafts for you. They appear at the bottom of the
@@ -71,7 +73,9 @@ PR number while it is in progress opens its agent terminals.
 ## Fan out from a draft
 
 Choose **Fan out** in the prompt dialog to add repeatable agent/model attempt rows.
-Save the draft and move it to In progress to launch the attempts. An unpicked fanout is
+Save the draft and move it to In progress to launch the attempts.
+
+![Fanout configuration inside a draft, with repeatable agent attempt rows](/media/agent-board-fanout.webp) An unpicked fanout is
 one card with its attempts nested inside; clicking an attempt opens its worktree.
 
 Dragging the fanout to **Completed** opens the full comparison in a popup: live sessions,

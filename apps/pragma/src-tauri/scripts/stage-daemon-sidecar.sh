@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the persistent server (`pragma-server`) and CLI helper
-# (`pragma-cli`), then stage sidecars/resources so the bundle is self-contained. The release app launches the server
+# Build the persistent server (`pragma-server`), CLI helper (`pragma-cli`), and
+# computer-use helper (`pragma-computer`), then stage sidecars/resources so the bundle is self-contained. The release app launches the server
 # from beside its own executable (see `sidecar_executable()` in
 # `src-tauri/src/pty.rs`), and the Tauri CLI only copies it there if a
 # `pragma-server-<target-triple>` binary exists under `src-tauri/binaries/`;
@@ -40,8 +40,9 @@ if [[ "$triple" == *windows* ]]; then
   exe=".exe"
 fi
 
-# Rust sidecars, built from this workspace.
-rust_sidecars=(pragma-server pragma-gateway pragma-cli)
+# Rust sidecars, built from this workspace. `pragma-computer` is the native
+# computer-use helper `pragma-server` supervises; it must sit beside the server.
+rust_sidecars=(pragma-server pragma-gateway pragma-cli pragma-computer)
 
 # `set -u` makes an empty array expansion an error on the bash 3.2 that ships
 # with macOS, so the profile flag is passed as a plain (possibly empty) word.
@@ -53,6 +54,12 @@ for crate in "${rust_sidecars[@]}"; do
   # shellcheck disable=SC2086 # intentionally unquoted: empty means "no flag"
   cargo build -p "$crate" $cargo_profile_flag
 done
+
+# The helper has its own TCC identity in dev and in signed release bundles.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # shellcheck disable=SC2086 # empty means debug; --release chooses release.
+  bun "$script_dir/stage-macos-helper.ts" $cargo_profile_flag
+fi
 
 # Bun-compiled sidecars: `<workspace filter>:<package dir>:<binary name>`.
 # A debug app runs several of these from source via `bun`, but the binary must

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { createExternalStore } from "@/lib/external-store";
+
 /**
  * Git and GitHub actions running on a worktree — committing, pushing, opening
  * a pull request, and the AI steps that draft them — so the sidebar can report
@@ -61,23 +63,17 @@ const LINGER_MS: Record<Exclude<WorktreeActivityState, "running">, number> = {
 };
 
 const EMPTY: readonly WorktreeActivity[] = [];
-let activities: readonly WorktreeActivity[] = EMPTY;
+const store = createExternalStore(EMPTY);
 let nextId = 1;
-const listeners = new Set<() => void>();
-
-function publish(next: readonly WorktreeActivity[]): void {
-  activities = next;
-  for (const listener of listeners) listener();
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
 
 function settle(id: number, state: Exclude<WorktreeActivityState, "running">): void {
-  publish(activities.map((activity) => (activity.id === id ? { ...activity, state } : activity)));
-  setTimeout(() => publish(activities.filter((activity) => activity.id !== id)), LINGER_MS[state]);
+  store.set(
+    store.get().map((activity) => (activity.id === id ? { ...activity, state } : activity)),
+  );
+  setTimeout(
+    () => store.set(store.get().filter((activity) => activity.id !== id)),
+    LINGER_MS[state],
+  );
 }
 
 /**
@@ -90,7 +86,7 @@ export async function trackWorktreeActivity<T>(
   work: () => Promise<T>,
 ): Promise<T> {
   const id = nextId++;
-  publish([...activities, { id, worktreeId, kind, state: "running", startedAt: Date.now() }]);
+  store.set([...store.get(), { id, worktreeId, kind, state: "running", startedAt: Date.now() }]);
   try {
     const result = await work();
     settle(id, "done");
@@ -104,8 +100,8 @@ export async function trackWorktreeActivity<T>(
 /** The newest tracked action on one worktree, or null when it is idle. */
 export function useLatestWorktreeActivity(worktreeId: string): WorktreeActivity | null {
   return useSyncExternalStore(
-    subscribe,
-    () => activities.findLast((activity) => activity.worktreeId === worktreeId) ?? null,
+    store.subscribe,
+    () => store.get().findLast((activity) => activity.worktreeId === worktreeId) ?? null,
     () => null,
   );
 }

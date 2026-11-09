@@ -56,3 +56,14 @@ If a hook blocks you, fix the underlying issue — don't bypass with `--no-verif
 macOS CI cleans `v8`'s release artifacts after Rust cache restore with
 `cargo clean --package v8 --release`: the cache can retain its build-script
 fingerprint while pruning the native archive. Keep that recovery before the build.
+
+Computer-use changes need host/fake-backend/pure-rule tests, SDK/System 1/decision fixture tests, and `bun run --filter @pragma-sh/ai-helpers computer:eval`. Windows CI checks x64 and ARM64. A macOS source cross-check cannot validate native linking or OS behavior: V8 has no Windows GNU bindings, and MSVC cross-builds need Windows system headers for SQLite. Record permission, fullscreen, mixed-DPI, stop-latency and signed-helper checks separately; synthetic replay is not live OS/model accuracy.
+
+macOS overlay focus regression: `PRAGMA_NATIVE_FOCUS_TEST=1 cargo test -p pragma --test macos_background_webview` on an interactive desktop (needs WindowServer access outside the filesystem sandbox). It checks both construction and showing; normal test runs skip it. For SDK tests that assume a standalone script caller, unset inherited `PRAGMA_TAB_ID` and `PRAGMA_WORKTREE_ID` in the test command, since Pragma terminals deliberately attribute those calls to their agent tab.
+
+When verifying a server change, compare the live socket's Hello `buildId` with
+the new `pragma-server` binary's SHA-256. Dev desktop relaunch/HMR preserves a
+same-protocol daemon, so a freshly built app may still use yesterday's host.
+Restart Server closes live terminal tabs: check for sessions and get the user's
+approval before using it when terminals are running. Never restart production
+to refresh a worktree's separate dev host.

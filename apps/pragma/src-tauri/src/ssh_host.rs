@@ -517,12 +517,24 @@ fn host_id(request: &RemoteConnectRequest) -> String {
 }
 
 /// Local Unix socket path the bridge listens on for this host.
+///
+/// The socket gets a directory of its own under the temporary directory,
+/// because binding makes the socket's directory owner-only — that is how the
+/// socket stays private on Windows, where the `AF_UNIX` entry itself cannot be
+/// given an ACL (#212) — and the shared temporary directory must not be.
 fn local_socket_path(host_id: &str) -> std::path::PathBuf {
-    let sanitized: String = host_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    std::env::temp_dir().join(format!("pragma-remote-{sanitized}.sock"))
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    // A fixed-width digest keeps the path length independent of the host and
+    // user names, so a long name can never push it past the socket limit.
+    let digest = Sha256::digest(host_id.as_bytes());
+    let mut short = String::with_capacity(12);
+    for byte in digest.iter().take(6) {
+        let _ = write!(short, "{byte:02x}");
+    }
+    std::env::temp_dir()
+        .join(format!("pragma-remote-{short}"))
+        .join(pragma_platform::ipc::socket_file_name())
 }
 
 /// Bootstrap command that ensures a protocol-pinned `pragma-server` is running
@@ -548,7 +560,7 @@ fn remote_socket_path(home: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{line_value, remote_shell_path};
+    use super::{line_value, local_socket_path, remote_shell_path};
 
     #[test]
     fn rewrites_tilde_for_remote_shell() {
@@ -577,5 +589,30 @@ mod tests {
         assert_eq!(line_value(out, "ABS=").as_deref(), Some("/home/u/p"));
         assert_eq!(line_value(out, "BRANCH=").as_deref(), Some("main"));
         assert_eq!(line_value(out, "MISSING=").as_deref(), None);
+    }
+
+    /// Binding makes the socket's directory owner-only, so the bridge socket
+    /// must sit in a per-host directory, never directly in the shared temp dir.
+    #[test]
+    fn the_bridge_socket_has_a_directory_of_its_own() {
+        let path = local_socket_path("ssh://ada@example.com:22");
+        let dir = path.parent().expect("a parent directory");
+        assert_ne!(dir, std::env::temp_dir().as_path());
+        assert_eq!(dir.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("pragma-remote-") && name.len() == 14 + 12));
+    }
+
+    /// The path length must not depend on the host or user name length.
+    #[test]
+    fn a_very_long_host_name_still_gives_an_addressable_socket_path() {
+        let host = format!("ssh://{}@{}:22", "u".repeat(200), "h".repeat(200));
+        let path = local_socket_path(&host);
+        assert_eq!(
+            path.as_os_str().len(),
+            local_socket_path("ssh://a@b:22").as_os_str().len()
+        );
     }
 }

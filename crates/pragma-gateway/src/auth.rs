@@ -18,6 +18,9 @@ pub struct GatewayDiscovery {
     pub port: u16,
     /// Bearer token.
     pub token: String,
+    /// Local computer-use credential. Never included in pairing payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_token: Option<String>,
     /// Gateway process id.
     pub pid: u32,
     /// Pragma server protocol version this gateway expects.
@@ -181,6 +184,7 @@ mod tests {
             // skips the kill while still exercising file removal.
             pid: u32::MAX,
             token: "token".to_string(),
+            local_token: Some("local-token".to_string()),
             protocol_version: protocol_version.to_string(),
         }
     }
@@ -281,6 +285,7 @@ mod tests {
         let discovery = GatewayDiscovery {
             port: 1234,
             token: "token".to_string(),
+            local_token: None,
             pid: 42,
             protocol_version: "8".to_string(),
         };

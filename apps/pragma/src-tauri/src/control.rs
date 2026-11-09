@@ -1,6 +1,7 @@
 //! Broker bridge between `pragma-cli` and the running Tauri app.
 //!
-//! The app registers as the single controller with `pragma-server`. CLI
+//! The app registers as a controller with `pragma-server`, which uses the
+//! newest connection and retains earlier live desktops as standbys. CLI
 //! commands publish `Control` requests to the server; the server forwards each
 //! request to this bridge, which dispatches to the same Rust command logic the
 //! UI already uses and returns a `ControlResult` tagged with the same

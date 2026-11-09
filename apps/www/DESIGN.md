@@ -422,6 +422,13 @@ band of charcoal cards, then back to canvas — like cuts in a dark film.
 ### Media Geometry
 
 - Screen recordings and screenshots sit in `{rounded.xl}` 20px tiles and never crop.
+- Universal computer use has its own feature row beside the live agent board in the
+  homepage feature run. Both use real captures from the dev app's sample project.
+  Computer use shows a still of its cursor and preview controls. The board uses a
+  compact overview plus a focused still of its draft cards on the homepage, with prompt-editor
+  and fanout screenshots in the article and guide. Trim empty space from source captures
+  and frame individual controls at a readable size. Keep the same alternating copy/media
+  layout as every other feature row.
 - Gradient spotlight cards use `{rounded.xxl}` 30px corners — softer than content cards by
   design, so they read as atmospheric panels rather than tighter UI.
 - Icon glyphs render in `{rounded.full}` circles at 32–40px.

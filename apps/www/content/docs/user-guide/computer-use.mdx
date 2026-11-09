@@ -1,0 +1,174 @@
+---
+title: Computer use
+description: Let agents read the screen and click and type in other apps on macOS and Windows, while you watch and can stop them at any time.
+---
+
+Computer use lets an agent work in apps outside its terminal: open Safari and go to a
+page, fill in a form in a desktop app, press a menu shortcut. The agent drives it through
+[`pragma-cli computer`](/docs/cli/computer). Pragma shows you exactly what it is doing and
+gives you a stop that always works.
+
+Computer use supports **macOS and Windows**. Linux commands report `unsupportedPlatform`. Windows uses UI Automation for controls and real foreground input when a control has no native action; elevated applications and the secure desktop are refused.
+
+## Turn it on
+
+Computer use is **off** until you enable it under **Settings → Computer Use**. The same
+page shows the two macOS permissions it needs, **Accessibility** and **Screen
+Recording**. Click **Allow Accessibility** and **Allow Screen Recording** and allow both for **Pragma Computer Use** in System Settings → Privacy &
+Security. They belong to Pragma's computer-use helper, not to the agent. Look for
+**Pragma Computer Use** with the cursor-arrow icon in the permission lists.
+
+If an agent invokes computer use before these grants are enabled, Pragma opens a
+setup popup with the same two buttons, even if that agent is already allowed by
+your access policy. Each button opens its macOS permission prompt. The popup
+rechecks access while waiting and when you return to Pragma, then automatically
+switches to Pragma's approval prompt once both grants are enabled. If macOS has
+already answered the Screen Recording prompt, **Allow Screen Recording** opens its
+System Settings pane so you can enable **Pragma Computer Use** there. Choose whether
+to allow the agent there; enabling macOS access alone does not approve its request.
+You can also **Deny** while setup is open. Requests still expire if left unanswered.
+
+The CLI equivalent is `pragma-cli computer permissions --request`. Without
+`--request`, it only checks status. After enabling access, return to Pragma or run
+`pragma-cli computer permissions` again. Pragma refreshes an idle helper that previously
+reported a missing grant, so macOS's cached denial does not require restarting the app.
+In dev builds, rebuilding the ad hoc signed helper can invalidate its grants. If a
+fresh check still says denied, remove the old **Pragma Computer Use** entry and add the
+current `target/debug/Pragma Computer Use.app` again.
+
+## Who may control apps
+
+Under **Who may control apps** you choose, for agents and for scripts using the SDK:
+
+- **Ask me first** (the default): the first time an agent tries, Pragma asks you. You can
+  allow it **for this session** or **always**, or deny it.
+- **Allow**: no prompt.
+- **Never**: every request is refused.
+
+**Sensitive controls**, such as buttons labelled Delete, Send, Pay or Confirm, and
+password fields, ask again for that one action unless you set them to Allow.
+
+Some apps are always off limits, whatever you choose: Pragma itself, Keychain Access,
+password managers, and system security prompts. That way an agent can never approve its
+own request. An agent cannot capture their windows either: a screenshot of the whole
+screen or a region of it leaves them out.
+
+## Seeing what an agent does
+
+While an agent is in control:
+
+- **The agent cursor.** A coloured arrow with the agent's name and its next step glides
+  to each target just before the action happens. On macOS the agent works in the
+  background: its clicks, scrolls, and keystrokes are delivered straight to the app it
+  is using, so that app never comes to the front and your real pointer never moves. You
+  can keep working in another app the whole time, and this cursor is the only one that
+  moves. The cursor stays on the window the agent is using: it follows that window when
+  you move it, and hides while another window is in front of it or the window is
+  closed or minimized. Pragma never brings the agent's app to the front on its own; a
+  drag, which needs the real pointer, works only once you bring that app forward yourself. Starting the first task or turning computer use on while Pragma is
+  running keeps your current app focused.
+- **Taking over.** Typing, clicking, or scrolling in the app the agent is using pauses the task
+  until you explicitly resume it. The cursor stops and shows **Task paused**, and a waiting
+  CLI returns with a message asking you to resume. Working in any other app, or just moving the mouse, does not.
+- **The picture-in-picture panel.** A small panel floating inside the Pragma window
+  shows a live view of the app being driven, who is driving it, and what it is doing. It
+  starts capturing as soon as the agent opens an app, without waiting for a click or
+  keystroke. The feed also works when a UI update arrives before the desktop restarts. It
+  shows only the selected worktree's agents. Drag it anywhere in the window by its
+  header, **minimize** it to a pill in the corner, or click the **Focus app** arrow
+  to bring the app shown in the preview to the front. Focusing keeps the agent's
+  session and pause state unchanged, including when a persistent host daemon
+  predates that button's RPC.
+- **The sidebar.** The worktree row shows a pointer badge while one of its agents is in
+  control. It turns amber while a prompt waits for you. Click it to select that worktree
+  and bring the panel back if it was minimized.
+
+The agent cursor is excluded from screenshots, so it never appears in what an agent reads
+back.
+
+## Stopping
+
+- **Pause** interrupts that agent's input and preserves its task as `paused`.
+  **Resume** in the panel allows further calls; use `computer resume <task-id>` to
+  continue a durable task from a fresh snapshot.
+- **Stop** cancels that agent's task and releases its app leases. The panel keeps a
+  **Restart** control: the CLI cannot continue until you click it. Cancelled tasks need
+  a new `computer run` command. Both outcomes tell the caller to ask you before continuing.
+- The **emergency stop**, <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>.</kbd>, works from any
+  app. It stops every agent at once, denies every open prompt, and halts a long typing
+  action within one chunk of text. Nothing can act again until you click **Resume** under
+  Settings → Computer Use.
+
+Controlling apps needs the Pragma window open, so you can always see and stop it. Reading
+the screen (listing apps, inspecting a window, taking a screenshot) works with Pragma
+closed, but still follows the access policy.
+
+The desktop and CLI must use the same host channel. An installed Pragma window does
+not connect a development channel; that channel needs its own dev desktop. If several
+desktops share a channel, closing one keeps computer use available through a surviving
+desktop. `desktopConnected: false` means no desktop controller is registered on that
+host, even if a Pragma process is running elsewhere.
+
+## Sessions and leases
+
+Each agent tab gets one session. A session holds an exclusive lease on every app it
+has acted in, so two agents never drive the same app at once. A second agent asking
+for a leased app gets `appBusy`, naming who has it. Two agents in two different apps
+work side by side. Short actions that send keystrokes or clicks take turns.
+
+A session ends when the agent runs `pragma-cli computer end`, when it finishes its turn,
+when its tab closes, after two minutes without an action while unpaused, or on the emergency stop. A per-agent Stop releases its app leases and keeps the panel's Restart control.
+
+## Security notes
+
+- Text on screen is **untrusted data**. Agents are told never to follow instructions
+  they read there.
+- Typed text never appears in the activity log or the sidebar; it shows as
+  `•••• (12 chars)`. The value of a password field is never read.
+- Screenshots are written to an owner-only folder and deleted after a day.
+- Computer use is not reachable from a paired phone or the remote-access tunnel.
+
+## Computer tasks
+
+An agent can give Pragma a bounded task with `computer run`, then disconnect while the host continues. Set up a **System 1** connection in Settings → AI for steps that require Jev. Exact quoted clicks, browser navigation to a supplied URL, and literal field fills have deterministic paths. Other steps choose among observed controls, supplied variables, and a fixed keyboard catalog. Jev never generates text to type.
+
+```bash
+pragma-cli computer run 'Open Safari and navigate to https://example.com' --app Safari
+pragma-cli computer run 'type "Hello"' --app TextEdit --detach
+pragma-cli computer status <task-id> --wait
+pragma-cli computer resume <task-id> --input text=Hello
+pragma-cli computer cancel <task-id>
+pragma-cli computer end
+```
+
+When Pragma needs an app, text, or a less ambiguous target, it returns `needsInput` with a question and `requestedInputs`. Supply the named values through `resume`; never guess a requested secret. A failed task includes a code and `resumable` flag. After a host restart, unfinished work reports `interrupted` and requires its variables again. Cancellation stops future steps; actions already performed remain.
+
+The CLI displays **Waiting for input**, explains what the agent needs, and prints a
+resume command. You supply the text to that command; the agent enters it in the app.
+For example, navigating to a named site without a full URL asks for `url`:
+`pragma-cli computer resume <task-id> --input 'url=https://www.youtube.com'`.
+An actual failure shows its reason: `lowConfidence` means Jev was uncertain about the
+next action, rather than a request for you to type into the app.
+
+The defaults are 25 steps, five minutes, and 30 model calls. The host keeps at most 64 task records and up to 200 steps per task in an owner-only file, pruning old finished records after seven days or when the record limit is reached. Input values, including secrets, stay in memory and are cleared when a task finishes or is cancelled. The activity stream contains progress and redacted action descriptions.
+
+The preview uses a cancellable JPEG frame channel at up to five frames per second. Hiding or minimizing the panel, hiding the window, and switching worktrees release its subscription. macOS 14+ capture uses ScreenCaptureKit, with explicit exclusions for Pragma windows; older macOS uses the compatibility capture path. This is a preview, not a video recording.
+
+Starting the preview rechecks macOS permissions and refreshes an idle helper with a
+cached denial, so access you have already granted can take effect without another
+manual permission check. When a capture fails, the panel says why instead of waiting:
+without Screen Recording it shows an **Allow Screen Recording** button that opens the
+macOS prompt (or the System Settings pane, once the prompt has been answered).
+The panel rechecks permissions while captures fail and recognizes permission errors
+even when the status check is unavailable or stale. A failed capture replaces an old
+preview frame, so the recovery button stays visible until captures succeed again.
+
+While the Mac is locked or its displays are asleep, macOS reports no active displays, so
+there is no preview frame and no cursor to draw. Both come back on the next action after
+you unlock.
+
+## Platform limits
+
+Windows keyboard and pointer fallbacks bring the target forward and may move your pointer. Invoke and value patterns can work in the background. Pressing a key, clicking, dragging, or scrolling in the target app pauses the task until you resume; the agent's own input never counts. A refused foreground request returns `targetChanged`; an elevated target returns `targetElevated` rather than attempting to bypass Windows permissions.
+
+Applications with incomplete accessibility trees may need direct CLI actions or a human handoff. Image and bounding-box support in the System 1 client is experimental and opt-in; autonomous tasks do not use it by default. The signed release helper and mixed-display/fullscreen behavior still require the native release-validation matrix.

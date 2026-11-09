@@ -10,6 +10,7 @@ import { scratchpadTheme, type ScratchpadTheme } from "@/lib/scratchpad-theme";
 const THEME_STYLE_ELEMENT_ID = "pragma-scratchpad-theme";
 
 interface ScratchpadPreviewProps {
+  blockKey?: string;
   source: string;
   filePath: string;
   worktreeId: string;
@@ -19,16 +20,19 @@ interface ScratchpadPreviewProps {
 
 /** Sandboxed live renderer for one scratchpad MDX component region. */
 export function ScratchpadPreview({
+  blockKey = "",
   source,
   filePath,
   worktreeId,
   getAttachedAgentTabId,
   onRequestAgentAttachment,
 }: ScratchpadPreviewProps) {
+  const storageKey = `pragma:scratchpad:v1:${JSON.stringify([worktreeId, filePath, blockKey])}`;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const tokenRef = useRef(crypto.randomUUID());
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [building, setBuilding] = useState(true);
   const [height, setHeight] = useState(96);
 
@@ -39,7 +43,11 @@ export function ScratchpadPreview({
     void buildScratchpadPreview({ source, filePath, worktreeId })
       .then((bundle) => {
         if (current) {
-          setSrcDoc(previewDocument(bundle.code, bundle.css, tokenRef.current, scratchpadTheme()));
+          const { saved, error: readError } = readSavedState(storageKey);
+          setStorageError(readError);
+          setSrcDoc(
+            previewDocument(bundle.code, bundle.css, tokenRef.current, scratchpadTheme(), saved),
+          );
         }
         return undefined;
       })
@@ -52,16 +60,18 @@ export function ScratchpadPreview({
     return () => {
       current = false;
     };
-  }, [source, filePath, worktreeId]);
+  }, [source, filePath, worktreeId, storageKey]);
 
   useScratchpadFrameBridge({
     iframeRef,
     token: tokenRef.current,
     worktreeId,
     srcDoc,
+    storageKey,
     getAttachedAgentTabId,
     onRequestAgentAttachment,
     onRenderError: setError,
+    onStorageError: setStorageError,
     onResize: setHeight,
   });
 
@@ -74,21 +84,44 @@ export function ScratchpadPreview({
   if (error) return <pre className="m-4 whitespace-pre-wrap text-sm text-destructive">{error}</pre>;
   if (!srcDoc) return null;
   return (
-    <iframe
-      className="block w-full border-0 bg-transparent"
-      ref={iframeRef}
-      sandbox="allow-scripts"
-      srcDoc={srcDoc}
-      style={{ height }}
-      title="Rendered MDX component"
-    />
+    <>
+      {storageError ? (
+        <output className="block px-2 pt-1 text-xs text-destructive">{storageError}</output>
+      ) : null}
+      <iframe
+        className="block w-full border-0 bg-transparent"
+        ref={iframeRef}
+        sandbox="allow-scripts"
+        srcDoc={srcDoc}
+        style={{ height }}
+        title="Rendered MDX component"
+      />
+    </>
   );
 }
 
-function previewDocument(code: string, css: string, token: string, theme: ScratchpadTheme): string {
+/** Saved state for a block, or the reason it could not be read; the controls still work without it. */
+function readSavedState(storageKey: string): { saved: string; error: string | null } {
+  try {
+    const saved = localStorage.getItem(storageKey) ?? "{}";
+    JSON.parse(saved);
+    return { saved, error: null };
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return { saved: "{}", error: `Saved answers could not be loaded (${reason}).` };
+  }
+}
+
+function previewDocument(
+  code: string,
+  css: string,
+  token: string,
+  theme: ScratchpadTheme,
+  saved: string,
+): string {
   const nonce = crypto.randomUUID().replaceAll("-", "");
   const runtimeUrl = new URL(frameRuntimeUrl, location.href).href;
-  const bootstrap = bridgeBootstrap(token).replaceAll("</script", "<\\/script");
+  const bootstrap = bridgeBootstrap(token, saved).replaceAll("</script", "<\\/script");
   const safeCode = code.replaceAll("</script", "<\\/script");
   const execution = import.meta.env.DEV
     ? `<script type="module" nonce="${nonce}">import ${JSON.stringify(runtimeUrl)};\n${safeCode}</script>`
@@ -102,7 +135,7 @@ function previewDocument(code: string, css: string, token: string, theme: Scratc
 </head><body><div id="root"></div>${execution}</body></html>`;
 }
 
-function bridgeBootstrap(token: string): string {
+function bridgeBootstrap(token: string, saved: string): string {
   return `(() => {
     const token = ${JSON.stringify(token)};
     globalThis.pragmaScratchpadToken = token;
@@ -110,12 +143,19 @@ function bridgeBootstrap(token: string): string {
     globalThis.$RefreshSig$ = () => (type) => type;
     const pending = new Map();
     const progress = new Map();
+    let state;
+    try { state = JSON.parse(${JSON.stringify(saved)}); if (!state || typeof state !== "object" || Array.isArray(state)) state = {}; } catch { state = {}; }
     const request = (method, payload = {}) => new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
       pending.set(id, { resolve, reject });
       parent.postMessage({ channel: "pragma-scratchpad", token, type: "request", id, method, ...payload }, "*");
     });
     globalThis.pragmaScratchpad = {
+      getLocalState: (key) => state[key],
+      setLocalState: (key, value) => {
+        state[key] = value;
+        parent.postMessage({ channel: "pragma-scratchpad", token, type: "local-state", state }, "*");
+      },
       promptAgent: (text) => request("promptAgent", { text }),
       requestAgentAttachment: () => request("requestAgentAttachment"),
       getWhiteboardSnapshot: (whiteboardId, knownVersion, dark) => request("getWhiteboardSnapshot", { whiteboardId, knownVersion, dark }),

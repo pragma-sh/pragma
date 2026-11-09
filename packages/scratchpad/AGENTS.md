@@ -39,7 +39,7 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   unchanged polls do not rerender, and never imports Excalidraw or desktop internals into the
   sandbox. Desktop frames expose `openWhiteboard`, so clicking the preview opens the durable
   board in its native interactive tab; hosts without an editor keep the preview read-only.
-- Keep components browser-safe and sandbox-safe. No Node APIs, Tauri APIs, storage, or direct parent access.
+- Keep components browser-safe and sandbox-safe. No Node APIs, Tauri APIs, direct storage, or direct parent access. Built-in controls use the optional host local-state bridge; controlled primitives remain owned by their caller.
 - `promptAgent` must preserve default missing-agent attachment behavior while allowing a per-call callback.
 - Public functions, types, and components require JSDoc.
 - React remains a peer dependency.

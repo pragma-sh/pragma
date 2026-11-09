@@ -10,6 +10,7 @@ mod agent_sounds;
 mod ai;
 mod automations;
 mod browser;
+mod computer;
 mod config_file;
 mod control;
 mod db;
@@ -1300,16 +1301,22 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let channel = pty::instance_channel(app.config().product_name.as_deref());
     let data_dir = pty::instance_data_dir(&app_data_dir, &channel);
     std::fs::create_dir_all(&data_dir)?;
-    if let Err(error) = agent_cli::ensure_installed(app.handle(), &data_dir, &channel) {
-        log::warn!("failed to install pragma-cli: {error}");
-    }
+    // Where the helper ended up, so the server can put it on every session's
+    // `PATH` instead of re-deriving the install layout (Windows has no `HOME`).
+    let cli_path = match agent_cli::ensure_installed(app.handle(), &data_dir, &channel) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            log::warn!("failed to install pragma-cli: {error}");
+            None
+        }
+    };
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     let tokens = github::TokenStore::new(&data_dir);
     app.manage(tokens.clone());
     app.manage(system1::System1KeyStore::new(&data_dir));
     let resource_dir = app.path().resource_dir().ok();
-    let pty = PtyClient::new(app_data_dir, channel, resource_dir);
+    let pty = PtyClient::new(app_data_dir, channel, resource_dir, cli_path);
     // The local client stays managed for host-agnostic consumers (agent event
     // bridge, server restart/logs); `Hosts` owns the project → host routing and
     // the per-host clients, and is what the worktree/session commands resolve.
@@ -1317,6 +1324,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
     app.manage(mini_window::MiniSessions::default());
+    app.manage(computer::ComputerPreviewStreams::default());
     app.manage(plugin_distribution::PluginInstaller::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(ai::AskRegistry::default());
@@ -1348,6 +1356,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
     fanouts::start_for(app.handle().clone(), pty.clone());
+    computer::start(app.handle().clone(), pty.clone());
     automations::start(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty, LOCAL_HOST.to_string());
     ssh_host::reconnect_remote_hosts(app.handle().clone());
@@ -1435,6 +1444,20 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts([computer::emergency_stop_shortcut()])
+                .unwrap_or_else(|error| {
+                    log::warn!("could not register the computer-use stop shortcut: {error}");
+                    tauri_plugin_global_shortcut::Builder::new()
+                })
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        computer::emergency_stop(app);
+                    }
+                })
+                .build(),
+        )
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -1620,6 +1643,9 @@ pub fn run() {
             fanouts::list_fanouts,
             fanouts::restore_fanout_tab,
             fanouts::pick_fanout_member,
+            computer::computer_rpc,
+            computer::computer_start_preview,
+            computer::computer_stop_preview,
             ai::ai_generate_pull_request_draft,
             ai::ai_commit_all_and_generate_pull_request_draft,
             ai::ai_inline_edit,

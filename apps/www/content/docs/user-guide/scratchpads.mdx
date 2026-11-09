@@ -27,6 +27,11 @@ The scratchpad tab has two modes sharing one buffer:
 If the file changes on disk (the agent updated it), a **Changed on disk — reload** button
 appears.
 
+Built-in question choices, answers, diff decisions, and uncontrolled text fields are saved
+on this device, so they return when you reopen the scratchpad. They are separate from the
+scratchpad file and do not sync to other devices. Changing a component's source creates a
+new local state for that block; custom controlled components manage their own state.
+
 ## Exporting HTML
 
 Click **Export HTML** in either toolbar mode to export the current document, including

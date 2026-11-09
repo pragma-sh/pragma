@@ -39,9 +39,9 @@ which is how a hand-typed host, with no QR payload to read, is version-checked a
 - The token is 48 alphanumeric characters, persisted in `gateway-token` (0600), stable
   across restarts; the app's **Regenerate token** kills the gateway and deletes the
   file. `--token` overrides.
-- `gateway.json` beside the socket records `{ port, token, pid, protocolVersion }`
+- `gateway.json` beside the socket records `{ port, token, localToken, pid, protocolVersion }`
   (0600) — the discovery file everything reads. Terminal sessions get
-  `PRAGMA_GATEWAY_URL`/`PRAGMA_GATEWAY_TOKEN` from it.
+  `PRAGMA_GATEWAY_URL`/`PRAGMA_GATEWAY_TOKEN` from it. A separate `gateway-local-token` supplies `PRAGMA_LOCAL_GATEWAY_TOKEN` only to local sessions. Computer RPC and activity require that local credential; neither pairing nor loopback source addresses convey this scope.
 - Bearer comparison is constant-time. Device identity rides headers
   (`x-pragma-device-id`, `-name`, `-platform`, `-app-version`) into a persisted device
   registry.

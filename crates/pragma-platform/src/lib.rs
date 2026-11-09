@@ -6,8 +6,9 @@
 //! so a platform gap is a missing implementation in one crate rather than a
 //! guarantee that silently evaporates somewhere in the tree.
 //!
-//! Ten seams live here:
+//! The seams live here:
 //!
+//! - [`desktop`] — bringing an existing app forward for explicit user navigation.
 //! - [`disk`] — how many bytes a file occupies on disk, and which hard-linked
 //!   entries share one copy of the data.
 //! - [`dock`] — the "New Pragma Mini Window" entry on the app's dock or
@@ -23,6 +24,7 @@
 //! - [`shell`] — resolving the interactive shell a PTY should launch.
 //! - [`wsl`] — enumerating the WSL distributions a machine has installed.
 
+pub mod desktop;
 pub mod disk;
 pub mod dock;
 pub mod install;

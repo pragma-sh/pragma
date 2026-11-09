@@ -1,6 +1,7 @@
 import { CiWatchMonitor } from "@/components/github/CiWatchMonitor";
 import { MotionConfig } from "motion/react";
 
+import { ComputerUseController } from "@/components/computer-use/ComputerUseController";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
 import { WorkspaceTour } from "@/components/onboarding/WorkspaceTour";
@@ -50,6 +51,7 @@ function App() {
                                 <AgentPluginInstallPrompt />
                                 <ScriptMigrationDialog />
                                 <StorageReminderWatcher />
+                                <ComputerUseController />
                                 <SessionRestoreDialog />
                               </UpdatesProvider>
                             </WorktreeCreationProvider>

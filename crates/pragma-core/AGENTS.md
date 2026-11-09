@@ -141,3 +141,8 @@ Tauri or client presentation code.
   worktrees), while file previews only need invalidations. Keep the recursive
   OS watch and all non-`.git` events intact; do not trade resource use for
   suppressing `node_modules`, build output, or other user-visible files.
+
+Computer-use rules are split between `computer.rs` (policy, geometry, input and revalidation) and `computer_task.rs` (literal variables, observed URLs, screen fingerprints and decision validation). Confidence and item-margin thresholds are enforced here even after the TypeScript decision builder validates offered choices.
+
+`request_text` only returns a question to the caller, so it is exempt from native-action
+confidence thresholds. Uncertain native actions still fail validation.

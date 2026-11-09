@@ -14,10 +14,11 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The ten seams
+## The seams
 
 | Module    | Unix                                                                          | Windows                                                    |
 | --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `desktop` | Explicit app focus by pid through AppKit on macOS; unsupported on Linux       | `WScript.Shell.AppActivate`                                |
 | `ipc`     | `std::os::unix::net`                                                          | `uds_windows` (`AF_UNIX`, Windows 10 1803+)                |
 | `path`    | `std::fs::canonicalize`                                                       | …then strip the `\\?\` verbatim prefix                     |
 | `perms`   | `chmod` `0600`/`0700`                                                         | `icacls /inheritance:r /grant:r <user>:(F)`                |
@@ -138,6 +139,18 @@ Consequences worth knowing:
   has to be revisited.
 - Socket files must be spelled from `@pragma-sh/constants` (`ipc::socket_file_name()` and
   friends), never inline.
+- **Never open, stat-follow, or `icacls` a socket on Windows.** An `AF_UNIX` socket there is
+  a reparse point no filter handles, so `fs::metadata`, `icacls`, and any ordinary open fail
+  with `ERROR_CANT_ACCESS_FILE` (1920), and `Path::exists` reports it as _absent_. That is
+  #212: the post-bind owner-only step killed every fresh server, and the leftover socket
+  then made each restart's bind fail with 10022. So `ipc::bind` makes the socket's
+  **directory** owner-only _before_ binding (the socket inherits that ACL; Unix also
+  `chmod`s the socket `0600`), and stale sockets are probed and cleared with
+  `ipc::socket_entry_exists` / `ipc::remove_stale_socket` (`symlink_metadata` +
+  `DeleteFileW`, neither of which follows the reparse point).
+- **A socket needs a directory of its own.** Because binding restricts the parent, `bind`
+  refuses the shared temporary directory; the SSH bridge socket lives in
+  `<temp>/pragma-remote-<host>/daemon.sock` for that reason.
 
 ### `perms` — `icacls`, not the Win32 API
 
@@ -218,6 +231,10 @@ every path through environment variables, never interpolation, so nothing needs 
 (`--ignored`); the POSIX helper's swap and restore are unit-tested on every Unix.
 
 ## Adding a seam
+
+`desktop::focus_app` is user navigation only. The desktop's compatibility path for
+older computer-use daemons resolves the pid from a live session snapshot; it never
+creates an agent session, takes a lease, or synthesizes input.
 
 1. Add the module here with a real implementation for every target.
 2. Put any tunable default in `@pragma-sh/constants` under `platform`, not in Rust.

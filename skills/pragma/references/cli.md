@@ -214,3 +214,5 @@ terminal reading, reporting, and fanouts can talk directly to persistent host.
 
 - Documentation: https://pragma-app.sh/docs
 - Source: https://github.com/pragma-sh/pragma/tree/main/crates/pragma-cli
+
+Computer tasks: `computer run <instruction> [--app] [--input name=value] [--detach]`, `status <task-id> [--wait]`, `resume <task-id>`, and `cancel <task-id>`. See [Computer use](computer-use.md) before controlling an app. Always call `computer end` when finished; missing text is a handoff to the caller, never something to invent.

@@ -25,6 +25,8 @@
  *                                 → { type: "result", files } | error
  */
 import { readStdinLines } from "@pragma-sh/sidecar-kit";
+import { decideComputer } from "./computer-use.ts";
+import type { ComputerDecideRequest } from "@pragma-sh/constants";
 import { checkEndpoint, System1Error, type System1Endpoint } from "@pragma-sh/system1";
 
 import {
@@ -401,6 +403,37 @@ async function runLoginCommand(args: string[]): Promise<number> {
 }
 
 const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
+  "computer-decide": async () => {
+    // A task reuses this process for every decision. EOF releases all requests.
+    await new Promise<void>((resolve) => {
+      const abort = new AbortController();
+      readStdinLines(
+        (line) => {
+          void (async () => {
+            let id: unknown;
+            try {
+              const request = JSON.parse(line) as {
+                id: number;
+                request: ComputerDecideRequest;
+                endpoint: System1Endpoint;
+              };
+              id = request.id;
+              const decision = await decideComputer(request.request, request.endpoint);
+              if (!abort.signal.aborted) emit({ id, decision });
+            } catch {
+              // No payloads or provider errors: they can contain screen text or credentials.
+              if (!abort.signal.aborted) emit({ id, error: "Computer decision failed" });
+            }
+          })();
+        },
+        () => {
+          abort.abort();
+          resolve();
+        },
+      );
+    });
+    return 0;
+  },
   methods: runMethods,
   status: runStatus,
   "set-key": runSetKey,
