@@ -941,6 +941,11 @@ Defaults live in `@pragma-sh/constants` under `platform` and `terminalDefaults`.
     repaints in a burst — PowerShell does exactly that after a resize. Drain everything
     already queued each pass with `try_recv`, and treat `Disconnected` as a failure rather
     than spinning to the deadline.
+  - **A dropped listener is not instantly dead.** A child spawned by a parallel test
+    inherits the listening fd until it execs (close-on-exec, not close-on-fork), so on
+    Linux a "dead" socket can still accept a connection for a moment. A test that drops
+    a listener to simulate a dead server calls `ipc::wait_until_unanswered` (feature
+    `test-support` of `pragma-platform`) before asserting the socket is stale.
   - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when

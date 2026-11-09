@@ -182,6 +182,29 @@ pub fn remove_stale_socket(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Waits until nothing answers on `path` any more, up to `timeout`.
+///
+/// For tests that drop a listener to simulate a dead server. Dropping it does
+/// not close the socket at once if a child process spawned by a parallel test
+/// was forked while it was open: the child holds a copy of the fd until it
+/// execs (the fd is close-on-exec, not close-on-fork), and in that window the
+/// "dead" socket still accepts a connection on Linux. Returns
+/// [`io::ErrorKind::TimedOut`] if something is still answering at the deadline.
+#[cfg(any(test, feature = "test-support"))]
+pub fn wait_until_unanswered(path: &Path, timeout: std::time::Duration) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while connect(path).is_ok() {
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("{} still answers after {timeout:?}", path.display()),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Ok(())
+}
+
 /// The directory a socket lives in, which [`bind`] makes owner-only.
 fn socket_dir(path: &Path) -> io::Result<&Path> {
     path.parent()
@@ -258,7 +281,8 @@ fn narrow_socket(path: &Path) -> io::Result<()> {
 mod tests {
     use super::{
         bind, check_socket_path, connect, lock_file_name, log_file_name, remove_stale_socket,
-        socket_entry_exists, socket_file_name, socket_path_in, MAX_SOCKET_PATH_BYTES,
+        socket_entry_exists, socket_file_name, socket_path_in, wait_until_unanswered,
+        MAX_SOCKET_PATH_BYTES,
     };
     use std::path::{Path, PathBuf};
 
@@ -345,24 +369,10 @@ mod tests {
             "a closed listener leaves its socket entry behind"
         );
 
-        // Other tests in this binary spawn children on parallel threads. A child
-        // forked while the listener was open holds a copy of its fd until it
-        // execs (the fd is close-on-exec, not close-on-fork), and in that window
-        // the "dead" socket still accepts a connection on Linux. Give that window
-        // a bounded moment to close rather than flaking on it.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            match remove_stale_socket(&path) {
-                Ok(()) => break,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::AddrInUse
-                        && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-                Err(error) => panic!("a socket nobody answers on is stale: {error:?}"),
-            }
-        }
+        wait_until_unanswered(&path, std::time::Duration::from_secs(5))
+            .expect("the dropped listener stops answering");
+
+        remove_stale_socket(&path).expect("a socket nobody answers on is stale");
         assert!(!socket_entry_exists(&path).expect("probe"));
         let _listener = bind(&path).expect("the path is bindable again");
     }
