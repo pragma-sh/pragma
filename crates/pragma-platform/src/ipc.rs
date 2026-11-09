@@ -345,7 +345,24 @@ mod tests {
             "a closed listener leaves its socket entry behind"
         );
 
-        remove_stale_socket(&path).expect("a socket nobody answers on is stale");
+        // Other tests in this binary spawn children on parallel threads. A child
+        // forked while the listener was open holds a copy of its fd until it
+        // execs (the fd is close-on-exec, not close-on-fork), and in that window
+        // the "dead" socket still accepts a connection on Linux. Give that window
+        // a bounded moment to close rather than flaking on it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match remove_stale_socket(&path) {
+                Ok(()) => break,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::AddrInUse
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(error) => panic!("a socket nobody answers on is stale: {error:?}"),
+            }
+        }
         assert!(!socket_entry_exists(&path).expect("probe"));
         let _listener = bind(&path).expect("the path is bindable again");
     }
