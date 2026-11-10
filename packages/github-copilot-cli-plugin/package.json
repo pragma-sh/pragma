@@ -35,10 +35,10 @@
   "devDependencies": {
     "@pragma-sh/plugin": "workspace:*",
     "@pragma-sh/watcher-kit": "workspace:*",
-    "@types/node": "^24.12.3",
+    "@types/node": "^24.19.2",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
   },
   "pragma": {
     "pluginId": "pragma.github-copilot",
