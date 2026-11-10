@@ -147,7 +147,7 @@ Successful helper dev signing persists the chosen identity in the gitignored
 `PRAGMA_DEV_SIGNING_IDENTITY` overrides it. Preserve this across rebuilds so a
 different launching shell does not silently replace a certificate with ad hoc signing.
 
-The computer PiP's Focus app arrow uses the host's desktop-only `focusSession` control and the same session lease as its preview. Only an unknown-operation rejection falls back to `status` plus `pragma-platform::desktop::focus_app` for older daemons; never use an agent action that acquires a competing lease. macOS overlay construction relies on `vendor/wry` honoring `.focused(false)`; early creation alone cannot prevent focus theft when computer use is enabled mid-run.
+The computer PiP's Focus app arrow uses the host's desktop-only `focusSession` control and the same session lease as its preview. Only an unknown-operation rejection falls back to `status` plus `pragma-platform::desktop::focus_app` for older daemons; never use an agent action that acquires a competing lease. macOS overlay construction relies on wry 0.57+ (tauri-apps/wry#1866) honoring `.focused(false)`; early creation alone cannot prevent focus theft when computer use is enabled mid-run.
 
 Preview startup must tolerate UI overlays/HMR ahead of the native binary:
 `streamComputerFrames` falls back to immediate, sequential `computer_rpc` frame polling

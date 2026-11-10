@@ -315,7 +315,7 @@ fn overlay_windows(app: &AppHandle) -> Vec<WebviewWindow> {
 /// display's frame.
 ///
 /// Preparing early has each overlay's activity bridge listening before the
-/// first cursor move arrives. Late creation is safe too: the vendored wry
+/// first cursor move arrives. Late creation is safe too: wry 0.57+'s
 /// constructor respects `.focused(false)` on macOS, keeping the user's current
 /// app and keyboard responder intact.
 fn prepare_overlays(app: &AppHandle) {
