@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.3.1...pragma-go-v1.3.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **sdk:** drop gateway keepalives from session and agent streams ([6d104ce](https://github.com/pragma-sh/pragma/commit/6d104ce56ceb554949440c65234345ec4b2ad4e1))
+* **sdk:** drop gateway keepalives from session and agent streams ([49e1944](https://github.com/pragma-sh/pragma/commit/49e1944d704cb6ad1d201f5a416f1099b4e67951)), closes [#213](https://github.com/pragma-sh/pragma/issues/213)
+
 ## [1.3.1](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.3.0...pragma-go-v1.3.1) (2026-10-17)
 
 
