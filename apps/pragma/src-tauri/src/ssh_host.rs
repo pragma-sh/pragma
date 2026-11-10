@@ -302,11 +302,25 @@ pub async fn client_for_session(
     if let Some(host_id) = hosts.session_host_id(session_id) {
         return client_for_host(app, hosts, &host_id).await;
     }
-    let tab = db.tab(session_id)?;
-    let host_id = hosts.host_id_for_worktree(db, &tab.worktree_id)?;
+    let host_id = match db.tab(session_id) {
+        Ok(tab) => hosts.host_id_for_worktree(db, &tab.worktree_id)?,
+        Err(error) if is_unpersisted_mini_session(&error, session_id) => LOCAL_HOST.to_string(),
+        Err(error) => return Err(error),
+    };
     let client = client_for_host(app, hosts, &host_id).await?;
     hosts.bind_session(session_id.to_string(), host_id)?;
     Ok(client)
+}
+
+/// Whether `error`, from looking up `session_id`'s tab, means the session is a
+/// Pragma Mini home-directory tab. Mini tabs are never persisted, so a fresh one
+/// has neither an in-memory host binding nor a tab row; it runs on the local
+/// host. Any other missing row is still an error.
+fn is_unpersisted_mini_session(error: &AppError, session_id: &str) -> bool {
+    matches!(
+        error,
+        AppError::Database(rusqlite::Error::QueryReturnedNoRows)
+    ) && session_id.starts_with(CONSTANTS.mini_window.session_id_prefix.as_str())
 }
 
 fn remote_preferences_for_host(hosts: &Hosts, host_id: &str) -> AppResult<RemoteRoutePreferences> {
@@ -560,7 +574,20 @@ fn remote_socket_path(home: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{line_value, local_socket_path, remote_shell_path};
+    use super::{is_unpersisted_mini_session, line_value, local_socket_path, remote_shell_path};
+    use crate::error::AppError;
+
+    #[test]
+    fn only_a_missing_mini_tab_falls_back_to_the_local_host() {
+        let missing = || AppError::Database(rusqlite::Error::QueryReturnedNoRows);
+        assert!(is_unpersisted_mini_session(&missing(), "mini-1234"));
+        // A persisted workspace tab must exist; never route it to a guessed host.
+        assert!(!is_unpersisted_mini_session(&missing(), "tab-1234"));
+        assert!(!is_unpersisted_mini_session(
+            &AppError::Daemon("unreachable".into()),
+            "mini-1234"
+        ));
+    }
 
     #[test]
     fn rewrites_tilde_for_remote_shell() {

@@ -28,8 +28,8 @@
     "@pragma-sh/sidecar-kit": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.12.3",
+    "@types/node": "^24.19.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
   }
 }

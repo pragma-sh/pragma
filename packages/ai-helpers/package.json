@@ -28,11 +28,11 @@
     "@pragma-sh/constants": "workspace:*",
     "@pragma-sh/sidecar-kit": "workspace:*",
     "@pragma-sh/system1": "workspace:*",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.19.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
   }
 }

@@ -44,15 +44,15 @@
     "lint": "oxlint ."
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.17.8",
-    "@opencode/plugin": "^2.1.1",
+    "@opencode-ai/plugin": "^1.19.5",
+    "@opencode/plugin": "^2.2.6",
     "@pragma-sh/plugin": "workspace:*",
     "@pragma-sh/sdk": "workspace:*",
     "@pragma-sh/watcher-kit": "workspace:*",
-    "@types/node": "^24.12.3",
+    "@types/node": "^24.19.2",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
   },
   "pragma": {
     "pluginId": "pragma.opencode",

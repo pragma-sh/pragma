@@ -64,8 +64,8 @@ helper binary that `pragma-server` spawns and supervises.
   newer than the helper's own last background post is not attributed to the
   user.
 - **Cursor overlays must never activate Pragma.** They use `.focused(false)`
-  and `.focusable(false)`. `vendor/wry` patches the macOS constructor to honor
-  the first setting instead of unconditionally activating the app and changing
+  and `.focusable(false)`. wry 0.57+ (tauri-apps/wry#1866) makes the macOS
+  constructor honor the first setting instead of unconditionally activating the app and changing
   its keyboard responder. Early preparation avoids missing cursor events, but
   first-session or mid-run creation must also preserve the user's focus.
 - **Never read a secure field's value**, and never put typed text anywhere but

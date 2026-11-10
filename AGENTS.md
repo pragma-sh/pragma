@@ -341,9 +341,10 @@ than no guide.
   and recovery_ below.
 - Anything that differs between operating systems → `crates/pragma-platform`. Never a
   bare `#[cfg(unix)]` at the call site (see _Platform targets_).
-- macOS background webviews rely on `vendor/wry` honoring `.focused(false)` during
-  construction. Keep its focus guards until upstream fixes unconditional app
-  activation; see `vendor/wry/PRAGMA-PATCH.md`.
+- macOS background webviews rely on wry **0.57 or newer** honoring `.focused(false)`
+  during construction (upstream tauri-apps/wry#1866: only a visible _and_ focused
+  webview activates the app). Older wry activated unconditionally, which is why Pragma
+  once vendored a patched copy; never pin Tauri to a release whose wry predates it.
 
 ## Durable agent sessions and recovery
 

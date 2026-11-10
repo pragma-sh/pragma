@@ -40,9 +40,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # see vendor/tauri-plugin-decorum/PRAGMA-PATCH.md. Remove once upstream fixes it.
 [patch.crates-io]
 tauri-plugin-decorum = { path = "vendor/tauri-plugin-decorum" }
-# wry activates macOS apps even for hidden, unfocused cursor overlays.
-# See vendor/wry/PRAGMA-PATCH.md; remove when upstream honors `focused`.
-wry = { path = "vendor/wry" }
 
 # Consistent lint policy across the whole Rust workspace.
 # Crates opt in with `[lints] workspace = true`.

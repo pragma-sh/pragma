@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerApproval, ComputerPermissions } from "@pragma-sh/constants";
 
 import { ComputerApprovalDialog } from "@/components/computer-use/ComputerApprovalDialog";
+import { PERMISSION_POLL_MS } from "@/hooks/use-computer-permissions";
 import { computerRpc } from "@/lib/tauri";
 import { answerApproval, refreshComputerUse } from "@/state/computer-use-store";
 
@@ -84,11 +85,14 @@ describe("computer-use permission setup", () => {
     const { rerender } = render(<ComputerApprovalDialog approvals={[approval]} />);
     await screen.findByRole("button", { name: "Allow Accessibility" });
     vi.mocked(computerRpc).mockResolvedValue(granted);
-    const [poll] = interval.mock.calls.at(-1)!;
-    await act(async () => {
-      if (typeof poll === "function") await poll();
-    });
-    expect(screen.getByRole("button", { name: "Allow for this session" })).toBeInTheDocument();
+    // Other timers (animations, Radix) also use setInterval; pick the permission poll by its delay.
+    const [poll] = interval.mock.calls.findLast(([, delay]) => delay === PERMISSION_POLL_MS)!;
+    expect(poll).toBeTypeOf("function");
+    // The poll callback fires `load()` without returning its promise, so wait for the render.
+    act(() => (poll as () => void)());
+    expect(
+      await screen.findByRole("button", { name: "Allow for this session" }),
+    ).toBeInTheDocument();
     expect(clear).toHaveBeenCalled();
     rerender(<ComputerApprovalDialog approvals={[]} />);
     vi.mocked(computerRpc).mockClear();

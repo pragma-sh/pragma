@@ -30,16 +30,26 @@ pub fn apply(window: &WebviewWindow) {
 
 /// [`apply`] with an explicit title (a Pragma Mini window's "Pragma Mini").
 pub fn apply_titled(window: &WebviewWindow, title: &str) {
-    apply_title(window, title);
     #[cfg(target_os = "macos")]
     {
-        // Mini windows are built on an async worker. AppKit's visual effect
-        // must be installed on the main thread, even after the builder returns.
+        // The title and the chrome go in ONE main-thread pass, title first.
+        // AppKit resets the traffic lights to their default position when the
+        // title changes; scheduled as separate messages, the title could land
+        // after the inset (it does since Tauri 2.12), leaving a Mini window's
+        // lights high in a too-short titlebar until its first resize. Mini
+        // windows are also built on an async worker, and AppKit's visual effect
+        // must be installed on the main thread even after the builder returns.
         let chrome_window = window.clone();
-        if let Err(error) = window.run_on_main_thread(move || apply_macos(&chrome_window)) {
+        let title = title.to_owned();
+        if let Err(error) = window.run_on_main_thread(move || {
+            apply_title(&chrome_window, &title);
+            apply_macos(&chrome_window);
+        }) {
             log::warn!("failed to schedule macOS window chrome: {error}");
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    apply_title(window, title);
 }
 
 /// The running product's name ("Pragma" / "Pragma Dev").
