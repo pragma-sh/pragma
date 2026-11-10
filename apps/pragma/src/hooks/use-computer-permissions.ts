@@ -5,7 +5,8 @@ import type { ComputerPermissionKind, ComputerPermissions } from "@pragma-sh/con
 import { errorMessage } from "@/lib/errors";
 import { computerRpc } from "@/lib/tauri";
 
-const PERMISSION_POLL_MS = 2_000;
+/** How often missing grants are rechecked while the setup dialog is open. */
+export const PERMISSION_POLL_MS = 2_000;
 
 /** Checks grants without prompting; only an explicit button press requests access. */
 export function useComputerPermissions({
