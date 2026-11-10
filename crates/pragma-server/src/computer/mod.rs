@@ -884,7 +884,9 @@ impl ComputerService {
             self.helper
                 .set_session_paused(&session.id, reason.is_some());
             if reason.is_some() {
-                self.policy.deny_caller(&session.owner);
+                // Settle the owner's tasks before denying its approvals: a denial wakes a
+                // worker blocked on approval, and while its generation is still current
+                // that worker records the user's pause or stop as a failure.
                 if reason == Some(ComputerPauseReason::Stopped) {
                     self.tasks.cancel_owner(&session.owner);
                 } else {
@@ -892,6 +894,7 @@ impl ComputerService {
                         self.task_event(&task);
                     }
                 }
+                self.policy.deny_caller(&session.owner);
             }
             let kind = if reason.is_some() {
                 ComputerActivityType::SessionPaused
