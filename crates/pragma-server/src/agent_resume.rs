@@ -1095,9 +1095,17 @@ mod tests {
         }
         #[cfg(windows)]
         {
+            // Write then rename, like the Unix script: `wait_for_file` returns as
+            // soon as the marker exists, and a direct redirect creates it empty
+            // before `echo` has written the argv into it.
             let path = dir.join("fake-pragma-cli.cmd");
-            std::fs::write(&path, format!("@echo off\r\n>\"{marker}\" echo %*\r\n"))
-                .expect("fake cli");
+            std::fs::write(
+                &path,
+                format!(
+                    "@echo off\r\n>\"{marker}.tmp\" echo %*\r\nmove /y \"{marker}.tmp\" \"{marker}\" >nul\r\n"
+                ),
+            )
+            .expect("fake cli");
             path
         }
     }

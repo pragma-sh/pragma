@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.4.0...pragma-gateway-v1.4.1) (2026-10-30)
+
+
+### Miscellaneous Chores
+
+* **pragma-gateway:** Synchronize desktop versions
+
 ## [1.4.0](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.3.1...pragma-gateway-v1.4.0) (2026-10-30)
 
 

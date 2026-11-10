@@ -165,7 +165,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     lock.flush()?;
     let _lock = lock;
     take_socket_path(&paths.socket)?;
-    // `ipc::bind` restricts the socket to its owner, on every platform.
+    // `ipc::bind` makes the server directory owner-only before binding, so the
+    // socket is restricted to its owner on every platform.
     let listener = ipc::bind(&paths.socket)?;
 
     let registry = Arc::new(Registry::new(
@@ -1755,19 +1756,20 @@ fn acquire_lock(lock_path: &Path) -> Result<File, Box<dyn std::error::Error>> {
 /// A deliberate replacement still works, because the app kills the old server
 /// before spawning a new one (`kill_stale_server` in `pragma-client`) — by the
 /// time we probe, nothing answers.
+///
+/// The probe and the unlink go through `ipc::remove_stale_socket`, never
+/// `Path::exists`: on Windows that follows the `AF_UNIX` reparse point, fails
+/// with 1920, and reports a leftover socket as absent, so every restart then
+/// failed to bind over it with 10022 (#212).
 fn take_socket_path(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    if !socket.exists() {
-        return Ok(());
-    }
-    if LocalStream::connect(socket).is_ok() {
-        return Err(format!(
+    match ipc::remove_stale_socket(socket) {
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => Err(format!(
             "another pragma-server is already serving on {}",
             socket.display()
         )
-        .into());
+        .into()),
+        result => Ok(result?),
     }
-    fs::remove_file(socket)?;
-    Ok(())
 }
 
 // `remove_stale_files` used to probe the socket and delete a "stale" lock here.
@@ -2178,7 +2180,7 @@ mod tests {
             "a socket that still answers must not be unlinked and rebound",
         );
         assert!(
-            socket_path.exists(),
+            pragma_platform::ipc::socket_entry_exists(&socket_path).expect("probe"),
             "the running server's socket must be left in place",
         );
     }
@@ -2193,6 +2195,26 @@ mod tests {
 
         take_socket_path(&socket_path).expect("a socket nobody answers on is stale");
         assert!(!socket_path.exists(), "the stale socket should be unlinked");
+    }
+
+    /// The #212 restart path with a real socket rather than a stand-in file: a
+    /// server that died leaves its socket entry behind (on Windows, a reparse
+    /// point that `Path::exists` reports as absent). The next start must clear
+    /// it and bind again rather than failing every restart with 10022.
+    #[test]
+    fn a_dead_servers_real_socket_is_cleared_and_rebound() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("server").join("daemon.sock");
+        drop(pragma_platform::ipc::bind(&socket_path).expect("the first server binds"));
+        pragma_platform::ipc::wait_until_unanswered(
+            &socket_path,
+            std::time::Duration::from_secs(5),
+        )
+        .expect("the dropped listener stops answering");
+
+        take_socket_path(&socket_path).expect("a socket nobody answers on is stale");
+        let _listener =
+            pragma_platform::ipc::bind(&socket_path).expect("the next server binds the same path");
     }
 
     /// A leftover lock file must not block startup. The previous

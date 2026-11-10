@@ -1,12 +1,18 @@
 import type { ProtocolEventKind } from "@pragma-sh/constants";
 
 import { routes } from "./routes";
-import { ndjsonStream } from "./streaming";
+import { type EventTypes, typedEventStream } from "./streaming";
 import type { Transport } from "./transport";
 
 export type ProtocolSubscriptionEvent =
   | { type: "snapshot"; subscription: ProtocolEventKind; payload: unknown }
   | { type: "delta"; subscription: ProtocolEventKind; payload: unknown };
+
+/** Only snapshot/delta lines are subscription events; keepalives are dropped. */
+const SUBSCRIPTION_EVENT_TYPES: EventTypes<ProtocolSubscriptionEvent> = {
+  snapshot: true,
+  delta: true,
+};
 
 /** Protocol event subscription namespace. */
 export class EventsClient {
@@ -31,12 +37,10 @@ export class EventsClient {
       signal: options.signal,
       localOnly: event === "computerActivity",
     });
-    for await (const line of ndjsonStream<{ type?: string }>(response, options.signal)) {
-      // The gateway interleaves `{"type":"ready"}` keepalive lines with real
-      // events; only snapshot/delta lines are subscription events.
-      if (line.type === "snapshot" || line.type === "delta") {
-        yield line as ProtocolSubscriptionEvent;
-      }
-    }
+    yield* typedEventStream<ProtocolSubscriptionEvent>(
+      response,
+      SUBSCRIPTION_EVENT_TYPES,
+      options.signal,
+    );
   }
 }

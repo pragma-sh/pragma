@@ -1,31 +1,14 @@
 import { constants } from "@pragma-sh/constants";
-import {
-  base64ToBytes,
-  PragmaGatewayError,
-  type SessionEvent,
-  type StreamOptions,
-} from "@pragma-sh/sdk";
+import { PragmaGatewayError, type StreamOptions } from "@pragma-sh/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
+import { applyTerminalEvent, type TerminalSink, type TerminalStatus } from "./terminal-events";
 import { errorText } from "./utils";
 
 /** How long to wait before retrying a dropped stream, and the ceiling. */
 const RECONNECT_INITIAL_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
-
-/** What the terminal screen knows about its session. */
-export type TerminalStatus = "connecting" | "live" | "exited" | "unavailable";
-
-/** Callbacks the renderer supplies, so output never passes through React state. */
-export interface TerminalSink {
-  /** Write terminal output. `cursor` is the absolute byte offset it starts at. */
-  onOutput: (dataBase64: string, cursor: number) => void;
-  /** Clear and rebuild: the resume cursor fell outside retained scrollback. */
-  onReset: () => void;
-  /** The shell reported a new window title. */
-  onTitle?: (title: string) => void;
-}
 
 /** A live attachment to one host terminal session. */
 export interface TerminalSession {
@@ -99,7 +82,7 @@ export function useTerminalSession(
       for await (const event of client.sessions.attach(sessionId, request)) {
         if (!attachment.live) return;
         delay = RECONNECT_INITIAL_MS;
-        applyEvent(event, { cursor, sink: sinkRef.current, setStatus, setExitCode });
+        applyTerminalEvent(event, { cursor, sink: sinkRef.current, setStatus, setExitCode });
       }
     };
 
@@ -234,44 +217,4 @@ function attachOptions(
     ...(lease && size ? size : {}),
     ...(cursor === null ? {} : { cursor }),
   };
-}
-
-/** Where stream events land: the renderer, the resume cursor, and React state. */
-interface StreamTarget {
-  cursor: { current: number | null };
-  sink: TerminalSink;
-  setStatus: (status: TerminalStatus) => void;
-  setExitCode: (code: number | null) => void;
-}
-
-type EventOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>;
-
-const EVENT_HANDLERS: {
-  [T in SessionEvent["type"]]: (event: EventOf<T>, target: StreamTarget) => void;
-} = {
-  replay: (event, { cursor, sink, setStatus }) => {
-    // A reset means the retained buffer no longer covers where this renderer
-    // was; its screen is stale and the bytes that follow rebuild it.
-    if (event.reset) sink.onReset();
-    cursor.current = event.cursor;
-    setStatus("live");
-  },
-  output: (event, { cursor, sink, setStatus }) => {
-    const at = cursor.current ?? 0;
-    sink.onOutput(event.dataBase64, at);
-    cursor.current = at + base64ToBytes(event.dataBase64).length;
-    setStatus("live");
-  },
-  title: (event, { sink }) => sink.onTitle?.(event.title),
-  exit: (event, { setStatus, setExitCode }) => {
-    setExitCode(event.code);
-    setStatus("exited");
-  },
-  echoMode: () => undefined,
-};
-
-/** Applies one stream event to the renderer and the connection state. */
-function applyEvent(event: SessionEvent, target: StreamTarget): void {
-  const handler = EVENT_HANDLERS[event.type] as (event: SessionEvent, target: StreamTarget) => void;
-  handler(event, target);
 }

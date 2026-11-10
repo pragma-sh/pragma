@@ -1,6 +1,6 @@
 [package]
 name = "pragma-server"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
@@ -32,5 +32,5 @@ uuid = { workspace = true }
 daemonize = "0.5"
 
 [dev-dependencies]
-pragma-platform = { path = "../pragma-platform" }
+pragma-platform = { path = "../pragma-platform", features = ["test-support"] }
 tempfile = "3"

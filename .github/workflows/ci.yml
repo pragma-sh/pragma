@@ -57,6 +57,38 @@ jobs:
         env:
           PRAGMA_TEST_PTY: "1"
 
+  # Starts the real pragma-server.exe on a fresh data directory, as the runner's
+  # admin account *and* as a newly created standard user, restarts it over the
+  # socket a forced kill leaves behind, and checks another account cannot connect.
+  # Nothing else in CI or the release ever starts the server on Windows. Runs on
+  # stable and on the release's pinned toolchain — keep that in step with
+  # `toolchain:` in release.yml.
+  #
+  # Known limit: it does NOT reproduce #212. That failure needs Windows build
+  # 26300+; the hosted images are 26100 (Server 2025) and 26200 (Windows 11 ARM),
+  # where the pre-fix server passes this check in every configuration.
+  windows-server-smoke:
+    name: Windows server smoke (${{ matrix.runner }}, rust ${{ matrix.toolchain }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+        toolchain: [stable, 1.96.0]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-smoke-${{ matrix.toolchain }}
+      - name: Build pragma-server
+        run: cargo build -p pragma-server
+      - name: Smoke-test the server (admin and standard user)
+        shell: pwsh
+        run: ./scripts/windows-server-smoke.ps1 -Server target/debug/pragma-server.exe -StandardUser
+
   build:
     name: Build app (${{ matrix.platform }})
     needs: [rust-windows]
@@ -64,8 +96,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
+          # Same image and Xcode as the release's darwin-aarch64 build, so CI links
+          # the macOS 27 SDK that the new window chrome depends on.
+          - runner: xcode-27
             platform: macos
+            xcode: "27.1"
+            min_sdk: "27"
           - runner: windows-latest
             platform: windows-x86_64
           - runner: windows-11-arm
@@ -85,10 +121,16 @@ jobs:
         # rust-cache prunes the archive in target/release/gn_out but can retain
         # V8's build-script fingerprint. Force that script to download it again.
         run: cargo clean --package v8 --release
+      - name: Select Xcode
+        if: ${{ matrix.xcode }}
+        run: ./scripts/macos-sdk.sh select ${{ matrix.xcode }}
       - run: bun install --frozen-lockfile
       - name: Build Tauri app (compile only, no bundling)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: bun run --filter pragma tauri build --no-bundle
+      - name: Verify linked macOS SDK
+        if: ${{ matrix.min_sdk && !startsWith(github.ref, 'refs/tags/') }}
+        run: ./scripts/macos-sdk.sh verify target/release/pragma ${{ matrix.min_sdk }}
       - name: Bundle signed release
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:

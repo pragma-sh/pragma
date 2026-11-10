@@ -31,8 +31,11 @@ cannot be overwritten.
   `%APPDATA%\com.pragma.app\<channel>`.
 - Production channel is `pragma`; dev builds derive `pragma-dev-<hash>` from the
   workspace root, so a dev instance never fights a production install.
-- **There is no in-band auth.** The socket is bound then `chmod 0600` (Unix) or given an
-  owner-only ACL (Windows) — filesystem permissions are the entire access-control story.
+- **There is no in-band auth.** The channel directory is made owner-only (`0700`, or an
+  owner-only inheritable ACL on Windows) _before_ the socket is bound into it, and Unix
+  also `chmod`s the socket `0600` — filesystem permissions are the entire access-control
+  story. A Windows `AF_UNIX` socket cannot be opened to set its own ACL, so it inherits
+  the directory's.
   This is also why the WSL bridge relays over stdio instead of forwarding a TCP port.
 
 ## Launch sequence

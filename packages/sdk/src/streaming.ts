@@ -49,3 +49,32 @@ export async function* ndjsonStream<T>(
     await reader.cancel().catch(() => undefined);
   }
 }
+
+/**
+ * Every event `type` a stream may yield, as a record so adding a variant to
+ * the event union without listing it here is a type error.
+ */
+export type EventTypes<T extends { type: string }> = Readonly<Record<T["type"], true>>;
+
+/**
+ * Parses an NDJSON event stream, yielding only lines whose `type` is one of
+ * `types`.
+ *
+ * The gateway interleaves `{"type":"ready"}` keepalive lines with real events
+ * (at attach and periodically), and a newer host may add event types this
+ * client does not know. Both are dropped here, so a consumer can dispatch on
+ * `type` exhaustively without its own guard. The filter is an allowlist rather
+ * than a check for the keepalive string, which keeps the heartbeat's spelling
+ * owned by the gateway alone.
+ */
+export async function* typedEventStream<T extends { type: string }>(
+  response: Response,
+  types: EventTypes<T>,
+  signal?: AbortSignal,
+): AsyncGenerator<T> {
+  for await (const line of ndjsonStream<{ type?: unknown }>(response, signal)) {
+    if (typeof line.type === "string" && Object.prototype.hasOwnProperty.call(types, line.type)) {
+      yield line as T;
+    }
+  }
+}

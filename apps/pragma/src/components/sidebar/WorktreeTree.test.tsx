@@ -99,6 +99,7 @@ const getPullRequestChecksStateMock = vi.fn();
 let githubAuthenticated = false;
 
 vi.mock("@/lib/github", () => ({
+  GITHUB_PR_REFRESH_INTERVAL_MS: 10_000,
   findPullRequestForBranch: (...args: unknown[]) => findPullRequestForBranchMock(...args),
   pullRequestLifecycle: (...args: unknown[]) => pullRequestLifecycleMock(...args),
   getPullRequestChecksState: (...args: unknown[]) => getPullRequestChecksStateMock(...args),

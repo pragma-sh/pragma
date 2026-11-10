@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GitHubRepoRef, Worktree } from "@pragma-sh/constants";
 import {
+  GITHUB_PR_REFRESH_INTERVAL_MS,
   findPullRequestForBranch,
   getPullRequestChecksState,
   pullRequestLifecycle,
@@ -10,7 +11,6 @@ import {
 } from "@/lib/github";
 import { githubRepoRef } from "@/lib/tauri";
 
-const PR_STATUS_REFRESH_INTERVAL_MS = 10_000;
 /** Lifecycles whose PR still runs CI worth showing; a closed or merged one is history. */
 const LIVE_PR_LIFECYCLES: ReadonlySet<GitHubPrLifecycle> = new Set(["open", "draft", "merging"]);
 
@@ -99,7 +99,7 @@ export function useWorktreePrLifecycles(
     void refresh();
     const interval = setInterval(() => {
       if (!document.hidden) void refresh();
-    }, PR_STATUS_REFRESH_INTERVAL_MS);
+    }, GITHUB_PR_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);

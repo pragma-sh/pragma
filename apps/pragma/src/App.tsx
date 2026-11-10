@@ -1,3 +1,4 @@
+import { CiWatchMonitor } from "@/components/github/CiWatchMonitor";
 import { MotionConfig } from "motion/react";
 
 import { ComputerUseController } from "@/components/computer-use/ComputerUseController";
@@ -44,6 +45,7 @@ function App() {
                             <WorktreeCreationProvider>
                               <UpdatesProvider>
                                 <WorkspaceShell />
+                                <CiWatchMonitor />
                                 <OnboardingModal />
                                 <WorkspaceTour />
                                 <AgentPluginInstallPrompt />

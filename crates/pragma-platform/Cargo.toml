@@ -1,6 +1,6 @@
 [package]
 name = "pragma-platform"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
@@ -43,6 +43,10 @@ windows = { version = "0.61", features = [
   "Win32_UI_Shell_Common",
   "Win32_UI_Shell_PropertiesSystem",
 ] }
+
+[features]
+# Exposes helpers other crates' tests need, such as `ipc::wait_until_unanswered`.
+test-support = []
 
 [dev-dependencies]
 tempfile = "3"
