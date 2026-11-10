@@ -196,7 +196,7 @@ The [Android install guide](https://pragma-app.sh/docs/user-guide/mobile#android
 
 Prerequisites:
 
-- [Bun](https://bun.sh/) 1.3.14 or newer
+- [Bun](https://bun.sh/) 1.4.4 or newer
 - Stable [Rust toolchain](https://www.rust-lang.org/tools/install) with clippy and rustfmt
 - [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform
 

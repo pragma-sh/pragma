@@ -79,7 +79,7 @@ tasks:
       "$BUN_INSTALL/bin/bun" --version
     env:
       # Keep in lockstep with `packageManager` in the root package.json.
-      BUN_VERSION: 1.3.14
+      BUN_VERSION: 1.4.4
       BUN_INSTALL: /var/bun
 
   - key: rust
