@@ -137,7 +137,11 @@ pub fn open(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         || WebviewUrl::App("index.html".into()),
         WebviewUrl::External,
     );
+    // The final title at build time, so the runtime set in `apply_titled` is
+    // not a title *change* (which makes AppKit reset the inset traffic lights).
+    let title = format!("{} Mini", app.package_info().name);
     let builder = WebviewWindowBuilder::new(app, &label, url)
+        .title(&title)
         .inner_size(
             as_f64(config.default_width.get()),
             as_f64(config.default_height.get()),
@@ -158,7 +162,6 @@ pub fn open(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
     let window = builder.build()?;
-    let title = format!("{} Mini", window_chrome::product_name(&window));
     window_chrome::apply_titled(&window, &title);
     let _ = window.set_focus();
     Ok(window)
