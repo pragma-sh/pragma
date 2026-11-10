@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.4.1...pragma-v1.5.0) (2026-11-10)
+
+
+### Features
+
+* **plugin:** add worktree section and badge count contributions ([93c6c4d](https://github.com/pragma-sh/pragma/commit/93c6c4dac00acf39b2a57057b07f114ccb3c240a))
+* **pragma:** fetch a pull request's CI rollup ([20a65ce](https://github.com/pragma-sh/pragma/commit/20a65ce18f4e9ec02ed80c34a636452f3a26c00d))
+* **pragma:** show worktree row sections in the sidebar ([92ad2ad](https://github.com/pragma-sh/pragma/commit/92ad2ad727d97add72b2686dbb58c6034a4ca577))
+* **pragma:** show worktree sections and PR CI status in the sidebar ([8155714](https://github.com/pragma-sh/pragma/commit/815571448ea5c8383bca97c3151ea6be692cc00a))
+* **pragma:** watch and fix failing CI checks on pull requests ([1e14472](https://github.com/pragma-sh/pragma/commit/1e14472071eee95c72cbd26fca97853c440b1cba))
+* **pragma:** watch and fix failing CI checks on pull requests ([8899e24](https://github.com/pragma-sh/pragma/commit/8899e2499da72ff2e38f5333ccf2316cabd57c6c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.5.0
+    * @pragma-sh/plugin bumped to 1.5.0
+    * @pragma-sh/scratchpad bumped to 1.5.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.5.0
+    * @pragma-sh/sdk bumped to 1.5.0
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-v1.4.0...pragma-v1.4.1) (2026-10-30)
 
 

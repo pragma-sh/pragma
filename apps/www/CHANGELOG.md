@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/www-v1.5.0...www-v1.6.0) (2026-11-10)
+
+
+### Features
+
+* **plugin:** add worktree section and badge count contributions ([93c6c4d](https://github.com/pragma-sh/pragma/commit/93c6c4dac00acf39b2a57057b07f114ccb3c240a))
+* **pragma:** show worktree row sections in the sidebar ([92ad2ad](https://github.com/pragma-sh/pragma/commit/92ad2ad727d97add72b2686dbb58c6034a4ca577))
+* **pragma:** show worktree sections and PR CI status in the sidebar ([8155714](https://github.com/pragma-sh/pragma/commit/815571448ea5c8383bca97c3151ea6be692cc00a))
+* **pragma:** watch and fix failing CI checks on pull requests ([1e14472](https://github.com/pragma-sh/pragma/commit/1e14472071eee95c72cbd26fca97853c440b1cba))
+
+
+### Bug Fixes
+
+* **platform:** keep Windows server sockets owner-only without opening them ([b8127ce](https://github.com/pragma-sh/pragma/commit/b8127ce63ca806ba81beecf5afbae25c42a2e81b))
+* **platform:** keep Windows server sockets owner-only without opening them ([009b139](https://github.com/pragma-sh/pragma/commit/009b139cf5f4979beb27c6aa5ddabcb12679835c)), closes [#212](https://github.com/pragma-sh/pragma/issues/212)
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/www-v1.4.0...www-v1.5.0) (2026-10-30)
 
 

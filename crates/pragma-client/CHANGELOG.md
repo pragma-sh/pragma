@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.4.1...pragma-client-v1.5.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **platform:** harden Windows socket dir ACL, shorten SSH bridge paths, test setup errors ([72fa20b](https://github.com/pragma-sh/pragma/commit/72fa20be69fe616ed0a37818fca7fad8e0160a21))
+* **platform:** keep Windows server sockets owner-only without opening them ([b8127ce](https://github.com/pragma-sh/pragma/commit/b8127ce63ca806ba81beecf5afbae25c42a2e81b))
+* **platform:** keep Windows server sockets owner-only without opening them ([009b139](https://github.com/pragma-sh/pragma/commit/009b139cf5f4979beb27c6aa5ddabcb12679835c)), closes [#212](https://github.com/pragma-sh/pragma/issues/212)
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.4.0...pragma-client-v1.4.1) (2026-10-30)
 
 

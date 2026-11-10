@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.2.1...dev-test-plugin-v1.3.0) (2026-11-10)
+
+
+### Features
+
+* **plugin:** add worktree section and badge count contributions ([93c6c4d](https://github.com/pragma-sh/pragma/commit/93c6c4dac00acf39b2a57057b07f114ccb3c240a))
+* **pragma:** show worktree sections and PR CI status in the sidebar ([8155714](https://github.com/pragma-sh/pragma/commit/815571448ea5c8383bca97c3151ea6be692cc00a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.5.0
+    * @pragma-sh/plugin bumped to 1.5.0
+    * @pragma-sh/sdk bumped to 1.5.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/dev-test-plugin-v1.2.0...dev-test-plugin-v1.2.1) (2026-10-30)
 
 

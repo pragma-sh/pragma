@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/sdk-v1.4.1...sdk-v1.5.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **sdk:** drop gateway keepalives from session and agent streams ([6d104ce](https://github.com/pragma-sh/pragma/commit/6d104ce56ceb554949440c65234345ec4b2ad4e1))
+* **sdk:** drop gateway keepalives from session and agent streams ([49e1944](https://github.com/pragma-sh/pragma/commit/49e1944d704cb6ad1d201f5a416f1099b4e67951)), closes [#213](https://github.com/pragma-sh/pragma/issues/213)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/constants bumped to 1.5.0
+    * @pragma-sh/scratchpad-contract bumped to 1.5.0
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/sdk-v1.4.0...sdk-v1.4.1) (2026-10-30)
 
 
