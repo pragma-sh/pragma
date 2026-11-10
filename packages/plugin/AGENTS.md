@@ -45,6 +45,11 @@ packages/plugin/
   OpenCode from the launcher. Keep node-only work inside the function that needs it
   (`globalThis.process?.…`, `await import("node:…")`), or off the entry's import graph
   entirely.
+- **Contribution components take no new props; context comes from hooks.** A worktree
+  section learns its row through `useWorktree()`, not a `worktree` prop, and its `when`
+  guard through `ctx.worktree`. Keep `PluginComponentProps` to `webViewPayload`.
+  `useCount` (sidebar cards and worktree sections) is a hook the host runs in its own
+  component: `0`/`null` hides the contribution, so nothing flashes empty while loading.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
   `react/jsx-runtime` to `@pragma-sh/plugin` subpaths.
 - **Agent launch options follow the models pattern.** `modes`, `permissionModes`, and

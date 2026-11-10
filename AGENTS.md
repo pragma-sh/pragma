@@ -272,7 +272,7 @@ than no guide.
   `packages/sdk`, not a per-client reimplementation.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma-sh/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
-- A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
+- A pure-TS sample/exercise plugin (sidebar tab, sidebar card, worktree section, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma-sh/dev-test-plugin`).
 - Fanout orchestration (one prompt into several isolated attempts, then keeping
   one) lives on the host: the durable record and the state machine in
@@ -742,6 +742,16 @@ without updating this guide and CI.
 - **Linux** builds need the GTK/WebKit system libraries — see the `rust`/`build` jobs in
   CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
   `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
+- **macOS window chrome follows the linked SDK, not the running OS.** AppKit reads the
+  SDK recorded in the binary's `LC_BUILD_VERSION`, so a build linked against an older
+  SDK keeps the old traffic-light buttons and titlebar on macOS 27. That is why the
+  Apple Silicon release and CI builds run on the `xcode-27` image with an explicit
+  `scripts/macos-sdk.sh select`, followed by `macos-sdk.sh verify`, which fails the job
+  if the binary is not linked against SDK 27 or newer. Intel stays on `macos-15-intel`,
+  because macOS 27 does not run on Intel Macs. A local `bun run dev` links whatever SDK
+  your installed Xcode ships, so you only see the new chrome locally once you install
+  Xcode 27 (`vtool -show-build <binary>` shows which SDK a binary links). The new chrome
+  needs no Tauri change.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers x64 on the
   GitHub-hosted `windows-latest` image and ARM64 on `windows-11-arm`; releases use the
@@ -932,6 +942,11 @@ Defaults live in `@pragma-sh/constants` under `platform` and `terminalDefaults`.
     repaints in a burst — PowerShell does exactly that after a resize. Drain everything
     already queued each pass with `try_recv`, and treat `Disconnected` as a failure rather
     than spinning to the deadline.
+  - **A dropped listener is not instantly dead.** A child spawned by a parallel test
+    inherits the listening fd until it execs (close-on-exec, not close-on-fork), so on
+    Linux a "dead" socket can still accept a connection for a moment. A test that drops
+    a listener to simulate a dead server calls `ipc::wait_until_unanswered` (feature
+    `test-support` of `pragma-platform`) before asserting the socket is stale.
   - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when

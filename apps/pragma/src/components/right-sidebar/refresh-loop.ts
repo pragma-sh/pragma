@@ -4,11 +4,13 @@
  * Interval ticks are skipped while the document is hidden (window minimized /
  * fully occluded): the data is invisible, and every poller that reaches the
  * daemon costs a git round-trip — the focus listener catches the app back up
- * the moment it becomes relevant again. Returns a stop function.
+ * the moment it becomes relevant again. Background automation can opt into
+ * `whileHidden` so watches continue while minimized. Returns a stop function.
  */
 export function startRefreshLoop(
   refresh: () => void | Promise<unknown>,
   intervalMs: number,
+  options?: { whileHidden?: boolean },
 ): () => void {
   let refreshing = false;
   const runRefresh = () => {
@@ -39,7 +41,7 @@ export function startRefreshLoop(
 
   runRefresh();
   const interval = setInterval(() => {
-    if (!document.hidden) {
+    if (options?.whileHidden || !document.hidden) {
       runRefresh();
     }
   }, intervalMs);

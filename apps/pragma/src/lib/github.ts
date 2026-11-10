@@ -330,8 +330,18 @@ export interface ReviewThread {
   comments: ReviewComment[];
 }
 
+/** Shared cadence for pull-request discovery and CI monitoring. */
+export const GITHUB_PR_REFRESH_INTERVAL_MS = 10_000;
+
 /** Combined CI/status summary for a ref (the merge card). */
 export interface CheckStatusItem {
+  /** GitHub check-run/status identity, used to recognize reruns. */
+  id?: number;
+  /** Present for check runs; legacy commit statuses have no annotations API. */
+  checkRunId?: number;
+  /** Distinguishes same-id GitHub check reruns, even if polling misses the pending phase. */
+  startedAt?: string | null;
+  description?: string | null;
   name: string;
   state: "success" | "failure" | "pending";
   url: string | null;
@@ -1057,11 +1067,19 @@ export const getChecksStatus = defineCachedRepoRead(
 
     const items: CheckStatusItem[] = [
       ...checks.data.check_runs.map((run) => ({
+        id: run.id,
+        checkRunId: run.id,
+        startedAt: run.started_at,
+        description: [run.output?.title, run.output?.summary, run.output?.text]
+          .filter(Boolean)
+          .join("\n"),
         name: run.name || "GitHub check",
         state: checkRunState(run),
         url: run.details_url ?? null,
       })),
       ...combined.data.statuses.map((status) => ({
+        id: status.id,
+        description: status.description,
         name: status.context || "Commit status",
         state: commitStatusState(status.state),
         url: status.target_url ?? null,
@@ -1081,6 +1099,81 @@ export const getChecksStatus = defineCachedRepoRead(
   },
   { ttlMs: 15_000 },
 );
+
+interface PullRequestChecksRollupResponse {
+  repository: {
+    pullRequest: {
+      commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+    } | null;
+  } | null;
+}
+
+const PULL_REQUEST_CHECKS_ROLLUP_QUERY = `
+  query ($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+`;
+
+/**
+ * GitHub's own CI rollup for a PR's head commit — the same state GitHub draws
+ * beside the PR — in one GraphQL call, so the sidebar can poll it for every
+ * worktree without the two REST calls {@link getChecksStatus} makes. Read from
+ * the PR's base repository, where a cross-fork PR's checks run.
+ */
+export async function getPullRequestChecksState(
+  repo: GitHubRepoRef,
+  pr: Pick<PullRequestSummary, "number" | "baseRepo">,
+): Promise<ChecksStatus["state"]> {
+  const target = pr.baseRepo ?? { owner: repo.owner, repo: repo.repo };
+  return cachedRepoFetch(
+    githubCacheKeys(target).checksRollup(pr.number),
+    async (octokit) => {
+      const data = await octokit.graphql<PullRequestChecksRollupResponse>(
+        PULL_REQUEST_CHECKS_ROLLUP_QUERY,
+        { owner: target.owner, repo: target.repo, number: pr.number },
+      );
+      const head = data.repository?.pullRequest?.commits.nodes[0]?.commit;
+      return toChecksState(head?.statusCheckRollup?.state ?? null);
+    },
+    { ttlMs: 15_000 },
+  );
+}
+
+/** Fetches failure annotations when available, retaining summaries if permissions prevent it. */
+export async function getCheckFailureDetails(
+  repo: GitHubRepoRef,
+  checks: ChecksStatus,
+): Promise<string> {
+  const octokit = await client();
+  const details = await Promise.all(
+    checks.items
+      .filter((item) => item.state === "failure")
+      .map(async (item) => {
+        const lines = [item.name, item.url, item.description].filter(Boolean);
+        if (item.checkRunId) {
+          try {
+            const annotations = await octokit.rest.checks.listAnnotations({
+              owner: repo.owner,
+              repo: repo.repo,
+              check_run_id: item.checkRunId,
+              per_page: 100,
+            });
+            for (const annotation of annotations.data) {
+              lines.push(`${annotation.path}:${annotation.start_line}: ${annotation.message}`);
+            }
+          } catch {
+            lines.push("Annotations unavailable; inspect the check URL for full logs.");
+          }
+        }
+        return lines.join("\n").slice(0, 20_000);
+      }),
+  );
+  return details.join("\n\n").slice(0, 60_000);
+}
 
 /** Merges a pull request with the given strategy (default: a merge commit). */
 export async function mergePullRequest(

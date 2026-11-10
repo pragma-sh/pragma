@@ -884,9 +884,10 @@ impl ComputerService {
             self.helper
                 .set_session_paused(&session.id, reason.is_some());
             if reason.is_some() {
-                // Settle the owner's tasks before denying its approvals: a denial wakes a
-                // worker blocked on approval, and while its generation is still current
-                // that worker records the user's pause or stop as a failure.
+                // Invalidate the owner's tasks *before* withdrawing their
+                // prompts: denying wakes a worker blocked on approval, and if
+                // its generation is still current it records the denial as
+                // `failed` ahead of the user's pause or stop.
                 if reason == Some(ComputerPauseReason::Stopped) {
                     self.tasks.cancel_owner(&session.owner);
                 } else {

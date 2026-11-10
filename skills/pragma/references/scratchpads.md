@@ -12,7 +12,7 @@ Suggest (or just create) a scratchpad when the answer is more than linear text:
 - **Long-running multi-tab work** — use `AgentProgress` for live status.
 - **Anything the user will keep and revisit.** Terminal scrollback is disposable; a scratchpad is a file with a tab.
 
-Ask before creating only when the user is mid-flow on something else; otherwise create it and say where it is available in the scratchpad sidebar card.
+Ask before creating only when the user is mid-flow on something else; otherwise create it and say where it is available: the Scratchpads chip on its worktree's row in the sidebar.
 
 ## Create It
 

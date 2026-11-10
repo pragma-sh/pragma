@@ -3,10 +3,12 @@ import { Icon } from "@iconify/react";
 import { Bot, GitPullRequestCreate } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
+import { ChecksStateIcon } from "@/components/github/ChecksStateIcon";
 import { AgentProgressLine } from "@/components/sidebar/AgentProgressLine";
 import { WorktreeActivityLine } from "@/components/sidebar/WorktreeActivityLine";
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { findReportingAgent, reportingAgentName } from "@/lib/agent-lookup";
+import type { ChecksStatus } from "@/lib/github";
 import {
   AGENT_STATUS_RANK,
   isVisibleAgentStatus,
@@ -47,6 +49,8 @@ export interface WorktreeRowDetailsData {
   agents: WorktreeAgent[];
   activity: WorktreeActivity | null;
   prNumber: number | null;
+  /** The open PR's CI rollup, or null when unknown or the PR is not open. */
+  prChecks: ChecksStatus["state"] | null;
   /** An AI-drafted PR is waiting to be opened, and the branch has no PR yet. */
   readyForPr: boolean;
 }
@@ -56,12 +60,14 @@ export function useWorktreeRowDetails(
   worktreeId: string,
   prNumber: number | null,
   hasPr: boolean,
+  prChecks: ChecksStatus["state"] | null,
 ): WorktreeRowDetailsData {
   const drafted = usePullRequestDrafted(worktreeId);
   return {
     agents: useWorktreeAgents(worktreeId),
     activity: useLatestWorktreeActivity(worktreeId),
     prNumber,
+    prChecks,
     readyForPr: drafted && !hasPr,
   };
 }
@@ -74,16 +80,23 @@ export function hasWorktreeRowDetails(data: WorktreeRowDetailsData): boolean {
 }
 
 /**
- * The PR pill: a GitHub mark and the number. The title line's icon already
- * carries the PR's lifecycle color, so the pill does not repeat that glyph.
+ * The PR pill: a GitHub mark, the number, and the CI rollup glyph GitHub draws
+ * beside a PR. The title line's icon already carries the PR's lifecycle color,
+ * so the pill does not repeat that glyph.
  */
-function PullRequestPill({ number }: { number: number }) {
+function PullRequestPill({
+  number,
+  checks,
+}: {
+  number: number;
+  checks: ChecksStatus["state"] | null;
+}) {
   return (
-    <span
-      aria-label={`Pull request #${number}`}
-      className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums"
-    >
-      <Icon aria-hidden className="size-3" icon="simple-icons:github" />#{number}
+    <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
+      <span aria-label={`Pull request #${number}`} className="flex items-center gap-1">
+        <Icon aria-hidden className="size-3" icon="simple-icons:github" />#{number}
+      </span>
+      <ChecksStateIcon className="size-3" state={checks} />
     </span>
   );
 }
@@ -148,12 +161,12 @@ export function WorktreeRowDetails({
   worktreeId: string;
   data: WorktreeRowDetailsData;
 }) {
-  const { agents, activity, prNumber, readyForPr } = data;
+  const { agents, activity, prNumber, prChecks, readyForPr } = data;
   return (
     <>
       {prNumber !== null || activity ? (
         <span className="flex min-w-0 items-center gap-2">
-          {prNumber !== null ? <PullRequestPill number={prNumber} /> : null}
+          {prNumber !== null ? <PullRequestPill checks={prChecks} number={prNumber} /> : null}
           {activity ? <WorktreeActivityLine activity={activity} className="min-w-0" /> : null}
         </span>
       ) : null}

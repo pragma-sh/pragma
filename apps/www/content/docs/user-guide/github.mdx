@@ -46,6 +46,26 @@ The **PR Review** tab (opened from a PR view) is the full review surface:
   right from the app. The toolbar's up/down arrows (or `Cmd/Ctrl+↑/↓`) step through
   comments. Each step centers the comment in its diff and the diff on screen.
 
+## Watch and fix CI
+
+When a pull request reports CI checks, **Watch and fix** appears beneath the check
+summary. Choose an agent and model using the standard picker, then select **Start
+watching**. The row shows the selected harness and model alongside **Watching CI**.
+Use its **Cancel watch** × button and confirm to stop watching.
+
+On a failure, Pragma opens a new agent terminal tab in the same worktree. Its prompt
+includes the failing check names, links, summaries, and GitHub error annotations when
+available, and asks the agent to fix the cause, run relevant checks, then commit and
+push. When a new commit's checks appear or an existing check reruns, Pragma closes
+that fix tab and continues watching. Existing jobs that are still running do not
+close the tab. One agent handles each failing check cycle.
+
+Watches continue across pane and project changes and while the app is minimized.
+They last for the current app session and stop when cancelled or the pull request
+closes. Cancelling leaves an already running fix tab open; it will no longer close
+automatically. When annotations are unavailable, the agent receives the check
+summary and link so it can investigate further.
+
 ## Resolving merge conflicts with AI
 
 When a pull request conflicts with its base, the merge card offers **Resolve Merge

@@ -10,6 +10,7 @@ import type {
   SidebarTabDefinition,
   TopperItemDefinition,
   WebViewDefinition,
+  WorktreeSectionDefinition,
 } from "./contributions";
 import { PLUGIN_API_VERSION } from "./generated/version";
 import type { PluginContext } from "./types";
@@ -30,6 +31,8 @@ export interface PluginUiContributions<TConfig = unknown> {
   settingsPages?: SettingsPageDefinition<TConfig>[];
   topper?: TopperItemDefinition<TConfig>[];
   sidebarCards?: SidebarCardDefinition<TConfig>[];
+  /** Subsections under each worktree row in the sidebar (see `defineWorktreeSection`). */
+  worktreeSections?: WorktreeSectionDefinition<TConfig>[];
   webViews?: WebViewDefinition[];
 }
 

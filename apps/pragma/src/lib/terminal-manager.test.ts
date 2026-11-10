@@ -152,7 +152,7 @@ import {
   WEBGL_RECOVERY_DELAY_MS,
   WEBGL_RECOVERY_MAX_ATTEMPTS,
   WEBGL_RENDERER_CACHE_SIZE,
-  TerminalManager,
+  TerminalManager as BaseTerminalManager,
 } from "./terminal-manager";
 import { defaultKeybindingsConfig, setLoadedKeybindingsConfig } from "./keybindings";
 import { setTerminalLinkHandler } from "./terminal-links";
@@ -162,6 +162,36 @@ import {
 } from "../plugins/command-keybindings";
 
 const tab = { id: "tab-1", worktreeId: "wt-1" } as Tab;
+
+const liveManagers = new Set<BaseTerminalManager>();
+
+/**
+ * Tracks every manager a test creates so `afterEach` can dispose its tabs.
+ *
+ * A test that leaves a parser write in flight also leaves the manager's write
+ * watchdog armed on a real timer. If nothing disposes the tab, that timer fires
+ * after the file's jsdom environment is torn down and throws
+ * `window is not defined`, which Vitest reports as an unhandled error that fails
+ * the whole run even though every test passed.
+ */
+class TerminalManager extends BaseTerminalManager {
+  constructor() {
+    super();
+    liveManagers.add(this);
+  }
+}
+
+afterEach(() => {
+  for (const manager of liveManagers) {
+    // `terminals` is private and the manager has no "dispose everything" API;
+    // reading it here keeps test-only cleanup out of the production surface.
+    const { terminals } = manager as unknown as { terminals: Map<string, unknown> };
+    for (const tabId of terminals.keys()) {
+      manager.dispose(tabId);
+    }
+  }
+  liveManagers.clear();
+});
 
 // Build an output ArrayBuffer from the realm's own Uint8Array (TextEncoder can
 // produce a cross-realm buffer under jsdom) so it matches the source's

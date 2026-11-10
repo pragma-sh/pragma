@@ -21,7 +21,8 @@ The sidebar lists the selected project's worktrees:
 - Hovering a non-main row reveals three actions: **Pin**, **New child**, and
   **Delete worktree**.
 - Rows are **detailed** by default: under the title line a worktree shows its open pull
-  request (a GitHub mark with the PR number), any git action in progress (**Committing**,
+  request (a GitHub mark with the PR number and its CI status: a green check, a red cross,
+  or an amber dot while checks run), any git action in progress (**Committing**,
   **Writing commit message**, **Committing & drafting PR**, **Drafting PR**, **Pushing**,
   **Opening PR**, **Merging**, then briefly whether it succeeded), **Ready for PR** once a
   pull request has been drafted but not yet opened, and one line per agent —
@@ -169,11 +170,20 @@ Pins are per user (stored locally), not checked into the repo.
   unless you force it. Project `teardown` scripts run first and can veto the deletion by
   failing. Optionally delete the branch too.
 
-## Ports and scratchpads cards
+## Ports, whiteboards, and scratchpads
 
-Below the tree, the sidebar shows two cards when they have content:
+Each worktree's row shows a small chip for every one of these it has, with a count. Click
+a chip to expand that list inside the row; click it again to fold it away. Pragma
+remembers which ones you left open, per worktree.
 
-- **Ports** — open TCP listeners grouped by worktree and terminal tab; click to focus the
-  tab that owns the process. Only processes started from Pragma terminals are listed.
-- **Scratchpads** — the selected worktree's agent-authored documents. See
+- **Ports** — open TCP listeners from that worktree's terminal tabs; click one to focus
+  the tab that owns the process. Only processes started from Pragma terminals are listed.
+- **Whiteboards** — that worktree's whiteboards; click to open one, right-click to delete.
+  See [Whiteboards](/docs/user-guide/whiteboards).
+- **Scratchpads** — that worktree's agent-authored documents. See
   [Scratchpads](/docs/user-guide/scratchpads).
+
+Clicking an item in a worktree you are not on switches to that worktree first. A worktree
+with none of these shows no chips. Chips appear in the detailed row layout only. The
+compact layout keeps every row to one line. Plugins can add their own sections here
+(see [UI contributions](/docs/plugins/ui#worktree-sections)).
