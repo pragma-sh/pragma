@@ -2206,6 +2206,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket_path = dir.path().join("server").join("daemon.sock");
         drop(pragma_platform::ipc::bind(&socket_path).expect("the first server binds"));
+        pragma_platform::ipc::wait_until_unanswered(
+            &socket_path,
+            std::time::Duration::from_secs(5),
+        )
+        .expect("the dropped listener stops answering");
 
         take_socket_path(&socket_path).expect("a socket nobody answers on is stale");
         let _listener =
