@@ -1,3 +1,4 @@
+import { CiWatchControls } from "@/components/github/CiWatchControls";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
@@ -729,15 +730,12 @@ function MergeCard({
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
+      <ChecksSummary checks={checks} />
+      <CiWatchControls repo={repo} pr={pr} worktreeId={worktreeId} checks={checks} />
       {pr.mergeable === false ? (
         <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
       ) : (
-        <MergeAction
-          checks={checks}
-          merging={merging}
-          onConfirm={() => setConfirming(true)}
-          stack={stack}
-        />
+        <MergeAction merging={merging} onConfirm={() => setConfirming(true)} stack={stack} />
       )}
 
       <MergeConfirmDialog
@@ -758,14 +756,12 @@ function MergeCard({
   );
 }
 
-/** The merge button and check summary shown while the PR is mergeable. */
+/** The merge button shown while the PR is mergeable. */
 function MergeAction({
-  checks,
   merging,
   onConfirm,
   stack,
 }: {
-  checks: ChecksStatus | null;
   merging: boolean;
   onConfirm: () => void;
   stack: PullRequestStack | null | undefined;
@@ -778,7 +774,6 @@ function MergeAction({
         : "Merge pull request";
   return (
     <>
-      <ChecksSummary checks={checks} />
       <Button
         className="w-full"
         disabled={merging || stack === undefined}

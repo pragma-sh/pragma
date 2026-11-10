@@ -20,6 +20,9 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `hooks/` — React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss).
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
+  - `components/github/CiWatchMonitor.tsx` — app-wide CI watch controller using the shared
+    refresh loop, including background ticks. `state/ci-watch-store.ts` owns session-scoped
+    worktree/repo/PR watches and closes only the agent tab it opened when CI restarts.
   - `lib/external-store.ts` — synchronous snapshots and stable subscriptions shared by frontend stores.
 - `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons, `agent_sessions.rs` for host-routed launch preparation/restore).
 - `crates/pragma-cli/` — `pragma-cli` helper CLI that external agents call from terminals.

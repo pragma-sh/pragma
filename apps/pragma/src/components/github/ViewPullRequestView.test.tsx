@@ -68,6 +68,8 @@ const {
   },
 }));
 
+vi.mock("@/components/github/CiWatchControls", () => ({ CiWatchControls: () => null }));
+
 vi.mock("@/components/github/GitHubMarkdown", () => ({
   GitHubMarkdown: ({ children }: { children: string }) => <>{children}</>,
 }));

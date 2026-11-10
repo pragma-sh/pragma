@@ -6,7 +6,7 @@ const { octokit, githubToken, readConfig } = vi.hoisted(() => ({
     rest: {
       pulls: { list: vi.fn(), create: vi.fn(), get: vi.fn(), merge: vi.fn() },
       issues: { listComments: vi.fn(), createComment: vi.fn() },
-      checks: { listForRef: vi.fn() },
+      checks: { listForRef: vi.fn(), listAnnotations: vi.fn() },
       repos: { getCombinedStatusForRef: vi.fn(), get: vi.fn(), listBranches: vi.fn() },
     },
     graphql: vi.fn(),
@@ -34,6 +34,7 @@ import {
   createPullRequest,
   findPullRequestForBranch,
   getChecksStatus,
+  getCheckFailureDetails,
   listBaseRepoOptions,
   listPullRequestCommits,
   listReviewThreads,
@@ -332,6 +333,46 @@ describe("findPullRequestForBranch", () => {
   });
 });
 
+describe("getCheckFailureDetails", () => {
+  const checks = {
+    state: "failure",
+    total: 1,
+    passed: 0,
+    failed: 1,
+    pending: 0,
+    items: [
+      {
+        id: 123,
+        checkRunId: 123,
+        name: "build",
+        state: "failure",
+        url: "https://example.com/check",
+        description: "Build failed",
+      },
+    ],
+  } as const;
+
+  it("includes check summaries and annotated error messages", async () => {
+    octokit.rest.checks.listAnnotations.mockResolvedValue({
+      data: [{ path: "src/app.ts", start_line: 12, message: "Type error" }],
+    });
+    const details = await getCheckFailureDetails(repo, { ...checks, items: [...checks.items] });
+    expect(details).toContain("Build failed");
+    expect(details).toContain("src/app.ts:12: Type error");
+    expect(octokit.rest.checks.listAnnotations).toHaveBeenCalledWith(
+      expect.objectContaining({ check_run_id: 123 }),
+    );
+  });
+
+  it("retains the check name and URL if annotation access is denied", async () => {
+    octokit.rest.checks.listAnnotations.mockRejectedValue(new Error("Forbidden"));
+    const details = await getCheckFailureDetails(repo, { ...checks, items: [...checks.items] });
+    expect(details).toContain("build");
+    expect(details).toContain("https://example.com/check");
+    expect(details).toContain("Annotations unavailable");
+  });
+});
+
 describe("getChecksStatus", () => {
   it("reports success when every check and status passed", async () => {
     octokit.rest.checks.listForRef.mockResolvedValue({
@@ -357,11 +398,15 @@ describe("getChecksStatus", () => {
       pending: 0,
       items: [
         {
+          id: undefined,
+          checkRunId: undefined,
+          startedAt: undefined,
+          description: "",
           name: "build",
           state: "success",
           url: "https://github.com/acme/widget/actions/1",
         },
-        { name: "coverage", state: "success", url: null },
+        { id: undefined, description: undefined, name: "coverage", state: "success", url: null },
       ],
     });
   });

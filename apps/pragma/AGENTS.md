@@ -342,7 +342,15 @@ subtab. The PR
 subtab (`right-sidebar/PullRequestTab`) resolves logged-out → create
 (`CreatePullRequestView`, TipTap markdown editor) → view (`ViewPullRequestView`). A PR
 view keeps each check-run/status name and state; its merge card shows passed/failed/pending
-counts and expands to a per-check dropdown. When GitHub reports a PR as unmergeable, the
+counts and expands to a per-check dropdown. **Watch and fix** below the checks uses
+`github/CiWatchControls` and the standard harness picker. `github/CiWatchMonitor`,
+mounted once in `App`, drives the existing `startRefreshLoop` with `whileHidden`
+enabled; `state/ci-watch-store.ts` owns session-scoped, worktree/repo/PR-keyed watches,
+deduplication, cancellation guards, and each watch's exact fix-tab id. Failure prompts
+include check summaries and best-effort GitHub annotations through `lib/github.ts`.
+A fresh head with checks or an existing check rerun closes only that fix tab and rearms
+the watch; pending jobs from the original run do not count as a restart. Watches stop
+on PR close or cancellation; cancelling leaves an already running agent tab open. When GitHub reports a PR as unmergeable, the
 merge card becomes a conflict alert. Its **Sync with Base Branch** action syncs the head,
 fetches the actual base repository (including cross-fork upstreams), and merges its latest
 base branch into the current worktree; clean merges push immediately, while conflicts
