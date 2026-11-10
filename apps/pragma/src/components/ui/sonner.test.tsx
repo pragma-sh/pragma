@@ -6,9 +6,16 @@ import { MAX_MOUNTED_TOASTS, Toaster } from "./sonner";
 
 const mountedToasts = () => document.querySelectorAll("[data-sonner-toast]").length;
 
-afterEach(() => {
+// Dismissing schedules sonner's own unmount timer, which calls `setState` once
+// it fires. Wait for it while the Toaster is still mounted: a timer left
+// pending outlives the file's jsdom environment and throws
+// "window is not defined" as an unhandled error, failing the whole run.
+afterEach(async () => {
   act(() => {
     toast.dismiss();
+  });
+  await waitFor(() => {
+    expect(mountedToasts()).toBe(0);
   });
 });
 

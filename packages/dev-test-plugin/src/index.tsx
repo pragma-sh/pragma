@@ -14,17 +14,19 @@ import { openReportWebView, reportWebView } from "./report-webview";
 import { DevTestSettingsPage } from "./settings-page";
 import { testMentionsProvider } from "./test-mentions";
 import { testSuggestionsProvider } from "./test-suggestions";
+import { uncommittedSection } from "./uncommitted-section";
 
 export default definePlugin({
   name: "Pragma Dev Test Plugin",
   description:
-    "Dev/test plugin: sidebar tabs, a sidebar card, an SDK event hook, and agent-board suggested drafts.",
+    "Dev/test plugin: sidebar tabs, a sidebar card, a worktree section, an SDK event hook, and agent-board suggested drafts.",
   ui: {
     sidebarTabs: [
       defineSidebarTab({ id: "overview", title: "Overview", component: OverviewTab }),
       defineSidebarTab({ id: "fortune", title: "Fortune", component: FortuneTab }),
     ],
     sidebarCards: [defineSidebarCard({ title: "Agent Pulse", component: AgentPulseCard })],
+    worktreeSections: [uncommittedSection],
     settingsPages: [
       defineSettingsPage({
         id: "dev-test",

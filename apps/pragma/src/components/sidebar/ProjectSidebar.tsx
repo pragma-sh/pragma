@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import {
-  ChevronDown,
-  FolderPlus,
-  GitBranchPlus,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-} from "lucide-react";
+import { FolderPlus, GitBranchPlus, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,19 +16,15 @@ import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
 import { InitGitDialog } from "@/components/dialogs/InitGitDialog";
 import { InstallUpdateButton } from "@/components/sidebar/InstallUpdateButton";
+import { PluginSidebarCards } from "@/components/sidebar/PluginSidebarCards";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
-import { OpenPortsCard } from "@/components/sidebar/OpenPortsCard";
-import { ScratchpadsCard } from "@/components/sidebar/ScratchpadsCard";
-import { WhiteboardsCard } from "@/components/sidebar/WhiteboardsCard";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { CREATE_PROJECT_EVENT, mainWorktreeLabel, projectIsGit } from "@/lib/non-git-project";
 import { startWindowDrag } from "@/lib/window-drag";
-import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { useWorktreeCreation } from "@/state/worktree-creation-context";
-import { cn } from "@/lib/utils";
 import { instantTransition, motionTransition, useMotionTransition } from "@/lib/motion";
 
 /** Width of the collapsed rail, in px — matches the `w-9` the strip used to hard-code. */
@@ -257,9 +245,6 @@ function ExpandedProjectSidebar({
         <WorktreeTree onCreateChild={onCreateChild} />
       </div>
       <div className="p-3">
-        <OpenPortsCard />
-        <WhiteboardsCard />
-        <ScratchpadsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />
         <InstallUpdateButton />
@@ -389,60 +374,5 @@ function SidebarResizeHandle({
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
     />
-  );
-}
-
-function PluginSidebarCards() {
-  const workspace = useWorkspace();
-  const cards = usePluginSidebarCards(workspace.selectedProjectId);
-  if (cards.length === 0) {
-    return null;
-  }
-  return (
-    <div className="mb-3 space-y-2">
-      {cards.map((card) => (
-        <PluginSidebarCardItem card={card} key={card.key} />
-      ))}
-    </div>
-  );
-}
-
-function PluginSidebarCardItem({
-  card,
-}: {
-  card: ReturnType<typeof usePluginSidebarCards>[number];
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <Collapsible
-      className="rounded-lg border border-sidebar-border bg-card shadow-sm"
-      data-slot="plugin-sidebar-card"
-      onOpenChange={setOpen}
-      open={open}
-    >
-      <CollapsibleTrigger
-        aria-label={`Toggle ${card.contribution.title} panel`}
-        className="group flex w-full items-center justify-between gap-2 px-3 py-3 text-left"
-      >
-        <h3 className="truncate text-xs font-semibold text-muted-foreground">
-          {card.contribution.title}
-        </h3>
-        <ChevronDown
-          aria-hidden="true"
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform",
-            open ? "rotate-0" : "rotate-90",
-          )}
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-3 pb-3">
-        <RenderPluginContribution
-          component={card.contribution.component}
-          config={card.record.config}
-          pluginId={card.pluginId}
-          resetKey={card.key}
-        />
-      </CollapsibleContent>
-    </Collapsible>
   );
 }

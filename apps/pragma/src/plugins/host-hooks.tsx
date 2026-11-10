@@ -22,6 +22,7 @@ import type {
   PluginQueryResult,
   PluginSessionSummary,
   PluginStorage,
+  PluginWorktree,
   PragmaHooksBridge,
 } from "@pragma-sh/plugin";
 import type { AgentMessage, PragmaClient } from "@pragma-sh/sdk";
@@ -130,6 +131,8 @@ interface PluginBoundaryValue {
   pluginId: string;
   config: unknown;
   webViewPayload?: unknown;
+  /** The row a worktree section renders under; absent everywhere else. */
+  worktree?: PluginWorktree;
 }
 
 const PluginBoundaryContext = createContext<PluginBoundaryValue | null>(null);
@@ -142,6 +145,7 @@ export function PluginBoundary(props: {
   pluginId: string;
   config: unknown;
   webViewPayload?: unknown;
+  worktree?: PluginWorktree;
   children: ReactNode;
 }): ReactNode {
   const value = useMemo(
@@ -149,8 +153,9 @@ export function PluginBoundary(props: {
       pluginId: props.pluginId,
       config: props.config,
       webViewPayload: props.webViewPayload,
+      worktree: props.worktree,
     }),
-    [props.pluginId, props.config, props.webViewPayload],
+    [props.pluginId, props.config, props.webViewPayload, props.worktree],
   );
   return (
     <PluginBoundaryContext.Provider value={value}>{props.children}</PluginBoundaryContext.Provider>
@@ -201,6 +206,14 @@ function useThemeImpl(): "light" | "dark" {
 function useWebViewPayloadImpl<TPayload>(): TPayload | undefined {
   const boundary = useRequiredContext(PluginBoundaryContext, "useWebViewPayload");
   return boundary.webViewPayload as TPayload | undefined;
+}
+
+function useWorktreeImpl(): PluginWorktree {
+  const boundary = useRequiredContext(PluginBoundaryContext, "useWorktree");
+  if (!boundary.worktree) {
+    throw new Error("useWorktree() is only available inside a worktree section");
+  }
+  return boundary.worktree;
 }
 
 function useNotifyImpl(): (message: string, options?: PluginNotifyOptions) => void {
@@ -442,4 +455,5 @@ export const hostHooks: PragmaHooksBridge = {
   useAgentStatuses: useAgentStatusesImpl,
   useAgentMessages: useAgentMessagesImpl,
   useSessions: useSessionsImpl,
+  useWorktree: useWorktreeImpl,
 };

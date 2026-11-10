@@ -8,7 +8,11 @@ import type {
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
+  WorktreeSectionDefinition,
+  PluginWorktree,
 } from "@pragma-sh/plugin";
+
+import { CountProbe } from "@/lib/count-probe";
 import {
   PluginBoundary,
   notifyFromPlugin,
@@ -55,9 +59,23 @@ export function usePluginSidebarCards(
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarCards);
 }
 
+/**
+ * Returns the worktree-section contributions visible on one worktree row; each
+ * `when` guard sees that row as `ctx.worktree`.
+ */
+export function usePluginWorktreeSections(
+  activeProjectId: string | null,
+  worktree: PluginWorktree,
+): VisiblePluginContribution<WorktreeSectionDefinition>[] {
+  return useVisibleContributions(activeProjectId, (definition) => definition.ui?.worktreeSections, {
+    worktree,
+  });
+}
+
 function useVisibleContributions<TContribution extends object>(
   activeProjectId: string | null,
   select: (definition: NonNullable<PluginRecord["definition"]>) => TContribution[] | undefined,
+  guardContext?: object,
 ): VisiblePluginContribution<TContribution>[] {
   const records = useActivePlugins(activeProjectId);
   const runtime = usePluginRuntimeState();
@@ -70,7 +88,7 @@ function useVisibleContributions<TContribution extends object>(
     for (const contribution of select(record.definition) ?? []) {
       const when =
         "when" in contribution ? (contribution.when as PluginWhen<unknown> | undefined) : undefined;
-      if (!shouldShow(record, when, runtime)) {
+      if (!shouldShow(record, when, runtime, guardContext)) {
         index += 1;
         continue;
       }
@@ -102,6 +120,7 @@ function shouldShow<TConfig>(
   record: PluginRecord,
   when: PluginWhen<TConfig> | undefined,
   runtime: PluginRuntime,
+  guardContext?: object,
 ): boolean {
   if (!when) {
     return true;
@@ -110,7 +129,8 @@ function shouldShow<TConfig>(
     return false;
   }
   try {
-    return Boolean(when(pluginContextForRecord(record, runtime) as PluginContext<TConfig>));
+    const ctx = { ...pluginContextForRecord(record, runtime), ...guardContext };
+    return Boolean(when(ctx as PluginContext<TConfig>));
   } catch (cause) {
     console.error(`plugin "${record.pluginId}" contribution guard threw`, cause);
     return false;
@@ -136,6 +156,8 @@ function pluginContextForRecord(record: PluginRecord, runtime: PluginRuntime): P
 interface PluginErrorBoundaryProps {
   pluginId: string;
   resetKey: string;
+  /** Rendered in place of a crashed subtree; defaults to the inline crash notice. */
+  fallback?: ReactNode;
   children: ReactNode;
 }
 
@@ -170,6 +192,9 @@ class PluginErrorBoundary extends ReactComponent<
 
   render(): ReactNode {
     if (this.state.error !== null) {
+      if (this.props.fallback !== undefined) {
+        return this.props.fallback;
+      }
       return (
         <div className="m-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
           <p className="font-medium">Plugin "{this.props.pluginId}" crashed.</p>
@@ -197,20 +222,61 @@ export function RenderPluginContribution(props: {
   pluginId: string;
   config: unknown;
   webViewPayload?: unknown;
+  /** The row a worktree section renders under, exposed through `useWorktree()`. */
+  worktree?: PluginWorktree;
   resetKey: string;
   component: PluginComponent;
 }): ReactNode {
   const PluginComponent = props.component;
+  return (
+    <PluginSubtree {...props}>
+      <PluginComponent webViewPayload={props.webViewPayload} />
+    </PluginSubtree>
+  );
+}
+
+/**
+ * Runs a plugin's `useCount` hook inside that plugin's boundary and reports its
+ * result. A count hook that throws reports nothing and renders nothing, which
+ * hides its contribution instead of drawing a crash notice for a badge.
+ */
+export function RenderPluginCount<TArgs extends unknown[]>(props: {
+  pluginId: string;
+  config: unknown;
+  worktree?: PluginWorktree;
+  resetKey: string;
+  useCount: (...args: TArgs) => number | null;
+  args: TArgs;
+  onCount: (count: number | null) => void;
+}): ReactNode {
+  return (
+    <PluginSubtree {...props} fallback={null}>
+      <CountProbe args={props.args} onCount={props.onCount} useCount={props.useCount} />
+    </PluginSubtree>
+  );
+}
+
+/** The error boundary plus per-plugin context every plugin subtree renders inside. */
+function PluginSubtree(props: {
+  pluginId: string;
+  config: unknown;
+  webViewPayload?: unknown;
+  worktree?: PluginWorktree;
+  resetKey: string;
+  fallback?: ReactNode;
+  children: ReactNode;
+}): ReactNode {
   const connected = usePluginRuntimeState().sdk !== null;
   const resetKey = `${props.resetKey}:${connected ? "sdk" : "no-sdk"}`;
   return (
-    <PluginErrorBoundary pluginId={props.pluginId} resetKey={resetKey}>
+    <PluginErrorBoundary fallback={props.fallback} pluginId={props.pluginId} resetKey={resetKey}>
       <PluginBoundary
         config={props.config}
         pluginId={props.pluginId}
         webViewPayload={props.webViewPayload}
+        worktree={props.worktree}
       >
-        <PluginComponent webViewPayload={props.webViewPayload} />
+        {props.children}
       </PluginBoundary>
     </PluginErrorBoundary>
   );

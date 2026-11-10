@@ -129,6 +129,7 @@ export function githubCacheKeys(repo: { owner: string; repo: string }) {
     reviews: (n: number) => `reviews:${base}#${n}`,
     threads: (n: number) => `threads:${base}#${n}`,
     checks: (ref: string) => `checks:${base}@${ref}`,
+    checksRollup: (n: number) => `checks-rollup:${base}#${n}`,
     branches: (owner: string, name: string) => `branches:${owner}/${name}`,
     baseRepos: (owner: string, name: string) => `base-repos:${owner}/${name}`,
     issueList: () => `issue-list:${base}`,

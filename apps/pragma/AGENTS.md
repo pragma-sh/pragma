@@ -424,12 +424,35 @@ drops all its status (`removeAgentStatusForTab`).
 
 **Detailed sidebar rows.** Agents are listed only inside their worktree's row — there is no
 separate flat agents list. Worktree rows are **detailed** by default (`WorktreeRowFrame`'s
-`details` slot: a GitHub mark + open-PR number, git action, one line per agent with an
+`details` slot: a GitHub mark + open-PR number + its CI rollup glyph
+(`components/github/ChecksStateIcon.tsx`, one GraphQL `getPullRequestChecksState` per
+poll), git action, one line per agent with an
 always-drawn progress bar floored at 10%) and fold back to the one-line layout with the
 **Compact rows** switch in Settings → Sidebar (`components/settings/SidebarSection.tsx` over
 `state/sidebar-preferences.ts`, a persisted per-device `createToggleSetStore` — deliberately
 not `config.json`). The title line never changes shape between the two. Status colors and labels live once in
 `lib/agent-status-style.ts`, shared by `AgentStatusDot` and the progress bars.
+
+**Worktree sections.** Ports, Whiteboards, and Scratchpads are not bottom-of-sidebar cards:
+they are sections in each row's `details` slot (`components/sidebar/worktree-sections/`),
+one chip per section with a nonzero count, expanding its body inline. Built-ins and plugin
+`ui.worktreeSections` share one renderer (`WorktreeSections.tsx`), so they get the same
+chips, ordering, persisted expand state (`pragma.worktreeSections`), and error boundary.
+Plugin `sidebarCards` still render at the bottom. Three rules hold it together:
+
+- **Counts run in probes, not in the chip.** Every section's `useCount` hook mounts in its
+  own `CountProbe` (`lib/count-probe.tsx`) inside `WorktreeRow`'s outer `<div>`, which
+  renders on every row whether or not it shows details. A hook per component keeps the
+  rules of hooks intact as plugins come and go. A probe that moves in the tree remounts,
+  resets its count to `null`, and hides what it was counting, so keep each probe in one
+  place (see `PluginSidebarCards.tsx`).
+- **One fetch per worktree.** A chip's count and the body it expands read the same
+  `createWorktreeListStore` cache (`state/worktree-list-store.ts`). Refresh by
+  `invalidate`, triggered by a worktree's own tab signature (`use-section-refresh.ts`), not
+  by `projectTabs` identity, which churns on every tab in the project.
+- **Opening from a row targets that row.** `openScratchpadFile` / `openWhiteboard` take an
+  optional `worktreeId` and select it. Without it they open in the _selected_ worktree,
+  which is wrong for a row the user is not on.
 
 **System 1 agent progress is owned by Pragma, not the plugins.** `state/agent-progress-store.ts`
 listens to every rich message (`subscribeAgentMessageEvents` — the same stream Pragma Go renders) and,
@@ -672,8 +695,8 @@ scope's configured plugins; a page whose plugin has no row in this scope still g
 of its own so its settings stay reachable.
 
 **`useSdk` throws until the gateway is up, and the gateway spawns lazily.** Any
-contribution that calls it — a sidebar card is the common case, since it renders at
-startup — throws during that window, so `RenderPluginContribution` resets the plugin error
+contribution that calls it — a sidebar card or a worktree section's `useCount` is the
+common case, since both render at startup — throws during that window, so `RenderPluginContribution` resets the plugin error
 boundary on SDK connectivity as well as the caller's reset key. The reset clears the caught
 error without remounting healthy child subtrees; only a contribution that actually crashed
 renders afresh, so component-local state in working plugins survives the connectivity flip.
@@ -1590,9 +1613,11 @@ an error screen. A dirty tab is never overwritten: the loader raises `externalCh
 instead, and `ScratchpadView` renders a "Changed on disk — reload" button that calls
 `reloadFromDisk()`. The window-focus re-read is deliberate redundancy — the watch is a
 live subscription that a dropped socket, a sleeping machine, or an unmounted tab can miss,
-and a buffer that only a tab close fixes is worse than one extra read. `ScratchpadsCard`
-watches the same events for `.pragma/scratchpads/` so an agent creating a scratchpad shows
-up in the sidebar without waiting on unrelated tab churn.
+and a buffer that only a tab close fixes is worse than one extra read. The sidebar's
+Scratchpads section watches the same events for `.pragma/scratchpads/` so an agent creating
+a scratchpad shows up in the sidebar without waiting on unrelated tab churn. It listens on
+the **main** worktree's watch, matching `.pragma/worktrees/<child>/.pragma/scratchpads/`, so
+every row shares one recursive OS watcher instead of opening one each.
 
 Dirty documents and their exact saved baselines survive ordinary pane unmounts; only a
 confirmed tab close disposes them. Scratchpad TipTap updates mark dirty only while focused,
@@ -1959,7 +1984,7 @@ Escape returns from a scoped worktree or editor submenu before closing the palet
 Active run/build commands appear as running-script rows with their worktree. Enter opens
 the script tab; Shift+Enter closes that script tab through normal managed-script cleanup.
 
-Open TCP listeners appear in both the left-sidebar Ports card and regular palette search.
+Open TCP listeners appear in both each worktree row's Ports section and regular palette search.
 `open-ports-context.tsx` polls one project-scoped `list_open_ports` command and shares the
 snapshot between both surfaces. The host only returns sockets whose PID is the live terminal
 shell or one of its descendants; the frontend additionally requires a matching visible,

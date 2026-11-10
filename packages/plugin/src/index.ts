@@ -49,6 +49,7 @@ export type {
   CommandDefinition,
   PluginComponent,
   PluginComponentProps,
+  PluginCountHook,
   PluginIcon,
   PluginWhen,
   SettingsPageDefinition,
@@ -59,6 +60,8 @@ export type {
   WebViewDefinition,
   WebViewDefinitionInput,
   WebViewReference,
+  WorktreeSectionContext,
+  WorktreeSectionDefinition,
 } from "./contributions";
 export {
   defineCommand,
@@ -67,6 +70,7 @@ export {
   defineSidebarTab,
   defineTopperItem,
   defineWebView,
+  defineWorktreeSection,
   openWebView,
 } from "./contributions";
 export type {
@@ -116,6 +120,7 @@ export {
   useStoredState,
   useTheme,
   useWebViewPayload,
+  useWorktree,
   useWorktreeChanges,
 } from "./hooks";
 export type { PragmaHooksBridge } from "./hooks";
@@ -210,5 +215,6 @@ export type {
   PluginProject,
   PluginQueryResult,
   PluginSessionSummary,
+  PluginWorktree,
 } from "./types";
 export { z } from "./z";

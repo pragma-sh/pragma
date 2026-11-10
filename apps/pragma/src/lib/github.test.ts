@@ -35,6 +35,7 @@ import {
   findPullRequestForBranch,
   getChecksStatus,
   getCheckFailureDetails,
+  getPullRequestChecksState,
   listBaseRepoOptions,
   listPullRequestCommits,
   listReviewThreads,
@@ -430,6 +431,34 @@ describe("getChecksStatus", () => {
     });
     octokit.rest.repos.getCombinedStatusForRef.mockResolvedValue({ data: { statuses: [] } });
     expect(await getChecksStatus(repo, "abc")).toMatchObject({ state: "pending" });
+  });
+});
+
+describe("getPullRequestChecksState", () => {
+  it("maps the head commit's rollup and reads it from the PR's base repo", async () => {
+    octokit.graphql.mockResolvedValue({
+      repository: {
+        pullRequest: {
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "ERROR" } } }] },
+        },
+      },
+    });
+    const base = { owner: "upstream", repo: "widget", cloneUrl: "" };
+    expect(await getPullRequestChecksState(repo, { number: 7, baseRepo: base })).toBe("failure");
+    expect(octokit.graphql).toHaveBeenCalledWith(expect.stringContaining("statusCheckRollup"), {
+      owner: "upstream",
+      repo: "widget",
+      number: 7,
+    });
+  });
+
+  it("reports none when the head commit has no checks", async () => {
+    octokit.graphql.mockResolvedValue({
+      repository: {
+        pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: null } }] } },
+      },
+    });
+    expect(await getPullRequestChecksState(repo, { number: 8, baseRepo: null })).toBe("none");
   });
 });
 

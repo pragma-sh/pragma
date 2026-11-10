@@ -81,16 +81,28 @@ vi.mock("@/lib/tauri", () => ({
   restoreFanoutTab: (...args: unknown[]) => restoreFanoutTabMock(...args),
   githubRepoRef: vi.fn().mockResolvedValue(null),
   onComputerActivity: vi.fn().mockResolvedValue(() => {}),
+  listScratchpads: vi.fn().mockResolvedValue([]),
+  listWhiteboards: vi.fn().mockResolvedValue([]),
+  deleteWhiteboard: vi.fn(),
 }));
+
+vi.mock("@/state/open-ports-context", () => ({ useOpenPorts: () => [] }));
 
 vi.mock("@/lib/file-watch", () => ({
   subscribeToWorktreeFiles: (worktreeId: string, listener: (change: { path: string }) => void) =>
     subscribeToWorktreeFilesMock(worktreeId, listener),
 }));
 
+const findPullRequestForBranchMock = vi.fn();
+const pullRequestLifecycleMock = vi.fn();
+const getPullRequestChecksStateMock = vi.fn();
+let githubAuthenticated = false;
+
 vi.mock("@/lib/github", () => ({
-  findPullRequestForBranch: vi.fn().mockResolvedValue(null),
-  pullRequestLifecycle: vi.fn().mockReturnValue(null),
+  GITHUB_PR_REFRESH_INTERVAL_MS: 10_000,
+  findPullRequestForBranch: (...args: unknown[]) => findPullRequestForBranchMock(...args),
+  pullRequestLifecycle: (...args: unknown[]) => pullRequestLifecycleMock(...args),
+  getPullRequestChecksState: (...args: unknown[]) => getPullRequestChecksStateMock(...args),
 }));
 
 vi.mock("@/state/fanouts-context", () => ({
@@ -131,7 +143,7 @@ vi.mock("@/state/kanban-context", () => ({
 }));
 
 vi.mock("@/state/github-context", () => ({
-  useGitHub: () => ({ authenticated: false }),
+  useGitHub: () => ({ authenticated: githubAuthenticated }),
 }));
 
 import { WorktreeTree } from "./WorktreeTree";
@@ -160,6 +172,10 @@ afterEach(() => {
   restoreFanoutTabMock.mockReset();
   restoreFanoutTabMock.mockResolvedValue(undefined);
   subscribeToWorktreeFilesMock.mockClear();
+  githubAuthenticated = false;
+  findPullRequestForBranchMock.mockReset().mockResolvedValue(null);
+  pullRequestLifecycleMock.mockReset().mockReturnValue(null);
+  getPullRequestChecksStateMock.mockReset().mockResolvedValue("none");
   worktreeFileListeners.clear();
   workspaceMock = {
     selectedProjectId: "p",
@@ -511,6 +527,20 @@ describe("WorktreeTree", () => {
     expect(await screen.findByText("Pushing")).toBeInTheDocument();
     await act(async () => push.resolve());
     expect(await screen.findByText("Pushed")).toBeInTheDocument();
+  });
+
+  it("shows the open PR's CI status beside its GitHub number", async () => {
+    githubAuthenticated = true;
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    const pr = { number: 42, baseRepo: null };
+    // Only child worktrees are looked up, so every lookup is the feature branch's.
+    findPullRequestForBranchMock.mockResolvedValue(pr);
+    pullRequestLifecycleMock.mockImplementation((value: unknown) => (value ? "open" : "none"));
+    getPullRequestChecksStateMock.mockResolvedValue("failure");
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    expect(await screen.findByLabelText("Pull request #42")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Checks failed")).toBeInTheDocument();
   });
 
   it("says a worktree is ready for a PR once one is drafted, until it is opened", async () => {

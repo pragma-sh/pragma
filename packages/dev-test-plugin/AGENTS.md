@@ -1,7 +1,7 @@
 # packages/dev-test-plugin — @pragma-sh/dev-test-plugin
 
 Lightweight dev/test Pragma plugin. Exercises the public `@pragma-sh/plugin`
-surface (sidebar tabs, a sidebar card, a Settings page, a plugin web view, host + SDK event hooks) and ships with
+surface (sidebar tabs, a sidebar card, a worktree section, a Settings page, a plugin web view, host + SDK event hooks) and ships with
 Vitest + jsdom coverage for those React hooks. It also served as the
 real-world test target for the `create-pragma-plugin` scaffolder CLI: it was
 generated non-interactively with
@@ -26,6 +26,11 @@ and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
   `agentStatus` event stream (`sdk.events.subscribe("agentStatus", …)`) and
   renders the latest reported agent/status; uses `useEvent("agent.report")`
   to count host-forwarded agent reports. Uses `useProject`.
+- **`uncommittedSection`** (`src/uncommitted-section.tsx`) — **worktree section**
+  declared with `defineWorktreeSection`. Its `useCount` hook counts each row's
+  staged + unstaged files with `useWorktreeChanges(worktree.path)` (a clean
+  worktree shows no chip), and the expanded body reads its row through
+  `useWorktree()` to list those paths.
 - **`reportWebView`** (`src/report-webview.tsx`) — **workspace web view tab**
   declared with `defineWebView`; `openReportWebView()` opens it with a typed
   payload and `dedupeKey`, and the view reads that payload via
@@ -103,7 +108,7 @@ bun run --filter @pragma-sh/dev-test-plugin lint
 ## Adding functionality
 
 To add another contribution, extend `src/index.tsx`'s `definePlugin` object
-(`ui.sidebarTabs`, `ui.sidebarCards`, `commands`, …), keep one component per
+(`ui.sidebarTabs`, `ui.sidebarCards`, `ui.worktreeSections`, `commands`, …), keep one component per
 file, render through the bridge hooks (not app internals), and add a
 `*.test.tsx` that fabricates the needed bridge via `createBridge`. For a new
 SDK-backed hook, add a matching generator helper in `src/test/bridge.ts`
