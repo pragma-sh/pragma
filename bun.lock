@@ -501,6 +501,18 @@
         "vitest": "^4.1.12",
       },
     },
+    "packages/omp-plugin": {
+      "name": "@pragma-sh/omp-plugin",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@pragma-sh/pi-plugin": "workspace:*",
+        "@pragma-sh/plugin": "workspace:*",
+        "@pragma-sh/sdk": "workspace:*",
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/opencode-plugin": {
       "name": "@pragma-sh/opencode-plugin",
       "version": "1.2.1",
@@ -1931,6 +1943,8 @@
     "@pragma-sh/junie-plugin": ["@pragma-sh/junie-plugin@workspace:packages/junie-plugin"],
 
     "@pragma-sh/kimi-plugin": ["@pragma-sh/kimi-plugin@workspace:packages/kimi-plugin"],
+
+    "@pragma-sh/omp-plugin": ["@pragma-sh/omp-plugin@workspace:packages/omp-plugin"],
 
     "@pragma-sh/opencode-plugin": ["@pragma-sh/opencode-plugin@workspace:packages/opencode-plugin"],
 

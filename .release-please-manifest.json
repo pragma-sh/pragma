@@ -31,6 +31,7 @@
   "packages/codex-plugin": "1.3.1",
   "packages/pi-plugin": "1.2.1",
   "packages/prime-agent-plugin": "1.2.1",
+  "packages/omp-plugin": "0.0.0",
   "packages/grok-plugin": "1.2.1",
   "packages/kimi-plugin": "1.2.1",
   "packages/junie-plugin": "1.2.1",

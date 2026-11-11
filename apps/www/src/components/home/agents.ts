@@ -29,5 +29,6 @@ export const AGENT_BRANDS: readonly AgentBrand[] = [
   },
   { id: "pi", name: "Pi", logo: "/agents/pi-badge.svg", tint: "#a1a1aa" },
   { id: "prime-agent", name: "Prime Agent", logo: "/agents/prime-butterfly.svg", tint: "#c4b5fd" },
+  { id: "omp", name: "Oh My Pi", logo: "/agents/omp-badge.svg", tint: "#9b4dff" },
   { id: "junie", name: "Junie", logo: "/agents/junie.svg", tint: "#48e054" },
 ];
