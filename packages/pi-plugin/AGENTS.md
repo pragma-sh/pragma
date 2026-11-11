@@ -11,8 +11,14 @@ catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pra
 - `src/pragma-plugin.ts` — `defineAgent` launcher and interjection watcher.
 - `src/pragma-plugin-factory.ts` — reusable branded launcher/model/watcher factory.
 
-Pi-derived products import the two factory subpaths rather than symlinking this package or
-re-exporting Pi's upstream API. Product packages own their agent id, command, branding,
+Pi-derived products import the factory subpaths rather than symlinking this package or
+re-exporting Pi's upstream API. `./reporter` (`PiLifecycleReporter`, structural
+`PiAgentEndEvent`) and `createSdkReporter` from `./extension-factory` serve forks whose
+event surface differs enough to need their own wiring (Oh My Pi); `createPiPragmaPlugin`
+also takes `parseModels` for another model listing and `watcher` overrides (submit keys,
+question answering) for a fork whose TUI differs. `PiLifecycleReporter.attention` /
+`resume` report a host's question through the same serialized queue and return to running
+once it settles. Product packages own their agent id, command, branding,
 feature exclusions, and any provider-specific usage-limit implementation.
 
 Pi-family interjections use Kitty-protocol Alt+Enter (`ESC [13;3u`), not carriage

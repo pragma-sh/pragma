@@ -91,7 +91,8 @@ function observeSession(ctx: ExtensionContext): PiSessionObservation {
   return { id, locator: file && existsSync(file) ? id : null };
 }
 
-function createSdkReporter(options: PiExtensionOptions, env: NodeJS.ProcessEnv): PiReporter {
+/** Best-effort `@pragma-sh/sdk` reporter for one Pi-derived agent; failures are swallowed. */
+export function createSdkReporter(options: PiExtensionOptions, env: NodeJS.ProcessEnv): PiReporter {
   const { agentId } = options;
   return {
     started: () => bestEffort(() => reportStarted({ agent: agentId, env }), options, env),
