@@ -96,7 +96,7 @@ const FAQ: readonly { question: string; answer: string }[] = [
   {
     question: "Which coding agents does it work with?",
     answer:
-      "Every agent Pragma runs: Claude Code, Codex, opencode, Cursor, GitHub Copilot CLI, Grok, Kimi Code, Junie, Pi, Prime Agent, and any agent you add with a plugin. Your custom agents and their icons show up on the phone exactly as they do on the desktop.",
+      "Every agent Pragma runs: Claude Code, Codex, opencode, Cursor, GitHub Copilot CLI, Grok, Kimi Code, Junie, Pi, Oh My Pi, Prime Agent, and any agent you add with a plugin. Your custom agents and their icons show up on the phone exactly as they do on the desktop.",
   },
   {
     question: "Do the agents run on my phone?",
