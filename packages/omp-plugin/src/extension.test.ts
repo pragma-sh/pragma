@@ -5,7 +5,7 @@ import type { PiReporter } from "@pragma-sh/pi-plugin/reporter";
 import type { OmpFormModules } from "./ask-form";
 import { createOmpExtension } from "./extension";
 import type { OmpAgentIdentity, OmpExtensionAPI, OmpExtensionContext } from "./omp-api";
-import { SubagentTracker } from "./subagents";
+import { createSubagentTracker } from "./subagents";
 
 type Handler = (event: unknown, ctx: OmpExtensionContext) => unknown;
 
@@ -41,7 +41,7 @@ function harness() {
     sessionName: async (name) => void events.push(`name:${name}`),
     sessionId: async (id) => void events.push(`id:${id}`),
   };
-  const tracker = new SubagentTracker();
+  const tracker = createSubagentTracker();
   const files = new Set<string>();
   const session = { id: "s-1", name: undefined as string | undefined };
   // Each `bind` is one omp factory binding: the main session or a subagent.

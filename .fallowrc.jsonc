@@ -122,7 +122,11 @@
   // `expo-updates` is wired through `app.json`'s `updates` + `runtimeVersion`
   // keys and loaded by the native runtime at launch (EAS Update); nothing in
   // source imports it.
+  // `@oh-my-pi/pi-tui` is resolved from omp's own install when its extension
+  // loader evaluates `packages/omp-plugin` (the build keeps `@oh-my-pi/*`
+  // external), so it is imported but deliberately never listed.
   "ignoreDependencies": [
+    "@oh-my-pi/pi-tui",
     "@expo/ngrok",
     "@google/design.md",
     "expo-dev-client",

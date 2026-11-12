@@ -56,29 +56,46 @@ export function parseOmpModels(output: string): AgentModelEntry[] {
   const rows = (parsed as { models?: unknown }).models;
   if (!Array.isArray(rows)) return [];
   return rows.flatMap((row: OmpModelRow) => {
-    if (row.kind !== undefined && row.kind !== "chat") return [];
-    const provider = typeof row.provider === "string" ? row.provider : undefined;
-    const modelId = typeof row.id === "string" ? row.id : undefined;
-    const selector =
-      typeof row.selector === "string"
-        ? row.selector
-        : provider && modelId
-          ? `${provider}/${modelId}`
-          : undefined;
-    if (!selector) return [];
-    const label = typeof row.name === "string" && row.name ? row.name : (modelId ?? selector);
-    const entry: AgentModelEntry = {
-      id: selector,
-      name: provider ? `${label} (${provider})` : label,
-    };
-    const levels = Array.isArray(row.thinking)
-      ? row.thinking.filter((level): level is string => typeof level === "string")
-      : [];
-    if (row.reasoning === true && levels.length > 0) {
-      entry.reasoning = levels.map((id) => ({ id, name: OMP_REASONING_NAMES[id] ?? id }));
-    }
-    return [entry];
+    const entry = toModelEntry(row);
+    return entry ? [entry] : [];
   });
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+/** omp's exact `--model` selector for a row, or its `provider/id` fallback. */
+function modelSelector(row: OmpModelRow): string | undefined {
+  const provider = optionalString(row.provider);
+  const modelId = optionalString(row.id);
+  return (
+    optionalString(row.selector) ?? (provider && modelId ? `${provider}/${modelId}` : undefined)
+  );
+}
+
+/** The reasoning levels a row advertises, or none when it does not reason. */
+function reasoningLevels(row: OmpModelRow): string[] {
+  if (row.reasoning !== true || !Array.isArray(row.thinking)) return [];
+  return row.thinking.filter((level): level is string => typeof level === "string");
+}
+
+/** Converts one chat-model row to a launcher entry; skips other kinds. */
+function toModelEntry(row: OmpModelRow): AgentModelEntry | undefined {
+  if (row.kind !== undefined && row.kind !== "chat") return undefined;
+  const selector = modelSelector(row);
+  if (!selector) return undefined;
+  const provider = optionalString(row.provider);
+  const label = optionalString(row.name) ?? optionalString(row.id) ?? selector;
+  const entry: AgentModelEntry = {
+    id: selector,
+    name: provider ? `${label} (${provider})` : label,
+  };
+  const levels = reasoningLevels(row);
+  if (levels.length > 0) {
+    entry.reasoning = levels.map((id) => ({ id, name: OMP_REASONING_NAMES[id] ?? id }));
+  }
+  return entry;
 }
 
 /** Pragma launcher and interjection watcher for Oh My Pi (`omp`). */
