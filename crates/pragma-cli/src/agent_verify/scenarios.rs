@@ -8,6 +8,10 @@ use super::engine::ScenarioCtx;
 use super::events::VerifyEvent;
 use super::prompts::Prompts;
 
+/// Joins a multi-question reply on the wire. Never `" | "`: a label or free-text
+/// answer can contain it, so every client moved to the unit separator.
+const MULTI_ANSWER_SEPARATOR: char = '\u{1f}';
+
 /// Scenario execution result.
 pub enum Outcome {
     Passed,
@@ -329,17 +333,19 @@ fn question_multi(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, S
             ("Choose Circle or Square?", &["Circle", "Square"]),
         ],
     )?;
-    // Mobile question wizard submits every answer on one ` | `-separated line.
-    // Watcher applies each part to corresponding native TUI prompt in order.
-    let combined = "Red | Circle";
+    // Mobile question wizard submits every answer on one line joined by the
+    // ASCII unit separator (`ANSWER_SEPARATOR` in watcher-kit, mobile's
+    // AttentionDock, and the Claude Code hook). Watcher applies each part to the
+    // corresponding native TUI prompt in order.
+    let combined = format!("Red{MULTI_ANSWER_SEPARATOR}Circle");
     ctx.api.answer(
         &attention.agent,
         session.worktree_id(),
         session.tab_id(),
         &attention.request_id,
-        Some(combined),
+        Some(&combined),
     )?;
-    session.await_answer_echo(&attention.request_id, Some(combined))?;
+    session.await_answer_echo(&attention.request_id, Some(&combined))?;
     session.await_assistant_message_containing("Red")?;
     session.await_assistant_message_containing("Circle")?;
     require_done(session.await_settled()?)?;

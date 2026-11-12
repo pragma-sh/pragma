@@ -214,6 +214,10 @@
       "release-type": "node",
       "component": "prime-agent-plugin"
     },
+    "packages/omp-plugin": {
+      "release-type": "node",
+      "component": "omp-plugin"
+    },
     "packages/grok-plugin": {
       "release-type": "node",
       "component": "grok-plugin",

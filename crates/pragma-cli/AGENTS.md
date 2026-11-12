@@ -114,7 +114,10 @@ retry transient failures briefly; a stale run id is final and never retried.
 
 `agent verify` discovers the local gateway, launches fresh real-agent sessions from the
 plugin catalog, drives question/decision/abort scenarios over HTTP, and strictly parses
-the same NDJSON event stream mobile consumes. Events are scoped by the RUNTIME agent id
+the same NDJSON event stream mobile consumes (`deny_unknown_fields`: when the gateway adds
+a field to an event, declare it on `VerifyEvent` in the same change, or every such event
+becomes a schema error — `agentRunId`/`harnessSessionId` once made every resume-capable
+agent fail with "no running status"). Events are scoped by the RUNTIME agent id
 (final segment of the catalog id), exactly like mobile's stream filter — a plugin
 reporting under the qualified catalog id fails verification because those consumers
 would never see it. It runs all scenarios by default, retries

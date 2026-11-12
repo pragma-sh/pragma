@@ -26,6 +26,16 @@ pub enum VerifyEvent {
         agent: String,
         status: Option<AgentStatus>,
         session_name: Option<String>,
+        /// Durable-session identity the gateway forwards (`harnessSessionId`,
+        /// `agentRunId`, `clearHarnessSessionId`). Unused by scenarios, but
+        /// declared so `deny_unknown_fields` does not reject every status event
+        /// of a resume-capable launch.
+        #[serde(default, rename = "harnessSessionId")]
+        _harness_session_id: Option<String>,
+        #[serde(default, rename = "agentRunId")]
+        _agent_run_id: Option<String>,
+        #[serde(default, rename = "clearHarnessSessionId")]
+        _clear_harness_session_id: Option<bool>,
         attention_kind: Option<AgentAttentionKind>,
         command: Option<String>,
         question: Option<String>,
@@ -302,6 +312,30 @@ mod tests {
             .expect("agent event");
         assert_eq!(found.cursor, 1);
         assert_eq!(ledger.ready_count(), 1);
+    }
+
+    #[test]
+    fn accepts_durable_session_fields_from_resumable_launches() {
+        // The exact shape the gateway emits for a launch wrapped in
+        // `pragma-cli agent run` (see `pragma-gateway` `http/response.rs`).
+        let ledger = Ledger::collect(Box::new(Cursor::new(
+            br#"{"type":"agent","worktreeId":"w","tabId":"t","agent":"a","status":"running","sessionName":null,"harnessSessionId":"h-1","agentRunId":"run-1","clearHarnessSessionId":null,"attentionKind":null,"command":null,"question":null,"options":null,"questions":null,"requestId":null}
+"#
+            .to_vec(),
+        )));
+        let found = ledger
+            .wait_for(0, Duration::from_secs(1), |event| {
+                matches!(
+                    event,
+                    VerifyEvent::Agent {
+                        status: Some(AgentStatus::Running),
+                        ..
+                    }
+                )
+            })
+            .expect("running event");
+        assert_eq!(found.cursor, 1);
+        assert_eq!(ledger.schema_errors(), Vec::<String>::new());
     }
 
     #[test]

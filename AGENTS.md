@@ -142,6 +142,7 @@ than no guide.
 │   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
 │   ├── prime-agent-plugin/      # Prime Agent integration → see packages/prime-agent-plugin/AGENTS.md
+│   ├── omp-plugin/              # Oh My Pi (omp) integration → see packages/omp-plugin/AGENTS.md
 │   ├── grok-plugin/             # xAI Grok Build CLI integration → see packages/grok-plugin/AGENTS.md
 │   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
 │   ├── junie-plugin/            # JetBrains Junie CLI integration → see packages/junie-plugin/AGENTS.md
@@ -371,13 +372,13 @@ identity in the client DB, localStorage, or a plugin.
   prelaunch args. A resume restores the conversation, not the original turn: prompts,
   slash commands, and `!!` commands are not replayed. A missing callback or a resume error
   leaves a `failed` record and surfaces an error — it never starts a fresh conversation.
-- **Official coverage is nine plugins, not every agent.** OpenCode, Claude Code, Cursor,
-  Codex, Pi, Grok, Kimi, Junie, and GitHub Copilot CLI declare resume; Prime Agent
+- **Official coverage is ten plugins, not every agent.** OpenCode, Claude Code, Cursor,
+  Codex, Pi, Oh My Pi, Grok, Kimi, Junie, and GitHub Copilot CLI declare resume; Prime Agent
   deliberately does not (Pragma launches it with `--no-session`, so its in-memory session
   has no file `--resume` could open). Limits that must not be overstated: OpenCode learns
   the active conversation only from user-initiated activity, so a TUI switch with no
   prompt cannot be observed; Pi reports its id only after the session file materializes
-  after the first assistant message.
+  after the first assistant message, and Oh My Pi only after its first completed turn.
 - **Updates preserve the workspace.** A successful restart-update quit closes no tabs and
   kills no sessions. A relaunched desktop reattaches to PTYs that survived on the host;
   when the server binary itself restarts, plain shells are gone and the host runs a
