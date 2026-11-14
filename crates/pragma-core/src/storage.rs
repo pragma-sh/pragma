@@ -264,7 +264,7 @@ fn ignored_folders(root: &Path) -> Vec<String> {
         .output()
         .ok()
         .filter(|output| output.status.success())
-        .map(|output| {
+        .map_or_default(|output| {
             output
                 .stdout
                 .split(|byte| *byte == 0)
@@ -277,7 +277,6 @@ fn ignored_folders(root: &Path) -> Vec<String> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Whether `relative` is, or lies under, a folder the host never deletes.

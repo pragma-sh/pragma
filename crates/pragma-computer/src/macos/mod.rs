@@ -362,8 +362,7 @@ fn display_of(displays: &[ComputerDisplay], x: f64, y: f64) -> Option<String> {
 
 fn display_rects() -> Vec<ComputerRect> {
     capture::displays()
-        .map(|displays| displays.into_iter().map(|display| display.frame).collect())
-        .unwrap_or_default()
+        .map_or_default(|displays| displays.into_iter().map(|display| display.frame).collect())
 }
 
 /// The AX window element a request targets: the one matching `window_id`'s

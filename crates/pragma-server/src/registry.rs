@@ -1216,8 +1216,7 @@ impl Registry {
         let reported = self
             .agent_statuses
             .lock()
-            .map(|statuses| statuses.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
+            .map_or_default(|statuses| statuses.keys().cloned().collect::<Vec<_>>());
         let Ok(workspace) = self.workspace.lock() else {
             return Vec::new();
         };

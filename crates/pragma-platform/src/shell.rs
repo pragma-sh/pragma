@@ -379,18 +379,21 @@ fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = path.metadata() else {
         return false;
     };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    metadata.is_file() && has_execute_permission(&metadata)
+}
+
+/// Whether any execute bit is set. Unix gates execution on the mode bits.
+#[cfg(unix)]
+fn has_execute_permission(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+/// Windows has no execute bit: any regular file on PATH (filtered by PATHEXT
+/// upstream) can be started.
+#[cfg(not(unix))]
+fn has_execute_permission(_metadata: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// Resolves a program on the provided PATH, including the platform shell fallback.

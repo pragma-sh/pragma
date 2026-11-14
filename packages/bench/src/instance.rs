@@ -338,16 +338,13 @@ impl DevInstance {
     pub fn close_stale_payload_tabs(&self) -> BenchResult<usize> {
         let title = CONSTANTS.bench.tab_title.as_str();
         let tabs = self.cli_json(&["tab", "list", "--worktree", &self.worktree])?;
-        let stale: Vec<String> = tabs
-            .as_array()
-            .map(|rows| {
-                rows.iter()
-                    .filter(|tab| tab.get("title").and_then(Value::as_str) == Some(title))
-                    .filter_map(|tab| tab.get("id").and_then(Value::as_str))
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let stale: Vec<String> = tabs.as_array().map_or_default(|rows| {
+            rows.iter()
+                .filter(|tab| tab.get("title").and_then(Value::as_str) == Some(title))
+                .filter_map(|tab| tab.get("id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        });
         for tab in &stale {
             self.close_tab(tab);
         }

@@ -238,8 +238,7 @@ impl PushWorker {
     fn push_tokens(&self) -> Vec<String> {
         self.devices
             .lock()
-            .map(|devices| devices.push_tokens())
-            .unwrap_or_default()
+            .map_or_default(|devices| devices.push_tokens())
     }
 
     fn forget(&self, tokens: &[String]) {

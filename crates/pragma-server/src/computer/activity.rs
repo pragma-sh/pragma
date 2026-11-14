@@ -125,7 +125,6 @@ impl ActivityBus {
     pub fn history(&self) -> Vec<ComputerActivityEvent> {
         self.inner
             .lock()
-            .map(|inner| inner.history.iter().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|inner| inner.history.iter().cloned().collect())
     }
 }

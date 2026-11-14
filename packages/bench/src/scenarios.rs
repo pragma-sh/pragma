@@ -179,14 +179,13 @@ pub fn clear_modals(driver: &Driver) -> BenchResult<()> {
     let remaining = state
         .get("remaining")
         .and_then(Value::as_array)
-        .map(|dialogs| {
+        .map_or_default(|dialogs| {
             dialogs
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>()
                 .join(" | ")
-        })
-        .unwrap_or_default();
+        });
     if remaining.is_empty() {
         return Ok(());
     }
@@ -267,8 +266,9 @@ pub fn run(
             let samples = progress
                 .get("samples")
                 .and_then(Value::as_array)
-                .map(|values| values.iter().filter_map(Value::as_f64).collect::<Vec<_>>())
-                .unwrap_or_default();
+                .map_or_default(|values| {
+                    values.iter().filter_map(Value::as_f64).collect::<Vec<_>>()
+                });
             let dropped =
                 usize::try_from(progress.get("dropped").and_then(Value::as_u64).unwrap_or(0))
                     .unwrap_or(0);

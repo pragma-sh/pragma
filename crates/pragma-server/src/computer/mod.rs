@@ -284,8 +284,7 @@ impl ComputerService {
         let live: HashSet<String> = self
             .sessions
             .lock()
-            .map(|s| s.all().into_iter().map(|session| session.id).collect())
-            .unwrap_or_default();
+            .map_or_default(|s| s.all().into_iter().map(|session| session.id).collect());
         if self.cursors.retain(|id| live.contains(id))
             || self.stopped.load(Ordering::SeqCst)
             || self.busy.load(Ordering::SeqCst) > 0
@@ -350,8 +349,7 @@ impl ComputerService {
         let idle = self
             .sessions
             .lock()
-            .map(|s| s.idle(now, idle_ms))
-            .unwrap_or_default();
+            .map_or_default(|s| s.idle(now, idle_ms));
         for id in idle {
             self.end_session(&id, "idle");
         }
@@ -360,11 +358,7 @@ impl ComputerService {
     /// Ends every session a tab owns: the tab closed, or its agent finished.
     pub fn end_tab(&self, tab_id: &str) {
         self.tasks.cancel_tab(tab_id);
-        let ids = self
-            .sessions
-            .lock()
-            .map(|s| s.of_tab(tab_id))
-            .unwrap_or_default();
+        let ids = self.sessions.lock().map_or_default(|s| s.of_tab(tab_id));
         for id in ids {
             self.end_session(&id, "owner finished");
         }
@@ -395,7 +389,7 @@ impl ComputerService {
         ComputerActivitySnapshot {
             enabled: is_enabled(&self.settings()),
             desktop_connected: host.desktop_connected(),
-            sessions: self.sessions.lock().map(|s| s.all()).unwrap_or_default(),
+            sessions: self.sessions.lock().map_or_default(|s| s.all()),
             approvals: self.policy.pending(),
             helper: self.helper.status(),
             stopped: self.stopped.load(Ordering::SeqCst),
@@ -850,11 +844,7 @@ impl ComputerService {
         self.stopped.store(true, Ordering::SeqCst);
         self.helper.set_stopped(true);
         self.policy.deny_all();
-        let ended = self
-            .sessions
-            .lock()
-            .map(|mut s| s.end_all())
-            .unwrap_or_default();
+        let ended = self.sessions.lock().map_or_default(|mut s| s.end_all());
         if let Ok(mut grants) = self.session_grants.lock() {
             grants.clear();
         }
@@ -873,8 +863,7 @@ impl ComputerService {
         let changed = self
             .sessions
             .lock()
-            .map(|mut s| s.set_paused(session, reason))
-            .unwrap_or_default();
+            .map_or_default(|mut s| s.set_paused(session, reason));
         if session.is_none() && reason.is_some() && reason != Some(ComputerPauseReason::Stopped) {
             for task in self.tasks.pause(None) {
                 self.task_event(&task);
@@ -1223,7 +1212,7 @@ impl ComputerService {
         if self.busy.load(Ordering::SeqCst) > 0 || self.stopped.load(Ordering::SeqCst) {
             return;
         }
-        let sessions = self.sessions.lock().map(|s| s.all()).unwrap_or_default();
+        let sessions = self.sessions.lock().map_or_default(|s| s.all());
         for session in sessions.iter().filter(|s| !s.paused) {
             for lease in &session.leases {
                 let activity: Option<UserActivity> = self

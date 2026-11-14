@@ -598,8 +598,7 @@ impl FanoutStore {
     ) {
         let members: Vec<FanoutMember> = self
             .get_by_id(fanout_id)
-            .map(|fanout| fanout.members)
-            .unwrap_or_default();
+            .map_or_default(|fanout| fanout.members);
         for batch in members.chunks(jobs) {
             for member in batch {
                 self.provision_member(host, fanout_id, member, parent, base_commit, commands);
@@ -654,8 +653,7 @@ impl FanoutStore {
         };
         let stored = self
             .get_by_id(fanout_id)
-            .map(|fanout| fanout.prompt)
-            .unwrap_or_default();
+            .map_or_default(|fanout| fanout.prompt);
         let prompt = match prelaunch_prompt(host, &worktree, &stored, commands) {
             Ok(prompt) => prompt,
             Err(error) => {

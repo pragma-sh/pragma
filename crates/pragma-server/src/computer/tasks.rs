@@ -125,8 +125,7 @@ impl Tasks {
     pub fn all(&self) -> Vec<ComputerTask> {
         self.inner
             .lock()
-            .map(|entries| entries.values().map(|e| e.task.clone()).collect())
-            .unwrap_or_default()
+            .map_or_default(|entries| entries.values().map(|e| e.task.clone()).collect())
     }
     fn persist(&self, entries: &HashMap<String, Entry>) -> Result<(), ComputerFailure> {
         let result = (|| -> std::io::Result<()> {
