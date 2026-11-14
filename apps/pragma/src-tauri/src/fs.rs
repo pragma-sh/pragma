@@ -250,7 +250,7 @@ pub async fn palette_search(
         .list_worktrees(&project_id)?
         .into_iter()
         .filter(|worktree| !worktree.hidden)
-        .filter(|worktree| worktree_id.as_ref().map_or(true, |id| id == &worktree.id))
+        .filter(|worktree| worktree_id.as_ref().is_none_or(|id| id == &worktree.id))
         .collect::<Vec<_>>();
     let route = worktrees
         .first()

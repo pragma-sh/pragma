@@ -5,7 +5,7 @@ description = "Pragma desktop app"
 authors = ["Pragma"]
 edition = "2021"
 license = "AGPL-3.0-only"
-rust-version = "1.77.2"
+rust-version = "1.96.0"
 publish = false
 
 [lib]

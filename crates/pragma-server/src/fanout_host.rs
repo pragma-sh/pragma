@@ -113,24 +113,28 @@ impl FanoutHost for Registry {
                 CatalogAgentView {
                     runtime_agent_id: runtime_agent_id(agent, &id),
                     id,
-                    models: agent["models"].as_array().map_or_default(|models| {
-                        models
-                            .iter()
-                            .map(|model| CatalogModelView {
-                                id: model["id"].as_str().unwrap_or_default().to_string(),
-                                reasoning_ids: model["reasoning"].as_array().map_or_default(
-                                    |levels| {
-                                        levels
-                                            .iter()
-                                            .filter_map(|level| {
-                                                level["id"].as_str().map(str::to_string)
-                                            })
-                                            .collect()
-                                    },
-                                ),
-                            })
-                            .collect()
-                    }),
+                    models: agent["models"]
+                        .as_array()
+                        .map(|models| {
+                            models
+                                .iter()
+                                .map(|model| CatalogModelView {
+                                    id: model["id"].as_str().unwrap_or_default().to_string(),
+                                    reasoning_ids: model["reasoning"]
+                                        .as_array()
+                                        .map(|levels| {
+                                            levels
+                                                .iter()
+                                                .filter_map(|level| {
+                                                    level["id"].as_str().map(str::to_string)
+                                                })
+                                                .collect()
+                                        })
+                                        .unwrap_or_default(),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 }
             })
             .collect())

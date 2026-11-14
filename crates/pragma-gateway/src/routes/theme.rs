@@ -122,7 +122,7 @@ fn mode_overrides(file: &Value, mode: &str) -> ThemeOverrides {
     file.get("colors")
         .and_then(|colors| colors.get(mode))
         .and_then(Value::as_object)
-        .map_or_default(|block| {
+        .map(|block| {
             block
                 .iter()
                 .filter_map(|(token, value)| {
@@ -132,6 +132,7 @@ fn mode_overrides(file: &Value, mode: &str) -> ThemeOverrides {
                 })
                 .collect()
         })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

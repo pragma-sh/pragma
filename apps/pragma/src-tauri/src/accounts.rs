@@ -23,7 +23,7 @@ pub fn accounts_rpc(
     let Some(project_id) = project_id else {
         return hosts.local().rpc(ProtocolRpcMethod::Accounts, payload);
     };
-    if payload.get("projectRoot").map_or(true, Value::is_null) {
+    if payload.get("projectRoot").is_none_or(Value::is_null) {
         payload["projectRoot"] = Value::String(db.project(&project_id)?.path);
     }
     hosts

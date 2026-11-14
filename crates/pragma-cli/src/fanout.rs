@@ -431,7 +431,8 @@ fn confirm(fanout: &Value, member_id: &str) -> Result<(), CliError> {
         winner["catalogAgentId"].as_str().unwrap_or_default(),
         winner["modelId"]
             .as_str()
-            .map_or_default(|model| format!(" · {model}")),
+            .map(|model| format!(" · {model}"))
+            .unwrap_or_default(),
         fanout["title"].as_str().unwrap_or_default()
     );
     println!(

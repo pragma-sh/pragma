@@ -272,7 +272,8 @@ fn execute_scenario(
     let launched_tabs = context
         .launched_tabs
         .lock()
-        .map_or_default(|tabs| tabs.clone());
+        .map(|tabs| tabs.clone())
+        .unwrap_or_default();
     let evidence = if launched_tabs.is_empty() {
         context.ledger.evidence_since(first_cursor, 8)
     } else {

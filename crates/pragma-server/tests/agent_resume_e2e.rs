@@ -420,10 +420,12 @@ impl Server {
     }
 
     fn log_tail(&self) -> String {
-        fs::read_to_string(&self.log).map_or_default(|contents| {
-            let lines: Vec<&str> = contents.lines().rev().take(40).collect();
-            lines.into_iter().rev().collect::<Vec<_>>().join("\n")
-        })
+        fs::read_to_string(&self.log)
+            .map(|contents| {
+                let lines: Vec<&str> = contents.lines().rev().take(40).collect();
+                lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+            })
+            .unwrap_or_default()
     }
 }
 

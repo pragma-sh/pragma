@@ -145,12 +145,13 @@ fn commits_touching(root: &Path, range: &str, path: &str) -> Vec<String> {
             path,
         ],
     )
-    .map_or_default(|log| {
+    .map(|log| {
         String::from_utf8_lossy(&log)
             .lines()
             .map(str::to_string)
             .collect()
     })
+    .unwrap_or_default()
 }
 
 /// A file's text, or `None` when it is missing, binary, or not UTF-8.

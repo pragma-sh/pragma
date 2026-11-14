@@ -515,7 +515,11 @@ Shared rules:
 - **Strictness is on, everywhere.** TS runs in `strict` mode with
   `noUncheckedIndexedAccess`, `noUnusedLocals/Parameters`, etc. Rust runs clippy
   `all` + `pedantic` as `-D warnings` and `unsafe_code = "deny"`. Treat warnings as
-  errors. Don't silence a lint without a comment explaining why.
+  errors. Don't silence a lint without a comment explaining why. Code must compile on the
+  pinned toolchain (1.96.0 in `.rwx/ci.yml`, `ci.yml`'s matrix, `release.yml`) while
+  passing clippy on the latest stable, so the root `clippy.toml` sets `msrv` to that pin —
+  otherwise a new stable clippy suggests APIs the pin lacks (`map_or_default`, 1.100).
+  Bump `msrv`, `src-tauri`'s `rust-version`, and the CI pins together.
 - **Errors are values, surfaced explicitly.** TS: prefer returning/throwing typed
   errors and narrowing with `instanceof`; never swallow. Rust: return `Result`, use
   `?`; reserve `expect`/`panic!` for genuinely-unrecoverable startup invariants.

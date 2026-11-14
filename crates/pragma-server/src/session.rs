@@ -1392,12 +1392,15 @@ fn path_with_cli_dir(cli_path: &Path) -> String {
 
 fn path_with_cli_dir_from(cli_path: &Path, existing: Option<std::ffi::OsString>) -> String {
     let Some(cli_dir) = cli_path.parent() else {
-        return existing.map_or_default(|path| path.to_string_lossy().into_owned());
+        return existing
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
     };
     let mut paths = vec![cli_dir.to_path_buf()];
     let fallback = existing
         .as_ref()
-        .map_or_default(|path| path.to_string_lossy().into_owned());
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if let Some(existing) = existing {
         paths.extend(std::env::split_paths(&existing).filter(|entry| entry != cli_dir));
     }

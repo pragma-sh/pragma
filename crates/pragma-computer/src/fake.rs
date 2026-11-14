@@ -404,7 +404,10 @@ impl ComputerBackend for FakeBackend {
 
     fn key(&mut self, ctx: &Context, request: &ComputerKeyRequest) -> ComputerResult<Performed> {
         ctx.stop.check()?;
-        let target = request.pid.map_or_default(|pid| format!(" @{pid}"));
+        let target = request
+            .pid
+            .map(|pid| format!(" @{pid}"))
+            .unwrap_or_default();
         self.record(format!("key {}{target}", request.chords.join(" ")));
         Ok(Performed {
             method: ComputerMethod::Keys,

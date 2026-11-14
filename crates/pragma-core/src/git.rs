@@ -930,7 +930,8 @@ fn load_diff_sides(
 /// Reads a worktree file as lossy UTF-8, or empty when missing/unreadable.
 fn read_worktree_text(root: &Path, path: &str) -> String {
     std::fs::read(root.join(path))
-        .map_or_default(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default()
 }
 
 /// Loads old/new text for one changed file on the given diff side.

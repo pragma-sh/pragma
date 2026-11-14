@@ -97,13 +97,17 @@ impl Policy {
 
     /// Pending approvals, oldest first, for the activity snapshot.
     pub fn pending(&self) -> Vec<ComputerApproval> {
-        let mut approvals: Vec<ComputerApproval> = self.pending.lock().map_or_default(|pending| {
-            pending
-                .values()
-                .filter(|entry| entry.decision.is_none())
-                .map(|entry| entry.approval.clone())
-                .collect()
-        });
+        let mut approvals: Vec<ComputerApproval> = self
+            .pending
+            .lock()
+            .map(|pending| {
+                pending
+                    .values()
+                    .filter(|entry| entry.decision.is_none())
+                    .map(|entry| entry.approval.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         approvals.sort_by_key(|approval| approval.requested_at);
         approvals
     }

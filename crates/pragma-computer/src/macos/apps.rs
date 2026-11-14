@@ -38,7 +38,8 @@ pub fn running() -> Vec<Running> {
                 .map(|path| path.to_string());
             let name = handle
                 .localizedName()
-                .map_or_default(|name| name.to_string());
+                .map(|name| name.to_string())
+                .unwrap_or_default();
             Running {
                 app: ComputerApp {
                     id: app_id(bundle_id.as_deref(), path.as_deref(), &name),

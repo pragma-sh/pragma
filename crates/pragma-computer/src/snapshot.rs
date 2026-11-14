@@ -97,7 +97,8 @@ pub fn label_of(node: &RawNode) -> String {
     .flatten()
     .map(str::trim)
     .find(|text| !text.is_empty())
-    .map_or_default(truncate_label)
+    .map(truncate_label)
+    .unwrap_or_default()
 }
 
 /// Limits a walk honours.

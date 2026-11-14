@@ -168,7 +168,7 @@ fn publish_snapshot(app: &AppHandle, only_host: Option<&str>) -> AppResult<()> {
 /// True when a snapshot for `host_id` is wanted: every host for a full publish,
 /// only the named one for the prepare-path barrier.
 fn snapshot_wanted(only_host: Option<&str>, host_id: &str) -> bool {
-    only_host.map_or(true, |target| target == host_id)
+    only_host.is_none_or(|target| target == host_id)
 }
 
 /// Adopts host-created fanout worktrees and their live agent tabs into the
