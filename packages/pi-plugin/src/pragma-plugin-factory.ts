@@ -17,7 +17,7 @@ import {
   type PluginContext,
   type PluginDefinition,
 } from "@pragma-sh/plugin/catalog";
-import { createTuiWatcher } from "@pragma-sh/watcher-kit";
+import { createTuiWatcher, type TuiWatcherOptions } from "@pragma-sh/watcher-kit";
 
 const KITTY_ENTER = "\x1b[13u";
 const KITTY_ALT_ENTER = "\x1b[13;3u";
@@ -178,6 +178,19 @@ export interface PiPragmaPluginOptions {
      * session has no file a resume could open.
      */
     resumeFlag?: string;
+    /**
+     * Parses `modelListCommand` output into launcher entries. Defaults to
+     * Pi's six-column table (`parsePiModels`); a fork with another listing
+     * format (Oh My Pi's `omp models --json`) passes its own.
+     */
+    parseModels?: (output: string) => AgentModelEntry[];
+    /**
+     * Overrides for the shared TUI watcher. Defaults: no decision handling and
+     * Pi's Kitty Alt+Enter interjection submit, which queues a follow-up while
+     * a response streams. A fork whose TUI submits or answers questions
+     * differently (Oh My Pi) overrides only what differs.
+     */
+    watcher?: Partial<Omit<TuiWatcherOptions, "agent">>;
   };
   /** Account providers the CLI signs in to (see `defineAccounts`). */
   accounts?: AccountProviderDefinition[];
@@ -193,7 +206,9 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
     // Pi queues a mid-turn follow-up with Alt+Enter. Plain Enter inserts a
     // newline while a response is streaming.
     interjectSubmitKeys: KITTY_ALT_ENTER,
+    ...agent.watcher,
   });
+  const parseModels = agent.parseModels ?? parsePiModels;
 
   return definePlugin({
     name: options.plugin.name,
@@ -259,7 +274,7 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
         prefillDelayMs: 2000,
         prefillMode: "plain",
         prefillSubmit: KITTY_ENTER,
-        models: async (ctx) => parsePiModels(await execFirst(ctx, agent.modelListCommand)),
+        models: async (ctx) => parseModels(await execFirst(ctx, agent.modelListCommand)),
         permissionModes: PI_PERMISSION_MODES,
         slashCommands: slashCommandProvider(
           PI_BUILTIN_SLASH_COMMANDS,

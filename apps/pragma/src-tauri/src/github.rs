@@ -42,7 +42,7 @@ const TOKEN_FILE_NAME: &str = "github-token";
 /// User-Agent sent on every GitHub HTTP request (GitHub requires one).
 const USER_AGENT: &str = "Pragma";
 /// Cap on how long the device-flow poll loop runs before giving up.
-const DEVICE_FLOW_TIMEOUT: Duration = Duration::from_secs(900);
+const DEVICE_FLOW_TIMEOUT: Duration = Duration::from_mins(15);
 
 // ---------------------------------------------------------------------------
 // Token file storage

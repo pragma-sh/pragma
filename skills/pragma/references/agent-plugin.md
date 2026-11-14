@@ -127,10 +127,11 @@ Rules:
   input replay. A failed resume is a recorded, retryable failure — never fall back to a
   fresh conversation.
 
-Official coverage is nine of the ten shipped integrations. OpenCode learns the active
+Official coverage is ten of the eleven shipped integrations. OpenCode learns the active
 conversation only from user-initiated activity (a prompt or slash command), so a TUI switch
 that never prompts is unobservable and restores the last active conversation. Pi has no id
-until its session file materializes after the first assistant message. Prime Agent is
+until its session file materializes after the first assistant message; Oh My Pi likewise
+until its first completed turn. Prime Agent is
 deliberately unsupported: Pragma launches it with `--no-session`, whose in-memory session
 has no file a resume could open.
 

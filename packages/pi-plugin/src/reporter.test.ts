@@ -182,3 +182,18 @@ describe("PiLifecycleReporter session identity", () => {
     expect(events).toEqual(["sessionName:Native name", "sessionName:Prompt line"]);
   });
 });
+
+describe("PiLifecycleReporter attention", () => {
+  it("reports attention and re-asserts running only inside an active turn", async () => {
+    const { events, lifecycle } = harness();
+    await lifecycle.attention(async () => void events.push("attention"));
+    await lifecycle.resume();
+    expect(events).toEqual([]);
+
+    await lifecycle.start();
+    await lifecycle.attention(async () => void events.push("attention"));
+    await lifecycle.resume();
+    await lifecycle.end(end());
+    expect(events).toEqual(["started", "attention", "started", "stopped"]);
+  });
+});

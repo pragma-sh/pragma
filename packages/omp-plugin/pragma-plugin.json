@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Oh My Pi",
+  "description": "Launch Oh My Pi (omp) in Pragma with live status, sub-agent activity, session naming, and interjections.",
+  "longDescription": "Launch Oh My Pi from the Pragma launcher with live status, sub-agent activity, session naming, resume, and interjections. omp sessions report into the same agent board as every other integration, and mid-run messages are delivered straight into the session.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/omp-plugin/assets/omp-badge.svg",
+      "alt": "Oh My Pi logo"
+    }
+  ],
+  "install": {
+    "command": "omp",
+    "args": ["plugin", "install", "."]
+  },
+  "agentBinary": "omp"
+}

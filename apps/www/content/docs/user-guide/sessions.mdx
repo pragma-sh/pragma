@@ -60,22 +60,23 @@ Ordinary reattachment to sessions that survived a desktop relaunch does not open
 
 ## Support matrix
 
-Nine of the ten shipped integrations declare a resume callback. Prime Agent intentionally
+Ten of the eleven shipped integrations declare a resume callback. Prime Agent intentionally
 does not: Pragma launches it with `--no-session`, so its session lives in memory and there
 is no saved file a `--resume` could open.
 
-| Integration            | Resume | Conversation id reported                                                          | Known limit                                                                                                                             |
-| ---------------------- | ------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **OpenCode**           | Yes    | From user-initiated activity: a submitted prompt or slash command                 | A TUI session switch with no following prompt is not observable; the last active conversation is restored.                              |
-| **Claude Code**        | Yes    | `SessionStart` / `UserPromptSubmit` when the conversation changes                 | —                                                                                                                                       |
-| **Cursor**             | Yes    | `sessionStart` / `beforeSubmitPrompt`                                             | —                                                                                                                                       |
-| **Codex**              | Yes    | `SessionStart` / `UserPromptSubmit` when the thread changes                       | —                                                                                                                                       |
-| **Pi**                 | Yes    | Session start (resume/fork) or the first assistant message; re-asserted each turn | A brand-new session has no id until its file materializes after the first assistant message, so an earlier crash has nothing to resume. |
-| **Grok**               | Yes    | `SessionStart` and the first prompt that pins a session                           | —                                                                                                                                       |
-| **Kimi**               | Yes    | `SessionStart` / `UserPromptSubmit` when the session changes                      | —                                                                                                                                       |
-| **Junie**              | Yes    | `SessionStart` / `UserPromptSubmit`                                               | —                                                                                                                                       |
-| **GitHub Copilot CLI** | Yes    | `sessionStart` / `userPromptSubmitted`                                            | —                                                                                                                                       |
-| **Prime Agent**        | No     | Never — Pragma's `--no-session` launch is in-memory                               | Not resumable by design; the tab always starts fresh.                                                                                   |
+| Integration            | Resume | Conversation id reported                                                            | Known limit                                                                                                                             |
+| ---------------------- | ------ | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenCode**           | Yes    | From user-initiated activity: a submitted prompt or slash command                   | A TUI session switch with no following prompt is not observable; the last active conversation is restored.                              |
+| **Claude Code**        | Yes    | `SessionStart` / `UserPromptSubmit` when the conversation changes                   | —                                                                                                                                       |
+| **Cursor**             | Yes    | `sessionStart` / `beforeSubmitPrompt`                                               | —                                                                                                                                       |
+| **Codex**              | Yes    | `SessionStart` / `UserPromptSubmit` when the thread changes                         | —                                                                                                                                       |
+| **Pi**                 | Yes    | Session start (resume/fork) or the first assistant message; re-asserted each turn   | A brand-new session has no id until its file materializes after the first assistant message, so an earlier crash has nothing to resume. |
+| **Grok**               | Yes    | `SessionStart` and the first prompt that pins a session                             | —                                                                                                                                       |
+| **Kimi**               | Yes    | `SessionStart` / `UserPromptSubmit` when the session changes                        | —                                                                                                                                       |
+| **Junie**              | Yes    | `SessionStart` / `UserPromptSubmit`                                                 | —                                                                                                                                       |
+| **GitHub Copilot CLI** | Yes    | `sessionStart` / `userPromptSubmitted`                                              | —                                                                                                                                       |
+| **Oh My Pi**           | Yes    | Session start, a session switch, or the first completed turn; re-asserted each turn | A brand-new session has no id until omp writes its file on the first completed turn, so an earlier crash has nothing to resume.         |
+| **Prime Agent**        | No     | Never — Pragma's `--no-session` launch is in-memory                                 | Not resumable by design; the tab always starts fresh.                                                                                   |
 
 ## Deliberately closing a session
 

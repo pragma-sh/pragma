@@ -1,0 +1,5 @@
+# Clippy must not suggest APIs newer than the toolchain CI and releases pin
+# (`rust-version` in .rwx/ci.yml, the 1.96.0 matrix leg in ci.yml, release.yml).
+# Without this, a newer stable clippy proposes e.g. `map_or_default` (1.100),
+# which the pinned toolchain cannot compile. Bump with those pins.
+msrv = "1.96.0"

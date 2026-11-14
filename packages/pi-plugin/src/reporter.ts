@@ -1,5 +1,12 @@
-import type { AgentEndEvent } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@pragma-sh/sdk";
+
+/**
+ * The part of an `agent_end` event the reporter reads. Structural, so every
+ * Pi-derived host (Pi, Prime Agent, oh-my-pi) can pass its own event type.
+ */
+export interface PiAgentEndEvent {
+  messages: ReadonlyArray<{ role: string; stopReason?: string }>;
+}
 
 /** One observation of the extension's own top-level session. */
 export interface PiSessionObservation {
@@ -123,7 +130,7 @@ export class PiLifecycleReporter {
     return this.enqueue(() => this.reporter.started());
   }
 
-  end(event: AgentEndEvent): Promise<void> {
+  end(event: PiAgentEndEvent): Promise<void> {
     if (!this.active) return this.queue;
     this.active = false;
     return this.enqueue(() =>
@@ -131,6 +138,27 @@ export class PiLifecycleReporter {
         ? this.reporter.cleared()
         : this.reporter.stopped(),
     );
+  }
+
+  /**
+   * Reports attention (a question or approval the host shows) through the same
+   * serialized queue, so it can never overtake the turn's `started`. Ignored
+   * outside an active turn: attention with no running turn has nothing to
+   * return to.
+   */
+  attention(report: () => Promise<void>): Promise<void> {
+    if (!this.active) return this.queue;
+    return this.enqueue(report);
+  }
+
+  /**
+   * Re-asserts `started` once attention resolves while the turn is still
+   * running. A host that keeps working after an answer emits no new start, so
+   * without this the tab would stay on attention until the turn ends.
+   */
+  resume(): Promise<void> {
+    if (!this.active) return this.queue;
+    return this.enqueue(() => this.reporter.started());
   }
 
   sendMessage(message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">): Promise<void> {
@@ -149,6 +177,6 @@ export function sessionNameFromPrompt(prompt: string): string {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line;
 }
 
-function isAbortedAssistantMessage(message: AgentEndEvent["messages"][number]): boolean {
+function isAbortedAssistantMessage(message: PiAgentEndEvent["messages"][number]): boolean {
   return message.role === "assistant" && message.stopReason === "aborted";
 }

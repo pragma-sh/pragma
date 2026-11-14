@@ -821,7 +821,7 @@ fn fetch_json<T: for<'de> Deserialize<'de>>(url: &str) -> AppResult<T> {
 
 fn fetch_bytes(url: &str) -> AppResult<Vec<u8>> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_mins(2))
         .build()
         .map_err(|error| AppError::Update(error.to_string()))?;
     let response = client

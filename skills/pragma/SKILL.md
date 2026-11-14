@@ -31,7 +31,7 @@ Auto mode follows the user's `automode.md` (`~/.pragma/automode.md`, overridden 
 
 Sessions are host-owned: closing or reloading the desktop does not end them. After a host
 restart, plain shells reopen fresh — there is no shell snapshot — while interrupted agent
-sessions launched through Pragma resume for the nine official integrations that declare a
+sessions launched through Pragma resume for the ten official integrations that declare a
 `launch.resume` callback (Prime Agent deliberately does not). Resume restores the conversation,
 never the original prompt or startup input. Runtime status is ephemeral; the durable recovery
 identity is the host's invocation record plus the harness session id an integration reports
