@@ -342,6 +342,10 @@ mod tests {
         let mut bytes = Vec::new();
         client.read_to_end(&mut bytes).expect("drain reply and EOF");
         assert_eq!(bytes, b"reply");
+        // Unix sockets report EPIPE for a write after the peer closed. Windows
+        // (`uds_windows`) still accepts that write into a buffer, so the
+        // post-disconnect write contract is only asserted where it holds.
+        #[cfg(not(windows))]
         assert!(client.write_all(b"request").is_err(), "writes still fail");
     }
 
