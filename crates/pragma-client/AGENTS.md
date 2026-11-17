@@ -22,6 +22,10 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   connection returns to the pool. Brokered control requests use the same unbounded wait:
   retrying an `agentSessionLaunch` after a 5s socket timeout can duplicate a launch that
   already succeeded server-side.
+- Timeout changes go through `pragma_platform::ipc::{set_read_timeout,set_write_timeout}`.
+  macOS rejects options on a disconnected socket with `EINVAL`, even with replies
+  buffered. Do not turn timeout restoration after a successful RPC into a retry
+  of an acknowledged mutation; do not swallow actual read/write failures.
 - Local managed-server bootstrap for development and packaged native clients.
   `connect_compatible` keeps a running server only when `hello_is_current`: the
   protocol matches **and**, for a bundled release, the hello `buildId` equals the hash

@@ -99,6 +99,11 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 
 ## Decision rules
 
+Native socket timeout changes use `pragma_platform::ipc::set_read_timeout` and
+`set_write_timeout`: macOS rejects options on disconnected sockets with `EINVAL`
+even with replies buffered. Preserve those replies; never retry an acknowledged
+mutation just because restoring its socket timeout failed after disconnect.
+
 1. **Reuse before writing.** Grep for an existing helper/constant/component first.
 2. **Extract on the second use.** Duplicated logic moves to `src/lib/` or a package.
 3. **Create packages freely.** Small single-purpose packages > sprawling apps. If it's
