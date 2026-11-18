@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.4.1...pragma-core-v1.5.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* pin clippy's msrv to the 1.96 CI toolchain ([8f2c780](https://github.com/pragma-sh/pragma/commit/8f2c780b1b18cd01e85bd95db91ac265b4b729d0))
+* satisfy the clippy 1.100 lints ([d8a3f49](https://github.com/pragma-sh/pragma/commit/d8a3f49a9245910f02052ebcb762e240c9e85fcf))
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.4.0...pragma-core-v1.4.1) (2026-10-30)
 
 
