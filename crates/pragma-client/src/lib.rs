@@ -527,7 +527,7 @@ impl PragmaClient {
                                 .unwrap_or_else(|| "server stream request failed".to_string()),
                         ));
                     }
-                    stream.set_read_timeout(None)?;
+                    ipc::set_read_timeout(&stream, None)?;
                     return Ok(stream);
                 }
                 ServerFrame::Hello(_)
@@ -744,7 +744,7 @@ impl PragmaClient {
             return Ok(None);
         };
         configure_stream(&stream)?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        ipc::set_read_timeout(&stream, Some(Duration::from_secs(2)))?;
         let expected_build = self.expected_build_id();
         match read_json_frame::<ServerFrame>(&mut stream) {
             Ok(ServerFrame::Hello(hello))
@@ -1339,15 +1339,15 @@ fn spawn_wait(compiles: bool) -> Duration {
 }
 
 fn configure_stream(stream: &LocalStream) -> ClientResult<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    ipc::set_read_timeout(stream, Some(Duration::from_secs(5)))?;
+    ipc::set_write_timeout(stream, Some(Duration::from_secs(5)))?;
     Ok(())
 }
 
 fn configure_rpc_stream(stream: &LocalStream) -> ClientResult<()> {
     // Host RPCs can legitimately outlive the normal request timeout, notably
     // when `git push` runs user-defined pre-push hooks.
-    stream.set_read_timeout(None)?;
+    ipc::set_read_timeout(stream, None)?;
     Ok(())
 }
 
@@ -1463,7 +1463,7 @@ fn send_input_frame(
 ) -> ClientResult<()> {
     if conn.is_none() {
         let stream = client.connect_with_spawn()?;
-        stream.set_read_timeout(None)?;
+        ipc::set_read_timeout(&stream, None)?;
         *conn = Some(stream);
     }
     let result = write_input_frame(
@@ -1607,6 +1607,73 @@ mod tests {
             .read_timeout()
             .expect("restored read timeout")
             .is_some());
+    }
+
+    #[test]
+    fn a_buffered_success_is_not_retried_when_the_peer_closes() {
+        use std::io::{Read, Write};
+
+        let client = PragmaClient::new_socket("unused.sock".into());
+        let (stream, mut peer) = LocalStream::pair().expect("socket pair");
+        configure_rpc_stream(&stream).expect("configure live RPC socket");
+        peer.write_all(b"ok").expect("buffer successful response");
+        drop(peer);
+        client.request_pool.lock().expect("pool lock").push(stream);
+
+        let calls = AtomicUsize::new(0);
+        let result = client.with_request_conn("RPC failed", |stream| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let mut reply = [0; 2];
+            stream.read_exact(&mut reply)?;
+            // The same timeout restoration used by rpc/control must not turn
+            // an acknowledged mutation into a transport retry on macOS.
+            configure_stream(stream)?;
+            Ok(Ok(reply))
+        });
+        assert_eq!(result.expect("keep the acknowledged success"), *b"ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_closed_pooled_socket_reconnects_for_the_next_request() {
+        use pragma_platform::ipc;
+        use pragma_protocol::{read_json_frame, write_json_frame, ResponseFrame, ServerFrame};
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("host").join("daemon.sock");
+        let listener = ipc::bind(&path).expect("listener");
+        let client = PragmaClient::new_socket(path);
+        let (stale, peer) = LocalStream::pair().expect("stale connection");
+        drop(peer);
+        client.request_pool.lock().expect("pool lock").push(stale);
+
+        let serving = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("fresh connection");
+            configure_stream(&stream).expect("bounded test socket");
+            write_json_frame(
+                &mut stream,
+                &ServerFrame::Hello(hello(
+                    &pragma_constants::CONSTANTS.daemon.protocol_version,
+                    None,
+                )),
+            )
+            .expect("hello");
+            let request: pragma_protocol::RequestFrame =
+                read_json_frame(&mut stream).expect("request");
+            write_json_frame(
+                &mut stream,
+                &ServerFrame::Response(ResponseFrame {
+                    request_id: request.request_id,
+                    ok: true,
+                    error: None,
+                }),
+            )
+            .expect("response");
+        });
+        client
+            .resize("tab".into(), 80, 24)
+            .expect("retry on a fresh connection");
+        serving.join().expect("server thread");
     }
 
     #[test]

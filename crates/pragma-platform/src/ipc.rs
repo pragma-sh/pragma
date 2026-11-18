@@ -20,6 +20,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use pragma_constants::CONSTANTS;
 
@@ -138,6 +139,38 @@ pub fn bind(path: &Path) -> io::Result<LocalListener> {
 pub fn connect(path: &Path) -> io::Result<LocalStream> {
     check_socket_path(path)?;
     LocalStream::connect(path)
+}
+
+/// Sets a read deadline without hiding buffered replies on a disconnected macOS socket.
+pub fn set_read_timeout(stream: &LocalStream, timeout: Option<Duration>) -> io::Result<()> {
+    allow_disconnected_timeout(stream, stream.set_read_timeout(timeout))
+}
+
+/// Sets a write deadline; subsequent writes still report a disconnected peer normally.
+pub fn set_write_timeout(stream: &LocalStream, timeout: Option<Duration>) -> io::Result<()> {
+    allow_disconnected_timeout(stream, stream.set_write_timeout(timeout))
+}
+
+fn allow_disconnected_timeout(stream: &LocalStream, result: io::Result<()>) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = &result {
+        // XNU's sosetoptlock rejects *all* options with EINVAL once both
+        // SS_CANTRCVMORE and SS_CANTSENDMORE are set. Buffered replies remain
+        // readable and reads then return EOF: a timeout cannot matter any more.
+        // Confirm the peer is gone too, rather than swallowing invalid arguments
+        // on a live socket. Rust's zero-duration validation has no raw errno.
+        const EINVAL: i32 = 22;
+        if error.raw_os_error() == Some(EINVAL)
+            && stream
+                .peer_addr()
+                .is_err_and(|error| error.raw_os_error() == Some(EINVAL))
+        {
+            return Ok(());
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = stream;
+    result
 }
 
 /// Reports whether a filesystem entry exists at a socket path.
@@ -284,7 +317,52 @@ mod tests {
         socket_entry_exists, socket_file_name, socket_path_in, wait_until_unanswered,
         MAX_SOCKET_PATH_BYTES,
     };
+    use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_changes_preserve_a_closed_peers_buffered_reply() {
+        let (mut client, mut server) = super::LocalStream::pair().expect("socket pair");
+        server.write_all(b"reply").expect("buffer reply");
+        drop(server);
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            client
+                .set_read_timeout(None)
+                .expect_err("XNU rejects options after disconnect")
+                .raw_os_error(),
+            Some(22),
+        );
+
+        super::set_read_timeout(&client, None).expect("closed socket cannot block again");
+        super::set_write_timeout(&client, Some(Duration::from_secs(5)))
+            .expect("closed socket cannot block again");
+        let mut bytes = Vec::new();
+        client.read_to_end(&mut bytes).expect("drain reply and EOF");
+        assert_eq!(bytes, b"reply");
+        // Unix sockets report EPIPE for a write after the peer closed. Windows
+        // (`uds_windows`) still accepts that write into a buffer, so the
+        // post-disconnect write contract is only asserted where it holds.
+        #[cfg(not(windows))]
+        assert!(client.write_all(b"request").is_err(), "writes still fail");
+    }
+
+    #[test]
+    fn timeout_changes_still_validate_arguments_and_configure_live_sockets() {
+        let (client, server) = super::LocalStream::pair().expect("socket pair");
+        let timeout = Some(Duration::from_secs(5));
+        super::set_read_timeout(&client, timeout).expect("read timeout");
+        super::set_write_timeout(&client, timeout).expect("write timeout");
+        assert_eq!(client.read_timeout().expect("read back timeout"), timeout);
+        assert_eq!(client.write_timeout().expect("read back timeout"), timeout);
+        assert!(super::set_read_timeout(&client, Some(Duration::ZERO)).is_err());
+        assert!(super::set_write_timeout(&client, Some(Duration::ZERO)).is_err());
+        drop(server);
+        assert!(super::set_read_timeout(&client, Some(Duration::ZERO)).is_err());
+        assert!(super::set_write_timeout(&client, Some(Duration::ZERO)).is_err());
+    }
 
     #[test]
     fn server_file_names_come_from_shared_constants() {

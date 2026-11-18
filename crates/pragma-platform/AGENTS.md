@@ -132,6 +132,11 @@ local-only transport. `AF_UNIX` keeps `set_read_timeout`, `try_clone`, `shutdown
 
 Consequences worth knowing:
 
+- Use `ipc::set_read_timeout` / `ipc::set_write_timeout` in native clients. On
+  macOS, XNU rejects socket options with `EINVAL` once both directions have shut
+  down, even while a complete reply is buffered. The helpers tolerate only that
+  confirmed-disconnected case; reads still drain to EOF and writes still fail.
+  Raw timeout errors must not discard an acknowledged RPC or trigger its retry.
 - A Unix-domain address has a **108-byte limit**, on Windows too. `check_socket_path`
   turns an overrun into a readable error instead of an opaque `InvalidInput` from `bind`.
 - There is no peer-credential API (no `SO_PEERCRED`). Nothing uses one today; gateway auth
