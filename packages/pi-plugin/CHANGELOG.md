@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/pi-plugin-v1.2.1...pi-plugin-v1.3.0) (2026-11-18)
+
+
+### Features
+
+* **omp-plugin:** add the Oh My Pi integration and share Pi's reporter with forks ([0cd813e](https://github.com/pragma-sh/pragma/commit/0cd813e1fae9308b165dbdfd8cd55a49a2e6d107))
+* **pi-plugin:** share the reporter and factory with Pi forks ([11d9679](https://github.com/pragma-sh/pragma/commit/11d96799a0598efc5e3f16e00d8b73a4c31e1ccf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.5.0
+    * @pragma-sh/sdk bumped to 1.5.0
+    * @pragma-sh/watcher-kit bumped to 1.5.0
+
 ## [1.2.1](https://github.com/pragma-sh/pragma/compare/pi-plugin-v1.2.0...pi-plugin-v1.2.1) (2026-10-30)
 
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.4.1...pragma-platform-v1.5.0) (2026-11-18)
+
+
+### Features
+
+* **omp-plugin:** add the Oh My Pi integration and share Pi's reporter with forks ([0cd813e](https://github.com/pragma-sh/pragma/commit/0cd813e1fae9308b165dbdfd8cd55a49a2e6d107))
+
+
+### Bug Fixes
+
+* **ipc:** preserve replies after macOS disconnect ([32fb57b](https://github.com/pragma-sh/pragma/commit/32fb57b587fd5a9818ee51b4f0d846d11fd0a41d))
+* **ipc:** preserve replies after macOS socket disconnect ([33bb74a](https://github.com/pragma-sh/pragma/commit/33bb74a63fff9bc2b59ef21e080fca29eb90640e))
+* **platform:** harden Windows socket dir ACL, shorten SSH bridge paths, test setup errors ([72fa20b](https://github.com/pragma-sh/pragma/commit/72fa20be69fe616ed0a37818fca7fad8e0160a21))
+* **platform:** keep Windows server sockets owner-only without opening them ([b8127ce](https://github.com/pragma-sh/pragma/commit/b8127ce63ca806ba81beecf5afbae25c42a2e81b))
+* **platform:** keep Windows server sockets owner-only without opening them ([009b139](https://github.com/pragma-sh/pragma/commit/009b139cf5f4979beb27c6aa5ddabcb12679835c)), closes [#212](https://github.com/pragma-sh/pragma/issues/212)
+* **platform:** skip post-disconnect write assertion on Windows ([21ea233](https://github.com/pragma-sh/pragma/commit/21ea233ba940340a92c389de6ede61a0797088df))
+* satisfy the clippy 1.100 lints ([d8a3f49](https://github.com/pragma-sh/pragma/commit/d8a3f49a9245910f02052ebcb762e240c9e85fcf))
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-platform-v1.4.0...pragma-platform-v1.4.1) (2026-10-30)
 
 

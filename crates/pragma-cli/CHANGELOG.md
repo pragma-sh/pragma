@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.4.1...pragma-cli-v1.5.0) (2026-11-18)
+
+
+### Features
+
+* **omp-plugin:** add the Oh My Pi integration and share Pi's reporter with forks ([0cd813e](https://github.com/pragma-sh/pragma/commit/0cd813e1fae9308b165dbdfd8cd55a49a2e6d107))
+
+
+### Bug Fixes
+
+* **cli:** accept durable-session fields in agent verify events ([af4a1dc](https://github.com/pragma-sh/pragma/commit/af4a1dcfa682a8b7d78693ea16cf003ab1fd21eb))
+* **cli:** join multi-question answers with the unit separator ([aa5af90](https://github.com/pragma-sh/pragma/commit/aa5af90f05fbe270d5af7a714dad2f45729d0ee3))
+* pin clippy's msrv to the 1.96 CI toolchain ([8f2c780](https://github.com/pragma-sh/pragma/commit/8f2c780b1b18cd01e85bd95db91ac265b4b729d0))
+* satisfy the clippy 1.100 lints ([d8a3f49](https://github.com/pragma-sh/pragma/commit/d8a3f49a9245910f02052ebcb762e240c9e85fcf))
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.4.0...pragma-cli-v1.4.1) (2026-10-30)
 
 

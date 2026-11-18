@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.4.1...pragma-server-v1.5.0) (2026-11-18)
+
+
+### Features
+
+* **pragma:** show worktree sections and PR CI status in the sidebar ([8155714](https://github.com/pragma-sh/pragma/commit/815571448ea5c8383bca97c3151ea6be692cc00a))
+
+
+### Bug Fixes
+
+* **computer:** invalidate tasks before denying their prompts on pause ([1910039](https://github.com/pragma-sh/pragma/commit/19100391862c819506716a7475724d431095d091))
+* pin clippy's msrv to the 1.96 CI toolchain ([8f2c780](https://github.com/pragma-sh/pragma/commit/8f2c780b1b18cd01e85bd95db91ac265b4b729d0))
+* **platform:** keep Windows server sockets owner-only without opening them ([b8127ce](https://github.com/pragma-sh/pragma/commit/b8127ce63ca806ba81beecf5afbae25c42a2e81b))
+* **platform:** keep Windows server sockets owner-only without opening them ([009b139](https://github.com/pragma-sh/pragma/commit/009b139cf5f4979beb27c6aa5ddabcb12679835c)), closes [#212](https://github.com/pragma-sh/pragma/issues/212)
+* **pragma-server:** pause tasks before denying their pending approvals ([de750de](https://github.com/pragma-sh/pragma/commit/de750de7be244d81b288a131aa0d3374ddc3f2ad))
+* satisfy the clippy 1.100 lints ([d8a3f49](https://github.com/pragma-sh/pragma/commit/d8a3f49a9245910f02052ebcb762e240c9e85fcf))
+
 ## [1.4.1](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.4.0...pragma-server-v1.4.1) (2026-10-30)
 
 

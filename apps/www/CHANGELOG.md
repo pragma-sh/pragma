@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/www-v1.5.0...www-v1.6.0) (2026-11-18)
+
+
+### Features
+
+* **omp-plugin:** add the Oh My Pi integration ([9c3bc6b](https://github.com/pragma-sh/pragma/commit/9c3bc6bed5517667cc339dd1d923a4611623226d))
+* **omp-plugin:** add the Oh My Pi integration and share Pi's reporter with forks ([0cd813e](https://github.com/pragma-sh/pragma/commit/0cd813e1fae9308b165dbdfd8cd55a49a2e6d107))
+* **plugin:** add worktree section and badge count contributions ([93c6c4d](https://github.com/pragma-sh/pragma/commit/93c6c4dac00acf39b2a57057b07f114ccb3c240a))
+* **pragma:** show worktree row sections in the sidebar ([92ad2ad](https://github.com/pragma-sh/pragma/commit/92ad2ad727d97add72b2686dbb58c6034a4ca577))
+* **pragma:** show worktree sections and PR CI status in the sidebar ([8155714](https://github.com/pragma-sh/pragma/commit/815571448ea5c8383bca97c3151ea6be692cc00a))
+* **pragma:** watch and fix failing CI checks on pull requests ([1e14472](https://github.com/pragma-sh/pragma/commit/1e14472071eee95c72cbd26fca97853c440b1cba))
+
+
+### Bug Fixes
+
+* **ipc:** preserve replies after macOS disconnect ([32fb57b](https://github.com/pragma-sh/pragma/commit/32fb57b587fd5a9818ee51b4f0d846d11fd0a41d))
+* **ipc:** preserve replies after macOS socket disconnect ([33bb74a](https://github.com/pragma-sh/pragma/commit/33bb74a63fff9bc2b59ef21e080fca29eb90640e))
+* **platform:** keep Windows server sockets owner-only without opening them ([b8127ce](https://github.com/pragma-sh/pragma/commit/b8127ce63ca806ba81beecf5afbae25c42a2e81b))
+* **platform:** keep Windows server sockets owner-only without opening them ([009b139](https://github.com/pragma-sh/pragma/commit/009b139cf5f4979beb27c6aa5ddabcb12679835c)), closes [#212](https://github.com/pragma-sh/pragma/issues/212)
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/www-v1.4.0...www-v1.5.0) (2026-10-30)
 
 
