@@ -696,12 +696,14 @@ mod tests {
 
     /// A `pragma-watch`-style recorder for `write_input`, so the prefill retry
     /// path is observable.
-    struct RecordingApi {
+    #[derive(Default)]
+    struct RecordingApi<'a> {
         writes: std::sync::Mutex<Vec<Vec<u8>>>,
         write_error: Option<String>,
+        running_after_writes: Option<(&'a Ledger, usize)>,
     }
 
-    impl crate::agent_verify::gateway::VerifyApi for RecordingApi {
+    impl crate::agent_verify::gateway::VerifyApi for RecordingApi<'_> {
         fn catalog(&self) -> Result<pragma_constants::AgentCatalog, String> {
             Err("unused".to_string())
         }
@@ -766,6 +768,12 @@ mod tests {
             }
             if let Ok(mut writes) = self.writes.lock() {
                 writes.push(bytes.to_vec());
+                if let Some((ledger, _)) = self
+                    .running_after_writes
+                    .filter(|(_, count)| writes.len() == *count)
+                {
+                    ledger.ingest_line(&agent_status_line("running"));
+                }
             }
             Ok(())
         }
@@ -786,17 +794,11 @@ mod tests {
     fn await_running_retypes_prompt_after_first_window() {
         let ledger = Ledger::default();
         let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
-            write_error: None,
+            running_after_writes: Some((&ledger, 2)),
+            ..RecordingApi::default()
         };
         let mut session = session(&api, &ledger, "a");
-        let feeder = ledger.clone();
-        thread::spawn(move || {
-            // Land the running report inside the second half-window, well
-            // after the first half (250ms of the 500ms test timeout) expired.
-            thread::sleep(Duration::from_millis(300));
-            feeder.ingest_line(&agent_status_line("running"));
-        });
+        session.deadline = Instant::now() + Duration::from_secs(2);
         session.await_running().expect("running after retry");
         let writes = api.writes.lock().expect("writes lock");
         assert_eq!(writes.len(), 2, "expected prompt body + submit writes");
@@ -811,25 +813,17 @@ mod tests {
     fn await_running_retypes_until_a_late_running_report() {
         let ledger = Ledger::default();
         let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
-            write_error: None,
+            running_after_writes: Some((&ledger, 4)),
+            ..RecordingApi::default()
         };
         let mut session = session(&api, &ledger, "a");
-        session.deadline = Instant::now() + Duration::from_millis(1500);
-        session.retry_cadence = Duration::from_millis(100);
-        let feeder = ledger.clone();
-        thread::spawn(move || {
-            // Land running well after the first window (750ms of the 1500ms
-            // budget) and after the first recovery retype's cadence window,
-            // so more than one retype is required.
-            thread::sleep(Duration::from_millis(1150));
-            feeder.ingest_line(&agent_status_line("running"));
-        });
+        session.deadline = Instant::now() + Duration::from_secs(2);
         session.await_running().expect("running after retries");
         let writes = api.writes.lock().expect("writes lock");
-        assert!(
-            writes.len() >= 4 && writes.len().is_multiple_of(2),
-            "expected at least two prompt body + submit retypes, got {writes:?}"
+        assert_eq!(
+            writes.as_slice(),
+            [b"\x1b[200~prompt\x1b[201~".as_slice(), b"\r"].repeat(2),
+            "expected two prompt body + submit retypes"
         );
     }
 
@@ -838,10 +832,7 @@ mod tests {
     #[test]
     fn await_running_stops_retyping_when_the_budget_runs_out() {
         let ledger = Ledger::default();
-        let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
-            write_error: None,
-        };
+        let api = RecordingApi::default();
         let mut session = session(&api, &ledger, "a");
         session.retry_cadence = Duration::from_millis(100);
         let error = session.await_running().expect_err("never running");
@@ -859,10 +850,7 @@ mod tests {
     fn await_running_skips_retype_when_prompt_lands() {
         let ledger = Ledger::default();
         ledger.ingest_line(&agent_status_line("running"));
-        let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
-            write_error: None,
-        };
+        let api = RecordingApi::default();
         let mut session = session(&api, &ledger, "a");
         session.await_running().expect("running");
         assert!(api.writes.lock().expect("writes lock").is_empty());
@@ -871,8 +859,8 @@ mod tests {
     #[test]
     fn headless_launch_surfaces_terminal_server_error_immediately() {
         let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
             write_error: Some("server error: session not found: t".to_string()),
+            ..RecordingApi::default()
         };
         let ledger = Ledger::default();
         let context = ScenarioCtx {
@@ -908,10 +896,7 @@ mod tests {
 
     #[test]
     fn fresh_launch_gets_fresh_timeout_budget() {
-        let api = RecordingApi {
-            writes: std::sync::Mutex::new(Vec::new()),
-            write_error: None,
-        };
+        let api = RecordingApi::default();
         let ledger = Ledger::default();
         let context = ScenarioCtx {
             api: &api,

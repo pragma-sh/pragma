@@ -133,11 +133,11 @@ finish. `--step-timeout` is one total budget per fresh-session attempt, shared b
 wait within that attempt. A retry gets a fresh budget instead of inheriting the first
 attempt's expired deadline. Each headless launch
 immediately probes its terminal with an empty write, surfacing server/session failures
-before any event timeout. `await_running` waits at most 20s: if no running report lands, the
-prompt prefill likely raced the TUI boot and was swallowed, so the session retypes the
-prompt once (mirroring the catalog's prefill mode/submit) and waits out the remaining
-budget. It never sends more than one retry because delayed status reporting must not
-create duplicate turns. Waits for
+before any event timeout. `await_running` waits at most 20s before recovering a prompt
+that the TUI may have swallowed at boot. It mirrors the catalog's prefill mode and submit
+bytes, then retries at 25s intervals until a running report arrives or the attempt budget
+ends. Tests inject the running report after the fake terminal records the submit write,
+so runner scheduling cannot dictate how many retries the test sees. Waits for
 attention, assistant messages, session names, and sub-agent activity **fail fast on
 settle**: after a done/cleared status only a 10s grace window remains for the awaited
 event to ride in (stop-hook reporters emit late events; a new running status re-opens

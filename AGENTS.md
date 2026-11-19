@@ -657,7 +657,10 @@ macOS bundles additionally need the six `APPLE_*` secrets (see _Release secrets_
 build as an empty string, the bundler gates on `var_os` — which returns `Some("")` for a
 set-but-empty variable — and the job dies at `security import` with
 `SecKeychainItemImport: One or more parameters passed to a function were not valid` after
-a full release compile, instead of producing an unsigned bundle. Linux
+a full release compile, instead of producing an unsigned bundle. If Apple returns HTTP
+403 for a missing or expired agreement during macOS notarization or TestFlight credential
+setup, the Apple Developer Account Holder must accept the updated agreement. Then rerun
+the failed jobs on the existing Release run to publish the tagged version. Linux
 package-manager installs select `.deb` or `.rpm`; AppImage sessions receive no automatic
 restart offer until in-place replacement is supported. **No release ships an AppImage** —
 the Linux jobs pass `--bundles deb,rpm`, because `tauri.conf.json` also targets AppImage

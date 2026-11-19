@@ -725,8 +725,10 @@ fn wait_task(world: &World, owner: &Value, id: &str) -> Value {
         if task["status"] != "running" && task["status"] != "needsApproval" {
             return task;
         }
+        // The worker syncs task metadata to disk at each transition. Under the
+        // full Windows test suite those writes can outlast a short polling bound.
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(5),
+            start.elapsed() < std::time::Duration::from_secs(30),
             "task did not settle: {task}"
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
