@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-protocol-v1.5.0...pragma-protocol-v1.6.0) (2026-11-19)
+
+
+### Miscellaneous Chores
+
+* **pragma-protocol:** Synchronize desktop versions
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-protocol-v1.4.1...pragma-protocol-v1.5.0) (2026-11-18)
 
 

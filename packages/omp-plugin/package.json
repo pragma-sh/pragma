@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/omp-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Oh My Pi (omp) extension and Pragma launcher built on the shared Pi integration.",
   "license": "AGPL-3.0-only",
   "repository": {

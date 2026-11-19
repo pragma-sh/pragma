@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.3](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.2.2...cursor-plugin-v1.2.3) (2026-11-19)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.6.0
+    * @pragma-sh/watcher-kit bumped to 1.6.0
+
 ## [1.2.2](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.2.1...cursor-plugin-v1.2.2) (2026-11-18)
 
 

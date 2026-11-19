@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.5.0...pragma-server-v1.6.0) (2026-11-19)
+
+
+### Bug Fixes
+
+* **ci:** stabilize Windows Rust tests ([ac1f8b0](https://github.com/pragma-sh/pragma/commit/ac1f8b053fa6aad446a8510922e2d12f90af9177))
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.4.1...pragma-server-v1.5.0) (2026-11-18)
 
 
