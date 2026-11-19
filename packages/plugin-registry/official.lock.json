@@ -4,9 +4,9 @@
   "plugins": [
     {
       "package": "@pragma-sh/claude-code-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.2.1.tgz",
-      "integrity": "sha512-EurdFdFz1SoUIT9F8aDh/ktEVenWMexAxFqQ00Cz7ppQKdt9NR+FdZ7I2HyK5X3cbcm1sRmeegYtjvqdGymYrg==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.2.2.tgz",
+      "integrity": "sha512-sHrAbd6u0k7/TxrPlty2bGmL61OFX8YZa2Sl9ct4YOCcqiZT/7Bv6NX9hKs191uVSjqlWqcttKxLWlmt/J21Bw==",
       "manifestSha256": "89f221514d6481b03cd6163078e8a0a3188538960dde16e1d7d260efb6ef2f62",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -29,9 +29,9 @@
     },
     {
       "package": "@pragma-sh/codex-plugin",
-      "version": "1.3.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/codex-plugin/-/codex-plugin-1.3.1.tgz",
-      "integrity": "sha512-KoWrGGuMCCCO4ktpcyjTxcDYVtr2RJY7BT1s3mgFHYtn+hCmNvxEyqyKZBbEZMtjsvruYRD5LH0fGKoi2G5Bqg==",
+      "version": "1.3.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/codex-plugin/-/codex-plugin-1.3.2.tgz",
+      "integrity": "sha512-NjlaIWdcM0nOnPY+fbYPPL68xn7JYXuF1U3mfmT24J1w4DKjoithZJNRGyfmVj9xYlveW6rDqAhALUqoIrQHLA==",
       "manifestSha256": "2bec896be1dbbbadbd88da08b08d9ae1b19f32a314932529df20c4218c03ce7a",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -54,9 +54,9 @@
     },
     {
       "package": "@pragma-sh/cursor-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/cursor-plugin/-/cursor-plugin-1.2.1.tgz",
-      "integrity": "sha512-sUMpyF2XvL473vud3vh0f/e+yfTdQqwksF6xg6KUIJp8ujcEQ0smm/4vCJrpw61WUUKuSYCcHZYABPITMxfPZg==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/cursor-plugin/-/cursor-plugin-1.2.2.tgz",
+      "integrity": "sha512-ZDY0aqXEtEjTq1VOALcjQgvi+8apy9gkbnQE749+irlqFdX3xjwmb+isyeaQIPG1nY90D1uF7nUuUZbZF6dprg==",
       "manifestSha256": "6b7d04e6f8caaa658043ed7426f70722f6669bc2653177a9be0c6c56b0e1e010",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -79,9 +79,9 @@
     },
     {
       "package": "@pragma-sh/grok-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/grok-plugin/-/grok-plugin-1.2.1.tgz",
-      "integrity": "sha512-jpdtETBzkqj9H2Q/INj9UmYf2IDK2i2PZ5v1Yf7j0wpTd/xzkkV5EzWGfx2Sf3uG35gKT51ElYJyxs9ZgS4Usg==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/grok-plugin/-/grok-plugin-1.2.2.tgz",
+      "integrity": "sha512-WFLhzjuKANo/73ZayXpncVIVAhpM/17c0EHwwkeelfqgw85MzJzwa5gNyAQdItJf1232z/VqOABIyude71QWGw==",
       "manifestSha256": "55ebf5919409c74f94b341b765351945bfe529f1091396ba4f18f6cebd1c59a3",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -104,9 +104,9 @@
     },
     {
       "package": "@pragma-sh/github-copilot-cli-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/github-copilot-cli-plugin/-/github-copilot-cli-plugin-1.2.1.tgz",
-      "integrity": "sha512-hlfO3DqpD1mXgVuaAKPuoiqax152R4qMPLW8bajOjZglOE4k8tbwhO+YrzPsQygMEjsvsaj1LvHhFUVq1EAFew==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/github-copilot-cli-plugin/-/github-copilot-cli-plugin-1.2.2.tgz",
+      "integrity": "sha512-lqRpmc685HdZsq4sI4iy4uPhz0rMkx2vn8eVurzNu+b6PWoUObVjBaCA6mmlSmvP36qHdkGkSuvlYZGcMX85RQ==",
       "manifestSha256": "ce5f64049b99f0a008ba0827f62032e62d25d1f890876032c301764e9ff37f86",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -129,9 +129,9 @@
     },
     {
       "package": "@pragma-sh/junie-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.2.1.tgz",
-      "integrity": "sha512-JbWgTLyiw58BwQmBiqCH8fghgY/km4rOPwy8iZy0g2bJeRkqP+ZlbcnWPusn0Zwu5Dh5FqihNcNYYHVkZVa7eA==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.2.2.tgz",
+      "integrity": "sha512-umwe0wjYk9Kqy2vyVVx3u958HewfidTSmDOFuLme1FYohXIVvs1MvpOetAiEI7o9hEnu1N1mQZXkpCUsGFMp5g==",
       "manifestSha256": "7bd16c7fe07595ea5fb8d5ed3fcba00bbe65094e551b99be63ddd79728d852f4",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -154,9 +154,9 @@
     },
     {
       "package": "@pragma-sh/kimi-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/kimi-plugin/-/kimi-plugin-1.2.1.tgz",
-      "integrity": "sha512-hm9m/aMUTUHHp6LJ6i/DQ2a7TggmOBjGiXl6nLf3s2h+eztvB2Yr7p/xp5KARJMFmnBUUcUayBIKYFsgr++H2w==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/kimi-plugin/-/kimi-plugin-1.2.2.tgz",
+      "integrity": "sha512-jMlxTPQFaduNIf+ta3vm5kEZKsimb0FXZOZtZQZq65XSgC8V69vm2UPVMaXmW60p5NFSWx2su1tbdDVCyZUQfQ==",
       "manifestSha256": "1e842b3017200efc75be5008bc9f61d9313687a94f57db0c85cf84d867e5c2e5",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -179,9 +179,9 @@
     },
     {
       "package": "@pragma-sh/opencode-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.2.1.tgz",
-      "integrity": "sha512-hrdeLjrKE8y7k/JHJ2lH0NZd5MnUDIEf2Y6jQ2zKlvR3X7Wd4TsB5oKVv2o3Dg498g1Ggao7TWRvbhHS3litaA==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.2.2.tgz",
+      "integrity": "sha512-D8S+belJSydGWqrJGeK9L42/RVmj4POJly63SxRE9gX304CsdASw2OJ7K4Z7NDaVxagGqY/iIm7gSI5Yz3m+nw==",
       "manifestSha256": "eb123b67f443f0d3c5acae29a723146861aef0edc65f3c2d81509ec20a0adfb0",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -204,9 +204,9 @@
     },
     {
       "package": "@pragma-sh/pi-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/pi-plugin/-/pi-plugin-1.2.1.tgz",
-      "integrity": "sha512-9lCv9ZRSGqL0wIJTiEgEpTT4Iy/XxCDomluTz9MfwyCFE5ZrZsgvIHhw5TdCTcQGZZYKi/UUcCErKWy5Z3gSMA==",
+      "version": "1.3.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/pi-plugin/-/pi-plugin-1.3.0.tgz",
+      "integrity": "sha512-1ijU88hTl4Oz+hUrLjxH9Rl3Yr8X5ZE4/odUlCCifC1Pd9pc71es9WowSjcvMVTXGdEsGp7vSya7/6hSk3KIfg==",
       "manifestSha256": "a968909a2ce219050a7a034ad926a3ad90286844e1bf72c2a7a42220dc206579",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -229,9 +229,9 @@
     },
     {
       "package": "@pragma-sh/prime-agent-plugin",
-      "version": "1.2.1",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/prime-agent-plugin/-/prime-agent-plugin-1.2.1.tgz",
-      "integrity": "sha512-dVAXqqMdne80voy0q2Z+5ax/fkIYIBJAvc+yFh8PYD3oKzKEkuzR0uFP6XV9SLs8UwzedEX7cD9Uvrcx2gATOw==",
+      "version": "1.2.2",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/prime-agent-plugin/-/prime-agent-plugin-1.2.2.tgz",
+      "integrity": "sha512-0M3x3IXgKDALtWZoQvBL107hLbqWsmD7tS9Uex4o1dC1LOBwOdj664OV8SHNNvAoJPs3w5VpBLDoiC0oyj6JZA==",
       "manifestSha256": "12c82fcd3213d2b95bc2d9cbd03b739c77992e32f5db3e046a16256af6f2f71d",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
