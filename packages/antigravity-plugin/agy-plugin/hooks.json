@@ -1,0 +1,56 @@
+{
+  "pragma-status": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/report.sh SessionStart",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/report.sh PreInvocation",
+        "timeout": 10
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/report.sh PostInvocation",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/report.sh Stop",
+        "timeout": 20
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ./hooks/report.sh PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ./hooks/report.sh PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

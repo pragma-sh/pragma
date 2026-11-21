@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Antigravity CLI",
+  "description": "Launch the Google Antigravity CLI in Pragma with live status, approvals, questions, sub-agents, usage limits, and session naming.",
+  "longDescription": "Launch the Google Antigravity CLI (agy) from the Pragma launcher with live status, command approvals, questions, sub-agent activity, quota usage limits, and session naming. The integration installs as a native Antigravity plugin and reports into Pragma's tab and sidebar, so Antigravity work in one worktree never hides progress in another.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/antigravity-plugin/assets/antigravity.svg",
+      "alt": "Google Antigravity logo"
+    }
+  ],
+  "install": {
+    "command": "node",
+    "args": ["dist/install.mjs"]
+  },
+  "agentBinary": "agy"
+}
