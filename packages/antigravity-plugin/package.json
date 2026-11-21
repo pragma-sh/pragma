@@ -1,0 +1,46 @@
+{
+  "name": "@pragma-sh/antigravity-plugin",
+  "version": "0.0.0",
+  "description": "Google Antigravity CLI (agy) plugin that reports agent status to Pragma via native hooks.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pragma-sh/pragma.git",
+    "directory": "packages/antigravity-plugin"
+  },
+  "files": [
+    "agy-plugin",
+    "assets",
+    "dist",
+    "pragma-plugin.json",
+    "scripts",
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./pragma-plugin": "./src/pragma-plugin.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun build src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs && bun build scripts/install-local.ts --outfile dist/install.mjs --format esm --target node --packages bundle && bun build src/hook/main.ts --outfile agy-plugin/dist/hook.mjs --format esm --target node --packages bundle && cp assets/antigravity.svg agy-plugin/dist/logo.svg",
+    "install:local": "bun run build && bun run scripts/install-local.ts",
+    "prepack": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@pragma-sh/plugin": "workspace:*",
+    "@pragma-sh/watcher-kit": "workspace:*",
+    "@types/node": "^24.19.2",
+    "bunup": "^0.16.32",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.12"
+  },
+  "pragma": {
+    "pluginId": "pragma.antigravity",
+    "main": "./dist/pragma-plugin.mjs"
+  }
+}

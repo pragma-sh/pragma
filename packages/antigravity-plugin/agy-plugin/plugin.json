@@ -1,0 +1,12 @@
+{
+  "name": "pragma",
+  "version": "0.0.0",
+  "description": "Reports Antigravity CLI agent status (running / done / attention) to Pragma automatically.",
+  "author": {
+    "name": "Pragma",
+    "url": "https://pragma.sh"
+  },
+  "homepage": "https://pragma.sh",
+  "repository": "https://github.com/pragma-sh/pragma",
+  "logo": "dist/logo.svg"
+}

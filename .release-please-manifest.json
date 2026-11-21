@@ -36,6 +36,7 @@
   "packages/kimi-plugin": "1.2.2",
   "packages/junie-plugin": "1.2.2",
   "packages/github-copilot-cli-plugin": "1.2.2",
+  "packages/antigravity-plugin": "0.0.0",
   "packages/dev-test-plugin": "1.3.0",
   "crates/pragma-computer": "1.3.4"
 }

@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { officialPluginList, officialPluginLock } from "./index";
 
 describe("official plugin registry", () => {
-  it("locks every package exactly once", () => {
+  it("locks official packages exactly once, in official order", () => {
     const locked = officialPluginLock.plugins.map((plugin) => plugin.package);
-    expect(locked).toEqual(officialPluginList.packages);
+    // A package awaiting its first npm publish is official but not lockable
+    // yet (see AGENTS.md, "Adding an official plugin"), so the lock may be a
+    // subset — never a reordering, a duplicate, or a stale entry.
+    expect(locked).toEqual(officialPluginList.packages.filter((name) => locked.includes(name)));
     expect(new Set(locked).size).toBe(locked.length);
   });
 

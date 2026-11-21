@@ -147,6 +147,7 @@ than no guide.
 │   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
 │   ├── junie-plugin/            # JetBrains Junie CLI integration → see packages/junie-plugin/AGENTS.md
 │   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
+│   ├── antigravity-plugin/      # Google Antigravity CLI (agy) integration → see packages/antigravity-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma-sh/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma-sh/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
@@ -372,8 +373,8 @@ identity in the client DB, localStorage, or a plugin.
   prelaunch args. A resume restores the conversation, not the original turn: prompts,
   slash commands, and `!!` commands are not replayed. A missing callback or a resume error
   leaves a `failed` record and surfaces an error — it never starts a fresh conversation.
-- **Official coverage is ten plugins, not every agent.** OpenCode, Claude Code, Cursor,
-  Codex, Pi, Oh My Pi, Grok, Kimi, Junie, and GitHub Copilot CLI declare resume; Prime Agent
+- **Official coverage is eleven plugins, not every agent.** OpenCode, Claude Code, Cursor,
+  Codex, Pi, Oh My Pi, Grok, Kimi, Junie, GitHub Copilot CLI, and Antigravity declare resume; Prime Agent
   deliberately does not (Pragma launches it with `--no-session`, so its in-memory session
   has no file `--resume` could open). Limits that must not be overstated: OpenCode learns
   the active conversation only from user-initiated activity, so a TUI switch with no
@@ -636,17 +637,17 @@ moves them to one version. Three rules hold that together:
 
 Publishing needs **no npm token**: every one of the nine names `pragma-sh/pragma` +
 `release.yml` as a trusted publisher, so the job's `id-token` authenticates it and signs
-provenance. The ten agent plugins under `@pragma-sh` trust
+provenance. The eleven agent plugins under `@pragma-sh` trust
 `.github/workflows/plugins.yml` instead, so a plugin release is published by
 `release.yml`'s `publish-plugins` job **dispatching** that workflow at the plugin's tag,
 never by `release.yml` itself. Two consequences: **renaming `release.yml` silently
-breaks all nine** (and renaming `plugins.yml` breaks all ten), since npm verifies the workflow filename, and a **brand-new** package
+breaks all nine** (and renaming `plugins.yml` breaks all eleven), since npm verifies the workflow filename, and a **brand-new** package
 must be published by hand once before npm will accept a trusted publisher for it: npm
 rejects an OIDC publish for an unconfigured package with `404 Not Found - PUT`, never a
 403, so the failure reads as if the package did not exist. Configuring one is a CLI step,
 not a web-UI one — `npm trust github <package> --file release.yml --repository
 pragma-sh/pragma --allow-publish`, which needs npm 11.15.0 or newer and prompts for a 2FA
-one-time password. `npm trust list <package>` shows what a package already has. Configure
+one-time password; an agent plugin names `--file plugins.yml` instead. `npm trust list <package>` shows what a package already has. Until that first publish, a new plugin listed in `official.json` stays out of `official.lock.json` (see _Adding an official plugin_ in `packages/plugin-registry/AGENTS.md`). Configure
 `RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require

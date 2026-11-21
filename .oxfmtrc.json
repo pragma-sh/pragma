@@ -15,6 +15,7 @@
     "packages/kimi-plugin/kimi.plugin.json",
     "packages/junie-plugin/.junie-plugin/plugin.json",
     "packages/github-copilot-cli-plugin/plugin.json",
+    "packages/antigravity-plugin/agy-plugin/plugin.json",
     "apps/pragma/src-tauri/src/testdata/**"
   ]
 }

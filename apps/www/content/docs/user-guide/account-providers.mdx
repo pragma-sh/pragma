@@ -85,6 +85,7 @@ you. Pragma stores the path to the token, never the token itself.
 | Kimi Code      | API-key providers (below) | Its own config (`kimi provider catalog add`) |
 | Cursor         | Cursor                    | One login (macOS Keychain entry)             |
 | Junie          | JetBrains                 | One login, signed in from Junie              |
+| Antigravity    | Google Antigravity        | One login, signed in from `agy`              |
 
 A harness's existing sign-in (for example `~/.claude`) shows up automatically as its
 default account.
@@ -123,13 +124,13 @@ itself (`opencode auth list`), so Pragma just tells it which one is active.
 Pragma lends a sign-in from one harness to another wherever the provider allows it and the two
 harnesses sign in the same way:
 
-| What                           | Shared between                                                              |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| ChatGPT sign-in                | Codex, OpenCode, Pi, Prime Agent                                            |
-| GitHub Copilot sign-in         | Pi and Prime Agent (OpenCode and Copilot CLI each use their own GitHub app) |
-| Any API key (below)            | OpenCode, Pi, Prime Agent; Kimi Code lends its keys but cannot take one     |
-| Claude or Gemini subscriptions | Never — their terms keep them to Claude Code and Google's own tools         |
-| Grok, Kimi Code, Cursor, Junie | Nothing to share: no other harness signs in to them the same way            |
+| What                                        | Shared between                                                              |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| ChatGPT sign-in                             | Codex, OpenCode, Pi, Prime Agent                                            |
+| GitHub Copilot sign-in                      | Pi and Prime Agent (OpenCode and Copilot CLI each use their own GitHub app) |
+| Any API key (below)                         | OpenCode, Pi, Prime Agent; Kimi Code lends its keys but cannot take one     |
+| Claude or Gemini subscriptions              | Never — their terms keep them to Claude Code and Google's own tools         |
+| Grok, Kimi Code, Cursor, Junie, Antigravity | Nothing to share: no other harness signs in to them the same way            |
 
 API keys never change, so a copied key is simply a copy. A ChatGPT or Copilot sign-in replaces
 its refresh token each time a harness refreshes it (for ChatGPT, about every 8–10 days), so

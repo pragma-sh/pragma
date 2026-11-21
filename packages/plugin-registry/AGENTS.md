@@ -15,7 +15,7 @@ published release) lacks them.
 component, and when the release PR merges, the `publish-plugins` job in `release.yml`
 dispatches `.github/workflows/plugins.yml` once per released plugin, pinned to its release
 tag (`ref` input), under `latest`. It dispatches rather than publishes because npm trusts
-`plugins.yml` — not `release.yml` — for these ten packages; moving that trust would need an
+`plugins.yml` — not `release.yml` — for these eleven packages; moving that trust would need an
 `npm trust` change per package. `scripts/release-config.test.ts` fails if a package in
 `official.json` is missing from the Release Please config or the workflow's choice list.
 
@@ -35,7 +35,7 @@ release that just published — never to a dist-tag, so an `alpha` publish never
 the desktop installs (`PRAGMA_PLUGIN_DIST_TAG` opts into a tag locally). It must not resolve
 `latest`: npm serves cached package metadata for minutes after a publish, and the 1.0.2 lock
 refresh, run ~2.5 minutes after three publishes, locked two of them at 1.0.1. `npm pack` of a
-version npm does not list yet is retried with backoff. The ten `refresh-lock` jobs a release
+version npm does not list yet is retried with backoff. The `refresh-lock` jobs a release
 fans out share one concurrency group: GitHub runs one and keeps only the newest pending.
 
 The desktop never reads a dist-tag. `plugin_distribution.rs` installs an exact
@@ -43,12 +43,36 @@ The desktop never reads a dist-tag. `plugin_distribution.rs` installs an exact
 differs from the lock, so the tag only affects humans running `npm i` and tooling that
 resolves `latest`.
 
-The ten official agent plugins are deliberately **not** in Release Please's linked `desktop`
+The official agent plugins are deliberately **not** in Release Please's linked `desktop`
 group: nothing bundles them into the app (there is no staged `resources/plugins` any more),
 they install from npm at locked exact versions, and each releases on its own schedule. In
 the group they would be forced to carry the desktop's version number and would drag a desktop
 release out of every plugin change. `@pragma-sh/sdk` and `@pragma-sh/plugin` _are_ in it, because
 the `plugins-host` sidecar bundles them.
+
+## Adding an official plugin
+
+A new plugin joins `official.json` **before** it has ever been published, because the
+release that publishes it is cut from that list: `plugins.yml`'s package choices must equal
+`official.json` (`scripts/release-config.test.ts`), and `publish-plugins` only dispatches
+what is listed there. Its lock entry cannot exist yet — the lock records npm tarball
+integrity — so a package npm has never heard of is **pending**:
+
+- `scripts/lock.ts` skips it with a warning (`npm view` answers E404 for the package
+  itself). Only a never-published package is skipped; a missing _version_ of a published
+  one still fails the refresh, so a broken release can never drop out of the lock silently.
+- `validate.ts` and `src/index.test.ts` accept an official package that is absent from the
+  lock, but the lock must still list only official packages, once each, in official order.
+
+The checklist, in order: add the package to `official.json`, `plugins.yml`'s choices,
+`release-please-config.json` (plus an `extra-files` entry for a versioned host manifest)
+and `.release-please-manifest.json` at `0.0.0` (its first release is `initial-version`,
+0.1.0). Then, **once, by hand**, an owner publishes the package and runs
+`npm trust github <package> --file plugins.yml --repository pragma-sh/pragma
+--allow-publish` — npm rejects an OIDC publish for an unconfigured package with
+`404 Not Found - PUT`. The next release then publishes it through `plugins.yml`, whose
+`refresh-lock` adds it to the lock; the desktop and gallery read the lock from `main`, so
+the plugin appears for every installed desktop once that lock PR merges.
 
 ## Commands
 
