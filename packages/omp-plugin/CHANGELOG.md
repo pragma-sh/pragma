@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.1](https://github.com/pragma-sh/pragma/compare/omp-plugin-v0.1.0...omp-plugin-v0.1.1) (2026-11-21)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/pi-plugin bumped to 1.3.1
+    * @pragma-sh/plugin bumped to 1.6.0
+    * @pragma-sh/sdk bumped to 1.6.0
+
 ## 0.1.0 (2026-11-18)
 
 

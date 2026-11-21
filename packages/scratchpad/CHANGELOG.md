@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.5.0...scratchpad-v1.6.0) (2026-11-21)
+
+
+### Miscellaneous Chores
+
+* **scratchpad:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sdk bumped from ^1.5.0 to ^1.6.0
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/scratchpad-v1.4.1...scratchpad-v1.5.0) (2026-11-18)
 
 

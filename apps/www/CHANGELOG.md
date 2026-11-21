@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/www-v1.6.0...www-v1.7.0) (2026-11-21)
+
+
+### Features
+
+* **antigravity-plugin:** add Google Antigravity (agy) integration ([9f6b8aa](https://github.com/pragma-sh/pragma/commit/9f6b8aa7d0ff2651f7ff555dd417fe975d9ed02c))
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/www-v1.5.0...www-v1.6.0) (2026-11-18)
 
 
