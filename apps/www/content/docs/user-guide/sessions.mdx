@@ -60,7 +60,7 @@ Ordinary reattachment to sessions that survived a desktop relaunch does not open
 
 ## Support matrix
 
-Ten of the eleven shipped integrations declare a resume callback. Prime Agent intentionally
+Eleven of the twelve shipped integrations declare a resume callback. Prime Agent intentionally
 does not: Pragma launches it with `--no-session`, so its session lives in memory and there
 is no saved file a `--resume` could open.
 
@@ -75,6 +75,7 @@ is no saved file a `--resume` could open.
 | **Kimi**               | Yes    | `SessionStart` / `UserPromptSubmit` when the session changes                        | —                                                                                                                                       |
 | **Junie**              | Yes    | `SessionStart` / `UserPromptSubmit`                                                 | —                                                                                                                                       |
 | **GitHub Copilot CLI** | Yes    | `sessionStart` / `userPromptSubmitted`                                              | —                                                                                                                                       |
+| **Antigravity**        | Yes    | `SessionStart` / the first `PreInvocation` of each turn (its `conversationId`)      | —                                                                                                                                       |
 | **Oh My Pi**           | Yes    | Session start, a session switch, or the first completed turn; re-asserted each turn | A brand-new session has no id until omp writes its file on the first completed turn, so an earlier crash has nothing to resume.         |
 | **Prime Agent**        | No     | Never — Pragma's `--no-session` launch is in-memory                                 | Not resumable by design; the tab always starts fresh.                                                                                   |
 
