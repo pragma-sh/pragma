@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.5.0...pragma-core-v1.6.0) (2026-11-21)
+
+
+### Miscellaneous Chores
+
+* **pragma-core:** Synchronize desktop versions
+
 ## [1.5.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.4.1...pragma-core-v1.5.0) (2026-11-18)
 
 
