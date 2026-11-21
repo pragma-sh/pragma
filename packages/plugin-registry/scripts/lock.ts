@@ -77,6 +77,12 @@ try {
       });
       if (build.exitCode !== 0) throw new Error(`${packageName}: build failed`);
     }
+    if (!local && !publishedOnNpm(packageName)) {
+      // A new official plugin is listed before its first release publishes it;
+      // the lock refresh that follows that publish picks it up.
+      console.warn(`${packageName}: never published to npm; leaving it out of the lock`);
+      continue;
+    }
     const version =
       distTag ??
       (JSON.parse(readFileSync(join(source, "package.json"), "utf8")) as { version: string })
@@ -110,6 +116,23 @@ try {
   if (formatted.exitCode !== 0) throw new Error("failed to format official plugin lock");
 } finally {
   await rm(temp, { recursive: true, force: true });
+}
+
+/**
+ * Whether npm knows the package at all. Only a package that was never
+ * published is skipped; a missing *version* of a published package still fails
+ * through `pack`, so a broken release can never silently drop out of the lock.
+ */
+function publishedOnNpm(packageName: string): boolean {
+  const viewed = Bun.spawnSync(["npm", "view", packageName, "name", "--json"], {
+    cwd: packageRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (viewed.exitCode === 0) return true;
+  const stderr = viewed.stderr.toString() + viewed.stdout.toString();
+  if (/E404|404 Not Found/.test(stderr)) return false;
+  throw new Error(`${packageName}: npm view failed: ${stderr}`);
 }
 
 function extractManifest(tarball: string): string {

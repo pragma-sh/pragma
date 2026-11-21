@@ -21,6 +21,7 @@ on:
         required: false
         type: choice
         options:
+          - "@pragma-sh/antigravity-plugin"
           - "@pragma-sh/claude-code-plugin"
           - "@pragma-sh/codex-plugin"
           - "@pragma-sh/cursor-plugin"

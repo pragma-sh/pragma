@@ -40,8 +40,15 @@ function registerPackageName(names: Set<string>, packageName: string): void {
   names.add(packageName);
 }
 
-if (lock.plugins.length !== official.packages.length) {
-  throw new Error("official lock does not cover official package list");
+// A package awaiting its first npm publish cannot be locked yet: `lock.ts`
+// skips it until the release that publishes it. Everything else must be locked.
+const locked = lock.plugins.map((plugin) => plugin.package);
+const expectedOrder = official.packages.filter((name) => locked.includes(name));
+if (locked.join("\n") !== expectedOrder.join("\n")) {
+  throw new Error("official lock is out of order or has duplicate entries");
+}
+for (const pending of official.packages.filter((name) => !locked.includes(name))) {
+  console.warn(`${pending}: not in the official lock yet (awaiting its first npm publish)`);
 }
 for (const plugin of lock.plugins) {
   if (!official.packages.includes(plugin.package))

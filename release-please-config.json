@@ -262,6 +262,17 @@
         }
       ]
     },
+    "packages/antigravity-plugin": {
+      "release-type": "node",
+      "component": "antigravity-plugin",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "agy-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    },
     "packages/dev-test-plugin": {
       "release-type": "node",
       "component": "dev-test-plugin"

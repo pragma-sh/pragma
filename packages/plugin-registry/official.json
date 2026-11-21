@@ -2,6 +2,7 @@
   "$schema": "./official.schema.json",
   "schemaVersion": 1,
   "packages": [
+    "@pragma-sh/antigravity-plugin",
     "@pragma-sh/claude-code-plugin",
     "@pragma-sh/codex-plugin",
     "@pragma-sh/cursor-plugin",
