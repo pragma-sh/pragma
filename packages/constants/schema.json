@@ -2934,6 +2934,84 @@
         }
       }
     },
+    "GlobalScriptsConfig": {
+      "title": "GlobalScriptsConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `scripts` block of the global `~/.pragma/config.json`: lifecycle scripts that apply to every project. Read from the home directory of the host that owns the project, because that is where the commands run. Every key is optional; omitted keys behave as empty.",
+      "properties": {
+        "worktree": {
+          "$ref": "#/definitions/GlobalWorktreeScripts"
+        },
+        "project": {
+          "$ref": "#/definitions/GlobalProjectScripts"
+        }
+      }
+    },
+    "GlobalWorktreeScripts": {
+      "title": "GlobalWorktreeScripts",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Worktree lifecycle scripts run for every worktree in every project, on top of the project's own `.pragma/scripts.json`.",
+      "properties": {
+        "setup": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Headless commands run after any worktree is created, from the new worktree root. They run before the project's own `setup`, so they can prepare the environment the project's commands build in."
+        },
+        "teardown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Headless commands run before any worktree is deleted, from the target worktree root. They run after the project's own `teardown`. Failures block deletion."
+        },
+        "runScripts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RunScriptDefinition"
+          },
+          "description": "Interactive header scripts offered in every project, keyed by name. A project script with the same name wins."
+        }
+      }
+    },
+    "GlobalProjectScripts": {
+      "title": "GlobalProjectScripts",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project lifecycle scripts. Global-only on purpose: a project's checked-in files never run code just because it was added or cloned.",
+      "properties": {
+        "add": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Headless commands run from the project root after a project is added, cloned, or connected over SSH. A failure is reported; the project stays added."
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Headless commands run from the project root before a project is removed from Pragma. Removing never deletes files. A failure blocks the removal unless the user removes it anyway."
+        },
+        "switch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Headless commands run from the project root in the background when the desktop switches to a project from another one. Launching the app is not a switch. A failure is only a warning."
+        }
+      }
+    },
+    "ProjectScriptEvent": {
+      "title": "ProjectScriptEvent",
+      "type": "string",
+      "enum": ["add", "remove", "switch"],
+      "description": "Which project lifecycle event a `GlobalProjectScripts` list runs for."
+    },
     "RunScriptDefinition": {
       "title": "RunScriptDefinition",
       "type": "object",

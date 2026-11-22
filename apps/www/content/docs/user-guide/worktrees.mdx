@@ -77,7 +77,8 @@ Type `@` in either mode to attach files, issues, or pull requests — see
 
 While it creates, a full-frame progress screen walks through **Syncing base** (when you
 accepted the sync offer), **Creating worktree**, and **Running scripts** when the project
-defines `setup` commands in `.pragma/scripts.json`. A failure before the worktree exists
+defines `setup` commands in `.pragma/scripts.json` or you have
+[global setup scripts](/docs/user-guide/project-scripts#global-scripts). A failure before the worktree exists
 offers Dismiss; a later failure offers Retry.
 
 Creation never blocks the workspace. Click any worktree row — including the one you are
@@ -167,8 +168,8 @@ Pins are per user (stored locally), not checked into the repo.
 - **Hide** — tucks a finished worktree out of the way. Hidden worktrees are listed under
   a collapsible **"Show N hidden"** section with a per-row **Show worktree** button.
 - **Delete** — removes the checkout. Refuses when the worktree has uncommitted changes
-  unless you force it. Project `teardown` scripts run first and can veto the deletion by
-  failing. Optionally delete the branch too.
+  unless you force it. Project and [global](/docs/user-guide/project-scripts#global-scripts)
+  `teardown` scripts run first and can veto the deletion by failing. Optionally delete the branch too.
 
 ## Ports, whiteboards, and scratchpads
 

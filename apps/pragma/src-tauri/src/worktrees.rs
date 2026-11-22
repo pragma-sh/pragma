@@ -10,7 +10,7 @@ use crate::db::{Db, WorktreeMru};
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::hosts::Hosts;
-use crate::scripts;
+use crate::scripts::{self, WorktreeHook};
 
 /// Frontend progress signal for the multi-step create-worktree flow. Only the
 /// stages the frontend cannot observe on its own are emitted — the setup
@@ -102,8 +102,7 @@ pub fn create_worktree(
         title.filter(|value| !value.trim().is_empty()),
         &path,
     )?;
-    let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
-    if !config.setup.is_empty() {
+    scripts::run_worktree_hook(&pty, &project, &worktree, WorktreeHook::Setup, || {
         let _ = app.emit(
             WORKTREE_CREATE_STAGE_EVENT,
             WorktreeCreateStage {
@@ -112,8 +111,7 @@ pub fn create_worktree(
                 stage: "scripts".to_string(),
             },
         );
-    }
-    scripts::run_headless_commands(&pty, &project, &worktree, "setup", config.setup.as_slice())?;
+    })?;
     publisher.trigger();
     Ok(worktree)
 }
@@ -193,14 +191,7 @@ pub fn delete_worktree(
     let _guard = lock.lock()?;
     let pty = hosts.for_project(&db, &worktree.project_id)?;
 
-    let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
-    scripts::run_headless_commands(
-        &pty,
-        &project,
-        &worktree,
-        "teardown",
-        config.teardown.as_slice(),
-    )?;
+    scripts::run_worktree_hook(&pty, &project, &worktree, WorktreeHook::Teardown, || {})?;
 
     // Terminate any PTY sessions in this worktree so they don't keep an open
     // fd on the directory we're about to remove. Best-effort: a daemon hiccup

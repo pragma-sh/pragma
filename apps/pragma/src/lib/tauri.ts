@@ -28,6 +28,7 @@ import type {
   KeybindingsConfig,
   Project,
   ProjectIcon,
+  ProjectScriptEvent,
   ProjectScriptsConfig,
   PaletteSearchResponse,
   Tab,
@@ -630,9 +631,28 @@ export function getProjectsDirectory(): Promise<string> {
   return invoke<string>("get_projects_directory");
 }
 
-/** Loads optional `.pragma/scripts.json` for a project from its persisted root path. */
+/**
+ * Loads the scripts a project's header offers: its optional `.pragma/scripts.json`
+ * with the host's global `scripts.worktree.runScripts` layered under it.
+ */
 export function loadProjectScripts(projectId: string): Promise<ProjectScriptsConfig> {
   return invoke<ProjectScriptsConfig>("load_project_scripts", { projectId });
+}
+
+/**
+ * Runs the global `scripts.project.<event>` commands for a project on its host.
+ * Resolves whether any were configured; rejects with the failures' output.
+ */
+export function runProjectScripts(
+  projectId: string,
+  event: ProjectScriptEvent,
+  previousProjectId?: string | null,
+): Promise<boolean> {
+  return invoke<boolean>("run_project_scripts", {
+    projectId,
+    event,
+    previousProjectId: previousProjectId ?? null,
+  });
 }
 
 /** One headless command's captured result, from the host's `exec` RPC. */
@@ -1925,6 +1945,16 @@ export function listWslDistros(worktreeId?: string | null): Promise<WslDistroLis
  */
 export function loadKeybindings(projectId?: string | null): Promise<KeybindingsConfig> {
   return invoke<KeybindingsConfig>("load_keybindings", { projectId: projectId ?? null });
+}
+
+/** Reads a project's `.pragma/scripts.json` verbatim (a starter document when missing). */
+export function readProjectScriptsFile(projectId: string): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_project_scripts_file", { projectId });
+}
+
+/** Writes a project's `.pragma/scripts.json`; the host rejects a config it could not run. */
+export function writeProjectScriptsFile(projectId: string, contents: string): Promise<void> {
+  return invoke("write_project_scripts_file", { projectId, contents });
 }
 
 /** Reads one scope's `keybindings.json` verbatim, for patching single actions. */

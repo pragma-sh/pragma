@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/errors";
 import { isMacPlatform } from "@/lib/platform";
+import { runProjectRemoveScripts } from "@/lib/project-scripts";
 import { removeProject } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useProjectAgentStatus } from "@/state/agent-status-store";
@@ -37,7 +38,15 @@ export function ProjectSwitcher() {
     activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [workspace.selectedProjectId]);
 
-  async function handleRemoveProject(projectId: string) {
+  async function handleRemoveProject(projectId: string, skipScripts = false) {
+    // Global `remove` scripts run first and can veto the removal, like a
+    // worktree's teardown; the failure toast offers to remove it anyway.
+    if (
+      !skipScripts &&
+      !(await runProjectRemoveScripts(projectId, () => void handleRemoveProject(projectId, true)))
+    ) {
+      return;
+    }
     try {
       await removeProject(projectId);
       await workspace.reload();

@@ -2,14 +2,18 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use pragma_constants::{FileContents, Project, ProtocolRpcMethod, Worktree, CONSTANTS};
+use pragma_constants::{
+    FileContents, Project, ProjectScriptEvent, ProtocolRpcMethod, Worktree, CONSTANTS,
+};
 use pragma_core::exec::{CommandResult, ExecCancel, ExecRequest};
 use pragma_core::fs::FsRequest;
+use pragma_core::scripts::{GlobalScripts, ScriptEvent};
 use serde_json::Value;
 use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::fs::fs_rpc;
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
@@ -33,7 +37,9 @@ impl HeadlessCommandResult {
     }
 }
 
-/// Loads a project's `.pragma/scripts.json` from its host (local or remote).
+/// Loads the scripts a project's header offers from its host (local or
+/// remote): its `.pragma/scripts.json` with the host's global run scripts
+/// layered under it.
 #[tauri::command(async)]
 pub fn load_project_scripts(
     db: State<'_, Db>,
@@ -42,7 +48,125 @@ pub fn load_project_scripts(
 ) -> AppResult<LoadedProjectScripts> {
     let project = db.project(&project_id)?;
     let pty = hosts.for_project(&db, &project_id)?;
-    load_project_scripts_on_host(&pty, &project.path)
+    let global = load_global_scripts_on_host(&pty)?;
+    Ok(load_project_scripts_on_host(&pty, &project.path)?.with_global_run_scripts(&global))
+}
+
+/// Reads the global `scripts` block from `~/.pragma/config.json` on `pty`'s
+/// host — the machine the scripts run on, which for an SSH project is not
+/// this one. A missing file is no global scripts; a malformed one is an error.
+pub fn load_global_scripts_on_host(pty: &PtyClient) -> AppResult<GlobalScripts> {
+    let home: String = fs_rpc(pty, &FsRequest::HomeDir)?;
+    let relative = CONSTANTS.plugins.config_file_name.clone();
+    let exists: bool = fs_rpc(
+        pty,
+        &FsRequest::PathExists {
+            root: home.clone(),
+            path: relative.clone(),
+        },
+    )?;
+    if !exists {
+        return Ok(GlobalScripts::default());
+    }
+    let contents: FileContents = fs_rpc(
+        pty,
+        &FsRequest::ReadFile {
+            root: home.clone(),
+            path: relative,
+        },
+    )?;
+    if contents.binary || contents.truncated {
+        return Err(AppError::InvalidInput(format!(
+            "{} must be a small UTF-8 text file",
+            CONSTANTS.plugins.config_file_name
+        )));
+    }
+    let path = pragma_core::scripts::global_config_path(Path::new(&home));
+    pragma_core::scripts::parse_global_config(&contents.text, &path)
+        .map_err(|error| AppError::InvalidInput(error.to_string()))
+}
+
+/// The worktree hook a lifecycle run belongs to.
+#[derive(Debug, Clone, Copy)]
+pub enum WorktreeHook {
+    Setup,
+    Teardown,
+}
+
+/// Runs a worktree hook's global and project layers in order on the
+/// worktree's host, stopping at the first layer with a failed command.
+pub fn run_worktree_hook(
+    pty: &PtyClient,
+    project: &Project,
+    worktree: &Worktree,
+    hook: WorktreeHook,
+    on_start: impl FnOnce(),
+) -> AppResult<()> {
+    let project_scripts = load_project_scripts_on_host(pty, &project.path)?;
+    let global = load_global_scripts_on_host(pty)?;
+    let (name, event, phases) = match hook {
+        WorktreeHook::Setup => (
+            "setup",
+            ScriptEvent::WorktreeSetup,
+            global.setup_phases(&project_scripts),
+        ),
+        WorktreeHook::Teardown => (
+            "teardown",
+            ScriptEvent::WorktreeTeardown,
+            global.teardown_phases(&project_scripts),
+        ),
+    };
+    if phases.iter().all(|phase| phase.commands.is_empty()) {
+        return Ok(());
+    }
+    on_start();
+    let mut env = worktree_env(project, worktree);
+    env.push(event.env());
+    for phase in phases {
+        run_batch(
+            pty,
+            &worktree.path,
+            env.clone(),
+            &phase.label(name),
+            phase.commands,
+        )?;
+    }
+    Ok(())
+}
+
+/// Runs a project's global lifecycle scripts for `event` from its root on its
+/// host. `previous_project_id` names the project a `switch` came from; its id
+/// and path are exported as `PRAGMA_PREVIOUS_PROJECT_*` when it still exists.
+/// Returns whether any scripts were configured (and so ran).
+#[tauri::command(async)]
+pub fn run_project_scripts(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    project_id: String,
+    event: ProjectScriptEvent,
+    previous_project_id: Option<String>,
+) -> AppResult<bool> {
+    let project = db.project(&project_id)?;
+    let pty = hosts.for_project(&db, &project_id)?;
+    let global = load_global_scripts_on_host(&pty)?;
+    let commands = global.project.commands(event);
+    if commands.is_empty() {
+        return Ok(false);
+    }
+    let mut env = pragma_core::scripts::project_env(&project.id, &project.path);
+    env.push(ScriptEvent::Project(event).env());
+    if let Some(previous) = previous_project_id.and_then(|id| db.project(&id).ok()) {
+        env.push(("PRAGMA_PREVIOUS_PROJECT_ID".to_string(), previous.id));
+        env.push(("PRAGMA_PREVIOUS_PROJECT_PATH".to_string(), previous.path));
+    }
+    run_batch(
+        &pty,
+        &project.path,
+        env,
+        ScriptEvent::Project(event).as_str(),
+        commands,
+    )?;
+    Ok(true)
 }
 
 /// Reads + validates `.pragma/scripts.json` on `pty`'s host. A missing or
@@ -84,12 +208,13 @@ pub(crate) fn parse_config(raw: &str, path: &Path) -> AppResult<LoadedProjectScr
         .map_err(|error| AppError::InvalidInput(error.to_string()))
 }
 
-/// Runs a project's `setup`/`teardown` commands on the worktree's host and
-/// returns each command's result, erroring if any command failed.
-pub fn run_headless_commands(
+/// Runs one batch of headless lifecycle commands from `cwd` on `pty`'s host
+/// and returns each command's result, erroring if any command failed. The
+/// batch's commands run concurrently, up to the shared limit.
+fn run_batch(
     pty: &PtyClient,
-    project: &Project,
-    worktree: &Worktree,
+    cwd: &str,
+    env: Vec<(String, String)>,
     kind: &str,
     commands: &[String],
 ) -> AppResult<Vec<HeadlessCommandResult>> {
@@ -97,9 +222,9 @@ pub fn run_headless_commands(
         return Ok(Vec::new());
     }
     let request = ExecRequest {
-        cwd: worktree.path.clone(),
+        cwd: cwd.to_string(),
         commands: commands.to_vec(),
-        env: worktree_env(project, worktree),
+        env,
         max_concurrent: u32::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).map_err(
             |_| AppError::InvalidInput("script concurrency limit is too large".to_string()),
         )?,
@@ -210,11 +335,7 @@ pub fn cancel_worktree_commands(
 
 /// Environment every headless worktree command receives.
 fn worktree_env(project: &Project, worktree: &Worktree) -> Vec<(String, String)> {
-    vec![
-        ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
-        ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
-        ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
-    ]
+    pragma_core::scripts::worktree_env(&project.path, &worktree.path, &worktree.id)
 }
 
 fn format_failures(kind: &str, failures: &[HeadlessCommandResult]) -> String {

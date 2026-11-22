@@ -211,7 +211,8 @@ impl FanoutHost for Registry {
         };
         self.insert_mirrored_worktree(worktree.clone())
             .map_err(|error| host_error(FanoutFailureCode::Internal, error))?;
-        run_setup_scripts(&project_root, &path, &worktree_id)?;
+        crate::worktree_scripts::run_setup(self.scripts_home(), &project_root, &path, &worktree_id)
+            .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error))?;
         Ok(view(&worktree))
     }
 
@@ -222,13 +223,14 @@ impl FanoutHost for Registry {
         run_id: Option<&str>,
     ) -> HostResult<Vec<CommandResult>> {
         let project_root = FanoutHost::project_root(self, &worktree.project_id)?;
-        run_exec(&ExecRequest {
+        crate::worktree_scripts::run_exec(&ExecRequest {
             cwd: worktree.path.clone(),
             commands: commands.to_vec(),
-            env: worktree_env(&project_root, &worktree.path, &worktree.id),
+            env: pragma_core::scripts::worktree_env(&project_root, &worktree.path, &worktree.id),
             max_concurrent: 1,
             run_id: run_id.map(str::to_string),
         })
+        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error))
     }
 
     fn launch_agent(&self, spec: &LaunchSpec) -> HostResult<String> {
@@ -412,6 +414,15 @@ impl FanoutHost for Registry {
     /// would strand the fanout in `cleanupFailed`.
     fn delete_worktree(&self, worktree: &WorktreeView) -> HostResult<()> {
         let project_root = FanoutHost::project_root(self, &worktree.project_id)?;
+        // The same teardown a desktop deletion runs, and like there a failure
+        // stops the removal: skipping it would leak whatever setup started.
+        crate::worktree_scripts::run_teardown(
+            self.scripts_home(),
+            &project_root,
+            &worktree.path,
+            &worktree.id,
+        )
+        .map_err(|error| host_error(FanoutFailureCode::CleanupFailed, error))?;
         // Sessions rooted in the checkout must die before it is removed, or
         // git refuses and the shell keeps a deleted directory open.
         let _ = self.kill_for_cwd(&worktree.path);
@@ -469,94 +480,6 @@ fn runtime_agent_id(agent: &Value, catalog_id: &str) -> String {
             },
             str::to_string,
         )
-}
-
-/// Runs the project's `setup` commands in a freshly created checkout.
-///
-/// The desktop runs these on every worktree it creates; a fanout attempt that
-/// skipped them would be missing its dependencies and every agent in it would
-/// fail for a reason that has nothing to do with the prompt.
-fn run_setup_scripts(project_root: &str, worktree_root: &str, worktree_id: &str) -> HostResult<()> {
-    let commands = setup_commands(project_root);
-    if commands.is_empty() {
-        return Ok(());
-    }
-    let results = run_exec(&ExecRequest {
-        cwd: worktree_root.to_string(),
-        commands,
-        env: worktree_env(project_root, worktree_root, worktree_id),
-        max_concurrent: u32::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).unwrap_or(1),
-        run_id: None,
-    })?;
-    let failures: Vec<&CommandResult> = results
-        .iter()
-        .filter(|result| result.status != Some(0))
-        .collect();
-    if failures.is_empty() {
-        return Ok(());
-    }
-    let detail = failures
-        .iter()
-        .map(|result| {
-            format!(
-                "`{}` exited {}: {}",
-                result.command,
-                result
-                    .status
-                    .map_or_else(|| "by signal".to_string(), |code| code.to_string()),
-                result.stderr.trim()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    Err(host_error(
-        FanoutFailureCode::SetupFailed,
-        format!("setup scripts failed: {detail}"),
-    ))
-}
-
-/// Environment every headless command in a worktree receives.
-fn worktree_env(
-    project_root: &str,
-    worktree_root: &str,
-    worktree_id: &str,
-) -> Vec<(String, String)> {
-    vec![
-        (
-            "PRAGMA_WORKTREE_PATH".to_string(),
-            worktree_root.to_string(),
-        ),
-        ("PRAGMA_PROJECT_PATH".to_string(), project_root.to_string()),
-        ("PRAGMA_WORKTREE_ID".to_string(), worktree_id.to_string()),
-    ]
-}
-
-/// Runs an `exec` batch in-process through the same handler the RPC uses, so
-/// a cancel arriving over the socket finds its run registered.
-fn run_exec(request: &ExecRequest) -> HostResult<Vec<CommandResult>> {
-    let payload = serde_json::to_value(request)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
-    let value = pragma_core::exec::handle(payload)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))?;
-    serde_json::from_value(value)
-        .map_err(|error| host_error(FanoutFailureCode::SetupFailed, error.to_string()))
-}
-
-/// The project's `setup` commands, or none when it has no scripts file. A
-/// malformed file is treated as "no setup" rather than failing every attempt.
-fn setup_commands(project_root: &str) -> Vec<String> {
-    let path = Path::new(project_root).join(CONSTANTS.scripts.config_path.as_str());
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    serde_json::from_str::<Value>(&raw)
-        .ok()
-        .and_then(|value| value.get("setup").cloned())
-        .and_then(|setup| serde_json::from_value::<Vec<String>>(setup).ok())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|command| !command.trim().is_empty())
-        .collect()
 }
 
 fn staged_diff(root: &str) -> HostResult<String> {
@@ -638,7 +561,7 @@ fn ai_command() -> Command {
 /// Appends the platform's executable suffix, so `pragma-ai` resolves to
 #[cfg(test)]
 mod tests {
-    use super::{belongs_to_project, runtime_agent_id, setup_commands};
+    use super::{belongs_to_project, runtime_agent_id};
     use serde_json::json;
 
     #[test]
@@ -670,22 +593,5 @@ mod tests {
             "opencode-nightly"
         );
         assert_eq!(runtime_agent_id(&json!({}), "pragma.opencode"), "opencode");
-    }
-
-    #[test]
-    fn setup_commands_tolerate_a_missing_or_malformed_scripts_file() {
-        let directory = tempfile::tempdir().expect("temp dir");
-        let root = directory.path().to_string_lossy().into_owned();
-        assert_eq!(setup_commands(&root), [] as [std::string::String; 0]);
-
-        let scripts = directory
-            .path()
-            .join(pragma_constants::CONSTANTS.scripts.config_path.as_str());
-        std::fs::create_dir_all(scripts.parent().expect("parent")).expect("dirs");
-        std::fs::write(&scripts, "{ not json").expect("write");
-        assert_eq!(setup_commands(&root), [] as [std::string::String; 0]);
-
-        std::fs::write(&scripts, r#"{ "setup": ["bun install", "  "] }"#).expect("write");
-        assert_eq!(setup_commands(&root), vec!["bun install".to_string()]);
     }
 }

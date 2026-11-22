@@ -13,6 +13,7 @@ import {
   Palette,
   PanelLeft,
   RefreshCw,
+  ScrollText,
   SlidersHorizontal,
   Smartphone,
   Sparkles,
@@ -28,6 +29,7 @@ import {
   type ComputerUseSettings,
   type GitHubAuthMethod,
   type GitHubSettings,
+  type GlobalScriptsConfig,
   type TerminalSettings,
   type OtherSettings,
   type StorageSettings,
@@ -44,6 +46,7 @@ import { ComputerUseSection } from "@/components/settings/ComputerUseSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
+import { ProjectScriptsSection, ScriptsSection } from "@/components/settings/ScriptsSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { OtherSection } from "@/components/settings/OtherSection";
 import { SidebarSection } from "@/components/settings/SidebarSection";
@@ -92,6 +95,7 @@ type BuiltinSection =
   | "mobile"
   | "automations"
   | "computerUse"
+  | "scripts"
   | "sidebar"
   | "other";
 
@@ -107,6 +111,7 @@ const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "accounts",
   "storage",
   "ai",
+  "scripts",
 ]);
 
 const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
@@ -122,6 +127,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "mobile",
   "automations",
   "computerUse",
+  "scripts",
   "sidebar",
   "other",
 ]);
@@ -165,6 +171,7 @@ interface PragmaConfig {
   storage?: StorageSettings;
   system1?: System1Settings;
   computerUse?: ComputerUseSettings;
+  scripts?: GlobalScriptsConfig;
   [key: string]: unknown;
 }
 
@@ -191,6 +198,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateGitHubSettings(config.github);
   validateOtherSettings(config.other);
   validateStorageSettings(config.storage);
+  validateScripts(config.scripts);
   // System 1 is optional and Auto treats a malformed block as defaults, so a
   // typo there must not clear the whole document and lock every Settings section.
   config.system1 = sanitizeSystem1Settings(config.system1);
@@ -272,6 +280,31 @@ function validateStorageSettings(storage: PragmaConfig["storage"]): void {
     (!Number.isInteger(reminder.intervalDays) || reminder.intervalDays < 1)
   ) {
     throw new Error("storage.reminder.intervalDays must be a positive integer");
+  }
+}
+
+/**
+ * Shape-checks the global `scripts` block. The host re-validates it in full
+ * (blank commands, run-script splits) before anything runs; this only keeps a
+ * mistyped block from being rewritten as if it were valid.
+ */
+function validateScripts(scripts: PragmaConfig["scripts"]): void {
+  if (scripts === undefined) return;
+  validateConfigObject(scripts, "scripts");
+  const blocks = { worktree: ["setup", "teardown"], project: ["add", "remove", "switch"] } as const;
+  for (const [name, hooks] of Object.entries(blocks)) {
+    const block = (scripts as Record<string, unknown>)[name];
+    if (block === undefined) continue;
+    validateConfigObject(block as object, `scripts.${name}`);
+    for (const hook of hooks) {
+      const commands = (block as Record<string, unknown>)[hook];
+      if (
+        commands !== undefined &&
+        (!Array.isArray(commands) || !commands.every((command) => typeof command === "string"))
+      ) {
+        throw new Error(`scripts.${name}.${hook} must be an array of strings`);
+      }
+    }
   }
 }
 
@@ -554,6 +587,13 @@ function SettingsNavigation({
         Storage
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "scripts"}
+        icon={<ScrollText />}
+        onClick={() => setSection("scripts")}
+      >
+        Scripts
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "ai"}
         icon={<Sparkles />}
         onClick={() => setSection("ai")}
@@ -689,6 +729,17 @@ function SettingsContent({
       </main>
     );
   }
+  // A project's scripts live in its `.pragma/scripts.json`, not `config.json`,
+  // so the project scope renders past the config load state.
+  if (section === "scripts" && scope === "project" && projectId) {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <ProjectScriptsSection projectId={projectId} projectName={projectName} />
+        </div>
+      </main>
+    );
+  }
   // Accounts live on the project's host, not in `config.json`, so the page
   // renders past the config load state.
   if (section === "accounts") {
@@ -805,6 +856,12 @@ function SettingsContent({
               }))
             }
             settings={loaded.value.computerUse ?? {}}
+          />
+        ) : null}
+        {loaded && section === "scripts" && scope === "global" ? (
+          <ScriptsSection
+            persist={(next) => persist((current) => ({ ...current, scripts: next }))}
+            settings={loaded.value.scripts ?? {}}
           />
         ) : null}
         {loaded && section === "github" && scope === "global" ? (

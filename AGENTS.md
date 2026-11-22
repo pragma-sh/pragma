@@ -178,7 +178,8 @@ than no guide.
   `agentStatus` = `{ notificationsEnabled, soundName }`, the System 1 endpoint under
   `system1` = `{ baseUrl, model }` (its key is an owner-only file, never config), the "Created with Pragma"
   pull-request footer under `github` = `{ prSignature }`, desktop auto-update overrides
-  under `updates` = `{ checkUrl, autoDownload }`). Keyboard shortcuts are separate:
+  under `updates` = `{ checkUrl, autoDownload }`, global lifecycle scripts under `scripts` =
+  `{ worktree: { setup, teardown, runScripts }, project: { add, remove, switch } }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
   belong in `@pragma-sh/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
   so Rust and TS agree, never hard-coded in one language.
@@ -201,6 +202,10 @@ than no guide.
   providers and the System 1 connection are global, `automode.md` is per scope. GitHub,
   Other (update server/download), Sidebar (row density, a per-device localStorage
   preference rather than config), and mobile pairing/gateway history are global-only.
+  Scripts has both too, over different files: global edits the `scripts` block of
+  `~/.pragma/config.json`, project edits the checked-in `.pragma/scripts.json`
+  (`setup`/`teardown` only, validated by the host's parser on write; project
+  `add`/`remove`/`switch` hooks stay global-only).
   Storage also has both scopes, but as a _view_ (every project vs. the current one's
   worktrees); only its reminder is persisted, under global `storage.reminder`.
 - Worktree disk usage is measured on the owning host: the walk, the gitignored-folder
@@ -225,6 +230,18 @@ than no guide.
 - The pull-request footer is text-only — a heading, a tagline, a small "Open worktree"
   link, and the opt-out line. It references **no** hosted image: a raw URL on `main` would
   be a published contract baked into other people's repositories. Keep it that way.
+- Lifecycle scripts have two layers: a project's checked-in `.pragma/scripts.json` and
+  the global `scripts` block of `~/.pragma/config.json`. Parsing, validation, the layer
+  order (global setup before the project's, teardown in reverse, project `runScripts`
+  win a name clash), and the script env all live in `crates/pragma-core/src/scripts.rs`
+  (+ `scripts/global.rs`). The global block is read from the home directory of the
+  **host that owns the project**, never the desktop's. A list's commands run
+  concurrently, so layers are separate sequential batches, not one concatenated list.
+  The desktop runs worktree hooks in `worktrees.rs`; `pragma-server` runs them for
+  fanout attempts and phone-created worktrees through `worktree_scripts.rs`. Project
+  hooks (`add`/`remove`/`switch`) are global-only so a cloned repository can never run
+  code, and the desktop triggers them through `run_project_scripts`
+  (`apps/pragma/src/lib/project-scripts.ts`, `hooks/use-project-switch-scripts.ts`).
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
