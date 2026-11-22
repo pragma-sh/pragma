@@ -34,3 +34,8 @@ daemonize = "0.5"
 [dev-dependencies]
 pragma-platform = { path = "../pragma-platform", features = ["test-support"] }
 tempfile = "3"
+
+# Builds the broken listening socket the listener tests recover from; std has no
+# way to bind, connect, and then listen on one socket.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+socket2 = "0.6"

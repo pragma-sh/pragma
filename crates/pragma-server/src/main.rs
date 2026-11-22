@@ -8,6 +8,7 @@ mod fanout_host;
 mod fanouts;
 mod github;
 mod invocations;
+mod listener;
 mod plugins_host;
 mod ports;
 mod registry;
@@ -32,6 +33,7 @@ use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 use pragma_platform::ipc::{self, LocalStream};
 
+use listener::ServerListener;
 use pragma_protocol::limits::raise_open_file_limit;
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, write_output_frame, ControlEnvelope,
@@ -167,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     take_socket_path(&paths.socket)?;
     // `ipc::bind` makes the server directory owner-only before binding, so the
     // socket is restricted to its owner on every platform.
-    let listener = ipc::bind(&paths.socket)?;
+    let mut listener = ServerListener::new(paths.socket.clone(), ipc::bind(&paths.socket)?);
 
     let registry = Arc::new(Registry::new(
         paths.socket.clone(),
@@ -182,23 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_invocation_reconciler(&registry);
     start_dropped_files_sweeper();
     loop {
-        // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
-        // must not take the whole process down with it: every other
-        // already-connected terminal's socket would die alongside it, turning
-        // one resource hiccup into a total, silent freeze. Log and keep
-        // serving; a transient failure (like EMFILE) is often self-resolving
-        // once some existing connections close.
-        let (stream, _) = match listener.accept() {
-            Ok(accepted) => accepted,
-            Err(err) => {
-                eprintln!("accept failed: {err}");
-                // Bound the spin rate on a persistent accept error (e.g.
-                // EMFILE from fd exhaustion): without a delay this would log
-                // and retry at full CPU speed until an fd is freed elsewhere.
-                thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-        };
+        let stream = listener.accept();
         let registry = Arc::clone(&registry);
         let core = Arc::clone(&core);
         thread::spawn(move || {

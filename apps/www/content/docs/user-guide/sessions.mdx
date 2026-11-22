@@ -92,9 +92,11 @@ Server Logs** before restarting and save the lines around the failure. Include y
 Pragma version, macOS/Windows/Linux version, and whether existing terminals still work
 when reporting it.
 
-On macOS, `Invalid argument (os error 22)` can come from a disconnected server socket,
-not from Claude, Codex, or the shell itself. Pragma preserves buffered replies when that
-socket closes instead of replacing them with a timeout-setting error.
+On macOS, `Invalid argument (os error 22)` and `Broken pipe (os error 32)` came from the
+server's listening socket breaking after a long session, not from Claude, Codex, or the
+shell itself. The server now notices this and opens a fresh socket on its own, keeping
+every running session. If it still cannot, the app replaces the server the next time a
+terminal opens, without you restarting it.
 
 Reloading the desktop can reconnect to surviving sessions. **Troubleshooting → Restart
 Server** also ends live PTYs: plain shells start fresh and only eligible agent sessions

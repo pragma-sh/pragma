@@ -67,6 +67,11 @@ const INPUT_QUEUE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const INPUT_FRAME_DATA_MAX: usize = 64 * 1024;
 const INPUT_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(10);
 const INPUT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(1);
+/// Pause before resending a request the server hung up on, long enough for a
+/// server with a broken listener to replace it (`pragma-server`'s `listener`).
+const HANG_UP_RETRY_DELAY: Duration = Duration::from_millis(100);
+/// How long a killed server gets to exit and release its lock.
+const SERVER_EXIT_WAIT: Duration = Duration::from_millis(200);
 
 /// Result type for Pragma client operations.
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -514,12 +519,26 @@ impl PragmaClient {
     }
 
     fn open_event_stream(&self, request: &RequestFrame) -> ClientResult<LocalStream> {
-        let mut stream = self.connect_with_spawn()?;
+        let mut hang_ups = HangUps::default();
+        loop {
+            let stream = self.connect_with_spawn()?;
+            match Self::start_event_stream(stream, request) {
+                Err(error) if is_hang_up(&error) && self.recover_from_hang_up(&mut hang_ups)? => {}
+                result => return result,
+            }
+        }
+    }
+
+    /// Sends `request` as the first frame on `stream` and returns the stream
+    /// positioned after the request's success response.
+    fn start_event_stream(
+        mut stream: LocalStream,
+        request: &RequestFrame,
+    ) -> ClientResult<LocalStream> {
         write_json_frame(&mut stream, request)?;
-        let request_id = request.request_id.clone();
         loop {
             match read_json_frame::<ServerFrame>(&mut stream)? {
-                ServerFrame::Response(response) if response.request_id == request_id => {
+                ServerFrame::Response(response) if response.request_id == request.request_id => {
                     if !response.ok {
                         return Err(ClientError::Server(
                             response
@@ -538,6 +557,40 @@ impl PragmaClient {
                 | ServerFrame::ControlResult(_) => {}
             }
         }
+    }
+
+    /// Decides whether to send a request again after the server hung up on
+    /// the fresh connection it was sent on, recording the hang-up.
+    ///
+    /// A hello proves only that the server accepted the connection. A server
+    /// whose listening socket lost its receive side still greets every
+    /// connection and then hangs up without reading it (#225), so the request
+    /// was never processed and is safe to send again. The first hang-up waits
+    /// briefly, giving the server time to replace its listener. A second one
+    /// means it has not, so a managed local server is then replaced the same
+    /// way as one that sends no hello at all. Further hang-ups are returned.
+    fn recover_from_hang_up(&self, hang_ups: &mut HangUps) -> ClientResult<bool> {
+        hang_ups.count += 1;
+        match hang_ups.count {
+            1 => {
+                hang_ups.server_pid = self.running_server_pid();
+                thread::sleep(HANG_UP_RETRY_DELAY);
+            }
+            2 if matches!(self.endpoint, ClientEndpoint::ManagedLocal(_)) => {
+                let _guard = self.launch_lock.lock()?;
+                // Only the server that hung up is replaced: a concurrent caller
+                // may already have done it, and the successor is healthy.
+                if let Some(pid) = hang_ups
+                    .server_pid
+                    .filter(|pid| self.running_server_pid() == Some(*pid))
+                {
+                    self.request_pool.lock()?.clear();
+                    kill_server(pid);
+                }
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
     }
 
     fn start_input_writer(&self) -> InputSender {
@@ -567,9 +620,7 @@ impl PragmaClient {
     }
 
     fn request(&self, request: &RequestFrame) -> ClientResult<()> {
-        self.with_request_conn("server request failed", |stream| {
-            Self::request_on(stream, request)
-        })
+        self.with_request_conn(|stream| Self::request_on(stream, request))
     }
 
     /// Sends a business-logic RPC and returns its JSON response payload.
@@ -579,7 +630,7 @@ impl PragmaClient {
     /// executes on the remote `pragma-server` — the caller is endpoint-agnostic.
     pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
         let request = request_rpc(method, payload);
-        self.with_request_conn("server rpc failed", |stream| {
+        self.with_request_conn(|stream| {
             configure_rpc_stream(stream)?;
             let result = Self::rpc_on(stream, &request);
             configure_stream(stream)?;
@@ -598,7 +649,7 @@ impl PragmaClient {
         payload: Value,
     ) -> ClientResult<Value> {
         let request = request_control(method, payload);
-        self.with_request_conn("server control failed", |stream| {
+        self.run_request_conn(false, |stream| {
             // Agent launches may legitimately exceed the normal 5s request
             // timeout while the host resolves plugins or creates a worktree.
             // A timeout here is especially unsafe: transport retry duplicates
@@ -638,26 +689,38 @@ impl PragmaClient {
     }
 
     /// Runs `op` on a checked-out request connection, returning the connection
-    /// to the pool on success. A transport error retries exactly once on a
-    /// fresh connection (a pooled stream may be stale after a server restart);
-    /// the stale pool is discarded so other callers don't retry through it too.
+    /// to the pool on success. A pooled stream may be stale after a server
+    /// restart, so a transport error on the first attempt retries once on a
+    /// fresh connection, and the rest of the pool is discarded so other callers
+    /// don't retry through it too. A fresh connection the server hangs up on is
+    /// retried as [`Self::recover_from_hang_up`] decides.
     fn with_request_conn<T>(
         &self,
-        failure: &str,
         op: impl Fn(&mut LocalStream) -> Result<ClientResult<T>, ClientError>,
     ) -> ClientResult<T> {
-        let mut last_err: Option<ClientError> = None;
-        for attempt in 0..2 {
-            let mut stream = if attempt == 0 {
-                match self.request_pool.lock()?.pop() {
-                    Some(stream) => stream,
-                    None => self.connect_with_spawn()?,
-                }
-            } else {
-                self.request_pool.lock()?.clear();
-                self.connect_with_spawn()?
+        self.run_request_conn(true, op)
+    }
+
+    /// [`Self::with_request_conn`] with control over hang-up resends.
+    /// `resend_on_hang_up` must be false for a request that is not idempotent:
+    /// a hang-up on a fresh connection can arrive after the server already did
+    /// the work (an SSH bridge dropping before the reply), and the server does
+    /// not deduplicate by request id.
+    fn run_request_conn<T>(
+        &self,
+        resend_on_hang_up: bool,
+        op: impl Fn(&mut LocalStream) -> Result<ClientResult<T>, ClientError>,
+    ) -> ClientResult<T> {
+        let mut pooled = self.request_pool.lock()?.pop();
+        let mut retried = false;
+        let mut hang_ups = HangUps::default();
+        loop {
+            let fresh = pooled.is_none();
+            let mut stream = match pooled.take() {
+                Some(stream) => stream,
+                None => self.connect_with_spawn()?,
             };
-            match op(&mut stream) {
+            let error = match op(&mut stream) {
                 Ok(result) => {
                     let mut pool = self.request_pool.lock()?;
                     if pool.len() < REQUEST_POOL_MAX_IDLE {
@@ -665,12 +728,20 @@ impl PragmaClient {
                     }
                     return result;
                 }
-                Err(transport_err) => {
-                    last_err = Some(transport_err);
-                }
+                Err(error) => error,
+            };
+            if !fresh {
+                self.request_pool.lock()?.clear();
+            }
+            let retry = if fresh && is_hang_up(&error) {
+                resend_on_hang_up && self.recover_from_hang_up(&mut hang_ups)?
+            } else {
+                !std::mem::replace(&mut retried, true)
+            };
+            if !retry {
+                return Err(error);
             }
         }
-        Err(last_err.unwrap_or_else(|| ClientError::Server(failure.to_string())))
     }
 
     fn rpc_on(
@@ -777,29 +848,25 @@ impl PragmaClient {
         if !matches!(self.endpoint, ClientEndpoint::ManagedLocal(_)) {
             return;
         }
-        // The server owns long-lived Bun sidecars, per-session watchers, PTYs,
-        // and the configured tunnel. Killing only its root pid reparents those
-        // children and leaves them running without a supervisor. Capture and
-        // terminate the complete descendant tree while the parent links still
-        // exist; the process-table implementation is shared across platforms.
-        let stale_pid = std::fs::read_to_string(self.lock_path())
+        if let Some(pid) = self.running_server_pid() {
+            kill_server(pid);
+        } else {
+            process::kill_matching("pragma-server");
+            process::kill_matching("pragma-daemon");
+            thread::sleep(SERVER_EXIT_WAIT);
+        }
+    }
+
+    /// The pid the managed server recorded in its lock file, while that
+    /// process is still running.
+    fn running_server_pid(&self) -> Option<u32> {
+        std::fs::read_to_string(self.lock_path())
             .ok()
             .and_then(|contents| contents.trim().parse::<u32>().ok())
             .filter(|pid| {
                 process::is_running(*pid, "pragma-server")
                     || process::is_running(*pid, "pragma-daemon")
-            });
-        if let Some(pid) = stale_pid {
-            let _ = process::kill_process_tree(pid);
-        } else {
-            process::kill_matching("pragma-server");
-            process::kill_matching("pragma-daemon");
-        }
-        // Do not unlink either path here. The killed process releases its
-        // advisory lock, and the replacement server removes an unresponsive
-        // socket only after acquiring that same lock. Deleting the lock file
-        // would let concurrent starters lock different inodes.
-        thread::sleep(Duration::from_millis(200));
+            })
     }
 
     fn spawn_server(&self) -> ClientResult<()> {
@@ -862,6 +929,46 @@ impl PragmaClient {
 fn hello_is_current(hello: &HelloFrame, protocol: &str, expected_build: Option<&str>) -> bool {
     hello.protocol_version == protocol
         && expected_build.is_none_or(|expected| hello.build_id.as_deref() == Some(expected))
+}
+
+/// Hang-ups seen while sending one request; see
+/// [`PragmaClient::recover_from_hang_up`].
+#[derive(Default)]
+struct HangUps {
+    count: u32,
+    /// The managed server that hung up first, so only it is ever replaced.
+    server_pid: Option<u32>,
+}
+
+/// Whether `error` means the server closed the connection before answering.
+fn is_hang_up(error: &ClientError) -> bool {
+    let (ClientError::Io(error) | ClientError::Protocol(pragma_protocol::ProtocolError::Io(error))) =
+        error
+    else {
+        return false;
+    };
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+    )
+}
+
+/// Kills the server `pid` together with its sidecars, PTYs, and tunnel.
+///
+/// Killing only the root pid would reparent those children and leave them
+/// running without a supervisor, so the complete descendant tree is captured
+/// and terminated while the parent links still exist. Neither the socket nor
+/// the lock file is unlinked: the killed process releases its advisory lock,
+/// and the replacement removes an unresponsive socket only after acquiring that
+/// same lock. Deleting the lock file would let concurrent starters lock
+/// different inodes.
+fn kill_server(pid: u32) {
+    let _ = process::kill_process_tree(pid);
+    thread::sleep(SERVER_EXIT_WAIT);
 }
 
 /// Build id of the `pragma-server` shipped beside this binary, hashed once.
@@ -1621,7 +1728,7 @@ mod tests {
         client.request_pool.lock().expect("pool lock").push(stream);
 
         let calls = AtomicUsize::new(0);
-        let result = client.with_request_conn("RPC failed", |stream| {
+        let result = client.with_request_conn(|stream| {
             calls.fetch_add(1, Ordering::SeqCst);
             let mut reply = [0; 2];
             stream.read_exact(&mut reply)?;
@@ -1674,6 +1781,97 @@ mod tests {
             .resize("tab".into(), 80, 24)
             .expect("retry on a fresh connection");
         serving.join().expect("server thread");
+    }
+
+    /// Serves `connections` in order on a fresh socket: `true` answers the
+    /// request, `false` greets and then hangs up without reading it — what
+    /// every connection from a server with a broken listener does (#225).
+    fn serve_connections(
+        connections: Vec<bool>,
+    ) -> (
+        tempfile::TempDir,
+        PragmaClient,
+        std::thread::JoinHandle<usize>,
+    ) {
+        use pragma_platform::ipc;
+        use pragma_protocol::{read_json_frame, write_json_frame, ResponseFrame, ServerFrame};
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("host").join("daemon.sock");
+        let listener = ipc::bind(&path).expect("listener");
+        let client = PragmaClient::new_socket(path);
+        let serving = std::thread::spawn(move || {
+            let mut served = 0;
+            for answers in connections {
+                let (mut stream, _) = listener.accept().expect("connection");
+                served += 1;
+                write_json_frame(
+                    &mut stream,
+                    &ServerFrame::Hello(hello(
+                        &pragma_constants::CONSTANTS.daemon.protocol_version,
+                        None,
+                    )),
+                )
+                .expect("hello");
+                if !answers {
+                    continue;
+                }
+                configure_stream(&stream).expect("bounded test socket");
+                let request: pragma_protocol::RequestFrame =
+                    read_json_frame(&mut stream).expect("request");
+                write_json_frame(
+                    &mut stream,
+                    &ServerFrame::Response(ResponseFrame {
+                        request_id: request.request_id,
+                        ok: true,
+                        error: None,
+                    }),
+                )
+                .expect("response");
+            }
+            served
+        });
+        (dir, client, serving)
+    }
+
+    #[test]
+    fn a_stream_request_the_server_hung_up_on_is_sent_again() {
+        let (_dir, client, serving) = serve_connections(vec![false, true]);
+        client
+            .attach_stream("tab".into(), Some((80, 24)), None)
+            .expect("the second connection answers");
+        assert_eq!(serving.join().expect("server thread"), 2);
+    }
+
+    #[test]
+    fn a_request_the_server_hung_up_on_is_sent_again() {
+        let (_dir, client, serving) = serve_connections(vec![false, true]);
+        client
+            .resize("tab".into(), 80, 24)
+            .expect("the second connection answers");
+        assert_eq!(serving.join().expect("server thread"), 2);
+    }
+
+    #[test]
+    fn a_server_that_keeps_hanging_up_surfaces_the_hang_up() {
+        // A socket endpoint has no server of its own to replace, so the second
+        // hang-up is the caller's answer.
+        let (_dir, client, serving) = serve_connections(vec![false, false]);
+        let error = client
+            .attach_stream("tab".into(), Some((80, 24)), None)
+            .expect_err("every connection hangs up");
+        assert!(super::is_hang_up(&error), "unexpected error: {error}");
+        assert_eq!(serving.join().expect("server thread"), 2);
+    }
+
+    #[test]
+    fn a_server_rejection_is_not_mistaken_for_a_hang_up() {
+        assert!(!super::is_hang_up(&ClientError::Server(
+            "session not found".into()
+        )));
+        assert!(!super::is_hang_up(&ClientError::Io(std::io::Error::from(
+            std::io::ErrorKind::WouldBlock
+        ))));
     }
 
     #[test]
