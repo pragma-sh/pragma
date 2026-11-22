@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0 (2026-11-21)
+
+Version-only release; identical plugin code to 0.1.0.
+
 ## 0.1.0 (2026-11-21)
 
 
