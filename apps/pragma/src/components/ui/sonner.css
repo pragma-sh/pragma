@@ -1,0 +1,43 @@
+/*
+ * Long toast text, laid out by `toast-overflow.tsx`.
+ *
+ * Sonner lays a toast out as one row: icon, text, buttons. Long text then
+ * shares that row with the buttons and is squeezed into a column a few words
+ * wide. Instead, text is clamped to three lines with a "Show more" toggle, and
+ * a long toast gives the text the whole width and puts its buttons beneath it.
+ */
+
+[data-sonner-toast] :where([data-title], [data-description]) {
+  overflow-wrap: anywhere;
+}
+
+[data-sonner-toast] [data-description] {
+  white-space: pre-line;
+}
+
+[data-sonner-toast]:not([data-pragma-open]) :where([data-title], [data-description]) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+[data-sonner-toast][data-pragma-long] {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+/* Full width beside the icon, so every button wraps onto the next row. */
+[data-sonner-toast][data-pragma-long] > [data-content] {
+  flex: 1 1 calc(100% - 28px);
+  min-width: 0;
+}
+
+[data-sonner-toast][data-pragma-long] > [data-button] {
+  margin-top: 6px;
+}
+
+/* The first button after the text starts the row, pushed to the right. */
+[data-sonner-toast][data-pragma-long] > [data-content] + [data-button] {
+  margin-left: auto;
+}
