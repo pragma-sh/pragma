@@ -104,6 +104,12 @@ Native socket timeout changes use `pragma_platform::ipc::set_read_timeout` and
 even with replies buffered. Preserve those replies; never retry an acknowledged
 mutation just because restoring its socket timeout failed after disconnect.
 
+A server hello does not prove the connection will be read: a macOS listener that
+lost its receive side greets and hangs up (#225). `pragma-server` replaces such a
+listener in place (`listener.rs`), and `pragma-client` resends a request whose
+fresh connection was hung up on. Never accept or bind the server socket outside
+`ServerListener`.
+
 1. **Reuse before writing.** Grep for an existing helper/constant/component first.
 2. **Extract on the second use.** Duplicated logic moves to `src/lib/` or a package.
 3. **Create packages freely.** Small single-purpose packages > sprawling apps. If it's
