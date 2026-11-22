@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/antigravity-plugin",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Google Antigravity CLI (agy) plugin that reports agent status to Pragma via native hooks.",
   "license": "AGPL-3.0-only",
   "repository": {
