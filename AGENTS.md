@@ -637,11 +637,11 @@ moves them to one version. Three rules hold that together:
 
 Publishing needs **no npm token**: every one of the nine names `pragma-sh/pragma` +
 `release.yml` as a trusted publisher, so the job's `id-token` authenticates it and signs
-provenance. The eleven agent plugins under `@pragma-sh` trust
+provenance. The twelve agent plugins under `@pragma-sh` trust
 `.github/workflows/plugins.yml` instead, so a plugin release is published by
 `release.yml`'s `publish-plugins` job **dispatching** that workflow at the plugin's tag,
 never by `release.yml` itself. Two consequences: **renaming `release.yml` silently
-breaks all nine** (and renaming `plugins.yml` breaks all eleven), since npm verifies the workflow filename, and a **brand-new** package
+breaks all nine** (and renaming `plugins.yml` breaks all twelve), since npm verifies the workflow filename, and a **brand-new** package
 must be published by hand once before npm will accept a trusted publisher for it: npm
 rejects an OIDC publish for an unconfigured package with `404 Not Found - PUT`, never a
 403, so the failure reads as if the package did not exist. Configuring one is a CLI step,

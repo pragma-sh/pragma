@@ -3,10 +3,35 @@
   "schemaVersion": 1,
   "plugins": [
     {
+      "package": "@pragma-sh/antigravity-plugin",
+      "version": "1.0.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/antigravity-plugin/-/antigravity-plugin-1.0.0.tgz",
+      "integrity": "sha512-TUGDUPDzdUG+gFmKqW3uVni9rZaF+M1k5FpyVFKgcF1GQxoD9qEvs9aTdRbr+j9/GZ6H9Gtr7Ai6kFSatudYaw==",
+      "manifestSha256": "be3de98fc599417de391910a3447119aea374ac4d98fd36bcb4ec10e0bc50e9e",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Antigravity CLI",
+        "description": "Launch the Google Antigravity CLI in Pragma with live status, approvals, questions, sub-agents, usage limits, and session naming.",
+        "longDescription": "Launch the Google Antigravity CLI (agy) from the Pragma launcher with live status, command approvals, questions, sub-agent activity, quota usage limits, and session naming. The integration installs as a native Antigravity plugin and reports into Pragma's tab and sidebar, so Antigravity work in one worktree never hides progress in another.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/antigravity-plugin/assets/antigravity.svg",
+            "alt": "Google Antigravity logo"
+          }
+        ],
+        "install": {
+          "command": "node",
+          "args": ["dist/install.mjs"]
+        },
+        "agentBinary": "agy"
+      }
+    },
+    {
       "package": "@pragma-sh/claude-code-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.2.2.tgz",
-      "integrity": "sha512-sHrAbd6u0k7/TxrPlty2bGmL61OFX8YZa2Sl9ct4YOCcqiZT/7Bv6NX9hKs191uVSjqlWqcttKxLWlmt/J21Bw==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-1.2.3.tgz",
+      "integrity": "sha512-YRVjSl2lWupR/Pj/bg17qNVDkpJyfASaClcWRr2qs+Cqzopt18V0Fc6UW/xzvFqoLnWFaLhxXQVOawRD+ayv4Q==",
       "manifestSha256": "89f221514d6481b03cd6163078e8a0a3188538960dde16e1d7d260efb6ef2f62",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -29,9 +54,9 @@
     },
     {
       "package": "@pragma-sh/codex-plugin",
-      "version": "1.3.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/codex-plugin/-/codex-plugin-1.3.2.tgz",
-      "integrity": "sha512-NjlaIWdcM0nOnPY+fbYPPL68xn7JYXuF1U3mfmT24J1w4DKjoithZJNRGyfmVj9xYlveW6rDqAhALUqoIrQHLA==",
+      "version": "1.3.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/codex-plugin/-/codex-plugin-1.3.3.tgz",
+      "integrity": "sha512-15cPam5zBEMwsbvXqTp9jee2lMbKxY/k//+zOX+PbsQqR9eHC6vSJZ0KMKP3Lx9xLNQqDnHYkNyEzDxU3OEdpw==",
       "manifestSha256": "2bec896be1dbbbadbd88da08b08d9ae1b19f32a314932529df20c4218c03ce7a",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -54,9 +79,9 @@
     },
     {
       "package": "@pragma-sh/cursor-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/cursor-plugin/-/cursor-plugin-1.2.2.tgz",
-      "integrity": "sha512-ZDY0aqXEtEjTq1VOALcjQgvi+8apy9gkbnQE749+irlqFdX3xjwmb+isyeaQIPG1nY90D1uF7nUuUZbZF6dprg==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/cursor-plugin/-/cursor-plugin-1.2.3.tgz",
+      "integrity": "sha512-zkIols5S8GGybxHiASMEUYCFBLHHRlhZjOezm7+GPxiNNbpdQpi9uLjMlCDxjWHSTqaa/MnzEmunmIdPewlAqQ==",
       "manifestSha256": "6b7d04e6f8caaa658043ed7426f70722f6669bc2653177a9be0c6c56b0e1e010",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -79,9 +104,9 @@
     },
     {
       "package": "@pragma-sh/grok-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/grok-plugin/-/grok-plugin-1.2.2.tgz",
-      "integrity": "sha512-WFLhzjuKANo/73ZayXpncVIVAhpM/17c0EHwwkeelfqgw85MzJzwa5gNyAQdItJf1232z/VqOABIyude71QWGw==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/grok-plugin/-/grok-plugin-1.2.3.tgz",
+      "integrity": "sha512-FlUZKMa3kDhfGfxVBTtVk1W8m66Uf1w4cR6yWFCKNXd+V2lraVKLl6AnlwEf5nh7fm8wdcuMePkVzN1TnAwEjA==",
       "manifestSha256": "55ebf5919409c74f94b341b765351945bfe529f1091396ba4f18f6cebd1c59a3",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -104,9 +129,9 @@
     },
     {
       "package": "@pragma-sh/github-copilot-cli-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/github-copilot-cli-plugin/-/github-copilot-cli-plugin-1.2.2.tgz",
-      "integrity": "sha512-lqRpmc685HdZsq4sI4iy4uPhz0rMkx2vn8eVurzNu+b6PWoUObVjBaCA6mmlSmvP36qHdkGkSuvlYZGcMX85RQ==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/github-copilot-cli-plugin/-/github-copilot-cli-plugin-1.2.3.tgz",
+      "integrity": "sha512-ePg2ZCjXucJulCqm2i6nx55aNSAklDuBETRaYd1cG+it+p2ZUzVqoNzz7UI7JeamkgaZa4f7hG/18Xjbdh0uDw==",
       "manifestSha256": "ce5f64049b99f0a008ba0827f62032e62d25d1f890876032c301764e9ff37f86",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -129,9 +154,9 @@
     },
     {
       "package": "@pragma-sh/junie-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.2.2.tgz",
-      "integrity": "sha512-umwe0wjYk9Kqy2vyVVx3u958HewfidTSmDOFuLme1FYohXIVvs1MvpOetAiEI7o9hEnu1N1mQZXkpCUsGFMp5g==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-1.2.3.tgz",
+      "integrity": "sha512-yBUdZL5GtQmYdfTFeA/MIz28P/wzN1MQakeNIrNw0ujNUOe/YjtX+3vcPcXGK/1aut2MGqiHZyFV7hbxM2KFMw==",
       "manifestSha256": "7bd16c7fe07595ea5fb8d5ed3fcba00bbe65094e551b99be63ddd79728d852f4",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -154,9 +179,9 @@
     },
     {
       "package": "@pragma-sh/kimi-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/kimi-plugin/-/kimi-plugin-1.2.2.tgz",
-      "integrity": "sha512-jMlxTPQFaduNIf+ta3vm5kEZKsimb0FXZOZtZQZq65XSgC8V69vm2UPVMaXmW60p5NFSWx2su1tbdDVCyZUQfQ==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/kimi-plugin/-/kimi-plugin-1.2.3.tgz",
+      "integrity": "sha512-kw/r4vQhsBIb8jyMLA8SEsHNOoySSn+HGMoHW+yRqZRupq0SC72pRRKokT3FVoGTrDY5iQ/lLNtQjeatEL45uA==",
       "manifestSha256": "1e842b3017200efc75be5008bc9f61d9313687a94f57db0c85cf84d867e5c2e5",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -178,10 +203,35 @@
       }
     },
     {
+      "package": "@pragma-sh/omp-plugin",
+      "version": "1.0.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/omp-plugin/-/omp-plugin-1.0.0.tgz",
+      "integrity": "sha512-ZmOK+5tIlLdJMZ1Ts/kDrkFuZ6qzvncNtgPD8X/00eMz2/kPaBDMYhxCCT+Ub4BOpcCS/G2j+LRgGOVfYh9I9Q==",
+      "manifestSha256": "5cbb1ee30c112c8293c32559813506ac4bd41e2bb2c9c2fafaed5e56942dabbe",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Oh My Pi",
+        "description": "Launch Oh My Pi (omp) in Pragma with live status, sub-agent activity, session naming, and interjections.",
+        "longDescription": "Launch Oh My Pi from the Pragma launcher with live status, sub-agent activity, session naming, resume, and interjections. omp sessions report into the same agent board as every other integration, and mid-run messages are delivered straight into the session.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/omp-plugin/assets/omp-badge.svg",
+            "alt": "Oh My Pi logo"
+          }
+        ],
+        "install": {
+          "command": "omp",
+          "args": ["plugin", "install", "."]
+        },
+        "agentBinary": "omp"
+      }
+    },
+    {
       "package": "@pragma-sh/opencode-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.2.2.tgz",
-      "integrity": "sha512-D8S+belJSydGWqrJGeK9L42/RVmj4POJly63SxRE9gX304CsdASw2OJ7K4Z7NDaVxagGqY/iIm7gSI5Yz3m+nw==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-1.2.3.tgz",
+      "integrity": "sha512-FvQG2BvF4h6WrC30VTDcMZ8eN8ImamIsZwy4NWCx7mSl50+L1NLQbydPbGwOOZyKFqQKGrn6GhwhruVjOfzO4w==",
       "manifestSha256": "eb123b67f443f0d3c5acae29a723146861aef0edc65f3c2d81509ec20a0adfb0",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -204,9 +254,9 @@
     },
     {
       "package": "@pragma-sh/pi-plugin",
-      "version": "1.3.0",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/pi-plugin/-/pi-plugin-1.3.0.tgz",
-      "integrity": "sha512-1ijU88hTl4Oz+hUrLjxH9Rl3Yr8X5ZE4/odUlCCifC1Pd9pc71es9WowSjcvMVTXGdEsGp7vSya7/6hSk3KIfg==",
+      "version": "1.3.1",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/pi-plugin/-/pi-plugin-1.3.1.tgz",
+      "integrity": "sha512-pS+7Lx2p9oWXHg5IhFMzmM/gEb+Bja7Cn7Fou9xMGYL+aYRD6zem35JLwp9vU3rSioiW7QVvjkzQdtniUXCTIg==",
       "manifestSha256": "a968909a2ce219050a7a034ad926a3ad90286844e1bf72c2a7a42220dc206579",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
@@ -229,9 +279,9 @@
     },
     {
       "package": "@pragma-sh/prime-agent-plugin",
-      "version": "1.2.2",
-      "tarball": "https://registry.npmjs.org/@pragma-sh/prime-agent-plugin/-/prime-agent-plugin-1.2.2.tgz",
-      "integrity": "sha512-0M3x3IXgKDALtWZoQvBL107hLbqWsmD7tS9Uex4o1dC1LOBwOdj664OV8SHNNvAoJPs3w5VpBLDoiC0oyj6JZA==",
+      "version": "1.2.3",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/prime-agent-plugin/-/prime-agent-plugin-1.2.3.tgz",
+      "integrity": "sha512-CD4IQgWTxVNA2+bfdcuIJHbPMmq9FpiRIZbNzA2fik9BgiQXypO9ot3NwKcl21I6LYxva8eA4gfCeRz/V91x2w==",
       "manifestSha256": "12c82fcd3213d2b95bc2d9cbd03b739c77992e32f5db3e046a16256af6f2f71d",
       "manifest": {
         "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",

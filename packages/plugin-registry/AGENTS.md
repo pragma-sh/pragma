@@ -74,6 +74,13 @@ and `.release-please-manifest.json` at `0.0.0` (its first release is `initial-ve
 `refresh-lock` adds it to the lock; the desktop and gallery read the lock from `main`, so
 the plugin appears for every installed desktop once that lock PR merges.
 
+**Never hand-publish a placeholder version (`0.0.0`, `0.0.0-stage`) as that first publish.**
+Once npm knows the package, `lock.ts` no longer treats it as pending, so a failed OIDC publish
+of the real version turns into `ETARGET` and aborts the **whole** refresh — every other
+plugin's lock entry then stays on its previous release. Antigravity did exactly this (its
+trusted publisher was never configured, so the 0.1.0 publish died with the 404 above). Publish
+the real release version by hand instead, then configure `npm trust`.
+
 ## Commands
 
 ```bash
