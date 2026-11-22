@@ -34,6 +34,13 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   the relaunched app would keep talking to the old one. Debug builds (`cargo run`) and
   socket endpoints stay on the protocol check alone; a server too old to send a
   `buildId` counts as stale. Anything else goes through `kill_stale_server`.
+- A hello proves the server accepted a connection, not that it will read it. A server
+  whose listener broke greets and then hangs up (#225). A request whose fresh
+  connection is hung up on was never processed, so `recover_from_hang_up` sends it
+  again once after `HANG_UP_RETRY_DELAY`. That pause gives the server time to replace
+  its listener. On a second hang-up, a managed local server is killed and respawned,
+  but only if it is the same pid that hung up first, so a concurrent caller's healthy
+  replacement survives. Server rejections and timeouts are never treated as hang-ups.
 - Remote SSH bridge using `russh` and `channel_open_direct_streamlocal`, with
   agent (default), key-file, and password auth (`RemoteAuth`). `ssh_exec` runs
   one-shot remote commands (path/git/version probing) over a fresh session,
