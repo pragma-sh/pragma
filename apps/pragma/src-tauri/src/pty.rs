@@ -7,15 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_client::{request_spawn, SpawnOptions};
-use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
+use pragma_client::{ClientError, LocalServerConfig, PragmaClient, SpawnOptions};
 use pragma_constants::CONSTANTS;
 use pragma_platform::ipc::LocalStream;
 use pragma_platform::process;
-use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolEventKind,
-    ServerFrame,
-};
+use pragma_protocol::{read_frame, EventFrame, Frame, ProtocolEventKind, ServerFrame};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
@@ -219,29 +215,11 @@ impl PtyClient {
         rows: u16,
         options: impl Into<SpawnOptions>,
     ) -> AppResult<()> {
-        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, options.into());
-        let mut stream = self.connect_with_spawn()?;
-        write_json_frame(&mut stream, &request)?;
-        loop {
-            match read_json_frame::<ServerFrame>(&mut stream)? {
-                ServerFrame::Response(response) if response.request_id == request.request_id => {
-                    if response.ok {
-                        return Ok(());
-                    }
-                    return Err(AppError::Daemon(
-                        response
-                            .error
-                            .unwrap_or_else(|| "spawn rejected".to_string()),
-                    ));
-                }
-                ServerFrame::Hello(_)
-                | ServerFrame::Response(_)
-                | ServerFrame::Rpc(_)
-                | ServerFrame::Event(_)
-                | ServerFrame::Control(_)
-                | ServerFrame::ControlResult(_) => {}
-            }
-        }
+        // Dropping the event stream closes only this connection; the session
+        // keeps running and accumulating scrollback.
+        self.inner
+            .spawn_stream(session_id, worktree_id, cwd, cols, rows, options)?;
+        Ok(())
     }
 
     pub fn attach(
