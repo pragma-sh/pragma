@@ -356,6 +356,18 @@ protocol to report back.
   and remains the only entry point, so agent plugins inside the distribution connect to
   it exactly as they do on a native Linux host. Covered by `tests/relay.rs`.
 
+- **The listening socket is supervised, not just opened** (`listener.rs`). On macOS a
+  listener can lose its receive side mid-run (#221, #225). XNU then fails `accept` on
+  an empty queue with `ECONNABORTED`, and `sonewconn` copies the listener's state into
+  every connection it accepts: the server writes its hello, reads EOF at once, and hangs
+  up, so new terminals fail with `Broken pipe` while attached ones keep working. A
+  healthy listener does not return `ECONNABORTED`, so `ABORT_LIMIT` of them within a
+  second makes `ServerListener` bind a fresh socket beside the old one and rename it
+  over `daemon.sock`. That keeps every live session; a server restart would end them.
+  Rename, never unlink-then-bind: a missing path reads as "no server" to clients, and
+  they start a second one. Other accept errors (`EMFILE`) are logged and backed off,
+  never fatal.
+
 ## One Server Per Channel
 
 Startup enforces this with two checks that cover each other's blind spot. Do not
