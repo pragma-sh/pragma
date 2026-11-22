@@ -649,7 +649,7 @@ impl PragmaClient {
         payload: Value,
     ) -> ClientResult<Value> {
         let request = request_control(method, payload);
-        self.with_request_conn(|stream| {
+        self.run_request_conn(false, |stream| {
             // Agent launches may legitimately exceed the normal 5s request
             // timeout while the host resolves plugins or creates a worktree.
             // A timeout here is especially unsafe: transport retry duplicates
@@ -698,6 +698,19 @@ impl PragmaClient {
         &self,
         op: impl Fn(&mut LocalStream) -> Result<ClientResult<T>, ClientError>,
     ) -> ClientResult<T> {
+        self.run_request_conn(true, op)
+    }
+
+    /// [`Self::with_request_conn`] with control over hang-up resends.
+    /// `resend_on_hang_up` must be false for a request that is not idempotent:
+    /// a hang-up on a fresh connection can arrive after the server already did
+    /// the work (an SSH bridge dropping before the reply), and the server does
+    /// not deduplicate by request id.
+    fn run_request_conn<T>(
+        &self,
+        resend_on_hang_up: bool,
+        op: impl Fn(&mut LocalStream) -> Result<ClientResult<T>, ClientError>,
+    ) -> ClientResult<T> {
         let mut pooled = self.request_pool.lock()?.pop();
         let mut retried = false;
         let mut hang_ups = HangUps::default();
@@ -721,7 +734,7 @@ impl PragmaClient {
                 self.request_pool.lock()?.clear();
             }
             let retry = if fresh && is_hang_up(&error) {
-                self.recover_from_hang_up(&mut hang_ups)?
+                resend_on_hang_up && self.recover_from_hang_up(&mut hang_ups)?
             } else {
                 !std::mem::replace(&mut retried, true)
             };

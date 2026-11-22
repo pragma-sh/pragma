@@ -42,7 +42,10 @@ const REPLACE_COOLDOWN: Duration = Duration::from_secs(1);
 
 /// Suffix of the path a replacement socket is bound at before it is renamed
 /// over the served path.
-const REPLACEMENT_SUFFIX: &str = ".next";
+/// File name of the staging socket, a sibling of the real one. Deliberately
+/// shorter than any plausible socket name: appending a suffix to the live path
+/// would overflow the OS `sun_path` limit for a path that only just fits.
+const REPLACEMENT_NAME: &str = ".n";
 
 /// The listening socket at `path`, replaced in place when it stops working.
 pub struct ServerListener {
@@ -134,9 +137,7 @@ impl ServerListener {
 /// path. A missing path would read as "no server", and the client would start
 /// a second one.
 fn bind_replacement(path: &Path) -> io::Result<LocalListener> {
-    let mut staging = path.as_os_str().to_owned();
-    staging.push(REPLACEMENT_SUFFIX);
-    let staging = PathBuf::from(staging);
+    let staging = path.with_file_name(REPLACEMENT_NAME);
     match std::fs::remove_file(&staging) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -165,6 +166,21 @@ mod tests {
         let _accepted = listener.accept();
         let _client = client.join().expect("client thread");
         assert!(listener.last_replaced.is_none());
+    }
+
+    #[test]
+    fn replacement_binds_when_the_path_is_near_the_socket_limit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Pad the directory so the socket path sits a couple of bytes under the
+        // 104-byte macOS `sun_path` limit (the smallest of the supported OSes).
+        let base = dir.path().as_os_str().len() + "/daemon.sock".len();
+        let pad = 100usize.saturating_sub(base);
+        let nested = dir.path().join("p".repeat(pad.max(1)));
+        std::fs::create_dir_all(&nested).expect("nested dir");
+        let path = nested.join("daemon.sock");
+        let Ok(old) = ipc::bind(&path) else { return };
+        drop(old);
+        super::bind_replacement(&path).expect("replacement fits near the path limit");
     }
 
     #[cfg(target_os = "macos")]
