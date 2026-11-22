@@ -118,18 +118,8 @@ on transparent and loses contrast on light backgrounds, so it is not used.
 
 ## Release onboarding
 
-`packages/omp-plugin` is a Release Please component (`release-type: node`, manifest
-`0.0.0`, so its first release is the config's `initial-version`, 0.1.0) and rides the next
-release PR. It is **not yet published by that release**: `publish-plugins` in `release.yml`
-only dispatches packages listed in `packages/plugin-registry/official.json`, and that list
-must match `official.lock.json` (validated on every build/typecheck), which can only lock a
-version that exists on npm. To finish shipping it:
-
-1. Publish `@pragma-sh/omp-plugin` once by hand (a brand-new package rejects OIDC with
-   `404 Not Found - PUT`), then `npm trust github @pragma-sh/omp-plugin --file plugins.yml
---repository pragma-sh/pragma --allow-publish`.
-2. In one change: add it to `official.json` and `.github/workflows/plugins.yml`'s package
-   choices (`scripts/release-config.test.ts` requires both lists to match), run
-   `bun run plugins:lock`, and bump "ten agent plugins" in the root `AGENTS.md`.
-3. If its release tag was already cut, dispatch `plugins.yml` with `operation=publish` and
-   `ref=<omp-plugin tag>` to publish that release.
+`packages/omp-plugin` is an official plugin (`packages/plugin-registry/official.json`) and a
+Release Please component (`release-type: node`). Its first npm release, 1.0.0, was published
+by hand because a brand-new package rejects OIDC (`404 Not Found - PUT`); `@pragma-sh/omp-plugin`
+now trusts `plugins.yml`, so every later release is published by `publish-plugins` like the
+other agent plugins.
