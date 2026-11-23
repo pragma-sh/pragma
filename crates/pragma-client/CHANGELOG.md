@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.6.0...pragma-client-v1.7.0) (2026-11-23)
+
+
+### Features
+
+* **pragma-client:** resend requests the server hung up on ([9fa162b](https://github.com/pragma-sh/pragma/commit/9fa162bfd771a61fdf62374167ed8c195baf9c58))
+
+
+### Bug Fixes
+
+* **pragma-client:** don't resend control requests on hang-up; shorten socket staging path ([8586454](https://github.com/pragma-sh/pragma/commit/85864542889b790ef641b2c0370d9f598ac89437))
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-client-v1.5.0...pragma-client-v1.6.0) (2026-11-21)
 
 

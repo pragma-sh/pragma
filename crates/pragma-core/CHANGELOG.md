@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.6.0...pragma-core-v1.7.0) (2026-11-23)
+
+
+### Features
+
+* **pragma:** add global lifecycle scripts ([ccff899](https://github.com/pragma-sh/pragma/commit/ccff89949f35a79dd5380d4625582e40711de965))
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.5.0...pragma-core-v1.6.0) (2026-11-21)
 
 
