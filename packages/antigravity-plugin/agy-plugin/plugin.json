@@ -1,6 +1,6 @@
 {
   "name": "pragma",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Reports Antigravity CLI agent status (running / done / attention) to Pragma automatically.",
   "author": {
     "name": "Pragma",

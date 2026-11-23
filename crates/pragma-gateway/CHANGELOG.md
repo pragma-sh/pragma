@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.6.0...pragma-gateway-v1.7.0) (2026-11-23)
+
+
+### Miscellaneous Chores
+
+* **pragma-gateway:** Synchronize desktop versions
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-gateway-v1.5.0...pragma-gateway-v1.6.0) (2026-11-21)
 
 
