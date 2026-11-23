@@ -154,9 +154,12 @@ from the first prompt's first nonblank line (47 characters plus `…` when trunc
 session, and resets that state on `sessionStart` / `sessionEnd`.
 
 Plugin launcher cannot expose question contents/answers, prompt-only command approval,
-subagent lifecycle, abort detection, or interrupt handling, so the latter four are declared in
-`excludeFeatures`. `agent verify` skips those unsupported scenario groups instead of
-treating known host limitations as failures.
+subagent lifecycle, abort detection, or interrupt handling, so all five are declared in
+`excludeFeatures` (`questions`, `commandApproval`, `subagents`, `abort`, `interrupt`).
+`agent verify` skips those unsupported scenario groups instead of treating known host
+limitations as failures. `questions` was left out at first, which made every question
+scenario a permanent failure; the title-based attention is still reported, there is just
+nothing a client could answer with.
 
 ## Installation
 
