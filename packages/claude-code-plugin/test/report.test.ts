@@ -310,6 +310,22 @@ describe("report.sh", () => {
     ]);
   });
 
+  // Grok and Cursor load Claude Code's plugins for compatibility and run this
+  // hook on their own turns, each with its own marker in the hook environment.
+  it.each([
+    ["Grok", { GROK_HOOK_EVENT: "UserPromptSubmit" }],
+    ["Cursor", { CURSOR_VERSION: "2026.10.22-27dcf5f" }],
+  ])("stays silent when %s runs the hook", (_host, hostEnv) => {
+    expect(run("started", { env: hostEnv })).toEqual([]);
+    expect(run("stopped", { env: hostEnv })).toEqual([]);
+    expect(run("cleared", { env: hostEnv })).toEqual([]);
+  });
+
+  it("still reports for a Claude Code started inside another agent", () => {
+    const nested = { CLAUDECODE: "1", GROK_HOOK_EVENT: "PreToolUse", CURSOR_VERSION: "1" };
+    expect(run("started", { env: nested }).some((call) => call.includes(" started"))).toBe(true);
+  });
+
   it("reports started and marks the turn in flight", () => {
     expect(run("started")).toEqual(["agent report --agent claude-code started"]);
     expect(existsSync(markerPath())).toBe(true);

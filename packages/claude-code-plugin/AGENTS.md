@@ -411,3 +411,25 @@ caches.
 ## Account provider
 
 Declared through `defineAccounts` as provider `anthropic` (agent `claude-code`). Each Pragma-created account is a `CLAUDE_CONFIG_DIR` under `~/.pragma/accounts/anthropic/`; login is `claude auth login`; `identify` parses `claude auth status --json` (`orgId:email`, so two users of one Team org stay separate). On macOS the token lives in the Keychain, which Claude Code keys by config dir, so `credentialPath` reports the Keychain rather than a file.
+
+## Other agents run these hooks too
+
+Grok and Cursor load Claude Code's enabled plugins for compatibility, from the same
+`~/.claude/plugins/cache/...` copy Claude Code installed — so every Grok or Cursor turn
+also ran `report.sh`, which reported a second agent, `claude-code`, onto **their** tab:
+duplicate user messages, a "Claude Code turn completed" reply, and a `cleared` that wiped
+their running status mid-turn (Grok's sub-agent, interrupt, and abort verify scenarios
+failed on exactly that). `report.sh` therefore exits early when another host's marker is
+in the hook environment and Claude Code's is not:
+
+| Host                    | Marker in the hook env |
+| ----------------------- | ---------------------- |
+| Claude Code 2.1.330     | `CLAUDECODE`           |
+| Grok 1.0.92             | `GROK_HOOK_EVENT`      |
+| cursor-agent 2026.10.22 | `CURSOR_VERSION`       |
+
+The rule is "foreign marker **without** `CLAUDECODE`", not "foreign marker": a Claude
+Code started from inside Grok or Cursor inherits their variables and must still report.
+Antigravity, Codex, Kimi, OpenCode, and Pi were checked and do not run these hooks. If a
+new host starts to, capture its hook environment with a logging stand-in for `PRAGMA_CLI`
+(run the host once with `-p`) and add its marker — never guess one.

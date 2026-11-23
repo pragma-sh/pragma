@@ -29,6 +29,20 @@ set -u
 # Outside Pragma there is no server to report to; every event is a silent no-op.
 [ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
+# Other agents run this hook too. Grok and Cursor both load Claude Code's
+# enabled plugins for compatibility, so every turn of theirs also fired these
+# hooks -- reporting a second agent, "claude-code", onto their tab: duplicate
+# user messages, a bogus "turn completed" reply, and a `cleared` that wiped
+# their running status mid-turn. Each exports its own marker into the hook
+# environment (verified: Grok 1.0.92 sets GROK_HOOK_EVENT, cursor-agent
+# 2026.10.22 sets CURSOR_VERSION) and Claude Code sets CLAUDECODE. Only a
+# foreign marker *without* CLAUDECODE is another host: a Claude Code started
+# from inside one of them (their shell tool, Cursor's terminal) inherits the
+# marker but is still Claude Code, and must keep reporting.
+if [ -z "${CLAUDECODE:-}" ] && [ -n "${GROK_HOOK_EVENT:-}${CURSOR_VERSION:-}" ]; then
+  exit 0
+fi
+
 agent="claude-code"
 pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
