@@ -21,6 +21,14 @@ pub use pragma_constants::{
 /// production data dir is never relocated out from under an existing install.
 pub const PROD_CHANNEL: &str = "pragma";
 
+/// How the server words a request for a session, worktree, or script it does
+/// not have, on the plain (non-RPC) error frame that carries no error code.
+///
+/// The gateway turns a message with this prefix into HTTP 404, which is what
+/// lets a remote terminal say "no longer running" instead of retrying a
+/// session that will never come back.
+pub const NOT_FOUND_MESSAGE_PREFIX: &str = "session not found";
+
 /// Derives the per-worktree development channel (`pragma-dev-<hash>`) from the
 /// absolute workspace root the binary was compiled in.
 ///

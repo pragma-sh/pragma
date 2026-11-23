@@ -95,6 +95,11 @@ impl From<ClientError> for GatewayError {
                 // on your computer to launch sessions." rather than a 500.
                 if message.starts_with("Pragma is not running") {
                     Self::Conflict(message)
+                } else if message.starts_with(pragma_protocol::NOT_FOUND_MESSAGE_PREFIX) {
+                    // A plain error frame has no code, so the wording is the
+                    // only signal. Without this an attach to an ended session
+                    // is a 500, which clients rightly retry forever.
+                    Self::NotFound
                 } else {
                     Self::Server(message)
                 }
@@ -168,7 +173,22 @@ fn protocol_code_name(code: ProtocolErrorCode) -> &'static str {
 mod tests {
     use pragma_constants::ProtocolErrorCode;
 
+    use pragma_client::ClientError;
+
     use super::GatewayError;
+
+    #[test]
+    fn a_missing_session_is_not_found_rather_than_a_server_fault() {
+        let missing = GatewayError::from(ClientError::Server(format!(
+            "{}: 7fe4672f",
+            pragma_protocol::NOT_FOUND_MESSAGE_PREFIX
+        )));
+        assert_eq!(missing.status(), 404);
+        assert_eq!(missing.code(), "notFound");
+
+        let other = GatewayError::from(ClientError::Server("pty failed".to_string()));
+        assert_eq!(other.status(), 500);
+    }
 
     #[test]
     fn maps_rpc_errors_to_http_statuses() {

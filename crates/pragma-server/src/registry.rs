@@ -4297,6 +4297,9 @@ mod tests {
         let result = registry.open_terminal_tab("worktree-missing", "request-1", None);
 
         assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+        // The gateway maps this wording to HTTP 404; keep the two in step.
+        let message = result.expect_err("unknown worktree").to_string();
+        assert!(message.starts_with(pragma_protocol::NOT_FOUND_MESSAGE_PREFIX));
     }
 
     /// Writes a `.pragma/scripts.json` into a project root the registry knows.
