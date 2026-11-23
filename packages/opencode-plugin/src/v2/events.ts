@@ -169,8 +169,12 @@ function formFieldQuestion(
   field: Record<string, unknown>,
   formTitle: string,
 ): Record<string, unknown> {
+  // The question tool puts its short `header` ("Choice", "Color") in the
+  // field's title and the question itself in the description, so the
+  // description is the prompt whenever there is one. A field with only a
+  // title (a plain form input) is asked by that title.
   const question =
-    stringField(field.title) ?? stringField(field.description) ?? (formTitle || "Answer needed");
+    stringField(field.description) ?? stringField(field.title) ?? (formTitle || "Answer needed");
   const options = Array.isArray(field.options)
     ? field.options.filter(isRecord).map((option) => formOption(option))
     : field.type === "boolean"
