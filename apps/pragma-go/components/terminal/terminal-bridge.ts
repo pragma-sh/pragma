@@ -1,7 +1,23 @@
 import { parseTerminalViewerMessage, type TerminalViewerMessage } from "@pragma-sh/terminal-viewer";
 
+/** What a renderer document knows about itself when it reports ready. */
+export interface TerminalDocumentState {
+  /**
+   * The session produced output this document never received: it replaced one
+   * that had it (a new palette, a discarded web view process). Its screen is
+   * incomplete until the session is replayed into it.
+   */
+  missedOutput: boolean;
+}
+
 /** What the terminal screen wants back from the renderer, on either platform. */
-export interface TerminalViewProps {
+export interface TerminalViewProps extends Omit<TerminalBridgeHandlers, "onReady"> {
+  /** A renderer document mounted and is ready for commands. */
+  onReady: (document: TerminalDocumentState) => void;
+}
+
+/** The raw bridge callbacks, one per renderer message. */
+export interface TerminalBridgeHandlers {
   /** The renderer mounted and is ready for commands. */
   onReady: () => void;
   /** The user typed; `dataBase64` is the raw bytes to send to the PTY. */
@@ -24,13 +40,13 @@ export interface TerminalViewProps {
  * whatever else on the page posts to it, and a native bridge is just as
  * untrusted.
  */
-export function terminalMessageHandler(props: TerminalViewProps): (raw: string) => void {
+export function terminalMessageHandler(props: TerminalBridgeHandlers): (raw: string) => void {
   return (raw: string) => {
     const message = parseTerminalViewerMessage(raw);
     if (!message) return;
     const route = MESSAGE_ROUTES[message.type] as (
       message: TerminalViewerMessage,
-      props: TerminalViewProps,
+      props: TerminalBridgeHandlers,
     ) => void;
     route(message, props);
   };
@@ -43,7 +59,10 @@ type MessageOf<T extends TerminalViewerMessage["type"]> = Extract<
 
 /** Which prop each renderer message is delivered to. */
 const MESSAGE_ROUTES: {
-  [T in TerminalViewerMessage["type"]]: (message: MessageOf<T>, props: TerminalViewProps) => void;
+  [T in TerminalViewerMessage["type"]]: (
+    message: MessageOf<T>,
+    props: TerminalBridgeHandlers,
+  ) => void;
 } = {
   ready: (_message, props) => props.onReady(),
   input: (message, props) => props.onInput(message.dataBase64),

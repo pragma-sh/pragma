@@ -67,12 +67,24 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
 
     useImperativeHandle(ref, () => ({ send: queue.send }), [queue]);
 
+    // The OS can throw the document away without telling the page: iOS kills a
+    // backgrounded web view's content process under memory pressure and
+    // Android can lose the renderer outright. Both leave an empty view that
+    // never reloads on its own — the terminal that is blank after coming back
+    // to the app. Close the gate and load the document again; its `ready`
+    // reports the output it missed, and the session is replayed into it.
+    const [generation, setGeneration] = useState(0);
+    const reloadDocument = (): void => {
+      queue.reset();
+      setPainted(false);
+      webView.current?.reload();
+    };
+
     const handleMessage = terminalMessageHandler({
       ...props,
       onReady: () => {
         setPainted(true);
-        queue.ready();
-        props.onReady();
+        props.onReady({ missedOutput: queue.ready() });
       },
     });
 
@@ -83,7 +95,16 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
           androidLayerType="hardware"
           hideKeyboardAccessoryView
           keyboardDisplayRequiresUserAction={false}
+          key={generation}
+          onContentProcessDidTerminate={reloadDocument}
           onMessage={(event: WebViewMessageEvent) => handleMessage(event.nativeEvent.data)}
+          // A lost Android renderer cannot be reloaded in place; the view has
+          // to be recreated.
+          onRenderProcessGone={() => {
+            queue.reset();
+            setPainted(false);
+            setGeneration((current) => current + 1);
+          }}
           // The document is generated locally and never navigates. A link in
           // terminal output is reported as a message and opened by the host, so
           // nothing here should ever start a load.
