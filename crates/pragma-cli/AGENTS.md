@@ -90,7 +90,10 @@ to be run by hand. It inherits the terminal (the child owns stdin/stdout/stderr)
 `PRAGMA_AGENT_RUN_ID` in the child's environment, and exits with the child's code.
 
 Its host protocol is strict in three places. **The host must authorize the start before
-the child exists**: `startRun` has to succeed (a stale, closed, or session-less run id is
+the child exists** (and waits up to 20s for it, not the 1s an end report gets — the host
+resolves the launch's account env through the plugin host before answering, and a
+timed-out start is not retried because the late reply would make the retry stale):
+`startRun` has to succeed (a stale, closed, or session-less run id is
 rejected) or the child is never executed and the failure is surfaced. That reply also
 carries `env`, resolved from the record's saved account references; the wrapper applies it
 to the child directly, so the execution runs under the account the launch was prepared
