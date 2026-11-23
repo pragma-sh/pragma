@@ -416,13 +416,18 @@ impl FanoutHost for Registry {
         let project_root = FanoutHost::project_root(self, &worktree.project_id)?;
         // The same teardown a desktop deletion runs, and like there a failure
         // stops the removal: skipping it would leak whatever setup started.
-        crate::worktree_scripts::run_teardown(
-            self.scripts_home(),
-            &project_root,
-            &worktree.path,
-            &worktree.id,
-        )
-        .map_err(|error| host_error(FanoutFailureCode::CleanupFailed, error))?;
+        // A checkout that is already gone means an earlier attempt got past
+        // teardown (a retry after a failed branch delete), and its scripts
+        // cannot run from a missing directory — so skip rather than strand it.
+        if Path::new(&worktree.path).exists() {
+            crate::worktree_scripts::run_teardown(
+                self.scripts_home(),
+                &project_root,
+                &worktree.path,
+                &worktree.id,
+            )
+            .map_err(|error| host_error(FanoutFailureCode::CleanupFailed, error))?;
+        }
         // Sessions rooted in the checkout must die before it is removed, or
         // git refuses and the shell keeps a deleted directory open.
         let _ = self.kill_for_cwd(&worktree.path);

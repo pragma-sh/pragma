@@ -82,7 +82,12 @@ function failureToast(
     closeButton: options.decision !== undefined,
     action: options.decision ?? {
       label: "Copy output",
-      onClick: () => void navigator.clipboard.writeText(message),
+      onClick: () =>
+        void navigator.clipboard
+          .writeText(message)
+          .catch((error: unknown) =>
+            toast.error("Could not copy output", { description: errorMessage(error) }),
+          ),
     },
   });
 }

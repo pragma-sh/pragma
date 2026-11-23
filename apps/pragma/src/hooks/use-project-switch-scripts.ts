@@ -20,7 +20,9 @@ export function useProjectSwitchScripts(selectedProjectId: string | null): void 
   useEffect(() => {
     if (!selectedProjectId) return;
     const settled = settledRef.current;
-    if (settled === null || consumeProjectAdded(selectedProjectId)) {
+    // Consume first: the mark must go even when this is the first selection.
+    const justAdded = consumeProjectAdded(selectedProjectId);
+    if (settled === null || justAdded) {
       settledRef.current = selectedProjectId;
       return;
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -141,23 +141,40 @@ export function ProjectScriptsSection({
   projectName: string | null;
 }) {
   const [loaded, setLoaded] = useState<LoadedProjectScripts>({ status: "loading" });
+  // Bumped whenever the project changes (and by each reload), so a read or
+  // write that finishes for an earlier request can tell it is stale.
+  const generation = useRef(0);
+  // The document as edits have left it, ahead of what a pending write has
+  // confirmed: each save builds on this, so back-to-back edits to different
+  // lists never overwrite one another.
+  const current = useRef<{ config: ProjectScriptsConfig; path: string } | null>(null);
+  // Writes run one at a time, in the order they were made.
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
   const load = useCallback(async () => {
+    generation.current += 1;
+    const mine = generation.current;
     try {
       const document = await readProjectScriptsFile(projectId);
-      setLoaded({
-        status: "ready",
-        config: parseProjectScripts(document.contents),
-        path: document.path,
-      });
+      if (mine !== generation.current) return;
+      const config = parseProjectScripts(document.contents);
+      current.current = { config, path: document.path };
+      setLoaded({ status: "ready", config, path: document.path });
     } catch (cause) {
+      if (mine !== generation.current) return;
+      current.current = null;
       setLoaded({ status: "error", error: errorMessage(cause) });
     }
   }, [projectId]);
 
   useEffect(() => {
+    current.current = null;
     setLoaded({ status: "loading" });
     void load();
+    return () => {
+      // Invalidate anything still in flight for this project.
+      generation.current += 1;
+    };
   }, [load]);
 
   if (loaded.status === "loading") {
@@ -176,12 +193,21 @@ export function ProjectScriptsSection({
 
   const { config, path } = loaded;
   const save = async (hook: WorktreeHook, commands: string[]) => {
-    const next = withList<ProjectScriptsConfig>(config, hook, commands);
+    const base = current.current;
+    if (!base) return;
+    const mine = generation.current;
+    const next = withList<ProjectScriptsConfig>(base.config, hook, commands);
+    current.current = { ...base, config: next };
+    setLoaded({ status: "ready", config: next, path: base.path });
+    const contents = `${JSON.stringify(next, null, 2)}\n`;
+    const write = writeQueue.current.then(() => writeProjectScriptsFile(projectId, contents));
+    writeQueue.current = write.catch(() => undefined);
     try {
-      await writeProjectScriptsFile(projectId, `${JSON.stringify(next, null, 2)}\n`);
-      setLoaded({ status: "ready", config: next, path });
+      await write;
     } catch (cause) {
       toast.error("Could not save scripts.json", { description: errorMessage(cause) });
+      // Resync with the file, unless the project changed meanwhile.
+      if (mine === generation.current) void load();
     }
   };
 

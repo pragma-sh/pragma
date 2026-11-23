@@ -116,18 +116,44 @@ const TYPED = {
   info: sonner.info,
 };
 
-/** The id of the live toast `node` renders, matched by its title text. */
+/** Text sonner renders for a plain string or number; undefined for anything richer. */
+function plainText(value: unknown): string | undefined {
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+}
+
+/** What a rendered toast shows, to tell it apart from other live toasts. */
+function renderedSignature(node: HTMLElement): string {
+  const part = (selector: string) => node.querySelector(selector)?.textContent ?? "";
+  return JSON.stringify([
+    node.getAttribute("data-type") ?? "default",
+    part("[data-title]"),
+    part("[data-description]"),
+  ]);
+}
+
+/**
+ * The id of the live toast `node` renders. Sonner puts no id in the DOM, and
+ * repeated errors share their text, so the title alone is not unique: match
+ * type, title and description, then break a remaining tie by order. Sonner
+ * renders its toasts in `getToasts()` order, so the nth rendered twin is the
+ * nth matching entry.
+ */
 function findToastId(node: HTMLElement): string | number | undefined {
-  const title = node.querySelector("[data-title]")?.textContent ?? "";
-  const match = sonner
-    .getToasts()
-    .find(
-      (entry): entry is ToastT =>
-        "title" in entry &&
-        (typeof entry.title === "string" || typeof entry.title === "number") &&
-        String(entry.title) === title,
+  const signature = renderedSignature(node);
+  const twins = [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].filter(
+    (other) => renderedSignature(other) === signature,
+  );
+  const matches = sonner.getToasts().filter((entry): entry is ToastT => {
+    if (!("title" in entry) || isValidElement(entry.title)) return false;
+    const title = plainText(entry.title);
+    if (title === undefined) return false;
+    const description = entry.description === undefined ? "" : plainText(entry.description);
+    return (
+      description !== undefined &&
+      JSON.stringify([entry.type ?? "default", title, description]) === signature
     );
-  return match && !isValidElement(match.title) ? match.id : undefined;
+  });
+  return matches[twins.indexOf(node)]?.id;
 }
 
 function textLength(content: HTMLElement): number {
