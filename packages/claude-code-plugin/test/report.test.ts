@@ -1132,6 +1132,64 @@ describe("report.sh", () => {
       expect(existsSync(markerPath())).toBe(false);
     });
 
+    // Esc before the reply has produced anything makes Claude Code restore the
+    // prompt and write no interrupt line at all; only its per-process session
+    // file (`<config>/sessions/<pid>.json`) records that the turn ended.
+    describe("a cancel that leaves no transcript trace", () => {
+      /** A Claude config root with a live transcript and its session status file. */
+      function liveSession(status: string): { stdin: string; setStatus: (next: string) => void } {
+        const config = join(workdir, "claude-config");
+        const sessionId = "9cbd6a3c-7be4-49ce-b744-8737d18e803d";
+        mkdirSync(join(config, "projects", "-repo"), { recursive: true });
+        mkdirSync(join(config, "sessions"), { recursive: true });
+        const transcriptPath = join(config, "projects", "-repo", `${sessionId}.jsonl`);
+        writeFileSync(transcriptPath, `${ASSISTANT_DONE}\n`);
+        const setStatus = (next: string): void =>
+          writeFileSync(
+            join(config, "sessions", "50142.json"),
+            JSON.stringify({ pid: 50142, sessionId, kind: "interactive", status: next }),
+          );
+        setStatus(status);
+        return {
+          stdin: JSON.stringify({
+            hook_event_name: "UserPromptSubmit",
+            session_id: sessionId,
+            transcript_path: transcriptPath,
+          }),
+          setStatus,
+        };
+      }
+
+      it("clears once the session goes idle with the turn still in flight", async () => {
+        const session = liveSession("busy");
+        run("started", { stdin: session.stdin });
+        await sleep(500);
+        // Busy is a turn that is merely thinking: nothing to clear.
+        expect(reportCalls().filter((call) => call.endsWith(" cleared"))).toEqual([]);
+        session.setStatus("idle");
+        await sleep(700);
+        expect(reportCalls().filter((call) => call.endsWith(" cleared"))).toEqual([
+          "agent report --agent claude-code cleared",
+        ]);
+        expect(existsSync(markerPath())).toBe(false);
+      });
+
+      it("leaves an idle parent alone while background subagents are running", async () => {
+        const session = liveSession("busy");
+        run("started", { stdin: session.stdin });
+        run("stopped", {
+          stdin: JSON.stringify({
+            hook_event_name: "Stop",
+            background_tasks: [{ type: "subagent", status: "running" }],
+          }),
+        });
+        session.setStatus("idle");
+        await sleep(700);
+        expect(reportCalls().filter((call) => call.endsWith(" cleared"))).toEqual([]);
+        expect(existsSync(markerPath())).toBe(true);
+      });
+    });
+
     it("ignores the interrupt phrase embedded inside tool output", async () => {
       // A tool result that *contains* the marker text (e.g. Claude reading this
       // very script) arrives JSON-escaped inside another string. Only a real

@@ -316,6 +316,32 @@ This mirrors opencode's "cancelled turn → clear, not a phantom `done`" rule (s
 transcript instead. `PRAGMA_WATCH_INTERVAL` (default `1`, set small in tests) tunes the
 poll cadence.
 
+### A cancel that never reaches the transcript
+
+The transcript marker is not the whole story (verified on 2.1.331). Pressing Esc **before
+the reply has produced anything** makes Claude Code put the prompt back in the input box
+and write no `[Request interrupted by user]` line at all — the transcript ends at the
+user message. Two more things break the simple watcher in exactly that case, which is
+also what a phone's Stop button produces (an Esc sent the instant the turn starts):
+
+- **The watcher has a second signal: the session status file.** Claude Code keeps
+  `<config>/sessions/<pid>.json` per live process with a `status` that is `busy` for the
+  whole turn (tool calls included) and `idle` once it ends for any reason. The watcher
+  clears when it reads `idle` twice running while the in-flight marker is still set. A
+  normal completion never looks like that: `Stop` removes the marker while the status is
+  still `busy` (measured: marker gone ~0.2s before the flip). The one legitimate
+  "idle with marker" state is the background-subagent phase, so the check stands down
+  while `.subagent-wait` exists or children are tracked; there only the transcript marker
+  reports a cancel.
+- **Esc cancels the running hooks too.** If it lands while `UserPromptSubmit` hooks are
+  executing, Claude Code kills the hook and everything in its process tree. `started`
+  therefore writes the marker and spawns the watcher **before** any report, and spawns it
+  fully detached — from a subshell that exits at once (orphaned, out of the tree) with
+  job-control mode on (its own process group). A watcher started as a plain `nohup … &`
+  child died with the hook and left the tab on `running` forever.
+
+Do not move the reports back above the spawn, and do not "simplify" the detached spawn.
+
 ## Installation
 
 Through Claude Code's own plugin system — **not** Pragma code:
