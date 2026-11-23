@@ -20,6 +20,7 @@ import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { openCodeStoreAccount } from "./accounts";
 import { pluginCwd } from "./cwd";
+import { isOpenCodeV2, openCodeTakesSelectionFlags } from "./opencode-version";
 import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
 /**
@@ -100,14 +101,32 @@ const SLASH_COMMAND_SOURCES = [
 /**
  * The option builders a launch and a resume share, so a resumed session is
  * flagged exactly like the launch it continues. `--session`, `--model`, and
- * `--agent` are all top-level options (verified against `opencode --help`,
- * 1.18.35); OpenCode has no permission-mode flag.
+ * `--agent` are all top-level options on v1 (verified against `opencode
+ * --help`, 1.18.35); OpenCode has no permission-mode flag.
+ *
+ * v2 kept only `--session` (verified against 2.1.1): its TUI rejects the other
+ * two with `Unrecognized flag` and exits, and neither a config environment
+ * variable nor the TUI plugin API can set the model instead. So on v2 a
+ * selection adds nothing — the session uses the model and agent OpenCode
+ * itself last had — and the catalog offers one model entry that says so
+ * ({@link OPENCODE_V2_MODELS}) and no modes.
  */
+/**
+ * The model list on OpenCode v2: whatever OpenCode itself has selected. It is
+ * one entry rather than none because an agent with no models reads everywhere
+ * as a broken catalog ("No models found", the verify catalog gate, the
+ * last-good fallback), which would hide a working agent. The user changes the
+ * model inside OpenCode (`/models`), and it sticks for later sessions.
+ */
+const OPENCODE_V2_MODELS: AgentModelEntry[] = [
+  { id: "default", name: "OpenCode default (change with /models)" },
+];
+
 const OPENCODE_AGENT_ARGS: AgentArgsBuilder = {
-  model: (modelId: string) => ["--model", modelId],
+  model: (modelId: string) => (openCodeTakesSelectionFlags() ? ["--model", modelId] : []),
   reasoning: () => [],
   permissionMode: () => [],
-  mode: (modeId: string) => ["--agent", modeId],
+  mode: (modeId: string) => (openCodeTakesSelectionFlags() ? ["--agent", modeId] : []),
 };
 
 /**
@@ -216,27 +235,39 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
         // `opencode --session <id>` continues that exact stored session, which
         // keeps its own agent and model, so a resume replays only an explicit
         // selection — never the original slash command or prompt.
-        resume: ({ harnessSessionId, selection }) => [
-          "opencode",
-          "--session",
-          harnessSessionId,
-          ...agentLaunchArgs(
-            { args: OPENCODE_AGENT_ARGS, modes: [], permissionModes: [] },
-            selection,
-          ),
-        ],
+        resume: async ({ harnessSessionId, selection }, ctx) => {
+          // The argument builders read the probed version; a resume can be the
+          // first thing this process does, so probe before building.
+          await isOpenCodeV2(ctx);
+          return [
+            "opencode",
+            "--session",
+            harnessSessionId,
+            ...agentLaunchArgs(
+              { args: OPENCODE_AGENT_ARGS, modes: [], permissionModes: [] },
+              selection,
+            ),
+          ];
+        },
       },
       prefillDelayMs: 6000,
+      // v2 cannot be told a model or agent at launch (see OPENCODE_AGENT_ARGS),
+      // so it lists the one honest choice: a picker entry that silently did
+      // nothing would label every session with a model it is not running.
       models: async (ctx) =>
-        parseOpenCodeModels(
-          await execFirst(
-            ctx,
-            "opencode models --json 2>/dev/null || opencode models --verbose 2>/dev/null || opencode models 2>/dev/null",
-          ),
-        ),
+        (await isOpenCodeV2(ctx))
+          ? OPENCODE_V2_MODELS
+          : parseOpenCodeModels(
+              await execFirst(
+                ctx,
+                "opencode models --json 2>/dev/null || opencode models --verbose 2>/dev/null || opencode models 2>/dev/null",
+              ),
+            ),
       permissionModes: [],
       modes: async (ctx) =>
-        parseOpenCodeAgents(await execFirst(ctx, "opencode agent list 2>/dev/null")),
+        (await isOpenCodeV2(ctx))
+          ? []
+          : parseOpenCodeAgents(await execFirst(ctx, "opencode agent list 2>/dev/null")),
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["opencode", "acp"] },
       }),

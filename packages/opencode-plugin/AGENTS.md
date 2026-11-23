@@ -333,9 +333,22 @@ TUI plugin target.
 
 **Resume.** `launch.resume` returns the full literal argv
 `["opencode", "--session", <id>, ...selection args]`. `--session`, `--model`, and
-`--agent` are all top-level options (verified with `opencode --help`), so an explicit
+`--agent` are all top-level options on v1 (verified with `opencode --help`), so an explicit
 launch selection is replayed and no default mode is forced — the stored session keeps
 its own agent/model. The original slash command and prompt are never replayed.
+
+**v2 takes no model or agent at launch.** OpenCode 2 (verified on 2.1.1) kept only
+`--session` on its TUI command: `opencode --model x` and `opencode --agent x` print
+`Unrecognized flag` and exit, so a launch carrying either never starts and Pragma types
+the prompt into the bare shell. Nothing else reaches the TUI either:
+`OPENCODE_CONFIG_CONTENT` / `OPENCODE_CLI_CONFIG_CONTENT` are ignored by it, and the TUI
+plugin API can read the selected model but only set its variant. So on v2 the argument
+builders return nothing (`openCodeTakesSelectionFlags`, fed by the version the catalog
+providers probe), `modes` is empty, and `models` is the single entry "OpenCode default"
+— one rather than none, because an agent with no models reads as a broken catalog
+everywhere (the launcher's "No models found", the verify catalog gate, the host's
+last-good fallback). The user picks a model inside OpenCode with `/models`. Re-check
+`opencode --help` on each major release; if the flags return, drop the v2 branch.
 
 ## Plugin launcher
 
