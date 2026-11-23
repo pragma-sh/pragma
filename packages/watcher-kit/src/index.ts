@@ -83,8 +83,17 @@ export interface TuiWatcherOptions {
 /** How a question TUI's option rows are activated. See `questionSelectMode`. */
 export type QuestionSelectMode = "digit" | "arrow-space";
 
-/** How a question TUI activates its synthetic free-text row. */
-export type QuestionOtherMode = "navigate-enter" | "navigate" | "shortcut-z";
+/**
+ * How a question TUI activates its synthetic free-text row.
+ *
+ * - `"navigate-enter"` (default): move past the last option, Enter opens an editor.
+ * - `"navigate"`: moving past the last option is already the input.
+ * - `"navigate-tab"`: the row past the last option is a real choice ("None of
+ *   the above") whose text goes in a note opened with Tab — Enter there would
+ *   submit that choice with no text (Codex 0.171).
+ * - `"shortcut-z"`: a dedicated key opens the editor.
+ */
+export type QuestionOtherMode = "navigate-enter" | "navigate" | "navigate-tab" | "shortcut-z";
 
 const DEFAULT_APPROVE_KEYS = "\r";
 const RIGHT_ARROW = "\x1b[C";
@@ -102,6 +111,8 @@ const QUESTION_DIGIT_MAX = 9;
 const QUESTION_PROMPT_MOUNT_DELAY_MS = 150;
 /** Lets the TUI mount its custom-answer editor before typing into it. */
 const QUESTION_OTHER_INPUT_DELAY_MS = 150;
+/** How long a typed note is given to commit before the Enter that submits it. */
+const QUESTION_NOTE_SUBMIT_DELAY_MS = 400;
 /** Lets the next prompt in a multi-question TUI mount after one answer submits. */
 const QUESTION_NEXT_PROMPT_DELAY_MS = 500;
 
@@ -423,7 +434,17 @@ async function writeFreeTextAnswer(
   // The TUI reserves digit shortcuts for listed choices. Navigate to its virtual Other row.
   await writeKeys(ctx, openOtherEditorKeys(optionCount, selectMode, otherMode));
   await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
-  if (!ctx.signal.aborted) await writeKeys(ctx, `${reply}\r`);
+  if (ctx.signal.aborted) return;
+  if (otherMode !== "navigate-tab") {
+    await writeKeys(ctx, `${reply}\r`);
+    return;
+  }
+  // A note field sits in a paste-aware TUI: text typed this fast is buffered as
+  // a paste, and an Enter in the same write is handled before the buffer lands,
+  // submitting the row with an empty note. Let the text commit first.
+  await writeKeys(ctx, reply);
+  await delay(QUESTION_NOTE_SUBMIT_DELAY_MS, ctx.signal);
+  if (!ctx.signal.aborted) await writeKeys(ctx, "\r");
 }
 
 /**
@@ -601,6 +622,7 @@ function openOtherEditorKeys(
 ): string {
   if (otherMode === "shortcut-z") return "z";
   const navigate = DOWN_ARROW.repeat(optionCount);
+  if (otherMode === "navigate-tab") return `${navigate}\t`;
   return selectMode === "arrow-space" || otherMode === "navigate" ? navigate : `${navigate}\r`;
 }
 
