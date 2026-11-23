@@ -22,9 +22,10 @@ const workspace = vi.hoisted(() => ({
 
 const removeProject = vi.hoisted(() => vi.fn());
 const setProjectIcon = vi.hoisted(() => vi.fn());
+const runProjectScripts = vi.hoisted(() => vi.fn(async () => false));
 
 vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
-vi.mock("@/lib/tauri", () => ({ removeProject, setProjectIcon }));
+vi.mock("@/lib/tauri", () => ({ removeProject, runProjectScripts, setProjectIcon }));
 
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { applyAgentReport, clearAllAgentStatuses } from "@/state/agent-status-store";
@@ -154,7 +155,21 @@ describe("ProjectSwitcher", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }));
     fireEvent.click(await screen.findByText("Remove project"));
 
-    expect(removeProject).toHaveBeenCalledWith("project-2");
+    // The global `remove` scripts run first and may veto the removal.
+    await waitFor(() => expect(removeProject).toHaveBeenCalledWith("project-2"));
+    expect(runProjectScripts).toHaveBeenCalledWith("project-2", "remove");
     await waitFor(() => expect(workspace.reload).toHaveBeenCalled());
+  });
+
+  it("keeps a project whose remove scripts fail", async () => {
+    runProjectScripts.mockRejectedValueOnce(new Error("project.remove scripts failed:"));
+    removeProject.mockClear();
+    render(<ProjectSwitcher />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }));
+    fireEvent.click(await screen.findByText("Remove project"));
+
+    await waitFor(() => expect(runProjectScripts).toHaveBeenCalled());
+    expect(removeProject).not.toHaveBeenCalled();
   });
 });

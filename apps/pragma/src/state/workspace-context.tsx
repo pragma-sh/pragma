@@ -11,6 +11,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { useProjectSwitchScripts } from "@/hooks/use-project-switch-scripts";
 import { isMiniSessionId } from "@/lib/mini-window";
 import { useRequiredContext } from "@/lib/context";
 
@@ -4774,6 +4775,7 @@ function useWorkspaceProviderSetup() {
   }, [state.selectedProjectId, state.worktrees]);
   const { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError } =
     useProjectScriptsConfig(state.selectedProjectId, mainWorktreeId);
+  useProjectSwitchScripts(state.selectedProjectId);
   const {
     stateRef,
     tabsRef,

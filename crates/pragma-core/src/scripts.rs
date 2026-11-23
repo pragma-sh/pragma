@@ -14,6 +14,13 @@ use serde_json::Value;
 
 use crate::{CoreError, CoreResult};
 
+mod global;
+
+pub use global::{
+    global_config_path, parse_global_config, read_global_scripts, GlobalProjectScripts,
+    GlobalScripts, GlobalWorktreeScripts, ScriptEvent, ScriptPhase, ScriptSource, SCRIPT_EVENT_ENV,
+};
+
 /// A validated project script config.
 ///
 /// `runScripts` commands stay as JSON: the split tree they may carry describes
@@ -94,12 +101,40 @@ pub struct ScriptListResult {
     pub error: Option<String>,
 }
 
+/// Environment every headless command in a worktree receives. One definition
+/// for the desktop and `pragma-server`, so a script sees the same variables
+/// whichever of them created the worktree.
+#[must_use]
+pub fn worktree_env(
+    project_root: &str,
+    worktree_root: &str,
+    worktree_id: &str,
+) -> Vec<(String, String)> {
+    vec![
+        (
+            "PRAGMA_WORKTREE_PATH".to_string(),
+            worktree_root.to_string(),
+        ),
+        ("PRAGMA_PROJECT_PATH".to_string(), project_root.to_string()),
+        ("PRAGMA_WORKTREE_ID".to_string(), worktree_id.to_string()),
+    ]
+}
+
+/// Environment a project lifecycle script receives.
+#[must_use]
+pub fn project_env(project_id: &str, project_root: &str) -> Vec<(String, String)> {
+    vec![
+        ("PRAGMA_PROJECT_ID".to_string(), project_id.to_string()),
+        ("PRAGMA_PROJECT_PATH".to_string(), project_root.to_string()),
+    ]
+}
+
 /// Parses and validates a `scripts.json` body. `path` is used only in errors.
 pub fn parse_config(raw: &str, path: &Path) -> CoreResult<ProjectScripts> {
     let value: Value = serde_json::from_str(raw).map_err(|error| {
         CoreError::InvalidPayload(format!("{} is not valid JSON: {error}", path.display()))
     })?;
-    validate_config(&value, path)?;
+    validate_config(&value, &path.display().to_string())?;
     config_from_value(&value)
 }
 
@@ -201,54 +236,51 @@ fn string_array_from_value(value: Option<&Value>) -> CoreResult<Vec<String>> {
         .collect()
 }
 
-fn validate_config(value: &Value, path: &Path) -> CoreResult<()> {
-    let object = value.as_object().ok_or_else(|| {
-        CoreError::InvalidPayload(format!("{} must contain a JSON object", path.display()))
-    })?;
+fn validate_config(value: &Value, at: &str) -> CoreResult<()> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| CoreError::InvalidPayload(format!("{at} must contain a JSON object")))?;
     for key in object.keys() {
         if !matches!(key.as_str(), "setup" | "runScripts" | "teardown") {
             return Err(CoreError::InvalidPayload(format!(
-                "{} has unknown key `{key}`",
-                path.display()
+                "{at} has unknown key `{key}`"
             )));
         }
     }
-    validate_command_array(object.get("setup"), path, "setup")?;
-    validate_command_array(object.get("teardown"), path, "teardown")?;
-    validate_runscripts(object.get("runScripts"), path)?;
+    validate_command_array(object.get("setup"), at, "setup")?;
+    validate_command_array(object.get("teardown"), at, "teardown")?;
+    validate_runscripts(object.get("runScripts"), at)?;
     Ok(())
 }
 
-fn validate_runscripts(value: Option<&Value>, path: &Path) -> CoreResult<()> {
+fn validate_runscripts(value: Option<&Value>, at: &str) -> CoreResult<()> {
     let Some(value) = value else {
         return Ok(());
     };
-    let object = value.as_object().ok_or_else(|| {
-        CoreError::InvalidPayload(format!("{}.runScripts must be an object", path.display()))
-    })?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| CoreError::InvalidPayload(format!("{at}.runScripts must be an object")))?;
     for (name, entry) in object {
         let field = format!("runScripts.{name}");
-        let entry_object = entry.as_object().ok_or_else(|| {
-            CoreError::InvalidPayload(format!("{}.{field} must be an object", path.display()))
-        })?;
+        let entry_object = entry
+            .as_object()
+            .ok_or_else(|| CoreError::InvalidPayload(format!("{at}.{field} must be an object")))?;
         for key in entry_object.keys() {
             if !matches!(key.as_str(), "command" | "icon") {
                 return Err(CoreError::InvalidPayload(format!(
-                    "{}.{field} has unknown key `{key}`",
-                    path.display()
+                    "{at}.{field} has unknown key `{key}`"
                 )));
             }
         }
         validate_interactive_script_array(
             entry_object.get("command"),
-            path,
+            at,
             &format!("{field}.command"),
         )?;
         if let Some(icon) = entry_object.get("icon") {
             if !icon.is_null() && !icon.is_string() {
                 return Err(CoreError::InvalidPayload(format!(
-                    "{}.{field}.icon must be a string",
-                    path.display()
+                    "{at}.{field}.icon must be a string"
                 )));
             }
         }
@@ -258,50 +290,48 @@ fn validate_runscripts(value: Option<&Value>, path: &Path) -> CoreResult<()> {
 
 fn validate_interactive_script_array(
     value: Option<&Value>,
-    path: &Path,
+    at: &str,
     field: &str,
 ) -> CoreResult<()> {
     let Some(value) = value else {
         return Ok(());
     };
-    let entries = value.as_array().ok_or_else(|| {
-        CoreError::InvalidPayload(format!("{}.{field} must be an array", path.display()))
-    })?;
+    let entries = value
+        .as_array()
+        .ok_or_else(|| CoreError::InvalidPayload(format!("{at}.{field} must be an array")))?;
     for (index, entry) in entries.iter().enumerate() {
-        validate_interactive_script_node(entry, path, &format!("{field}[{index}]"))?;
+        validate_interactive_script_node(entry, at, &format!("{field}[{index}]"))?;
     }
     Ok(())
 }
 
-fn validate_command_array(value: Option<&Value>, path: &Path, field: &str) -> CoreResult<()> {
+fn validate_command_array(value: Option<&Value>, at: &str, field: &str) -> CoreResult<()> {
     let Some(value) = value else {
         return Ok(());
     };
-    let commands = value.as_array().ok_or_else(|| {
-        CoreError::InvalidPayload(format!("{}.{field} must be an array", path.display()))
-    })?;
+    let commands = value
+        .as_array()
+        .ok_or_else(|| CoreError::InvalidPayload(format!("{at}.{field} must be an array")))?;
     for (index, command) in commands.iter().enumerate() {
-        validate_command(command, path, &format!("{field}[{index}]"))?;
+        validate_command(command, at, &format!("{field}[{index}]"))?;
     }
     Ok(())
 }
 
-fn validate_interactive_script_node(value: &Value, path: &Path, field: &str) -> CoreResult<()> {
+fn validate_interactive_script_node(value: &Value, at: &str, field: &str) -> CoreResult<()> {
     if value.is_string() {
-        return validate_command(value, path, field);
+        return validate_command(value, at, field);
     }
     let object = value.as_object().ok_or_else(|| {
         CoreError::InvalidPayload(format!(
-            "{}.{field} must be a command string or split object",
-            path.display()
+            "{at}.{field} must be a command string or split object"
         ))
     })?;
     let has_horizontal = object.contains_key("left") || object.contains_key("right");
     let has_vertical = object.contains_key("top") || object.contains_key("bottom");
     if has_horizontal == has_vertical {
         return Err(CoreError::InvalidPayload(format!(
-            "{}.{field} must use exactly one split axis: left/right or top/bottom",
-            path.display()
+            "{at}.{field} must use exactly one split axis: left/right or top/bottom"
         )));
     }
     let expected = if has_horizontal {
@@ -312,31 +342,26 @@ fn validate_interactive_script_node(value: &Value, path: &Path, field: &str) -> 
     for key in object.keys() {
         if !expected.contains(&key.as_str()) {
             return Err(CoreError::InvalidPayload(format!(
-                "{}.{field} has unknown key `{key}`",
-                path.display()
+                "{at}.{field} has unknown key `{key}`"
             )));
         }
     }
     for key in expected {
-        let child = object.get(key).ok_or_else(|| {
-            CoreError::InvalidPayload(format!("{}.{field}.{key} is required", path.display()))
-        })?;
-        validate_interactive_script_node(child, path, &format!("{field}.{key}"))?;
+        let child = object
+            .get(key)
+            .ok_or_else(|| CoreError::InvalidPayload(format!("{at}.{field}.{key} is required")))?;
+        validate_interactive_script_node(child, at, &format!("{field}.{key}"))?;
     }
     Ok(())
 }
 
-fn validate_command(value: &Value, path: &Path, field: &str) -> CoreResult<()> {
+fn validate_command(value: &Value, at: &str, field: &str) -> CoreResult<()> {
     let command = value.as_str().ok_or_else(|| {
-        CoreError::InvalidPayload(format!(
-            "{}.{field} must be a command string",
-            path.display()
-        ))
+        CoreError::InvalidPayload(format!("{at}.{field} must be a command string"))
     })?;
     if command.trim().is_empty() {
         return Err(CoreError::InvalidPayload(format!(
-            "{}.{field} must not be empty",
-            path.display()
+            "{at}.{field} must not be empty"
         )));
     }
     Ok(())

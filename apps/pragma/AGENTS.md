@@ -1102,7 +1102,10 @@ client-local project metadata. Route preferences persist only non-secret SSH met
 on app startup and terminal spawn reconnects them on demand if the UI wins the startup
 race, while password/key-passphrase routes stay disconnected until the user reconnects.
 Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown commands
-route through the owning host via `pragma-core` RPC.
+route through the owning host via `pragma-core` RPC. So do global lifecycle scripts:
+`scripts.rs::load_global_scripts_on_host` reads `~/.pragma/config.json` through the
+host's `filesystem` RPC (`HomeDir` + `ReadFile`), so an SSH project uses the remote
+machine's global scripts.
 
 ## Native menubar + Settings / Troubleshooting menus
 
@@ -1876,7 +1879,7 @@ swaps `WorktreeCreationScreen` in for the terminal area while it runs — full-f
 the agent board rather than an overlay, because native browser webviews float above HTML. Steps
 are "Syncing base" (only when the user chose to sync), "Creating worktree", and "Running
 scripts". The scripts step is appended from the `pragma:worktree-create-stage` Tauri
-event, which `create_worktree` emits just before the project's `setup` commands run
+event, which `create_worktree` emits just before the global and project `setup` commands run
 (they run inside that single command, so the frontend cannot otherwise see them); no
 event means no setup scripts and no step. A failure keeps the screen up with the message.
 Failures before creation offer Dismiss; failures while refreshing or opening an already-created
@@ -2144,3 +2147,17 @@ win; later dev builds reuse that certificate even from a different terminal.
 
 Shared synchronous frontend snapshot stores use `src/lib/external-store.ts` for
 stable subscriptions and change notification; keep domain state in its owning store.
+
+## Toasts
+
+`components/ui/sonner.tsx` wraps sonner, and every caller still imports `toast`
+straight from `sonner` with plain strings. Long text is handled at render time by
+`components/ui/toast-overflow.tsx` + `sonner.css`, not per call site: title and
+description clamp to three lines with a muted **Show more** toggle, and a toast whose
+text passes `LONG_TOAST_CHARS` moves its buttons to a row beneath the text instead of
+squeezing it into a narrow column. Sonner pins each toast in a hovered stack to the
+height it measured and only re-measures when the toast's title, description, or buttons
+change, so expanding re-issues the toast under its own id (same typed call, so an
+error keeps its icon) to make sonner measure again. A toast asking for a decision
+(like **Remove anyway**) uses `duration: Infinity` plus a close button; a single
+action button keeps the text readable.

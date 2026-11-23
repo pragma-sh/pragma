@@ -32,6 +32,7 @@ use crate::ports::{self, SessionOwner};
 use crate::session::{Session, SessionError};
 use crate::tunnel::{TunnelError, TunnelRegistry};
 use crate::watchers::{DesiredWatcher, WatcherSupervisor};
+use crate::worktree_scripts;
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -129,6 +130,10 @@ pub struct Registry {
     /// Live script runs by run id. Not persisted: a run is its terminals, and
     /// those do not survive a server restart either.
     script_runs: Mutex<HashMap<String, ScriptRun>>,
+    /// Home directory whose `.pragma/config.json` holds this host's global
+    /// lifecycle scripts. `None` in tests, which must never run the
+    /// developer's own global setup.
+    scripts_home: Option<PathBuf>,
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
     tunnel: Arc<TunnelRegistry>,
@@ -461,6 +466,11 @@ impl Registry {
             ai: Arc::new(AiHost::new(&server_dir)),
             git_locks: Mutex::new(HashMap::new()),
             script_runs: Mutex::new(HashMap::new()),
+            scripts_home: if cfg!(test) {
+                None
+            } else {
+                pragma_platform::path::home_dir()
+            },
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
             plugins: Arc::clone(&plugins),
@@ -960,6 +970,18 @@ impl Registry {
             .ok_or_else(|| RegistryError::NotFound(worktree_id.to_string()))
     }
 
+    /// The home directory this host's global lifecycle scripts are read from.
+    pub(crate) fn scripts_home(&self) -> Option<&Path> {
+        self.scripts_home.as_deref()
+    }
+
+    /// Points global-script lookups at `home`, for tests that exercise them.
+    #[cfg(test)]
+    pub(crate) fn with_scripts_home(mut self, home: &Path) -> Self {
+        self.scripts_home = Some(home.to_path_buf());
+        self
+    }
+
     /// Lists a project's named run scripts, and which are running here.
     ///
     /// The config is read from the *project root*, never from the worktree the
@@ -969,7 +991,7 @@ impl Registry {
     pub fn list_scripts(&self, worktree_id: &str) -> Result<ScriptListResult, RegistryError> {
         let (project_id, cwd) = self.worktree_location(worktree_id)?;
         let root = self.project_root(&project_id).unwrap_or(cwd);
-        let config = match read_project_scripts(&root) {
+        let config = match worktree_scripts::effective_scripts(self.scripts_home(), &root) {
             Ok(config) => config,
             Err(error) => {
                 // A malformed config is shown as the error it is. An empty list
@@ -1022,7 +1044,8 @@ impl Registry {
         }
         let (project_id, cwd) = self.worktree_location(worktree_id)?;
         let root = self.project_root(&project_id).unwrap_or(cwd);
-        let config = read_project_scripts(&root).map_err(RegistryError::Scripts)?;
+        let config = worktree_scripts::effective_scripts(self.scripts_home(), &root)
+            .map_err(RegistryError::Scripts)?;
         let definition = config
             .run_scripts
             .get(name)
@@ -1719,7 +1742,7 @@ impl Registry {
             .to_string_lossy()
             .into_owned();
         run_core_git(&GitRequest::EnsurePragmaExcluded {
-            project_root: project_path,
+            project_root: project_path.clone(),
         })?;
         run_core_git(&GitRequest::CreateWorktree {
             parent_root: parent.path,
@@ -1747,6 +1770,10 @@ impl Registry {
             snapshot.worktrees.push(worktree);
             Ok(())
         })?;
+        // Same setup the desktop runs on the worktrees it creates: an agent
+        // launched into a checkout without its dependencies fails for a
+        // reason that has nothing to do with its prompt.
+        worktree_scripts::run_setup(self.scripts_home(), &project_path, &path, &worktree_id)?;
         Ok((worktree_id, path))
     }
 
@@ -3010,23 +3037,6 @@ fn next_order_index(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> i64 {
         .map(|tab| tab.order_index)
         .max()
         .map_or(0, |max| max + 1)
-}
-
-/// Reads and validates a project's `.pragma/scripts.json`.
-///
-/// A missing file is an empty config, not an error: most projects have no
-/// scripts. A file that exists but does not parse *is* an error, because the
-/// user wrote something and it is not doing what they meant.
-fn read_project_scripts(root: &str) -> Result<pragma_core::scripts::ProjectScripts, String> {
-    let path = Path::new(root).join(CONSTANTS.scripts.config_path.as_str());
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(pragma_core::scripts::ProjectScripts::default())
-        }
-        Err(error) => return Err(format!("{}: {error}", path.display())),
-    };
-    pragma_core::scripts::parse_config(&raw, &path).map_err(|error| error.to_string())
 }
 
 /// The title of one of a script run's terminals.
@@ -4318,6 +4328,35 @@ mod tests {
         );
         assert!(listing.scripts.iter().all(|script| script.run.is_none()));
         assert!(listing.error.is_none());
+    }
+
+    #[test]
+    fn lists_global_run_scripts_beside_the_projects() {
+        let dir = tempdir().expect("tempdir");
+        let home = tempdir().expect("home");
+        std::fs::create_dir_all(home.path().join(".pragma")).expect("home config dir");
+        std::fs::write(
+            home.path().join(".pragma/config.json"),
+            r#"{"scripts":{"worktree":{"runScripts":{"git":{"command":["lazygit"]},"dev":{"command":["global"]}}}}}"#,
+        )
+        .expect("write global config");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["a","b"]}}}"#,
+        )
+        .with_scripts_home(home.path());
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        // The project's `dev` wins over the global one of the same name.
+        assert_eq!(
+            listing
+                .scripts
+                .iter()
+                .map(|script| (script.name.as_str(), script.command_count))
+                .collect::<Vec<_>>(),
+            [("dev", 2), ("git", 1)]
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@ import {
   type RemoteAuthChoice,
 } from "@/lib/tauri";
 import { disableNonGitWarning, nonGitWarningEnabled } from "@/lib/non-git-project";
+import { markProjectAdded, runProjectAddScripts } from "@/lib/project-scripts";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface CreateProjectDialogProps {
@@ -42,7 +43,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
   };
   useEscapeToClose(isOpen, () => close(false));
 
-  async function adopt(load: () => Promise<{ id: string } | null>) {
+  async function adopt(load: () => Promise<{ id: string; name: string } | null>) {
     try {
       setError(null);
       setBusy(true);
@@ -51,7 +52,11 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
         return;
       }
       await workspace.reload();
+      // Landing on a project just added is not a switch; its `add` scripts
+      // run instead, in the background so the dialog closes right away.
+      markProjectAdded(project.id);
       await workspace.selectProject(project.id);
+      void runProjectAddScripts(project.id, project.name);
       close(false);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -214,7 +219,7 @@ function toAuthChoice(auth: RemoteAuthState): RemoteAuthChoice {
 }
 
 interface RemoteProjectFormProps {
-  onConnect: (load: () => Promise<{ id: string } | null>) => Promise<void>;
+  onConnect: (load: () => Promise<{ id: string; name: string } | null>) => Promise<void>;
   onError: (message: string | null) => void;
 }
 

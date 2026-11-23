@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { Toaster as Sonner, toast, type ToasterProps, useSonner } from "sonner";
 
+import { ToastOverflow } from "@/components/ui/toast-overflow";
+import "./sonner.css";
+
 /**
  * Maximum number of toasts kept mounted at once. Sonner keeps *every* toast in
  * the DOM — the ones past `visibleToasts` are only hidden, not unmounted — and
@@ -28,23 +31,26 @@ const Toaster = ({ ...props }: ToasterProps) => {
   useToastLimit(MAX_MOUNTED_TOASTS);
 
   return (
-    <Sonner
-      className="toaster group"
-      style={
-        {
-          // Pin the toast width so custom (JSX) toasts — which sonner renders
-          // with `data-styled="false"` and therefore *without* its default
-          // width — match the standard toasts. The agent toast reads this same
-          // var via `w-[var(--width)]`.
-          "--width": "356px",
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
-        } as React.CSSProperties
-      }
-      {...props}
-    />
+    <>
+      <Sonner
+        className="toaster group"
+        style={
+          {
+            // Pin the toast width so custom (JSX) toasts — which sonner renders
+            // with `data-styled="false"` and therefore *without* its default
+            // width — match the standard toasts. The agent toast reads this same
+            // var via `w-[var(--width)]`.
+            "--width": "356px",
+            "--normal-bg": "var(--popover)",
+            "--normal-text": "var(--popover-foreground)",
+            "--normal-border": "var(--border)",
+            "--border-radius": "var(--radius)",
+          } as React.CSSProperties
+        }
+        {...props}
+      />
+      <ToastOverflow />
+    </>
   );
 };
 

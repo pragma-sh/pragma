@@ -16,6 +16,7 @@ mod session;
 mod sidecar;
 mod tunnel;
 mod watchers;
+mod worktree_scripts;
 
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};

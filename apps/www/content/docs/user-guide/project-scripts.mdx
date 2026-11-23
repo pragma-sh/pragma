@@ -1,6 +1,6 @@
 ---
 title: Project scripts
-description: Define setup, teardown, and run scripts in .pragma/scripts.json and run them from the toolbar.
+description: Define setup, teardown, and run scripts in .pragma/scripts.json, plus global scripts that apply to every worktree and project.
 ---
 
 Project scripts are commands the project itself declares, checked into
@@ -11,9 +11,9 @@ Project scripts are commands the project itself declares, checked into
   "setup": ["bun install", "cargo fetch"],
   "teardown": ["docker compose down"],
   "runScripts": {
-    "run": [{ "command": "bun run dev" }],
-    "build": [{ "command": "bun run build" }],
-    "test:watch": [{ "command": "bun run test --watch" }]
+    "run": { "command": ["bun run dev"] },
+    "build": { "command": ["bun run build"] },
+    "test:watch": { "command": ["bun run test --watch"], "icon": "lucide:flask-conical" }
   }
 }
 ```
@@ -22,6 +22,11 @@ Project scripts are commands the project itself declares, checked into
   `setup` and `teardown` run without a visible terminal. `runScripts` open as real terminal tabs you
   can watch and interact with.
 </Callout>
+
+You can also edit `setup` and `teardown` in **Settings → Scripts** with the scope toggle
+set to **Project**. Settings writes the same file and keeps the rest of it — your
+`runScripts`, splits, and icons — exactly as written, and refuses a save the host could
+not run (a blank command, an unknown key).
 
 ## Setup and teardown
 
@@ -32,7 +37,13 @@ Project scripts are commands the project itself declares, checked into
   deletion** — use it to stop containers, release ports, or clean caches that must not
   leak.
 
-Commands run concurrently, capped at four at a time.
+Commands in one list run concurrently, capped at four at a time. Each command gets
+`PRAGMA_WORKTREE_ID`, `PRAGMA_WORKTREE_PATH`, `PRAGMA_PROJECT_PATH`, and
+`PRAGMA_SCRIPT_EVENT` (`worktree.setup` or `worktree.teardown`).
+
+Setup runs for every worktree, whoever creates it: the desktop, an agent launched from
+[Pragma Go](/docs/user-guide/mobile) into a new worktree, or a fanout attempt. Fanout
+attempts also run teardown before their checkout is cleaned up.
 
 ## Run scripts
 
@@ -62,3 +73,67 @@ open.
 
 A typical split: `run` on the left, the agent terminal in the middle,
 [browser](/docs/user-guide/browser) pointed at the dev server on the right.
+
+## Global scripts
+
+Scripts that belong to you rather than to a repository live under `scripts` in the
+global `~/.pragma/config.json`, and apply to every project. Edit them in
+**Settings → Scripts**, or in the file:
+
+```json
+{
+  "scripts": {
+    "worktree": {
+      "setup": ["mise trust", "cp ~/.secrets/app.env .env.local"],
+      "teardown": ["docker compose down --remove-orphans"],
+      "runScripts": {
+        "lazygit": { "command": ["lazygit"], "icon": "lucide:git-branch" }
+      }
+    },
+    "project": {
+      "add": ["gh repo set-default"],
+      "remove": ["rm -rf ~/.cache/indexer/$PRAGMA_PROJECT_ID"],
+      "switch": ["git fetch --prune"]
+    }
+  }
+}
+```
+
+### Worktree scripts
+
+These layer on each project's own `.pragma/scripts.json`:
+
+| Hook         | When                         | Order                                                                                                | On failure                     |
+| ------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `setup`      | After a worktree is created  | Global first, then the project's — so global setup can prepare the environment the project builds in | Reported; the worktree is kept |
+| `teardown`   | Before a worktree is deleted | The project's first, then global                                                                     | Blocks the deletion            |
+| `runScripts` | Header buttons               | Shown beside the project's; **the project's script wins** when both use a name                       | —                              |
+
+The global layer finishes before the project's layer starts.
+
+### Project scripts
+
+Project scripts run headlessly from the project root and receive `PRAGMA_PROJECT_ID`,
+`PRAGMA_PROJECT_PATH`, and `PRAGMA_SCRIPT_EVENT` (`project.add`, `project.remove`, or
+`project.switch`).
+
+- **`add`** runs after a project is added, cloned, or connected over SSH. It runs in the
+  background, and a failure is reported without removing the project.
+- **`remove`** runs before a project is removed from Pragma. Removing never deletes
+  files. A failure keeps the project and offers **Remove anyway**.
+- **`switch`** runs in the background when you switch to a project from another one,
+  once the selection rests there, so cycling through projects runs it only for the one
+  you stop on. Opening Pragma is not a switch, and neither is landing on a project you
+  just added. `PRAGMA_PREVIOUS_PROJECT_ID` and `PRAGMA_PREVIOUS_PROJECT_PATH` name the
+  project you left. A failure is only a warning.
+
+<Callout title="Project scripts are global-only">
+  A repository's `.pragma/scripts.json` cannot declare `add`, `remove`, or `switch`, so cloning
+  someone else's repository never runs its code.
+</Callout>
+
+<Callout title="SSH projects use the remote machine's config">
+  Global scripts are read from the home directory of the machine the project lives on, because that
+  is where they run. An SSH project uses the remote `~/.pragma/config.json`; **Settings → Scripts**
+  edits this machine's.
+</Callout>

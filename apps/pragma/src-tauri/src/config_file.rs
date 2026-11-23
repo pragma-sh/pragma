@@ -266,6 +266,55 @@ pub async fn write_keybindings_file(
     Ok(())
 }
 
+/// Reads a project's `.pragma/scripts.json` verbatim so Settings can patch its
+/// lifecycle lists and leave the rest of the file (run scripts, splits) alone.
+/// A missing file comes back as a starter document.
+#[tauri::command]
+pub async fn read_project_scripts_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    project_id: String,
+) -> AppResult<ConfigDocument> {
+    read_scoped(
+        app,
+        &db,
+        &hosts,
+        ConfigScope::Project,
+        Some(project_id),
+        CONSTANTS.scripts.config_path.as_str(),
+    )
+    .await
+}
+
+/// Writes a project's `.pragma/scripts.json` after validating it with the same
+/// parser the host runs scripts through, so Settings can never save a file
+/// that would then fail every worktree creation.
+#[tauri::command]
+pub async fn write_project_scripts_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    project_id: String,
+    contents: String,
+) -> AppResult<()> {
+    crate::scripts::parse_config(
+        &contents,
+        std::path::Path::new(CONSTANTS.scripts.config_path.as_str()),
+    )?;
+    write_scoped(
+        app,
+        &db,
+        &hosts,
+        ConfigScope::Project,
+        Some(project_id),
+        CONSTANTS.scripts.config_path.as_str(),
+        contents,
+    )
+    .await?;
+    Ok(())
+}
+
 /// Reads the optional `.pragma/theme.json` color overrides for a scope. A
 /// missing file is not an error — the frontend treats it as "no overrides".
 #[tauri::command]
