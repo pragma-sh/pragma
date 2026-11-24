@@ -262,6 +262,16 @@ plugins install the published package normally.
   (OpenCode, Codex). Verify the real keymap against a live prompt; a wrong mode fails
   only as a question timeout.
 - Use watcher for interjections when host has no mid-turn input hook.
+- Set `interruptKeys` on the watcher definition when the host does not cancel a turn
+  on Escape. The host writes those keys into the terminal when a client interrupts
+  (a phone's Stop button); the default is Escape. Grok binds Escape to scrollback and
+  cancels on Ctrl+C, so its watcher sets `"\x03"`. Check the TUI's own key hints
+  during a running turn — a wrong key fails silently, the turn just keeps going.
+- Start the abort watcher **before** any report in the turn-start hook, and detach it
+  (subshell + `set -m`). A cancel that lands while the hook is still running kills
+  the hook and its children; a watcher started last, or as a plain `nohup … &`
+  child, is gone before it can clear the tab. See the Claude Code and Grok
+  `hooks/report.sh`.
 
 Declare an account provider with `defineAccounts` (never the deprecated
 `defineUsageLimitProvider`):

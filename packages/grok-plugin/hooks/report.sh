@@ -56,12 +56,23 @@ sent_file="${state_dir}/pragma-cli-${agent}-${tab}.sent"
 # Transcript byte offset the active turn started at, so `stopped` can run the
 # final message sync over the same window the watcher used.
 offset_file="${state_dir}/pragma-cli-${agent}-${tab}.offset"
+# Written by `started` as its very last step, holding the turn token. A cancel
+# that lands while UserPromptSubmit hooks are still running kills the hook, puts
+# the prompt back in the input box, and leaves no record at all -- no
+# `turn_completed`, no `signals.json` (verified on 1.0.92). The one trace is
+# that this file never appears, which the watcher reads as that cancel.
+submitted_file="${state_dir}/pragma-cli-${agent}-${tab}.submitted"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
 # is killed uncatchably (SIGKILL) and the marker is never removed.
 interval="${PRAGMA_WATCH_INTERVAL:-1}"
 max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
+# How long `started` is given to finish before the watcher concludes it was
+# killed with a cancelled prompt. Generous on purpose: the hook only makes a
+# few local `pragma-cli` calls, but clearing a turn that is in fact running
+# would mute its reports, so a slow machine must not look like a cancel.
+submit_grace="${PRAGMA_SUBMIT_GRACE:-10}"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Grok session (e.g. when pragma-cli or the server is unavailable).
@@ -487,12 +498,20 @@ stop_watcher() {
 # marker is removed (normal end / session end) or rewritten (a new turn
 # started), the watcher exits without touching state, so it can never clobber a
 # later turn.
+# Succeeds when the `started` hook for turn `$1` still has not finished by
+# `$2` (epoch seconds): it was killed, which only a cancel does.
+submit_hook_was_killed() {
+  [ "$(cat "$submitted_file" 2>/dev/null)" = "$1" ] && return 1
+  [ "$(date +%s)" -ge "$2" ]
+}
+
 run_watcher() {
   tp="$1"
   token="$2"
   offset="${3:-0}"
   baseline="${4:-0}"
   deadline=$(($(date +%s) + max_lifetime))
+  submit_deadline=$(($(date +%s) + submit_grace))
   while :; do
     # Turn ended or was superseded -> nothing to clear, exit quietly.
     [ -f "$marker" ] || exit 0
@@ -500,11 +519,12 @@ run_watcher() {
     sync_messages "$tp" "$offset" "$token"
     current="$(cancellations "$tp")"
     [ -n "$current" ] || current="$baseline"
-    if [ "$current" -gt "$baseline" ] 2>/dev/null || aborted_since "$tp" "$offset"; then
+    if [ "$current" -gt "$baseline" ] 2>/dev/null || aborted_since "$tp" "$offset" ||
+      submit_hook_was_killed "$token" "$submit_deadline"; then
       # Re-check the token right before acting so we never clear a turn that
       # started in the gap between the poll and now.
       [ "$(cat "$marker" 2>/dev/null)" = "$token" ] || exit 0
-      rm -f "$marker" "$turn_session_file" "$sent_file" "$offset_file"
+      rm -f "$marker" "$turn_session_file" "$sent_file" "$offset_file" "$submitted_file"
       report cleared
       exit 0
     fi
@@ -583,23 +603,22 @@ esac
 
 case "${1:-}" in
   started)
-    # A new turn is in flight. Tag the marker with a unique token, report
-    # running, then replace any prior watcher with a fresh one bound to this
-    # turn's transcript, byte offset and cancellation baseline.
-    token="$$-$(date +%s)"
+    # A new turn is in flight. Tag the marker with a unique token, replace any
+    # prior watcher with a fresh one bound to this turn's transcript, byte
+    # offset and cancellation baseline, and only then report.
+    #
+    # The watcher comes first because this hook can be killed mid-run: a
+    # cancel that lands while UserPromptSubmit hooks are still executing (a
+    # phone's Stop button, sent the instant the turn starts) cancels the hooks
+    # too. With the reports first, that left a tab reported `running` with a
+    # marker and no watcher -- nothing would ever clear it.
+    token="$-$(date +%s)"
+    stop_watcher
+    rm -f "$submitted_file"
     printf '%s' "$token" >"$marker"
     printf '%s' "$hook_session_id" >"$turn_session_file"
     rm -f "$sent_file" "$offset_file"
-    report started
     tp="$(transcript_path "$input")"
-    prompt="$(unwrap_prompt "$(json_field prompt "$input")")"
-    if [ -n "$prompt" ]; then
-      content_message user "$prompt"
-    else
-      message assistant "Grok turn started"
-    fi
-    report_session_name "$tp" "$prompt"
-    stop_watcher
     if [ -n "$tp" ]; then
       # Pin the watcher to where the transcript stands *now* so a prior turn's
       # records can't be mistaken for this turn's output or cancel.
@@ -608,9 +627,27 @@ case "${1:-}" in
       printf '%s' "$offset" >"$offset_file"
       baseline="$(cancellations "$tp")"
       [ -n "$baseline" ] || baseline=0
-      nohup sh "$0" __watch "$tp" "$token" "$offset" "$baseline" >/dev/null 2>&1 &
-      echo "$!" >"$pidfile"
+      # Fully detached: the subshell exits at once, so the watcher is orphaned
+      # out of this hook's process tree, and job-control mode gives it a
+      # process group of its own. A watcher left as this script's child dies
+      # with a cancelled hook. A shell that cannot enable job control (dash
+      # without a tty) still gets the orphaning.
+      (
+        set -m 2>/dev/null
+        nohup sh "$0" __watch "$tp" "$token" "$offset" "$baseline" >/dev/null 2>&1 &
+        echo "$!" >"$pidfile"
+      )
     fi
+    report started
+    prompt="$(unwrap_prompt "$(json_field prompt "$input")")"
+    if [ -n "$prompt" ]; then
+      content_message user "$prompt"
+    else
+      message assistant "Grok turn started"
+    fi
+    report_session_name "$tp" "$prompt"
+    # Last on purpose: its presence tells the watcher this hook ran to the end.
+    printf '%s' "$token" >"$submitted_file"
     ;;
   stopped)
     # Grok fires Stop only for genuine completions, plus one extra observe-only

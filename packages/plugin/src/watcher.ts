@@ -6,6 +6,13 @@ export interface WatcherDefinition<TConfig = unknown> {
   agent: string;
   /** Runs once per launched session; lives until the session exits. */
   watch: (ctx: WatcherContext<TConfig>) => void | Promise<void>;
+  /**
+   * Keys the host writes into the terminal to cancel the agent's running turn
+   * when a client interrupts it (a phone's Stop button). Defaults to Escape;
+   * set it for a TUI that cancels on something else — Grok binds Escape to
+   * scrollback and cancels on Ctrl+C (`"\x03"`).
+   */
+  interruptKeys?: string;
 }
 
 /** Host-side context passed to a running watcher instance. */
