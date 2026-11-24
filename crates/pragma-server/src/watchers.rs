@@ -44,6 +44,13 @@ const BACKOFF_BASE: Duration = Duration::from_secs(5);
 /// spawn every few minutes instead of one every reconcile tick.
 const BACKOFF_MAX: Duration = Duration::from_mins(5);
 
+/// How long after a launch is prepared its watcher is still handed the launch
+/// selection. Short on purpose: a harness that takes its model through the TUI
+/// (`OpenCode` 2) is driven on its start screen, and Pragma types the launch
+/// prompt a few seconds later. A watcher that starts after this window gets no
+/// selection, so it can never type a model picker into a running turn.
+pub const LAUNCH_SELECTION_WINDOW_SECS: i64 = 3;
+
 /// One agent session that must have a watcher attached.
 // The shared `_id` suffix is the workspace vocabulary these fields are copied
 // from (`Tab::id`, `Tab::worktree_id`, `Tab::agent_id`); dropping it here would
@@ -123,12 +130,35 @@ impl WatcherSupervisor {
             .is_ok_and(|children| children.contains_key(tab_id))
     }
 
+    /// Stops the watcher attached to this session, so the next reconcile
+    /// starts a new one. A launch prepared in a tab whose watcher is already
+    /// running calls this: only a watcher started with the launch receives its
+    /// selection.
+    pub fn restart(&self, tab_id: &str) {
+        let removed = self
+            .children
+            .lock()
+            .ok()
+            .and_then(|mut children| children.remove(tab_id));
+        if let Some(mut entry) = removed {
+            stop_child(&mut entry.child);
+        }
+    }
+
     /// Brings the running watcher set in line with `desired`: reaps exited
     /// children, stops watchers whose session ended or whose agent changed,
     /// replaces watchers holding stale gateway credentials, and starts the
     /// missing ones. Best-effort throughout — a watcher that cannot start logs
     /// and is retried with backoff; the agent session itself keeps running.
-    pub fn reconcile(&self, plugins: &PluginsRegistry, desired: &[DesiredWatcher]) {
+    ///
+    /// `launch_selection` is asked only for a watcher about to start, and
+    /// returns the JSON launch selection it should be handed, if any.
+    pub fn reconcile(
+        &self,
+        plugins: &PluginsRegistry,
+        desired: &[DesiredWatcher],
+        launch_selection: &dyn Fn(&DesiredWatcher) -> Option<String>,
+    ) {
         let gateway = gateway_credentials(&self.server_dir);
         let Ok(mut children) = self.children.lock() else {
             return;
@@ -150,7 +180,8 @@ impl WatcherSupervisor {
             if !self.backoff_ready(&entry.tab_id) {
                 continue;
             }
-            match Self::spawn(plugins, entry, &gateway) {
+            let selection = launch_selection(entry);
+            match Self::spawn(plugins, entry, &gateway, selection.as_deref()) {
                 Some(child) => {
                     children.insert(entry.tab_id.clone(), child);
                 }
@@ -214,6 +245,7 @@ impl WatcherSupervisor {
         plugins: &PluginsRegistry,
         entry: &DesiredWatcher,
         gateway: &GatewayCredentials,
+        selection: Option<&str>,
     ) -> Option<WatcherChild> {
         let watcher = watcher_spec(plugins, &entry.agent_id)?;
         if !Path::new(&watcher.main_path).is_file() {
@@ -234,7 +266,11 @@ impl WatcherSupervisor {
             .args(["--tabId", &entry.tab_id])
             .args(["--worktreeId", &entry.worktree_id])
             .args(["--gatewayUrl", &gateway.url])
-            .args(["--gatewayToken", &gateway.token])
+            .args(["--gatewayToken", &gateway.token]);
+        if let Some(selection) = selection {
+            command.args(["--selection", selection]);
+        }
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());

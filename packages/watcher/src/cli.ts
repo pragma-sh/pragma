@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { PragmaClient, type AgentMessage } from "@pragma-sh/sdk";
 
 import { interruptKeysFor } from "./interrupt";
+import { parseLaunchSelection } from "./selection";
 import { attachSessionEvents, waitForExit } from "./session-attach";
 
 interface Args {
@@ -17,6 +18,8 @@ interface Args {
   worktreeId: string;
   gatewayUrl: string;
   gatewayToken: string;
+  /** JSON launch selection; passed only to a watcher started with a fresh launch. */
+  selection?: string;
 }
 
 interface PluginModule {
@@ -51,6 +54,7 @@ function parseArgs(argv: string[]): Args {
     worktreeId: get("worktreeId"),
     gatewayUrl: get("gatewayUrl"),
     gatewayToken: get("gatewayToken"),
+    selection: flag(argv, "selection"),
   };
 }
 
@@ -180,6 +184,7 @@ async function run(args: Args): Promise<void> {
         agentId: args.agentId,
         config: JSON.parse(args.config) as unknown,
         session,
+        selection: parseLaunchSelection(args.selection),
         output,
         sendKeys,
         reportMessage,

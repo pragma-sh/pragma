@@ -267,6 +267,12 @@ plugins install the published package normally.
   (a phone's Stop button); the default is Escape. Grok binds Escape to scrollback and
   cancels on Ctrl+C, so its watcher sets `"\x03"`. Check the TUI's own key hints
   during a running turn — a wrong key fails silently, the turn just keeps going.
+- Read `ctx.selection` only as a last resort: it carries the launch's model, reasoning,
+  and mode for a host with **no launch flag** for them, so the watcher can apply them
+  through the TUI (OpenCode 2 does). It is present only on a watcher started with a
+  fresh launch, never on a later restart or a resume. Driving a TUI races the launch
+  prompt and breaks when the host restyles a picker; prefer `args` flags whenever the
+  host has them, and type text only after the picker it belongs to has just been drawn.
 - Start the abort watcher **before** any report in the turn-start hook, and detach it
   (subshell + `set -m`). A cancel that lands while the hook is still running kills
   the hook and its children; a watcher started last, or as a plain `nohup … &`

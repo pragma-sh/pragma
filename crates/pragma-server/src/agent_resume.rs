@@ -337,6 +337,10 @@ impl Registry {
                 accounts,
             })
             .map_err(|error| error.to_string())?;
+        // A watcher can already be attached (the desktop publishes the tab
+        // before it prepares the launch); only one started now is handed this
+        // launch's selection.
+        self.restart_watcher_for_launch(tab_id);
         Ok(prepared.run_id)
     }
 

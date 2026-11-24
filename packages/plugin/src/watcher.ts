@@ -1,5 +1,7 @@
 import type { AgentMessage, PragmaClient } from "@pragma-sh/sdk";
 
+import type { AgentLaunchSelection } from "./agent";
+
 /** Declares a watcher a plugin attaches to one of its agents' sessions. */
 export interface WatcherDefinition<TConfig = unknown> {
   /** The `defineAgent` id this watcher attaches to. */
@@ -25,6 +27,17 @@ export interface WatcherContext<TConfig = unknown> {
   config: TConfig;
   /** Session this watcher is attached to. */
   session: { id: string; tabId: string; worktreeId: string };
+  /**
+   * The choices the launch that started this session made, for a harness that
+   * takes them through its TUI because it has no launch flag for them.
+   *
+   * Present only on a watcher the host started together with a fresh launch,
+   * while the harness is still on its start screen. A watcher started later
+   * (the first one died, the gateway restarted, the session was resumed, the
+   * agent was typed by hand) gets none, so applying it can never type into a
+   * running turn. Prefer `AgentArgsBuilder` flags whenever the harness has them.
+   */
+  selection?: AgentLaunchSelection;
   /** Decoded terminal output chunks for this session. */
   output: AsyncIterable<string>;
   /** Writes bytes into the live terminal session. */

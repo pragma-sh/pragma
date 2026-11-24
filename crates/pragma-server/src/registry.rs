@@ -1215,7 +1215,20 @@ impl Registry {
     /// does not wait out a full tick for its watcher.
     pub fn reconcile_watchers(&self) {
         let desired = self.desired_watchers();
-        self.watchers.reconcile(&self.plugins, &desired);
+        self.watchers.reconcile(&self.plugins, &desired, &|entry| {
+            self.invocations.fresh_launch_selection(
+                &entry.worktree_id,
+                &entry.tab_id,
+                crate::watchers::LAUNCH_SELECTION_WINDOW_SECS,
+            )
+        });
+    }
+
+    /// Replaces a tab's watcher so the one that runs was started with the
+    /// launch just prepared there, and so receives its selection.
+    pub(crate) fn restart_watcher_for_launch(&self, tab_id: &str) {
+        self.watchers.restart(tab_id);
+        self.reconcile_watchers();
     }
 
     /// One entry per live session whose mirrored tab or runtime report identifies an agent.
