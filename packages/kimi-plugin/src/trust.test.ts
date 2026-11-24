@@ -20,6 +20,12 @@ describe("Kimi trust gate", () => {
     expect(scanner.push(GATE.join(""))).toBe(false);
   });
 
+  // A shell integration's OSC ended by ST must not swallow the dialog after it.
+  it("still sees the gate after an OSC that ends in ST", () => {
+    const scanner = createKimiTrustScanner();
+    expect(scanner.push(`\x1b]133;A\x1b\\${GATE.join("")}\x1b]0;kimi\x07`)).toBe(true);
+  });
+
   it("ignores a session that never shows the gate", () => {
     const scanner = createKimiTrustScanner();
     expect(scanner.push("Send /help for help information.\r\n > ")).toBe(false);

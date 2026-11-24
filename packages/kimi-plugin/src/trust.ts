@@ -28,8 +28,10 @@ const TRUST_LAST_ROW = "asked again next launch";
 /** How much trailing output is kept while looking for the gate. */
 const BUFFER_LIMIT = 16_384;
 
+// An OSC body stops at the first ESC as well as at BEL: one ended by ST (ESC \)
+// would otherwise run on to a terminator far later and swallow the dialog text.
 // oxlint-disable-next-line no-control-regex -- ANSI CSI/OSC framing uses ESC and BEL bytes.
-const CONTROL_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
+const CONTROL_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
 
 /** Scans a session's output for the trust gate, across however it is chunked. */
 export interface KimiTrustScanner {
