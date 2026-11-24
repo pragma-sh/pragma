@@ -342,15 +342,29 @@ subtab. The PR
 subtab (`right-sidebar/PullRequestTab`) resolves logged-out → create
 (`CreatePullRequestView`, TipTap markdown editor) → view (`ViewPullRequestView`). A PR
 view keeps each check-run/status name and state; its merge card shows passed/failed/pending
-counts and expands to a per-check dropdown. **Watch and fix** below the checks uses
-`github/CiWatchControls` and the standard harness picker. `github/CiWatchMonitor`,
-mounted once in `App`, drives the existing `startRefreshLoop` with `whileHidden`
-enabled; `state/ci-watch-store.ts` owns session-scoped, worktree/repo/PR-keyed watches,
-deduplication, cancellation guards, and each watch's exact fix-tab id. Failure prompts
-include check summaries and best-effort GitHub annotations through `lib/github.ts`.
-A fresh head with checks or an existing check rerun closes only that fix tab and rearms
-the watch; pending jobs from the original run do not count as a restart. Watches stop
-on PR close or cancellation; cancelling leaves an already running agent tab open. When GitHub reports a PR as unmergeable, the
+counts and expands to a per-check dropdown. The card shows exactly one merge control: conflict
+resolution when GitHub reports a conflict, otherwise **Watch, fix and merge** while CI is
+failing or running (`isCiWatchOffered` in `state/ci-watch-store.ts`), otherwise the plain
+**Merge pull request** button. The watch split button (`github/CiWatchControls`, standard
+harness picker) _replaces_ the plain button, so its menu carries **Watch and fix** and the plain
+merge too; both merges share `useMergeActionState` (`github/MergeActionControls`) and are
+disabled without write access (`hooks/use-merge-permission`, `canMergePullRequests` in
+`lib/github.ts`). An armed or stopped watch stays visible either way. The watch **record** is host-owned
+(`pragma-core::ci_watches`, the `ciWatches` RPC, `ci_watch_rpc` in `src-tauri/src/ci_watches.rs`)
+so `pragma-cli ci` arms, reads, and disarms the same watch. The desktop _drives_ it:
+`github/CiWatchMonitor`, mounted once in `App`, lists every project's records each
+`startRefreshLoop` tick (`whileHidden`) and `state/ci-watch-store.ts` advances the live
+ones, writing every transition (`fixing`, attempts, `merging`, `merged`, `failed`) to the
+host first — the host rejects writes to a stopped record, which is how a CLI disarm racing
+a poll wins. Failure prompts include check summaries and best-effort GitHub annotations
+through `lib/github.ts`, the attempt count, and the `pragma-cli ci disarm --reason`
+escape hatch. A fresh head with checks or an existing check rerun closes only that fix tab
+and rearms the watch; pending jobs from the original run do not count as a restart. After
+`github.ciWatchMaxFixAttempts` (3) launches that still fail, the watch stops as `failed`
+and never merges; it merges only when every check on the head passed. Stopped watches
+show in the PR pane (full reason, Dismiss) and as a sidebar row line
+(`WorktreeRowDetails`). Watches stop on PR close or cancellation; cancelling leaves an
+already running agent tab open. When GitHub reports a PR as unmergeable, the
 merge card becomes a conflict alert. Its **Sync with Base Branch** action syncs the head,
 fetches the actual base repository (including cross-fork upstreams), and merges its latest
 base branch into the current worktree; clean merges push immediately, while conflicts

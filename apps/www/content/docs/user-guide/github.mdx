@@ -46,12 +46,16 @@ The **PR Review** tab (opened from a PR view) is the full review surface:
   right from the app. The toolbar's up/down arrows (or `Cmd/Ctrl+↑/↓`) step through
   comments. Each step centers the comment in its diff and the diff on screen.
 
-## Watch and fix CI
+## Watch, fix and merge
 
-When a pull request reports CI checks, **Watch and fix** appears beneath the check
-summary. Choose an agent and model using the standard picker, then select **Start
-watching**. The row shows the selected harness and model alongside **Watching CI**.
-Use its **Cancel watch** × button and confirm to stop watching.
+While a pull request's checks are failing or still running, a **Watch, fix and merge**
+button takes the place of the merge button beneath the check summary. Its dropdown offers
+**Watch and fix**, which does everything except merge, and the plain **Merge pull request**
+for merging right away. Once every check passes there is nothing to fix, so the card shows
+only **Merge pull request**; a pull request with a merge conflict shows conflict resolution
+instead, and no watch can be armed until it is resolved. Choose an agent and model using the standard picker, then select **Start
+watching**. The row shows the selected harness and model alongside what the watch is
+doing; its **Cancel watch** × button (with a confirmation) stops it.
 
 On a failure, Pragma opens a new agent terminal tab in the same worktree. Its prompt
 includes the failing check names, links, summaries, and GitHub error annotations when
@@ -60,11 +64,29 @@ push. When a new commit's checks appear or an existing check reruns, Pragma clos
 that fix tab and continues watching. Existing jobs that are still running do not
 close the tab. One agent handles each failing check cycle.
 
-Watches continue across pane and project changes and while the app is minimized.
-They last for the current app session and stop when cancelled or the pull request
-closes. Cancelling leaves an already running fix tab open; it will no longer close
-automatically. When annotations are unavailable, the agent receives the check
-summary and link so it can investigate further.
+With **Watch, fix and merge**, Pragma merges the pull request (or its whole stack) itself
+once **every** check on the latest commit has passed — never while one is pending or
+failing. **Merge pull request** in the dropdown stays available to merge right away.
+Both merge options are disabled when your GitHub account lacks write access to the pull
+request's base repository; **Watch and fix** still works.
+
+A watch launches at most three fix agents. If CI still fails after the third, the watch
+stops and the pull request is not merged. The worktree's row in the sidebar then shows
+**Merge could not be completed** (or **CI watch stopped** for Watch and fix), hovering it
+shows why, and the PR pane shows the full reason with a **Dismiss** button. The same
+happens if GitHub rejects the merge, for example because a required review is missing.
+
+A fix agent that cannot fix the failure from the branch — a missing secret, broken CI
+infrastructure, a change outside the pull request's scope — is told to stop and run
+`pragma-cli ci disarm --reason "…"` instead of pushing a workaround. Its reason appears
+in full in the PR pane. You can arm, inspect, and disarm watches from any terminal too;
+see [`pragma-cli ci`](/docs/cli/ci).
+
+Watches continue across pane and project changes and while the app is minimized. The
+record lives on the host, but Pragma drives it, so a watch only makes progress while the
+app is open, and a host restart forgets it. Cancelling leaves an already running fix tab
+open; it will no longer close automatically. When annotations are unavailable, the agent
+receives the check summary and link so it can investigate further.
 
 ## Resolving merge conflicts with AI
 

@@ -306,6 +306,11 @@ than no guide.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
+- CI watches (watch, fix, and merge a worktree's PR) keep their **record** on the host
+  (`crates/pragma-core/src/ci_watches.rs`, the `ciWatches` RPC) so the desktop,
+  `pragma-cli ci`, and fix agents share it; the desktop drives it
+  (`apps/pragma/src/state/ci-watch-store.ts`) because it holds the GitHub session and the
+  agent catalog. The fix-attempt cap is `github.ciWatchMaxFixAttempts`.
 - Worktree-scoped whiteboards live on the host: SQLite CRUD/search and native PNG rendering
   in `crates/pragma-core/src/whiteboards.rs`, with `whiteboards` RPC callers in CLI, SDK,
   desktop, and scratchpad bridge. Scene JSON stays lossless; edits use optimistic versions.
