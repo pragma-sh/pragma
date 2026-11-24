@@ -173,6 +173,7 @@
       "tunnel",
       "scratchpads",
       "whiteboards",
+      "ciWatches",
       "wsl",
       "fanouts",
       "ports",
@@ -256,7 +257,8 @@
       "endMarker": "<!-- /pragma:pr-signature -->",
       "linkLabel": "Open worktree in Pragma",
       "openUrl": "https://pragma-app.sh/open"
-    }
+    },
+    "ciWatchMaxFixAttempts": 3
   },
   "app": {
     "name": "Pragma",
