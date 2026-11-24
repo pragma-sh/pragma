@@ -559,6 +559,26 @@ export async function listBaseRepoOptions(repo: GitHubRepoRef): Promise<RepoTarg
   );
 }
 
+/**
+ * Whether the signed-in user may merge pull requests in `target`: GitHub grants
+ * merging to anyone with write (`push`), `maintain`, or `admin` access. Read
+ * from the PR's base repository, which is where a merge happens.
+ */
+export async function canMergePullRequests(target: {
+  owner: string;
+  repo: string;
+}): Promise<boolean> {
+  return cachedRepoFetch(
+    githubCacheKeys(target).mergePermission(),
+    async (octokit) => {
+      const { data } = await octokit.rest.repos.get({ owner: target.owner, repo: target.repo });
+      const permissions = data.permissions;
+      return Boolean(permissions?.push || permissions?.maintain || permissions?.admin);
+    },
+    { ttlMs: 5 * 60_000 },
+  );
+}
+
 /** Lists a repo's branch names (the base-branch dropdown), sorted alphabetically. */
 export async function listBranches(target: { owner: string; repo: string }): Promise<string[]> {
   return cachedRepoFetch(
