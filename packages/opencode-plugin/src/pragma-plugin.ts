@@ -19,8 +19,22 @@ import {
 import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { openCodeStoreAccount } from "./accounts";
-import { pluginCwd } from "./cwd";
+import { pluginCwd, type HostContext } from "./cwd";
+import { openCodeApi } from "./opencode-api";
+import {
+  openCodeV2ModelEntries,
+  readOpenCodeV2Agents,
+  readOpenCodeV2Models,
+  readOpenCodeV2Providers,
+} from "./opencode-v2-catalog";
 import { isOpenCodeV2, openCodeTakesSelectionFlags } from "./opencode-version";
+import {
+  createOutputFeed,
+  planIsEmpty,
+  planSelection,
+  runSelectionPlan,
+  type SelectionPlan,
+} from "./tui-selection";
 import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
 /**
@@ -107,20 +121,41 @@ const SLASH_COMMAND_SOURCES = [
  * v2 kept only `--session` (verified against 2.1.1): its TUI rejects the other
  * two with `Unrecognized flag` and exits, and neither a config environment
  * variable nor the TUI plugin API can set the model instead. So on v2 a
- * selection adds nothing — the session uses the model and agent OpenCode
- * itself last had — and the catalog offers one model entry that says so
- * ({@link OPENCODE_V2_MODELS}) and no modes.
+ * selection adds no argument; the watcher applies it by driving OpenCode's
+ * own pickers ({@link applyLaunchSelection}).
  */
 /**
- * The model list on OpenCode v2: whatever OpenCode itself has selected. It is
- * one entry rather than none because an agent with no models reads everywhere
- * as a broken catalog ("No models found", the verify catalog gate, the
- * last-good fallback), which would hide a working agent. The user changes the
- * model inside OpenCode (`/models`), and it sticks for later sessions.
+ * The model list when OpenCode v2's API cannot be read: whatever OpenCode
+ * itself has selected. It is one entry rather than none because an agent with
+ * no models reads everywhere as a broken catalog ("No models found", the
+ * verify catalog gate, the last-good fallback), which would hide a working
+ * agent. The watcher finds no such model and leaves OpenCode's choice alone.
  */
-const OPENCODE_V2_MODELS: AgentModelEntry[] = [
-  { id: "default", name: "OpenCode default (change with /models)" },
+const OPENCODE_V2_FALLBACK_MODELS: AgentModelEntry[] = [
+  { id: "default", name: "OpenCode default" },
 ];
+
+/** OpenCode v2's models, with names and reasoning variants, from its server API. */
+async function openCodeV2Models(ctx: HostContext): Promise<AgentModelEntry[]> {
+  try {
+    const entries = openCodeV2ModelEntries(
+      readOpenCodeV2Models(await openCodeApi(ctx, "GET", "/api/model")),
+    );
+    return entries.length > 0 ? entries : OPENCODE_V2_FALLBACK_MODELS;
+  } catch {
+    return OPENCODE_V2_FALLBACK_MODELS;
+  }
+}
+
+/** OpenCode v2's selectable agents, falling back to its two built-ins. */
+async function openCodeV2Modes(ctx: HostContext): Promise<AgentMode[]> {
+  try {
+    const modes = readOpenCodeV2Agents(await openCodeApi(ctx, "GET", "/api/agent"));
+    return modes.length > 0 ? modes : DEFAULT_MODES;
+  } catch {
+    return DEFAULT_MODES;
+  }
+}
 
 const OPENCODE_AGENT_ARGS: AgentArgsBuilder = {
   model: (modelId: string) => (openCodeTakesSelectionFlags() ? ["--model", modelId] : []),
@@ -136,15 +171,93 @@ const OPENCODE_AGENT_ARGS: AgentArgsBuilder = {
  * current binary, so remote command approvals and question answers go the
  * watcher route (`handleDecisions: true`).
  */
+const baseWatcher = createTuiWatcher({
+  agent: "opencode",
+  handleDecisions: true,
+  questionFinalizeKeys: "\r",
+});
+
+type OpenCodeWatchContext = Parameters<typeof baseWatcher.watch>[0];
+
+/**
+ * Builds the picker inputs for this launch, or `null` when there is nothing to
+ * drive: no selection, OpenCode v1 (which took the selection as flags), or
+ * lists that could not be read.
+ */
+async function launchSelectionPlan(ctx: OpenCodeWatchContext): Promise<SelectionPlan | null> {
+  const { selection } = ctx;
+  if (!selection?.modelId && !selection?.modeId) return null;
+  const host: HostContext = { sdk: ctx.sdk };
+  try {
+    if (!(await isOpenCodeV2(host))) return null;
+    const [models, providers] = selection.modelId
+      ? await Promise.all([
+          openCodeApi(host, "GET", "/api/model"),
+          openCodeApi(host, "GET", "/api/provider"),
+        ])
+      : [null, null];
+    const plan = planSelection(
+      selection,
+      readOpenCodeV2Models(models),
+      readOpenCodeV2Providers(providers),
+    );
+    return planIsEmpty(plan) ? null : plan;
+  } catch {
+    return null;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Applies the launch's model, variant, and agent to OpenCode v2 through its
+ * TUI. See `tui-selection.ts`. Never throws: a selection that cannot be
+ * applied leaves OpenCode on its own choice, and the watcher's other duties
+ * (answers, approvals, interrupts) must go on.
+ */
+async function applyLaunchSelection(ctx: OpenCodeWatchContext): Promise<void> {
+  const feed = createOutputFeed();
+  let reading = true;
+  // Read from the first byte: the start screen can be drawn before the lists
+  // below have been fetched.
+  const pump = (async () => {
+    for await (const chunk of ctx.output) {
+      if (!reading) return;
+      feed.push(chunk);
+    }
+  })().catch(() => {
+    // The output transport reconnects on its own; the base watcher owns the session.
+  });
+  try {
+    const plan = await launchSelectionPlan(ctx);
+    if (!plan) return;
+    const outcome = await runSelectionPlan(
+      { feed, sendKeys: ctx.sendKeys, sleep, now: Date.now },
+      plan,
+    );
+    process.stderr.write(
+      `${JSON.stringify({ type: "watcher.opencodeSelection", sessionId: ctx.session.id, ...outcome })}\n`,
+    );
+  } catch {
+    // A failed write leaves OpenCode on its own selection.
+  } finally {
+    reading = false;
+    void pump;
+  }
+}
+
 export const opencodeAgentPlugin: PluginDefinition = definePlugin({
   name: "OpenCode",
   description: "Launch OpenCode from Pragma.",
   watchers: [
-    createTuiWatcher({
-      agent: "opencode",
-      handleDecisions: true,
-      questionFinalizeKeys: "\r",
-    }),
+    {
+      ...baseWatcher,
+      async watch(ctx) {
+        await Promise.all([baseWatcher.watch(ctx), applyLaunchSelection(ctx)]);
+      },
+    },
   ],
   accounts: defineAccounts([
     {
@@ -251,12 +364,11 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
         },
       },
       prefillDelayMs: 6000,
-      // v2 cannot be told a model or agent at launch (see OPENCODE_AGENT_ARGS),
-      // so it lists the one honest choice: a picker entry that silently did
-      // nothing would label every session with a model it is not running.
+      // v2 lists its models and agents through its server API; the watcher
+      // applies the pick in the TUI (v2 has no launch flag for either).
       models: async (ctx) =>
         (await isOpenCodeV2(ctx))
-          ? OPENCODE_V2_MODELS
+          ? openCodeV2Models(ctx)
           : parseOpenCodeModels(
               await execFirst(
                 ctx,
@@ -266,7 +378,7 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       permissionModes: [],
       modes: async (ctx) =>
         (await isOpenCodeV2(ctx))
-          ? []
+          ? openCodeV2Modes(ctx)
           : parseOpenCodeAgents(await execFirst(ctx, "opencode agent list 2>/dev/null")),
       slashCommands: slashCommandProvider(BUILTIN_SLASH_COMMANDS, SLASH_COMMAND_SOURCES, {
         acp: { command: ["opencode", "acp"] },

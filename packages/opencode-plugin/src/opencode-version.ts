@@ -1,6 +1,4 @@
-import type { PluginContext } from "@pragma-sh/plugin/catalog";
-
-import { pluginCwd } from "./cwd";
+import { pluginCwd, type HostContext } from "./cwd";
 import { runOnHost } from "./host-shell";
 
 /**
@@ -29,7 +27,7 @@ function parseOpenCodeMajor(output: string): number {
 }
 
 /** Whether the host's OpenCode is v2 or newer. A missing or unreadable `opencode` is v1. */
-export async function isOpenCodeV2(ctx: PluginContext): Promise<boolean> {
+export async function isOpenCodeV2(ctx: HostContext): Promise<boolean> {
   const key = pluginCwd(ctx);
   const cached = versions.get(key);
   const now = Date.now();
@@ -47,7 +45,8 @@ export async function isOpenCodeV2(ctx: PluginContext): Promise<boolean> {
  *
  * v1 does. v2 dropped both from the top-level command (only `opencode mini`
  * and `opencode run` keep them) and exits with `Unrecognized flag` — so a
- * launch that passed one never started at all.
+ * launch that passed one never started at all. On v2 the watcher applies the
+ * selection through the TUI instead (`tui-selection.ts`).
  */
 export function openCodeTakesSelectionFlags(): boolean {
   return !lastSeenV2;
