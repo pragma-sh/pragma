@@ -20,6 +20,7 @@ import {
   ListChecks,
   Loader2,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,6 +38,7 @@ import {
   REVIEW_REFRESH_INTERVAL_MS,
   reuseUnchangedReviewData,
   reviewDataSignature,
+  unresolvedFixItComments,
 } from "@/components/github/review-data";
 import { DEFAULT_DIFF_PANE_HEIGHT_PX, FileDiffPane } from "@/components/github/ReviewFileDiff";
 import {
@@ -345,14 +347,22 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusPath = useReviewFocus(prNumber);
   // The comment a single-comment "Fix" dialog is open for (null when closed), and
-  // whether the "Address fix it list" dialog is open.
+  // which list dialog is open: the user's fix it list, or every unresolved comment.
   const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  const [fixAllComments, setFixAllComments] = useState<FixItComment[] | null>(null);
   useReviewFocusScroll(state, prNumber, focusPath, sectionEls);
   // Memoized so the toolbar's keyboard listener isn't re-bound on every render.
   const commentKeys = useMemo(
     () =>
       state.kind === "ready" ? buildCommentKeys(state.data.files, state.data.threadsByPath) : [],
+    [state],
+  );
+  const unresolvedCount = useMemo(
+    () =>
+      state.kind === "ready"
+        ? flattenThreads(state.data.threadsByPath).filter((thread) => !thread.isResolved).length
+        : 0,
     [state],
   );
 
@@ -386,7 +396,9 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
         commentKeys={commentKeys}
         commentTargets={commentTargets}
         onAddressFixIt={() => setListOpen(true)}
+        onFixAll={() => setFixAllComments(unresolvedFixItComments(data.files, data.threadsByPath))}
         prNumber={data.pr.number}
+        unresolvedCount={unresolvedCount}
         scrollRef={scrollRef}
       />
       {data.reviews.length > 0 ? (
@@ -430,6 +442,19 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
           worktreeId={worktreeId}
         />
       ) : null}
+      {fixAllComments !== null ? (
+        <FixItListDialog
+          onOpenChange={(open) => {
+            if (!open) {
+              setFixAllComments(null);
+            }
+          }}
+          open={true}
+          prNumber={data.pr.number}
+          presetComments={fixAllComments}
+          worktreeId={worktreeId}
+        />
+      ) : null}
     </div>
   );
 }
@@ -447,13 +472,17 @@ function ReviewToolbar({
   commentTargets,
   prNumber,
   scrollRef,
+  unresolvedCount,
   onAddressFixIt,
+  onFixAll,
 }: {
   commentKeys: string[];
   commentTargets: React.RefObject<Map<string, ReviewCommentTarget>>;
   prNumber: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  unresolvedCount: number;
   onAddressFixIt: () => void;
+  onFixAll: () => void;
 }) {
   // Index into `commentKeys` of the comment we last scrolled to; -1 before any
   // navigation so the first "next" lands on the first comment. State (not a ref)
@@ -550,8 +579,28 @@ function ReviewToolbar({
         {count} comment{count === 1 ? "" : "s"}
       </span>
       <div className="flex-1" />
+      <FixAllButton count={unresolvedCount} onClick={onFixAll} />
       <AddressFixItButton onClick={onAddressFixIt} prNumber={prNumber} />
     </div>
+  );
+}
+
+/** Top-of-tab button opening the list dialog preset to every unresolved comment. */
+function FixAllButton({ count, onClick }: { count: number; onClick: () => void }) {
+  return (
+    <Button
+      className="shrink-0"
+      disabled={count === 0}
+      onClick={onClick}
+      size="xs"
+      variant="outline"
+    >
+      <Wrench />
+      Fix all
+      {count > 0 ? (
+        <span className="ml-1 rounded bg-warning/20 px-1 text-[10px] text-warning">{count}</span>
+      ) : null}
+    </Button>
   );
 }
 

@@ -7,6 +7,8 @@ import type {
   PullReview,
   ReviewThread,
 } from "@/lib/github";
+import { reviewThreadToFixItComment } from "@/lib/fix-it-prompt";
+import type { FixItComment } from "@/state/fix-it-store";
 
 /**
  * How often the review tab re-fetches PR metadata, files, comments, and local
@@ -50,6 +52,22 @@ export function buildCommentKeys(
     }
   }
   return keys;
+}
+
+/** Every unresolved thread as a fix-it comment, in file-then-thread order ("Fix all"). */
+export function unresolvedFixItComments(
+  files: PullFile[],
+  threadsByPath: Map<string, ReviewThread[]>,
+): FixItComment[] {
+  const comments: FixItComment[] = [];
+  for (const file of files) {
+    for (const thread of threadsByPath.get(file.path) ?? []) {
+      if (!thread.isResolved) {
+        comments.push(reviewThreadToFixItComment(thread));
+      }
+    }
+  }
+  return comments;
 }
 
 /** Flatten path → threads for seeding the GitHub SWR store after an optimistic flip. */
