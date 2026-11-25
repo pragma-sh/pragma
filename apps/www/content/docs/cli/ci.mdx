@@ -29,13 +29,16 @@ app polls GitHub, opens the fix agents, and performs the merge.
 | `disarm` | Stops a live watch and records `--reason`. The watch shows as stopped, with that reason in full, in the sidebar and the PR pane. No merge happens. |
 | `clear`  | Forgets the watch, live or stopped, without recording anything.                                                                                    |
 
+While a watch is `merging`, `watch`, `disarm`, and `clear` fail: the merge has already been
+sent to GitHub.
+
 ## Statuses
 
 | Status     | Meaning                                                                                       |
 | ---------- | --------------------------------------------------------------------------------------------- |
 | `watching` | Waiting for checks to finish.                                                                 |
 | `fixing`   | A fix agent is working. Its tab closes when CI restarts on a new push or a rerun.             |
-| `merging`  | Every check passed; the merge is in flight.                                                   |
+| `merging`  | Every check passed; the merge is in flight and can no longer be cancelled.                    |
 | `merged`   | The pull request merged.                                                                      |
 | `failed`   | CI still failed after the last fix attempt, or GitHub rejected the merge. The reason is kept. |
 | `disarmed` | Someone ran `ci disarm`. The reason is kept.                                                  |

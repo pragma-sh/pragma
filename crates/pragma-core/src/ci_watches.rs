@@ -13,6 +13,13 @@
 //! A terminal record (`merged`, `failed`, `disarmed`) is never rewritten by
 //! `update`: a disarm from the CLI racing the desktop's next progress write must
 //! win, so the late write is rejected as stale and the desktop re-reads.
+//!
+//! Every arm issues a new `id`, and `update` names the one it started from, so a
+//! poll that outlives a re-arm cannot touch the replacement.
+//!
+//! `merging` is the point of no return: the desktop writes it immediately before
+//! sending the merge, so from then on `arm`, `disarm`, and `clear` are refused
+//! rather than reporting a cancellation that would not stop the merge.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -21,11 +28,16 @@ use chrono::Utc;
 use pragma_constants::{CiWatch, CiWatchMode, CiWatchStatus};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use uuid::Uuid;
 
 use crate::{CoreError, CoreResult};
 
 /// Reason recorded when a disarm names none.
 const DEFAULT_DISARM_REASON: &str = "Disarmed with `pragma-cli ci disarm`.";
+
+/// Why a watch cannot be changed while its merge is in flight.
+const MERGE_IN_FLIGHT: &str =
+    "the merge has already been sent to GitHub, so this CI watch can no longer be cancelled";
 
 /// One `ciWatches` RPC request.
 #[derive(Debug, Deserialize)]
@@ -57,6 +69,7 @@ enum CiWatchesRequest {
     /// Progress from the driving client; rejected once the record is terminal.
     Update {
         worktree_id: String,
+        watch_id: String,
         #[serde(flatten)]
         changes: Map<String, Value>,
     },
@@ -66,8 +79,12 @@ enum CiWatchesRequest {
         #[serde(default)]
         reason: Option<String>,
     },
-    /// Forgets a worktree's record entirely.
-    Clear { worktree_id: String },
+    /// Forgets a worktree's record entirely, or only the arm named by `watch_id`.
+    Clear {
+        worktree_id: String,
+        #[serde(default)]
+        watch_id: Option<String>,
+    },
 }
 
 /// Fields `update` may change; everything else on a record is fixed at arm time.
@@ -78,6 +95,7 @@ const UPDATABLE_FIELDS: &[&str] = &[
     "prNumber",
     "fixTabId",
     "fixHeadSha",
+    "fixChecks",
 ];
 
 /// In-memory CI watch records keyed by worktree id.
@@ -121,8 +139,10 @@ impl CiWatchStore {
                 reasoning_id,
                 pr_number,
             } => {
+                ensure_cancellable(records.get(&worktree_id))?;
                 let now = now_millis();
                 let record = from_value(serde_json::json!({
+                    "id": Uuid::new_v4().to_string(),
                     "worktreeId": worktree_id,
                     "mode": mode,
                     "agentId": agent_id,
@@ -134,6 +154,7 @@ impl CiWatchStore {
                     "error": null,
                     "fixTabId": null,
                     "fixHeadSha": null,
+                    "fixChecks": null,
                     "createdAt": now,
                     "updatedAt": now,
                 }))?;
@@ -143,9 +164,13 @@ impl CiWatchStore {
             }
             CiWatchesRequest::Update {
                 worktree_id,
+                watch_id,
                 changes,
             } => {
                 let record = live_record(&mut records, &worktree_id)?;
+                if record.id != watch_id {
+                    return Err(CoreError::StaleWrite);
+                }
                 *record = apply_update(record, changes)?;
                 to_value(&*record)
             }
@@ -154,6 +179,7 @@ impl CiWatchStore {
                 reason,
             } => {
                 let record = live_record(&mut records, &worktree_id)?;
+                ensure_cancellable(Some(record))?;
                 let reason = reason
                     .map(|reason| reason.trim().to_string())
                     .filter(|reason| !reason.is_empty())
@@ -163,8 +189,24 @@ impl CiWatchStore {
                 record.updated_at = now_millis();
                 to_value(&*record)
             }
-            CiWatchesRequest::Clear { worktree_id } => {
-                to_value(serde_json::json!({ "cleared": records.remove(&worktree_id).is_some() }))
+            CiWatchesRequest::Clear {
+                worktree_id,
+                watch_id,
+            } => {
+                let record = records.get(&worktree_id);
+                let cleared = match (record, watch_id) {
+                    // The driving client forgetting its own watch, merging or not.
+                    (Some(record), Some(watch_id)) => record.id == watch_id,
+                    (record, None) => {
+                        ensure_cancellable(record)?;
+                        record.is_some()
+                    }
+                    (None, Some(_)) => false,
+                };
+                if cleared {
+                    records.remove(&worktree_id);
+                }
+                to_value(serde_json::json!({ "cleared": cleared }))
             }
         };
         value
@@ -178,6 +220,14 @@ pub fn is_live(status: CiWatchStatus) -> bool {
         status,
         CiWatchStatus::Watching | CiWatchStatus::Fixing | CiWatchStatus::Merging
     )
+}
+
+/// Refuses to cancel or replace a watch whose merge is already in flight.
+fn ensure_cancellable(record: Option<&CiWatch>) -> CoreResult<()> {
+    if record.is_some_and(|record| record.status == CiWatchStatus::Merging) {
+        return Err(CoreError::Operation(MERGE_IN_FLIGHT.to_string()));
+    }
+    Ok(())
 }
 
 /// A worktree's record, provided it is still live.
@@ -271,11 +321,12 @@ mod tests {
     #[test]
     fn updates_progress_but_not_fixed_fields() {
         let store = CiWatchStore::new();
-        arm(&store, "w1");
+        let id = arm(&store, "w1")["id"].clone();
         let updated = store
             .handle(json!({
                 "action": "update",
                 "worktreeId": "w1",
+                "watchId": id,
                 "status": "fixing",
                 "attempts": 1,
                 "fixTabId": "tab-1",
@@ -288,7 +339,9 @@ mod tests {
         assert_eq!(updated["prNumber"], 7);
 
         let error = store
-            .handle(json!({ "action": "update", "worktreeId": "w1", "mode": "watch" }))
+            .handle(
+                json!({ "action": "update", "worktreeId": "w1", "watchId": id, "mode": "watch" }),
+            )
             .unwrap_err();
         assert!(matches!(error, CoreError::InvalidPayload(_)));
     }
@@ -296,7 +349,7 @@ mod tests {
     #[test]
     fn disarm_wins_over_a_late_update() {
         let store = CiWatchStore::new();
-        arm(&store, "w1");
+        let id = arm(&store, "w1")["id"].clone();
         let disarmed = store
             .handle(json!({
                 "action": "disarm",
@@ -308,7 +361,9 @@ mod tests {
         assert_eq!(disarmed["error"], "needs a secret the agent cannot read");
 
         let late = store
-            .handle(json!({ "action": "update", "worktreeId": "w1", "status": "fixing" }))
+            .handle(
+                json!({ "action": "update", "worktreeId": "w1", "watchId": id, "status": "fixing" }),
+            )
             .unwrap_err();
         assert!(matches!(late, CoreError::StaleWrite));
     }
@@ -325,5 +380,49 @@ mod tests {
             .handle(json!({ "action": "disarm", "worktreeId": "nope" }))
             .unwrap_err();
         assert!(matches!(missing, CoreError::NotFound(_)));
+    }
+
+    fn update(store: &CiWatchStore, id: &Value, status: &str) -> CoreResult<Value> {
+        store.handle(
+            json!({ "action": "update", "worktreeId": "w1", "watchId": id, "status": status }),
+        )
+    }
+
+    #[test]
+    fn rearming_rejects_progress_from_the_earlier_watch() {
+        let store = CiWatchStore::new();
+        let old = arm(&store, "w1")["id"].clone();
+        let new = arm(&store, "w1")["id"].clone();
+        assert_ne!(old, new);
+
+        let error = update(&store, &old, "fixing").unwrap_err();
+        assert!(matches!(error, CoreError::StaleWrite));
+        let cleared = store
+            .handle(json!({ "action": "clear", "worktreeId": "w1", "watchId": old }))
+            .unwrap();
+        assert_eq!(cleared["cleared"], false);
+        assert_eq!(update(&store, &new, "fixing").unwrap()["status"], "fixing");
+    }
+
+    #[test]
+    fn a_merge_in_flight_cannot_be_cancelled() {
+        let store = CiWatchStore::new();
+        let id = arm(&store, "w1")["id"].clone();
+        update(&store, &id, "merging").unwrap();
+
+        for action in ["disarm", "clear"] {
+            let error = store
+                .handle(json!({ "action": action, "worktreeId": "w1" }))
+                .unwrap_err();
+            assert!(error.to_string().contains(MERGE_IN_FLIGHT));
+        }
+        let rearm = store.handle(json!({
+            "action": "arm",
+            "worktreeId": "w1",
+            "mode": "watch",
+            "agentId": "claude-code",
+        }));
+        assert!(rearm.is_err());
+        assert_eq!(update(&store, &id, "merged").unwrap()["status"], "merged");
     }
 }

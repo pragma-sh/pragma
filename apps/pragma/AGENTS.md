@@ -352,11 +352,11 @@ disabled without write access (`hooks/use-merge-permission`, `canMergePullReques
 `lib/github.ts`). An armed or stopped watch stays visible either way. The watch **record** is host-owned
 (`pragma-core::ci_watches`, the `ciWatches` RPC, `ci_watch_rpc` in `src-tauri/src/ci_watches.rs`)
 so `pragma-cli ci` arms, reads, and disarms the same watch. The desktop _drives_ it:
-`github/CiWatchMonitor`, mounted once in `App`, lists every project's records each
+`github/CiWatchMonitor`, mounted once in `App`, lists every registered project's records (worktrees from the client DB, never the loaded snapshots) each
 `startRefreshLoop` tick (`whileHidden`) and `state/ci-watch-store.ts` advances the live
 ones, writing every transition (`fixing`, attempts, `merging`, `merged`, `failed`) to the
 host first — the host rejects writes to a stopped record, which is how a CLI disarm racing
-a poll wins. Failure prompts include check summaries and best-effort GitHub annotations
+a poll wins. Each arm has its own `id` that `update` must name, so an outliving poll cannot touch a re-arm; the attempt's check snapshot is on the record (`fixChecks`). `merging` is written immediately before the merge is sent and is the point of no return (the host refuses arm, disarm, and clear); the merge is pinned to the checked head SHA. The fix agent is resolved from the watched worktree's project (`loadProjectAgent` in `plugins/agents.ts`), not the selected one. Failure prompts include check summaries and best-effort GitHub annotations
 through `lib/github.ts`, the attempt count, and the `pragma-cli ci disarm --reason`
 escape hatch. A fresh head with checks or an existing check rerun closes only that fix tab
 and rearms the watch; pending jobs from the original run do not count as a restart. After

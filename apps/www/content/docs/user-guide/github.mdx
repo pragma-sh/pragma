@@ -66,7 +66,8 @@ close the tab. One agent handles each failing check cycle.
 
 With **Watch, fix and merge**, Pragma merges the pull request (or its whole stack) itself
 once **every** check on the latest commit has passed — never while one is pending or
-failing. **Merge pull request** in the dropdown stays available to merge right away.
+failing. A commit pushed in the meantime is not merged; Pragma waits for its checks.
+Once the merge has been sent, the watch can no longer be cancelled. **Merge pull request** in the dropdown stays available to merge right away.
 Both merge options are disabled when your GitHub account lacks write access to the pull
 request's base repository; **Watch and fix** still works.
 

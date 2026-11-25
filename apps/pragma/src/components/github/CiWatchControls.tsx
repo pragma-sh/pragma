@@ -167,14 +167,15 @@ function CiWatchStartButton({
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
+            <IconButton
               aria-label="More CI watch options"
               className="rounded-l-none border-l-0 px-2"
+              label="More options"
               size="sm"
               variant="outline"
             >
               <ChevronDown />
-            </Button>
+            </IconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuItem disabled={mergeBlocked} onSelect={() => onChoose("watchMerge")}>
@@ -221,7 +222,7 @@ function CiWatchStartButton({
 function liveLabel(view: CiWatchView): string {
   const { record } = view;
   if (view.launching) return "Starting CI fix…";
-  if (record.status === "merging") return "Checks passed — merging…";
+  if (record.status === "merging") return "Checks passed — merging, too late to cancel…";
   if (record.status === "fixing") {
     return `Fixing CI · attempt ${record.attempts} of ${CI_WATCH_MAX_FIX_ATTEMPTS}`;
   }
@@ -253,9 +254,11 @@ function CiWatchState({ view, onCancel }: { view: CiWatchView; onCancel: () => v
             {agentName ?? view.record.agentId} · {view.record.modelId ?? "Default model"}
           </span>
         </span>
-        <IconButton label="Cancel watch" size="icon-sm" variant="ghost" onClick={onCancel}>
-          <X />
-        </IconButton>
+        {view.record.status === "merging" ? null : (
+          <IconButton label="Cancel watch" size="icon-sm" variant="ghost" onClick={onCancel}>
+            <X />
+          </IconButton>
+        )}
       </output>
       {view.error ? (
         <p role="alert" className="text-xs text-destructive">

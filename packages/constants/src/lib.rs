@@ -40,7 +40,7 @@ pub use generated::{
     AutomationPendingPayload, AutomationRootRegistration, AutomationScope, AutomationStatus,
     AutomationTriggerKind, AutomationTrust, AutomationWorktreeRoot, AutomationsChangedPayload,
     Bench, BoardDraftCreatePayload, BranchSyncStatus, CatalogAgent, ChangeStatus, ChangedFile,
-    CiWatch, CiWatchMode, CiWatchStatus, ComputerAccess, ComputerAccessPolicy,
+    CiWatch, CiWatchCheck, CiWatchMode, CiWatchStatus, ComputerAccess, ComputerAccessPolicy,
     ComputerActionResult, ComputerActivityEvent, ComputerActivitySnapshot, ComputerActivityType,
     ComputerApp, ComputerApproval, ComputerApprovalDecision, ComputerApproveRequest,
     ComputerAppsRequest, ComputerCaller, ComputerCallerKind, ComputerClickRequest,

@@ -183,7 +183,8 @@ three attempts), and by default it merges once every check passes. One watch per
 If you are a CI fix agent and the failure cannot be fixed by changing the branch (a missing
 secret or permission, broken CI infrastructure, a fix outside the PR's scope), do not push a
 workaround: run `ci disarm` with a reason that states the check, the full error, and why,
-then stop. The user sees that reason verbatim and nothing is merged.
+then stop. The user sees that reason verbatim and nothing is merged. Once a watch is
+`merging`, `watch`, `disarm`, and `clear` fail: the merge has already been sent.
 
 ## Whiteboards, Scratchpads, And Fanouts
 

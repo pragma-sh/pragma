@@ -1200,6 +1200,8 @@ export async function mergePullRequest(
   repo: GitHubRepoRef,
   prNumber: number,
   method: MergeMethod = "merge",
+  /** Refuses the merge unless the pull request head is still this commit. */
+  expectedHeadSha?: string,
 ): Promise<void> {
   const octokit = await client();
   await octokit.rest.pulls.merge({
@@ -1207,6 +1209,7 @@ export async function mergePullRequest(
     repo: repo.repo,
     pull_number: prNumber,
     merge_method: method,
+    ...(expectedHeadSha ? { sha: expectedHeadSha } : {}),
   });
   // Drop every cached view of this PR so the next poll shows merged.
   const keys = githubCacheKeys(repo);
@@ -1238,6 +1241,8 @@ function invalidateMergedStack(repo: GitHubRepoRef, stack: PullRequestStack): vo
 export async function mergePullRequestStack(
   repo: GitHubRepoRef,
   stack: PullRequestStack,
+  /** Cancels the merge unless the top pull request's head is still this commit. */
+  expectedHeadSha?: string,
 ): Promise<void> {
   const top = stack.entries.at(-1);
   if (!top) throw new Error("Cannot merge an empty pull request stack");
@@ -1248,6 +1253,7 @@ export async function mergePullRequestStack(
     pull_number: top.number,
     merge_method: "merge",
     merge_action: "default",
+    ...(expectedHeadSha ? { sha: expectedHeadSha } : {}),
     headers: STACK_API_HEADERS,
   } as const;
   let result: AsyncMergeResult;

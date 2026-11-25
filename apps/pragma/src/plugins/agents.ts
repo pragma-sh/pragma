@@ -10,11 +10,18 @@ import {
 import type { PragmaClient } from "@pragma-sh/sdk";
 
 import { splitSlashPrompt } from "@/lib/agent-launch-options";
-import type { AgentConfig, AgentModel, AgentModelSelection, RawAgentModel } from "@/lib/tauri";
+import {
+  readPluginManifests,
+  type AgentConfig,
+  type AgentModel,
+  type AgentModelSelection,
+  type RawAgentModel,
+} from "@/lib/tauri";
 
 import { notifyFromPlugin } from "./host-hooks";
 import { resolvePluginAssetPath } from "./assets";
-import type { PluginRecord } from "./registry";
+import { loadPluginEntries } from "./loader";
+import { preferHigherScope, type PluginRecord } from "./registry";
 
 interface RuntimeServices {
   sdk: PragmaClient | null;
@@ -32,6 +39,15 @@ const listeners = new Set<() => void>();
 let records: PluginAgentRecord[] = [];
 let configSnapshot: AgentConfig[] = [];
 let runtime: RuntimeServices = { sdk: null, project: null };
+/**
+ * Agents resolved for a project that is not the active one (see
+ * {@link loadProjectAgent}). Keyed by the config object so their launch
+ * callbacks never mix with an active-project agent that shares the id.
+ */
+const detached = new WeakMap<
+  AgentConfig,
+  { record: PluginAgentRecord; options: ResolvedAgentOptions }
+>();
 /** Last resolved modes/permission modes/slash commands per agent id. */
 let optionsByAgent = new Map<string, ResolvedAgentOptions>();
 
@@ -57,6 +73,32 @@ export function usePluginAgents(): AgentConfig[] {
 /** Returns current launchable plugin-defined agents outside React. */
 export function listPluginAgents(): AgentConfig[] {
   return pluginAgentConfigs();
+}
+
+/**
+ * Resolves one agent as `project` defines it — its own plugin entries over the
+ * global ones — without touching the active project's agents. The returned
+ * config launches with that project's callbacks.
+ */
+export async function loadProjectAgent(
+  project: NonNullable<PluginContext["project"]>,
+  agentId: string,
+): Promise<AgentConfig | null> {
+  const entries = await readPluginManifests(project.path);
+  const loaded = preferHigherScope(
+    await loadPluginEntries(entries, { projectIdByPath: () => project.id }),
+  );
+  const record = loaded
+    .flatMap(pluginAgentRecords)
+    .find((candidate) => candidate.config.id === agentId);
+  if (!record) {
+    return null;
+  }
+  const options = runtime.sdk
+    ? await resolveAgentOptions(record.definition, pluginContext(record, project))
+    : staticOptions(record.definition);
+  detached.set(record.config, { record, options });
+  return record.config;
 }
 
 /** Resolves models for a plugin-defined agent, or `null` when the id is not plugin-owned. */
@@ -105,14 +147,14 @@ export async function resolvePluginAgentOptions(
  * providers (see {@link resolvePluginAgentOptions}).
  */
 export function pluginAgentLaunchArgs(
-  agentId: string,
+  agent: AgentConfig,
   selection: AgentModelSelection | null | undefined,
 ): string[] | null {
-  const record = findRecord(agentId);
+  const { record, options } = launchContext(agent);
   if (!record) {
     return null;
   }
-  return agentLaunchArgs(record.definition, selection, optionsByAgent.get(agentId) ?? {});
+  return agentLaunchArgs(record.definition, selection, options ?? {});
 }
 
 /**
@@ -121,12 +163,12 @@ export function pluginAgentLaunchArgs(
  * `/command` is rewritten only when the agent invokes it differently.
  */
 export function pluginAgentPrompt(
-  agentId: string,
+  agent: AgentConfig,
   slashCommand: string | null | undefined,
   prompt: string | undefined,
 ): string | undefined {
-  const record = findRecord(agentId);
-  const commands = optionsByAgent.get(agentId)?.slashCommands;
+  const { record, options } = launchContext(agent);
+  const commands = options?.slashCommands;
   const invocation = (name: string) => {
     const command = commands?.find((candidate) => candidate.name === name) ?? name;
     return record ? slashCommandInvocation(record.definition, command) : `/${name}`;
@@ -142,6 +184,13 @@ export function pluginAgentPrompt(
     return prompt;
   }
   return applySlashCommand(invocation(typed.slashCommand), typed.prompt);
+}
+
+/** The plugin record and resolved options that build `agent`'s launch. */
+function launchContext(agent: AgentConfig) {
+  return (
+    detached.get(agent) ?? { record: findRecord(agent.id), options: optionsByAgent.get(agent.id) }
+  );
 }
 
 function findRecord(agentId: string): PluginAgentRecord | undefined {
@@ -218,7 +267,10 @@ function toAgentModel(model: RawAgentModel): AgentModel {
   };
 }
 
-function pluginContext(record: PluginAgentRecord): PluginContext {
+function pluginContext(
+  record: PluginAgentRecord,
+  project: PluginContext["project"] = runtime.project,
+): PluginContext {
   if (!runtime.sdk) {
     throw new Error("Pragma SDK is not connected yet");
   }
@@ -226,7 +278,7 @@ function pluginContext(record: PluginAgentRecord): PluginContext {
     pluginId: record.pluginId,
     ...(record.record.dir === undefined ? {} : { pluginDir: record.record.dir }),
     config: record.record.config,
-    project: runtime.project,
+    project,
     sdk: runtime.sdk,
     notify: notifyFromPlugin,
   };

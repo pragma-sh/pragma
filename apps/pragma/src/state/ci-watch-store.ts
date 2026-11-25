@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
-import { constants, type CiWatch, type GitHubRepoRef } from "@pragma-sh/constants";
+import {
+  constants,
+  type CiWatch,
+  type CiWatchCheck,
+  type GitHubRepoRef,
+} from "@pragma-sh/constants";
 import type { AgentConfig, CiWatchUpdate } from "@/lib/tauri";
 import type { CheckStatusItem, ChecksStatus, PullRequestSummary } from "@/lib/github";
 import { errorMessage } from "@/lib/errors";
@@ -17,13 +22,6 @@ export interface CiWatchView {
   error?: string;
   /** True while a fix agent tab is being opened. */
   launching?: boolean;
-}
-
-/** The fix attempt in flight, kept to recognize when CI restarts. */
-interface CiAttempt {
-  tabId: string;
-  headSha: string;
-  checks: CheckStatusItem[];
 }
 
 /** A watch is driven only while live; terminal records stay to explain why it stopped. */
@@ -59,21 +57,38 @@ export function stoppedCiWatchTitle(record: Pick<CiWatch, "mode">): string {
   return record.mode === "watchMerge" ? "Merge could not be completed" : "CI watch stopped";
 }
 
+/** The host records found by one pass over every project. */
+export interface CiWatchListing {
+  records: CiWatch[];
+  unanswered: ReadonlySet<string>;
+}
+
 /** Effects supplied by the app-wide monitor; injectable for lifecycle verification. */
 export interface CiWatchEffects {
-  /** Every host record this window can see; `complete` is false when a host could not answer. */
-  list: () => Promise<{ records: CiWatch[]; complete: boolean }>;
+  /**
+   * Every project's host records. `unanswered` names the worktrees whose host
+   * could not be asked, so their watches are kept rather than dropped.
+   */
+  list: () => Promise<CiWatchListing>;
   repoFor: (worktreeId: string) => Promise<GitHubRepoRef>;
   findPr: (repo: GitHubRepoRef) => Promise<PullRequestSummary | null>;
   getPr: (repo: GitHubRepoRef, prNumber: number) => Promise<PullRequestSummary>;
   getChecks: (repo: GitHubRepoRef, sha: string) => Promise<ChecksStatus>;
   getDetails: (repo: GitHubRepoRef, checks: ChecksStatus) => Promise<string>;
-  agentFor: (record: CiWatch) => AgentConfig | null;
+  /** The watch's agent as the watched worktree's project defines it. */
+  agentFor: (record: CiWatch) => Promise<AgentConfig | null>;
   launch: (record: CiWatch, agent: AgentConfig, prompt: string) => Promise<{ id: string } | null>;
   close: (tabId: string) => Promise<void>;
-  merge: (repo: GitHubRepoRef, pr: PullRequestSummary) => Promise<void>;
-  update: (worktreeId: string, changes: CiWatchUpdate) => Promise<CiWatch>;
-  clear: (worktreeId: string) => Promise<void>;
+  /**
+   * Does the slow lookups a merge needs and returns the call that sends it,
+   * pinned to `pr.headSha`; null when the head has already moved.
+   */
+  prepareMerge: (
+    repo: GitHubRepoRef,
+    pr: PullRequestSummary,
+  ) => Promise<(() => Promise<void>) | null>;
+  update: (worktreeId: string, watchId: string, changes: CiWatchUpdate) => Promise<CiWatch>;
+  clear: (worktreeId: string, watchId: string) => Promise<void>;
   notify: (kind: "merged" | "failed", record: CiWatch) => void;
 }
 
@@ -85,7 +100,6 @@ export interface CiWatchEffects {
  */
 export class CiWatchStore {
   private views = new Map<string, CiWatchView>();
-  private attempts = new Map<string, CiAttempt>();
   private listeners = new Set<() => void>();
   private inFlight = new Set<string>();
   private refresher: (() => void) | null = null;
@@ -114,7 +128,6 @@ export class CiWatchStore {
 
   /** Forgets a worktree's watch locally (after the host cleared it). */
   remove(worktreeId: string): void {
-    this.attempts.delete(worktreeId);
     if (this.views.delete(worktreeId)) this.emit();
   }
 
@@ -131,64 +144,59 @@ export class CiWatchStore {
   }
 
   /** Replaces the mirror with the host's records, emitting only on a change. */
-  sync(records: CiWatch[], complete: boolean): void {
+  sync({ records, unanswered }: CiWatchListing): void {
     let changed = false;
     const seen = new Set<string>();
     for (const record of records) {
       seen.add(record.worktreeId);
-      const view = this.views.get(record.worktreeId);
-      if (view?.record.updatedAt === record.updatedAt && view.record.status === record.status) {
-        continue;
-      }
-      this.views.set(record.worktreeId, { ...view, record });
-      changed = true;
+      if (this.adopt(record)) changed = true;
     }
-    if (complete) {
-      for (const worktreeId of this.views.keys()) {
-        if (seen.has(worktreeId)) continue;
-        this.views.delete(worktreeId);
-        this.attempts.delete(worktreeId);
-        changed = true;
-      }
+    for (const worktreeId of this.views.keys()) {
+      if (seen.has(worktreeId) || unanswered.has(worktreeId)) continue;
+      this.views.delete(worktreeId);
+      changed = true;
     }
     if (changed) this.emit();
   }
 
-  /** Re-reads the host records, then advances every live watch once. */
-  async refresh(effects: CiWatchEffects): Promise<void> {
-    const { records, complete } = await effects.list();
-    this.sync(records, complete);
-    const live = [...this.views.values()].filter((view) => isLiveCiWatch(view.record));
-    await Promise.all(live.map((view) => this.refreshOne(view.record.worktreeId, effects)));
+  /** Takes one listed record, reporting whether the mirror changed. */
+  private adopt(record: CiWatch): boolean {
+    const view = this.views.get(record.worktreeId);
+    // Local errors and spinners belong to one arm; a re-arm starts clean.
+    const previous = view?.record.id === record.id ? view : undefined;
+    if (
+      previous?.record.updatedAt === record.updatedAt &&
+      previous.record.status === record.status
+    ) {
+      return false;
+    }
+    this.views.set(record.worktreeId, { ...previous, record });
+    return true;
   }
 
-  private async refreshOne(worktreeId: string, effects: CiWatchEffects): Promise<void> {
-    if (this.inFlight.has(worktreeId)) return;
-    this.inFlight.add(worktreeId);
-    const run = new WatchRun(this, worktreeId, effects);
+  /** Re-reads the host records, then advances every live watch once. */
+  async refresh(effects: CiWatchEffects): Promise<void> {
+    this.sync(await effects.list());
+    const live = [...this.views.values()].filter((view) => isLiveCiWatch(view.record));
+    await Promise.all(live.map((view) => this.refreshOne(view.record, effects)));
+  }
+
+  private async refreshOne({ id, worktreeId }: CiWatch, effects: CiWatchEffects): Promise<void> {
+    if (this.inFlight.has(id)) return;
+    this.inFlight.add(id);
+    const run = new WatchRun(this, worktreeId, id, effects);
     try {
       await stepWatch(run);
       if (run.alive()) this.patch(worktreeId, { error: undefined, launching: false });
     } catch (cause) {
-      // A stale write means the record was disarmed or cleared elsewhere; the
-      // next list picks that up. Anything else is transient: show it and retry.
+      // A stale write means the record was disarmed, cleared, or re-armed
+      // elsewhere; the next list picks that up. Anything else is transient.
       if (run.alive() && !isStaleWrite(cause)) {
         this.patch(worktreeId, { error: errorMessage(cause), launching: false });
       }
     } finally {
-      this.inFlight.delete(worktreeId);
+      this.inFlight.delete(id);
     }
-  }
-
-  /** @internal Shared with {@link WatchRun}. */
-  attemptFor(worktreeId: string): CiAttempt | undefined {
-    return this.attempts.get(worktreeId);
-  }
-
-  /** @internal Shared with {@link WatchRun}. */
-  setAttempt(worktreeId: string, attempt: CiAttempt | undefined): void {
-    if (attempt) this.attempts.set(worktreeId, attempt);
-    else this.attempts.delete(worktreeId);
   }
 
   /** @internal Shared with {@link WatchRun}. */
@@ -206,19 +214,21 @@ function isStaleWrite(cause: unknown): boolean {
 /** One poll of one watch: reads the live record and writes transitions through the host. */
 class WatchRun {
   readonly worktreeId: string;
+  readonly watchId: string;
   readonly effects: CiWatchEffects;
   private readonly store: CiWatchStore;
 
-  constructor(store: CiWatchStore, worktreeId: string, effects: CiWatchEffects) {
+  constructor(store: CiWatchStore, worktreeId: string, watchId: string, effects: CiWatchEffects) {
     this.store = store;
     this.worktreeId = worktreeId;
+    this.watchId = watchId;
     this.effects = effects;
   }
 
-  /** The current record, while it is still live here. */
+  /** The current record, while this same arm is still live here. */
   record(): CiWatch | null {
     const record = this.store.get(this.worktreeId)?.record;
-    return record && isLiveCiWatch(record) ? record : null;
+    return record?.id === this.watchId && isLiveCiWatch(record) ? record : null;
   }
 
   alive(): boolean {
@@ -232,22 +242,21 @@ class WatchRun {
   }
 
   async update(changes: CiWatchUpdate): Promise<CiWatch> {
-    const record = await this.effects.update(this.worktreeId, changes);
+    const record = await this.effects.update(this.worktreeId, this.watchId, changes);
     const view = this.store.get(this.worktreeId);
-    if (view) this.store.put(record, { error: view.error, launching: view.launching });
+    // A re-arm that landed during the write must not be overwritten here.
+    if (view?.record.id === record.id) {
+      this.store.put(record, { error: view.error, launching: view.launching });
+    }
     return record;
   }
 
-  get attempt(): CiAttempt | undefined {
-    return this.store.attemptFor(this.worktreeId);
-  }
-
-  set attempt(attempt: CiAttempt | undefined) {
-    this.store.setAttempt(this.worktreeId, attempt);
+  clear(): Promise<void> {
+    return this.effects.clear(this.worktreeId, this.watchId);
   }
 
   launching(value: boolean): void {
-    this.store.setLaunching(this.worktreeId, value);
+    if (this.alive()) this.store.setLaunching(this.worktreeId, value);
   }
 }
 
@@ -257,6 +266,9 @@ interface WatchTarget {
 }
 
 async function stepWatch(run: WatchRun): Promise<void> {
+  // A watch is stepped by one poll at a time, so `merging` seen here is a merge
+  // whose outcome was never recorded (the app quit): unlock it and look again.
+  if (run.live().status === "merging") await run.update({ status: "watching" });
   const target = await resolveTarget(run);
   if (!target) return;
   const checks = await run.effects.getChecks(target.repo, target.pr.headSha);
@@ -289,7 +301,7 @@ async function resolveTarget(run: WatchRun): Promise<WatchTarget | null> {
   }
   if (pr.state !== "open" || pr.headRef !== repo.headBranch) {
     // The PR closed or now tracks another branch: nothing left to watch.
-    await run.effects.clear(run.worktreeId);
+    await run.clear();
     return null;
   }
   return { repo, pr };
@@ -301,20 +313,14 @@ async function attemptStillRunning(
   target: WatchTarget,
   checks: ChecksStatus,
 ): Promise<boolean> {
-  const record = run.live();
-  if (!record.fixTabId) return false;
-  // After an app restart the host still names the tab; rebuild its snapshot.
-  const attempt = run.attempt ?? {
-    tabId: record.fixTabId,
-    headSha: record.fixHeadSha ?? target.pr.headSha,
-    checks: checks.items,
-  };
-  run.attempt = attempt;
-  if (checks.total === 0 || !ciRestarted(attempt, target.pr.headSha, checks)) return true;
-  await run.effects.close(attempt.tabId);
-  run.attempt = undefined;
+  const { fixTabId, fixHeadSha, fixChecks } = run.live();
+  if (!fixTabId) return false;
+  if (checks.total === 0 || !ciRestarted(fixHeadSha, fixChecks, target.pr.headSha, checks)) {
+    return true;
+  }
+  await run.effects.close(fixTabId);
   if (!run.alive()) return true;
-  await run.update({ status: "watching", fixTabId: null, fixHeadSha: null });
+  await run.update({ status: "watching", fixTabId: null, fixHeadSha: null, fixChecks: null });
   return false;
 }
 
@@ -329,7 +335,8 @@ async function launchOrGiveUp(
     run.effects.notify("failed", failed);
     return;
   }
-  const agent = run.effects.agentFor(record);
+  const agent = await run.effects.agentFor(record);
+  if (!run.alive()) return;
   if (!agent) throw new Error(`The fix agent "${record.agentId}" is not installed.`);
   run.launching(true);
   const details = await run.effects
@@ -350,29 +357,57 @@ async function launchOrGiveUp(
       attempts: attemptNumber,
       fixTabId: tab.id,
       fixHeadSha: target.pr.headSha,
+      fixChecks: snapshot(checks),
     });
   } catch (cause) {
     // Disarmed while the tab opened: the user asked for no more fixes.
     await run.effects.close(tab.id);
     throw cause;
   }
-  run.attempt = { tabId: tab.id, headSha: target.pr.headSha, checks: checks.items };
+}
+
+/** The check identities a later poll compares against to spot a rerun. */
+function snapshot(checks: ChecksStatus): CiWatchCheck[] {
+  return checks.items.map(({ name, state, id, startedAt }) => ({
+    name,
+    state,
+    id: id ?? null,
+    startedAt: startedAt ?? null,
+  }));
 }
 
 async function mergeWhenGreen(run: WatchRun, target: WatchTarget): Promise<void> {
+  const send = await run.effects.prepareMerge(target.repo, target.pr);
+  if (!send || !run.alive()) return;
+  // The last chance to cancel: the host rejects this write if the watch was
+  // disarmed, cleared, or re-armed, and refuses all three once it succeeds.
   await run.update({ status: "merging" });
   try {
-    await run.effects.merge(target.repo, target.pr);
+    await send();
   } catch (cause) {
-    const failed = await run.update({
-      status: "failed",
-      error: `Every check passed, but GitHub rejected the merge: ${errorMessage(cause)}`,
-    });
-    run.effects.notify("failed", failed);
+    await recordMergeFailure(run, target, cause);
     return;
   }
   const merged = await run.update({ status: "merged" });
   run.effects.notify("merged", merged);
+}
+
+/** A rejected merge stops the watch, unless a new commit arrived: then it keeps watching. */
+async function recordMergeFailure(
+  run: WatchRun,
+  target: WatchTarget,
+  cause: unknown,
+): Promise<void> {
+  const current = await run.effects.getPr(target.repo, target.pr.number).catch(() => null);
+  if (current && current.headSha !== target.pr.headSha) {
+    await run.update({ status: "watching" });
+    return;
+  }
+  const failed = await run.update({
+    status: "failed",
+    error: `Every check passed, but GitHub rejected the merge: ${errorMessage(cause)}`,
+  });
+  run.effects.notify("failed", failed);
 }
 
 /** Every check on the head commit passed and GitHub reports no conflict. */
@@ -395,15 +430,20 @@ function giveUpMessage(record: CiWatch, checks: ChecksStatus): string {
   return `CI is still failing after ${record.attempts} fix attempts, ${outcome}. Failing checks: ${failingNames(checks) || "unknown"}.`;
 }
 
-function ciRestarted(attempt: CiAttempt, headSha: string, checks: ChecksStatus): boolean {
-  if (attempt.headSha !== headSha) return true;
+function ciRestarted(
+  fixHeadSha: string | null | undefined,
+  before: CiWatchCheck[] | null | undefined,
+  headSha: string,
+  checks: ChecksStatus,
+): boolean {
+  if (fixHeadSha && fixHeadSha !== headSha) return true;
   return checks.items.some((item) => {
-    const previous = attempt.checks.find((old) => old.name === item.name);
+    const previous = before?.find((old) => old.name === item.name);
     return previous !== undefined && checkRestarted(item, previous);
   });
 }
 
-function checkRestarted(item: CheckStatusItem, previous: CheckStatusItem): boolean {
+function checkRestarted(item: CheckStatusItem, previous: CiWatchCheck): boolean {
   if (item.id !== undefined && item.id !== previous.id) return true;
   if (item.state === "pending" && previous.state !== "pending") return true;
   const previousStartKnown = previous.state !== "pending" || previous.startedAt != null;

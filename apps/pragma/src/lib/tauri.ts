@@ -1082,7 +1082,10 @@ export function openScratchpadTab(
 
 /** Fields the desktop reports as a host-owned CI watch makes progress. */
 export type CiWatchUpdate = Partial<
-  Pick<CiWatch, "status" | "attempts" | "error" | "prNumber" | "fixTabId" | "fixHeadSha">
+  Pick<
+    CiWatch,
+    "status" | "attempts" | "error" | "prNumber" | "fixTabId" | "fixHeadSha" | "fixChecks"
+  >
 >;
 
 function ciWatchRpc<T>(worktreeId: string, payload: Record<string, unknown>): Promise<T> {
@@ -1107,13 +1110,17 @@ export function armCiWatch(input: {
 }
 
 /** Reports progress; rejects with a stale write once the watch was stopped elsewhere. */
-export function updateCiWatch(worktreeId: string, changes: CiWatchUpdate): Promise<CiWatch> {
-  return ciWatchRpc(worktreeId, { action: "update", worktreeId, ...changes });
+export function updateCiWatch(
+  worktreeId: string,
+  watchId: string,
+  changes: CiWatchUpdate,
+): Promise<CiWatch> {
+  return ciWatchRpc(worktreeId, { action: "update", worktreeId, watchId, ...changes });
 }
 
-/** Forgets a worktree's watch record. */
-export function clearCiWatch(worktreeId: string): Promise<{ cleared: boolean }> {
-  return ciWatchRpc(worktreeId, { action: "clear", worktreeId });
+/** Forgets a worktree's watch record; with `watchId`, only if it is still that arm. */
+export function clearCiWatch(worktreeId: string, watchId?: string): Promise<{ cleared: boolean }> {
+  return ciWatchRpc(worktreeId, { action: "clear", worktreeId, watchId });
 }
 
 /** Creates a host-owned whiteboard. */

@@ -97,6 +97,7 @@ export type {
   ExcalidrawScene,
   Whiteboard,
   CiWatch,
+  CiWatchCheck,
   CiWatchMode,
   CiWatchStatus,
   WhiteboardCreateInput,

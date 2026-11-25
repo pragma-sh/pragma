@@ -24,6 +24,7 @@ class FakeHost {
 
   arm(overrides: Partial<CiWatch> = {}): CiWatch {
     const record: CiWatch = {
+      id: `watch-${this.clock}`,
       worktreeId: "worktree",
       mode: "watchMerge",
       agentId: "agent",
@@ -43,10 +44,14 @@ class FakeHost {
     return record;
   }
 
-  update = async (worktreeId: string, changes: CiWatchUpdate): Promise<CiWatch> => {
+  update = async (
+    worktreeId: string,
+    watchId: string,
+    changes: CiWatchUpdate,
+  ): Promise<CiWatch> => {
     const record = this.records.get(worktreeId);
     if (!record) throw new Error("not found: no CI watch for worktree");
-    if (!isLiveCiWatch(record)) throw new Error("stale write");
+    if (!isLiveCiWatch(record) || record.id !== watchId) throw new Error("stale write");
     const next = { ...record, ...changes, updatedAt: this.clock++ };
     this.records.set(worktreeId, next);
     return next;
@@ -105,24 +110,28 @@ function fixture(overrides: Partial<CiWatch> = {}) {
     items: checks.items.map((item) => ({ ...item, id: item.id! + 100, state: "success" })),
   };
   let tab = 0;
+  const send = vi.fn().mockResolvedValue(undefined);
   const effects = {
-    list: vi.fn(async () => ({ records: [...host.records.values()], complete: true })),
+    list: vi.fn(async () => ({
+      records: [...host.records.values()],
+      unanswered: new Set<string>(),
+    })),
     repoFor: vi.fn(async () => repo),
     findPr: vi.fn(async () => pr),
     getPr: vi.fn().mockResolvedValue(pr),
     getChecks: vi.fn().mockResolvedValue(checks),
     getDetails: vi.fn().mockResolvedValue("lint: file.ts:12: Lint error"),
-    agentFor: vi.fn(() => ({ id: "agent", name: "Agent", start: [], iconDataUrl: null })),
+    agentFor: vi.fn(async () => ({ id: "agent", name: "Agent", start: [], iconDataUrl: null })),
     launch: vi.fn<CiWatchEffects["launch"]>(async () => ({ id: `fix-tab-${++tab}` })),
     close: vi.fn().mockResolvedValue(undefined),
-    merge: vi.fn().mockResolvedValue(undefined),
+    prepareMerge: vi.fn<CiWatchEffects["prepareMerge"]>(async () => send),
     update: vi.fn(host.update),
     clear: vi.fn(async (worktreeId: string) => {
       host.records.delete(worktreeId);
     }),
     notify: vi.fn(),
   } satisfies CiWatchEffects;
-  return { host, store, pr, checks, passing, effects };
+  return { host, store, pr, checks, passing, effects, send };
 }
 
 /** Checks that look like CI restarted on the same commit (new run ids). */
@@ -160,7 +169,7 @@ describe("CI watch lifecycle", () => {
   });
 
   it(`gives up after ${CI_WATCH_MAX_FIX_ATTEMPTS} attempts and never merges`, async () => {
-    const { host, store, checks, effects } = fixture();
+    const { host, store, checks, effects, send } = fixture();
     for (let round = 0; round <= CI_WATCH_MAX_FIX_ATTEMPTS; round++) {
       effects.getChecks.mockResolvedValue(restarted(checks, round));
       // eslint-disable-next-line no-await-in-loop -- each poll depends on the last.
@@ -172,34 +181,34 @@ describe("CI watch lifecycle", () => {
       `still failing after ${CI_WATCH_MAX_FIX_ATTEMPTS} fix attempts`,
     );
     expect(host.get()?.error).toContain("lint");
-    expect(effects.merge).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     expect(effects.notify).toHaveBeenCalledWith("failed", expect.anything());
   });
 
   it("merges only once every check passes", async () => {
-    const { host, store, passing, effects } = fixture();
+    const { host, store, passing, effects, send } = fixture();
     effects.getChecks.mockResolvedValue({ ...passing, state: "pending", pending: 1, passed: 1 });
     await store.refresh(effects);
-    expect(effects.merge).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     effects.getChecks.mockResolvedValue(passing);
     await store.refresh(effects);
-    expect(effects.merge).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
     expect(host.get()?.status).toBe("merged");
     expect(effects.notify).toHaveBeenCalledWith("merged", expect.anything());
   });
 
   it("does not merge in watch-only mode", async () => {
-    const { host, store, passing, effects } = fixture({ mode: "watch" });
+    const { host, store, passing, effects, send } = fixture({ mode: "watch" });
     effects.getChecks.mockResolvedValue(passing);
     await store.refresh(effects);
-    expect(effects.merge).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     expect(host.get()?.status).toBe("watching");
   });
 
   it("records GitHub's merge rejection as a failure", async () => {
-    const { host, store, passing, effects } = fixture();
+    const { host, store, passing, effects, send } = fixture();
     effects.getChecks.mockResolvedValue(passing);
-    effects.merge.mockRejectedValue(new Error("At least 1 approving review is required"));
+    send.mockRejectedValue(new Error("At least 1 approving review is required"));
     await store.refresh(effects);
     expect(host.get()?.status).toBe("failed");
     expect(host.get()?.error).toContain("At least 1 approving review is required");
@@ -266,5 +275,64 @@ describe("CI watch lifecycle", () => {
     host.records.clear();
     await store.refresh(effects);
     expect(store.get("worktree")).toBeUndefined();
+  });
+
+  it("keeps watching when a push lands before the merge", async () => {
+    const { host, store, pr, passing, effects, send } = fixture();
+    effects.getChecks.mockResolvedValue(passing);
+    effects.getPr.mockResolvedValueOnce(pr).mockResolvedValue({ ...pr, headSha: "newer" });
+    send.mockRejectedValue(new Error("Head branch was modified"));
+    await store.refresh(effects);
+    expect(host.get()?.status).toBe("watching");
+    expect(effects.notify).not.toHaveBeenCalled();
+  });
+
+  it("does not send the merge when disarmed while preparing it", async () => {
+    const { host, store, passing, effects, send } = fixture();
+    effects.getChecks.mockResolvedValue(passing);
+    effects.prepareMerge.mockImplementationOnce(async () => {
+      host.disarm("stop");
+      return send;
+    });
+    await store.refresh(effects);
+    expect(send).not.toHaveBeenCalled();
+    expect(host.get()?.status).toBe("disarmed");
+  });
+
+  it("unlocks a merge whose outcome was never recorded", async () => {
+    const { host, store, effects } = fixture({ status: "merging" });
+    await store.refresh(effects);
+    expect(effects.update.mock.calls[0]![2]).toEqual({ status: "watching" });
+    expect(host.get()?.status).toBe("fixing");
+  });
+
+  it("notices a rerun that finished while the app was closed", async () => {
+    const { host, store, checks, effects } = fixture();
+    await store.refresh(effects);
+    effects.getChecks.mockResolvedValue(restarted(checks, 1));
+    await new CiWatchStore().refresh(effects);
+    expect(effects.close).toHaveBeenCalledWith("fix-tab-1");
+    expect(host.get()).toMatchObject({ attempts: 2, fixTabId: "fix-tab-2" });
+  });
+
+  it("never applies an old poll's progress to a re-armed watch", async () => {
+    const { host, store, effects } = fixture();
+    effects.launch.mockImplementationOnce(async () => {
+      host.arm();
+      return { id: "old-tab" };
+    });
+    await store.refresh(effects);
+    expect(effects.close).toHaveBeenCalledWith("old-tab");
+    expect(host.get()).toMatchObject({ status: "watching", attempts: 0, fixTabId: null });
+  });
+
+  it("keeps watches whose host could not answer", async () => {
+    const { host, store, effects } = fixture();
+    await store.refresh(effects);
+    host.records.clear();
+    effects.list.mockResolvedValueOnce({ records: [], unanswered: new Set(["worktree"]) });
+    effects.getPr.mockRejectedValue(new Error("offline"));
+    await store.refresh(effects);
+    expect(store.get("worktree")).toBeDefined();
   });
 });

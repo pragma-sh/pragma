@@ -56,6 +56,7 @@ const checks: ChecksStatus = {
 
 function record(overrides: Partial<CiWatch> = {}): CiWatch {
   return {
+    id: "watch",
     worktreeId: "worktree",
     mode: "watchMerge",
     agentId: "agent",

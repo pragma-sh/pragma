@@ -3,6 +3,7 @@ import { Icon } from "@iconify/react";
 import type { CiWatch } from "@pragma-sh/constants";
 import { Bot, GitPullRequestCreate, XCircle } from "lucide-react";
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { ChecksStateIcon } from "@/components/github/ChecksStateIcon";
 import { AgentProgressLine } from "@/components/sidebar/AgentProgressLine";
@@ -123,14 +124,20 @@ function ReadyForPullRequestLine() {
 
 /** A CI watch that stopped short; hovering shows its full reason. */
 function StoppedCiWatchLine({ record }: { record: CiWatch }) {
-  return (
-    <span
-      className="flex min-w-0 items-center gap-1.5 text-xs text-destructive"
-      title={record.error ?? undefined}
-    >
+  const line = (
+    <span className="flex min-w-0 items-center gap-1.5 text-xs text-destructive">
       <XCircle aria-hidden className="size-3 shrink-0" />
       <span className="truncate">{stoppedCiWatchTitle(record)}</span>
     </span>
+  );
+  if (!record.error) return line;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{line}</TooltipTrigger>
+      <TooltipContent className="break-words whitespace-pre-wrap" side="right">
+        {record.error}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
