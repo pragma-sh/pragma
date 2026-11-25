@@ -184,7 +184,12 @@ flag, Codex 0.144.4 only offers the tool in Plan mode and verification prompts c
 question reports. Watcher
 keeps `handleDecisions: false` for command decisions but enables question answers. Listed
 answers use Codex's digit shortcuts and dismissal sends Escape. Custom free-text answers
-open the native final answer row, type into its editor, and submit with Enter. Answers never
+go in the note of the "None of the above" row Codex lists after the options: move down
+past the options, **Tab** (not Enter) to open the note, type, Enter
+(`questionOtherMode: "navigate-tab"`, verified on 0.171.0 — Codex then records
+`answer: None of the above` / `note: <text>` and the model reads the note). Up to 0.147
+that final row opened an editor on Enter; on 0.171 Enter submits the row itself, so the
+old keys delivered "None of the above" in place of what the user typed. Answers never
 abort an active turn or inject a synthetic follow-up chat message. Unmatched request ids are
 ignored.
 

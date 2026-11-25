@@ -55,6 +55,18 @@ const FINISH_ATTEMPTS: usize = 8;
 /// Every lifecycle report is bounded: a server that accepts the connection and
 /// then wedges must not pin the terminal after the agent has already exited.
 const REPORT_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long the host may take to authorize a start.
+///
+/// Much longer than [`REPORT_TIMEOUT`], because authorizing is not a bare
+/// acknowledgement: the host resolves the launch's account env first, which
+/// asks the agent's plugin to activate each bound login (`OpenCode` 2 does that
+/// through several `opencode api` calls). One second was routinely too short
+/// for an agent with bound accounts, and a timeout here is not a slow start —
+/// the agent never runs, and the prompt Pragma then types lands in the bare
+/// shell. Nothing has been handed to a child yet, so waiting costs only time.
+const START_TIMEOUT: Duration = Duration::from_secs(20);
+/// The `tabs` op that authorizes a run.
+const START_ACTION: &str = "startRun";
 
 /// How the supervised child ended, as observed by this process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +169,7 @@ pub fn run(args: &crate::cli::AgentRunArgs, _out: &output::Output) -> Result<(),
                 exit.exit_code(),
                 authorized.server_boot_id.as_deref(),
                 FINISH_ATTEMPTS,
+                REPORT_TIMEOUT,
             ) {
                 report_failure(&args.run_id, exit, journaled, &error);
             }
@@ -254,7 +267,14 @@ struct AuthorizedRun {
 /// omits `env` means the harness default and one that omits the boot id keeps
 /// the legacy finish semantics.
 fn authorized_run(run_id: &str) -> Result<AuthorizedRun, CliError> {
-    let reply = report_run(run_id, "startRun", None, None, START_ATTEMPTS)?;
+    let reply = report_run(
+        run_id,
+        START_ACTION,
+        None,
+        None,
+        START_ATTEMPTS,
+        START_TIMEOUT,
+    )?;
     let env = match reply.get("env") {
         None | Some(serde_json::Value::Null) => Vec::new(),
         Some(serde_json::Value::Array(_)) => {
@@ -310,6 +330,7 @@ fn report_run(
     exit_code: Option<i32>,
     server_boot_id: Option<&str>,
     attempts: usize,
+    timeout: Duration,
 ) -> Result<serde_json::Value, CliError> {
     let mut payload = json!({ "action": action, "runId": run_id });
     if let Some(exit_code) = exit_code {
@@ -321,13 +342,14 @@ fn report_run(
     }
     let mut last_error = None;
     for attempt in 0..attempts {
-        match server::rpc_with_timeout(
-            ProtocolRpcMethod::Tabs,
-            payload.clone(),
-            Some(REPORT_TIMEOUT),
-        ) {
+        match server::rpc_with_timeout(ProtocolRpcMethod::Tabs, payload.clone(), Some(timeout)) {
             Ok(reply) => return Ok(reply),
             Err(error) if is_stale(&error) => return Err(error),
+            // The host may still be working on a start that timed out, so
+            // asking again would only race it: a start that lands late makes
+            // the retry "stale". An end report is idempotent and keeps its
+            // retries, since the host may simply be mid-restart.
+            Err(error) if action == START_ACTION && timed_out(&error) => return Err(error),
             Err(error) => last_error = Some(error),
         }
         if attempt + 1 < attempts {
@@ -335,6 +357,19 @@ fn report_run(
         }
     }
     Err(last_error.unwrap_or_else(|| CliError::other("agent run report failed")))
+}
+
+/// True when the host did not answer inside the read timeout. A timed-out
+/// socket read is `WouldBlock` on Unix and `TimedOut` on Windows.
+fn timed_out(error: &CliError) -> bool {
+    matches!(
+        error,
+        CliError::Protocol(pragma_protocol::ProtocolError::Io(io))
+            if matches!(
+                io.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )
+    )
 }
 
 /// True when the host rejected the run id as stale (superseded or ended).
@@ -362,8 +397,22 @@ fn survive_terminal_signals() {
 
 #[cfg(test)]
 mod tests {
-    use super::is_stale;
+    use super::{is_stale, timed_out, REPORT_TIMEOUT, START_TIMEOUT};
     use crate::server::CliError;
+
+    #[test]
+    fn a_start_waits_longer_than_an_acknowledgement_and_is_not_retried_on_timeout() {
+        // Authorizing resolves account env through the plugin host; a bare
+        // acknowledgement does not.
+        assert!(START_TIMEOUT >= REPORT_TIMEOUT * 10);
+        for kind in [std::io::ErrorKind::WouldBlock, std::io::ErrorKind::TimedOut] {
+            let error = CliError::Protocol(std::io::Error::from(kind).into());
+            assert!(timed_out(&error));
+        }
+        assert!(!timed_out(&CliError::server("stale agent run: run-1")));
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(!timed_out(&CliError::Protocol(refused.into())));
+    }
 
     #[test]
     fn a_stale_run_is_final_but_a_transport_failure_is_retried() {

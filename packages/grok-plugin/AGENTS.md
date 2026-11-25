@@ -173,6 +173,39 @@ Turn-token ownership, watcher replacement, and a 24-hour backstop keep stale wat
 clearing later work. `SessionEnd` covers a graceful exit; the Pragma watcher's `finally`
 reports `cleared` for a session killed hard enough that no hook runs.
 
+### Cancel is Ctrl+C, not Escape (1.0.92)
+
+Grok 1.0.92 binds **Escape to scrollback** and **Ctrl+C to cancel** (its own key hints
+say so during a turn and on a question card). So:
+
+- The watcher declares `interruptKeys: "\x03"`. The host's default Escape scrolled the
+  view while the turn ran on, so a phone's Stop button did nothing.
+- Verify with `--abort-input '\x03'`. With Escape, `abort-mid-run` only "passed"
+  because the turn finished normally, and `abort-mid-question` could never pass.
+  One Ctrl+C cancels and leaves the TUI open.
+
+### A cancel before the first token leaves no record
+
+A Ctrl+C that lands while the `UserPromptSubmit` hooks are still running kills those
+hooks, puts the prompt back in the input box, and writes **nothing**: no
+`turn_completed`, no `signals.json`, no `hook_execution` record. Two consequences,
+both handled in `started`:
+
+- The marker is written and the watcher spawned **before** any report, fully detached
+  (subshell + `set -m`), or the cancelled hook takes the watcher down with it.
+- `started` writes `.submitted` (the turn token) as its last step. A watcher that
+  still sees no such file `PRAGMA_SUBMIT_GRACE` seconds (10) after it started
+  concludes the hook was killed and reports `cleared`. The grace is deliberately long:
+  clearing a live turn would mute its reports.
+
+### Sub-agents need an approval the plugin cannot give
+
+Grok 1.0.92 asks "Start subagent …?" in its own TUI before each `spawn_subagent`,
+even under `--permission-mode dontAsk`. No hook can answer it (`commandApproval` is
+excluded for the same reason), so the turn waits there and `agent verify`'s `subagent`
+scenario times out unless someone approves in the terminal. The tab keeps showing
+`running` meanwhile. `SubagentStart`/`SubagentStop` tracking itself is unchanged.
+
 ## Models and usage limits
 
 Both come from one short-lived `grok agent stdio` process (`src/acp.ts`), so Pragma never
@@ -237,7 +270,7 @@ running it brokers headed launches from its _own_ plugin copy, so quit it before
 bun run --filter @pragma-sh/grok-plugin test
 bun run --filter @pragma-sh/grok-plugin typecheck
 bun run --filter @pragma-sh/grok-plugin build
-pragma-cli agent verify --agent pragma.grok --abort-input '\x1b'
+pragma-cli agent verify --agent pragma.grok --abort-input '\x03'
 ```
 
 Only `commandApproval` is skipped by `excludeFeatures` — grok owns that prompt in its own

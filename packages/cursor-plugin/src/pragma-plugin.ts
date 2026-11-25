@@ -154,7 +154,10 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
           ),
         ],
       },
-      excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
+      // `questions`: Cursor exposes no hook or transcript signal for AskQuestion,
+      // so the watcher can only raise a bare attention from the terminal title --
+      // no prompt, options, or request id for a client to render and answer.
+      excludeFeatures: ["questions", "commandApproval", "subagents", "abort", "interrupt"],
       prefillDelayMs: 14000,
       prefillMode: "plain",
       prefillSubmit: "\r",

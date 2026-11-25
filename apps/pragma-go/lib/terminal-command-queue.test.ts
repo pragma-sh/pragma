@@ -54,6 +54,35 @@ describe("createTerminalCommandQueue", () => {
     expect(delivered[0]).toEqual(write("10"));
   });
 
+  // A replaced document starts blank, and the stream will not resend what the
+  // old one was given. `ready` says so, so the screen can be replayed.
+  describe("a document that missed output", () => {
+    it("is not reported for the first document, which got everything", () => {
+      const queue = createTerminalCommandQueue(() => undefined);
+      queue.reset(); // the mount-time reset, before anything was sent
+      queue.send(write("replay"));
+      expect(queue.ready()).toBe(false);
+    });
+
+    it("is reported when a document that had output is replaced", () => {
+      const queue = createTerminalCommandQueue(() => undefined);
+      queue.ready();
+      queue.send(write("replay"));
+      queue.reset();
+      expect(queue.ready()).toBe(true);
+      // Told once: the replay it triggers goes to this same document.
+      queue.reset();
+      expect(queue.ready()).toBe(false);
+    });
+
+    it("is reported when the replay was still waiting for a document that never loaded", () => {
+      const queue = createTerminalCommandQueue(() => undefined);
+      queue.send(write("replay"));
+      queue.reset(); // the palette arrived before the first document was ready
+      expect(queue.ready()).toBe(true);
+    });
+  });
+
   // The document reloads when the palette changes; anything held was aimed at
   // the screen that just went away.
   it("drops what it held and gates again after a reset", () => {

@@ -129,6 +129,10 @@ export const grokAgentPlugin: PluginDefinition = definePlugin({
   watchers: [
     {
       agent: "grok",
+      // Grok 1.0.92 binds Escape to scrollback; Ctrl+C is what cancels a turn
+      // (and leaves the TUI open). The default Escape scrolled the view while
+      // the turn ran on.
+      interruptKeys: "\x03",
       async watch(ctx) {
         try {
           await baseWatcher.watch(ctx);

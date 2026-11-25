@@ -15,6 +15,7 @@ import { createTuiWatcher } from "@pragma-sh/watcher-kit";
 
 import { kimiApiKeyProviders } from "./accounts";
 import { loadKimiModels } from "./models";
+import { createKimiTrustScanner, KIMI_TRUST_KEYS } from "./trust";
 
 /** Lets Kimi's paste-aware composer commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
@@ -103,6 +104,27 @@ const baseWatcher = createTuiWatcher({
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 
+type KimiWatchContext = Parameters<NonNullable<typeof baseWatcher.watch>>[0];
+
+/** Accepts the folder-trust gate when a launch stops on it. See `trust.ts`. */
+async function answerTrustGate(ctx: KimiWatchContext): Promise<void> {
+  const scanner = createKimiTrustScanner();
+  try {
+    for await (const chunk of ctx.output) {
+      if (!scanner.push(chunk)) continue;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- The gate appears at most once per session.
+        await ctx.sendKeys(KIMI_TRUST_KEYS);
+      } catch {
+        // A failed write leaves the gate for the user; it must not end the watcher.
+      }
+      return;
+    }
+  } catch {
+    // The output transport reconnects on its own; the base watcher owns the session.
+  }
+}
+
 /**
  * Pragma plugin for the Kimi Code CLI, bundled to `dist/pragma-plugin.mjs`.
  *
@@ -136,7 +158,7 @@ export const kimiAgentPlugin: PluginDefinition = definePlugin({
       agent: "kimi",
       async watch(ctx) {
         try {
-          await baseWatcher.watch(ctx);
+          await Promise.all([baseWatcher.watch(ctx), answerTrustGate(ctx)]);
         } finally {
           // `SessionEnd` already clears a graceful exit; this covers a session
           // killed hard enough that no hook runs.

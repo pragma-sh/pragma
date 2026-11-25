@@ -63,8 +63,7 @@ export const TerminalWebView = forwardRef<TerminalViewHandle, TerminalViewProps>
       const handle = terminalMessageHandler({
         onReady: () => {
           setPainted(true);
-          queue.ready();
-          latest.current.onReady();
+          latest.current.onReady({ missedOutput: queue.ready() });
         },
         onInput: (data) => latest.current.onInput(data),
         onResize: (cols, rows) => latest.current.onResize(cols, rows),

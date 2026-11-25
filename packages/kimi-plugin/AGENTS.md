@@ -210,3 +210,20 @@ provider is not recognized. Only providers that sell keys for use in any client 
   it fight at launch), and Kimi has no interactive key prompt — the paste field cannot drive
   `catalog add`. Known limit, as with OpenCode Go: switching `moonshot` to a Pragma-added
   account moves the whole Kimi home, so the keys then come from that directory's config.
+
+## The folder-trust gate
+
+The first launch in a folder Kimi has not seen stops on a full-screen "Trust this
+folder?" dialog before the TUI exists (verified on 0.36.1). No flag or setting skips it,
+no hook fires while it is up, and the preselected row is "Don't trust", which exits. A
+launch from Pragma therefore sat there: the prefilled prompt went nowhere and the tab
+never left idle. Every new worktree is a new folder, so this was every first launch in
+one.
+
+The watcher answers it (`src/trust.ts`, wired beside the base watcher in
+`pragma-plugin.ts`), as the Cursor and Antigravity plugins answer their own gates:
+starting an agent in a folder is the user's decision to work there. It waits for the
+dialog's **last** row before sending Up + Enter — an arrow sent mid-render is dropped,
+and the Enter after it would select "Don't trust". If Kimi rewords the dialog the scanner
+stops matching and the gate is simply left for the user; update `TRUST_TITLE` /
+`TRUST_LAST_ROW` from a captured screen, never from memory.

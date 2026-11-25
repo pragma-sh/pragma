@@ -600,6 +600,21 @@ fn usage_limits(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome, St
     Ok(Outcome::Passed)
 }
 
+/// Whether a question attention carries what a client needs to render and
+/// answer it: a request id, and the prompt itself.
+///
+/// A single question arrives in `question`; a batch arrives in `questions`
+/// with `question` empty (the Claude Code and Codex reporters both send it that
+/// way), so either form counts as carrying the prompt.
+fn question_attention_is_addressable(
+    question: Option<&str>,
+    batch_len: usize,
+    request_id: Option<&str>,
+) -> bool {
+    let has_prompt = question.is_some_and(|text| !text.is_empty()) || batch_len > 0;
+    has_prompt && request_id.is_some()
+}
+
 fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome, String> {
     let errors = ctx.ledger.schema_errors();
     if !errors.is_empty() {
@@ -623,10 +638,15 @@ fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome
                 status: Some(AgentStatus::Attention),
                 attention_kind: Some(AgentAttentionKind::Question),
                 question,
+                questions,
                 request_id,
                 ..
             } if agent == ctx.runtime_agent_id
-                && (question.as_deref().is_none_or(str::is_empty) || request_id.is_none()) =>
+                && !question_attention_is_addressable(
+                    question.as_deref(),
+                    questions.as_ref().map_or(0, Vec::len),
+                    request_id.as_deref(),
+                ) =>
             {
                 return Err("question attention omitted question/requestId".to_string());
             }
@@ -806,7 +826,7 @@ mod tests {
 
     use pragma_constants::QuestionOption;
 
-    use super::{validate_question, validate_usage_result};
+    use super::{question_attention_is_addressable, validate_question, validate_usage_result};
     use crate::agent_verify::engine::Attention;
 
     #[test]
@@ -830,6 +850,20 @@ mod tests {
         }))
         .is_ok());
         assert!(validate_usage_result(&json!({ "status": "ready", "limits": [] })).is_err());
+    }
+
+    #[test]
+    fn question_attention_accepts_a_batch_without_a_single_question() {
+        assert!(question_attention_is_addressable(
+            Some("Tea?"),
+            0,
+            Some("r")
+        ));
+        assert!(question_attention_is_addressable(None, 2, Some("r")));
+        assert!(question_attention_is_addressable(Some(""), 2, Some("r")));
+        assert!(!question_attention_is_addressable(None, 0, Some("r")));
+        assert!(!question_attention_is_addressable(Some(""), 0, Some("r")));
+        assert!(!question_attention_is_addressable(Some("Tea?"), 0, None));
     }
 
     #[test]

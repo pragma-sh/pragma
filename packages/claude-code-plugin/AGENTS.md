@@ -316,6 +316,32 @@ This mirrors opencode's "cancelled turn → clear, not a phantom `done`" rule (s
 transcript instead. `PRAGMA_WATCH_INTERVAL` (default `1`, set small in tests) tunes the
 poll cadence.
 
+### A cancel that never reaches the transcript
+
+The transcript marker is not the whole story (verified on 2.1.331). Pressing Esc **before
+the reply has produced anything** makes Claude Code put the prompt back in the input box
+and write no `[Request interrupted by user]` line at all — the transcript ends at the
+user message. Two more things break the simple watcher in exactly that case, which is
+also what a phone's Stop button produces (an Esc sent the instant the turn starts):
+
+- **The watcher has a second signal: the session status file.** Claude Code keeps
+  `<config>/sessions/<pid>.json` per live process with a `status` that is `busy` for the
+  whole turn (tool calls included) and `idle` once it ends for any reason. The watcher
+  clears when it reads `idle` twice running while the in-flight marker is still set. A
+  normal completion never looks like that: `Stop` removes the marker while the status is
+  still `busy` (measured: marker gone ~0.2s before the flip). The one legitimate
+  "idle with marker" state is the background-subagent phase, so the check stands down
+  while `.subagent-wait` exists or children are tracked; there only the transcript marker
+  reports a cancel.
+- **Esc cancels the running hooks too.** If it lands while `UserPromptSubmit` hooks are
+  executing, Claude Code kills the hook and everything in its process tree. `started`
+  therefore writes the marker and spawns the watcher **before** any report, and spawns it
+  fully detached — from a subshell that exits at once (orphaned, out of the tree) with
+  job-control mode on (its own process group). A watcher started as a plain `nohup … &`
+  child died with the hook and left the tab on `running` forever.
+
+Do not move the reports back above the spawn, and do not "simplify" the detached spawn.
+
 ## Installation
 
 Through Claude Code's own plugin system — **not** Pragma code:
@@ -411,3 +437,25 @@ caches.
 ## Account provider
 
 Declared through `defineAccounts` as provider `anthropic` (agent `claude-code`). Each Pragma-created account is a `CLAUDE_CONFIG_DIR` under `~/.pragma/accounts/anthropic/`; login is `claude auth login`; `identify` parses `claude auth status --json` (`orgId:email`, so two users of one Team org stay separate). On macOS the token lives in the Keychain, which Claude Code keys by config dir, so `credentialPath` reports the Keychain rather than a file.
+
+## Other agents run these hooks too
+
+Grok and Cursor load Claude Code's enabled plugins for compatibility, from the same
+`~/.claude/plugins/cache/...` copy Claude Code installed — so every Grok or Cursor turn
+also ran `report.sh`, which reported a second agent, `claude-code`, onto **their** tab:
+duplicate user messages, a "Claude Code turn completed" reply, and a `cleared` that wiped
+their running status mid-turn (Grok's sub-agent, interrupt, and abort verify scenarios
+failed on exactly that). `report.sh` therefore exits early when another host's marker is
+in the hook environment and Claude Code's is not:
+
+| Host                    | Marker in the hook env |
+| ----------------------- | ---------------------- |
+| Claude Code 2.1.330     | `CLAUDECODE`           |
+| Grok 1.0.92             | `GROK_HOOK_EVENT`      |
+| cursor-agent 2026.10.22 | `CURSOR_VERSION`       |
+
+The rule is "foreign marker **without** `CLAUDECODE`", not "foreign marker": a Claude
+Code started from inside Grok or Cursor inherits their variables and must still report.
+Antigravity, Codex, Kimi, OpenCode, and Pi were checked and do not run these hooks. If a
+new host starts to, capture its hook environment with a logging stand-in for `PRAGMA_CLI`
+(run the host once with `-p`) and add its marker — never guess one.

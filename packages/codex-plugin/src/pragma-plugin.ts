@@ -30,6 +30,10 @@ const baseWatcher = createTuiWatcher({
   agent: "codex",
   handleDecisions: false,
   handleQuestionAnswers: true,
+  // Codex 0.171 lists "None of the above" after the options and takes free
+  // text as a note on that row, opened with Tab. Enter there submits the row
+  // itself, so a typed answer used to arrive as "None of the above".
+  questionOtherMode: "navigate-tab",
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 

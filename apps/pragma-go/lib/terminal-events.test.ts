@@ -1,7 +1,12 @@
 import { bytesToBase64 } from "@pragma-sh/sdk";
 import { describe, expect, it } from "vitest";
 
-import { applyTerminalEvent, type StreamTarget, type TerminalStatus } from "./terminal-events";
+import {
+  applyTerminalEvent,
+  gridChanged,
+  type StreamTarget,
+  type TerminalStatus,
+} from "./terminal-events";
 
 /** A recording target: the renderer writes, the cursor, and the status trail. */
 function recorder() {
@@ -60,5 +65,17 @@ describe("applyTerminalEvent", () => {
     expect(statuses.at(-1)).toBe("live");
     expect(writes).toHaveLength(1);
     expect(target.cursor.current).toBe(101);
+  });
+});
+
+describe("gridChanged", () => {
+  it("is false for the grid the lease was taken with", () => {
+    expect(gridChanged({ cols: 45, rows: 30 }, { cols: 45, rows: 30 })).toBe(false);
+  });
+
+  // The keyboard rising after the lease request went out changes only the rows.
+  it("is true when either dimension moved while the lease was being acquired", () => {
+    expect(gridChanged({ cols: 45, rows: 30 }, { cols: 45, rows: 18 })).toBe(true);
+    expect(gridChanged({ cols: 45, rows: 30 }, { cols: 80, rows: 30 })).toBe(true);
   });
 });

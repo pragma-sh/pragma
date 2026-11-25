@@ -49,6 +49,31 @@ describe("runtimeEventsFromV2", () => {
     expect(event?.properties).toMatchObject({ type: "bash", command: "npm test" });
   });
 
+  it("asks the question tool's question, not its short header", () => {
+    const [event] = runtimeEventsFromV2({
+      type: "form.created",
+      data: {
+        form: {
+          id: "frm_2",
+          sessionID: "ses_root",
+          title: "Question",
+          fields: [
+            {
+              key: "q0",
+              type: "string",
+              title: "Choice",
+              description: "Choose Red or Blue?",
+              options: [{ value: "red", label: "Red" }],
+            },
+          ],
+        },
+      },
+    });
+    expect(event?.properties).toMatchObject({
+      questions: [{ question: "Choose Red or Blue?", options: [{ label: "Red" }] }],
+    });
+  });
+
   it("turns a form into a question with its field options", () => {
     const [event] = runtimeEventsFromV2({
       type: "form.created",

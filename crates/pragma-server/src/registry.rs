@@ -1215,7 +1215,20 @@ impl Registry {
     /// does not wait out a full tick for its watcher.
     pub fn reconcile_watchers(&self) {
         let desired = self.desired_watchers();
-        self.watchers.reconcile(&self.plugins, &desired);
+        self.watchers.reconcile(&self.plugins, &desired, &|entry| {
+            self.invocations.fresh_launch_selection(
+                &entry.worktree_id,
+                &entry.tab_id,
+                crate::watchers::LAUNCH_SELECTION_WINDOW_SECS,
+            )
+        });
+    }
+
+    /// Replaces a tab's watcher so the one that runs was started with the
+    /// launch just prepared there, and so receives its selection.
+    pub(crate) fn restart_watcher_for_launch(&self, tab_id: &str) {
+        self.watchers.restart(tab_id);
+        self.reconcile_watchers();
     }
 
     /// One entry per live session whose mirrored tab or runtime report identifies an agent.
@@ -4297,6 +4310,9 @@ mod tests {
         let result = registry.open_terminal_tab("worktree-missing", "request-1", None);
 
         assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+        // The gateway maps this wording to HTTP 404; keep the two in step.
+        let message = result.expect_err("unknown worktree").to_string();
+        assert!(message.starts_with(pragma_protocol::NOT_FOUND_MESSAGE_PREFIX));
     }
 
     /// Writes a `.pragma/scripts.json` into a project root the registry knows.

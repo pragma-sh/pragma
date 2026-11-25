@@ -319,6 +319,33 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  // A cancel that lands while the prompt-submit hook is still running kills
+  // the hook and leaves no record in grok's files; the only trace is that the
+  // hook never wrote its completion flag.
+  itWithPython3("clears when the prompt-submit hook was killed before it finished", async () => {
+    const { transcriptPath } = session({ cancellations: 0 });
+    const submitted = markerPath().replace(/\.active$/, ".submitted");
+    run("started", {
+      env: { PRAGMA_SUBMIT_GRACE: "1" },
+      stdin: JSON.stringify({ hookEventName: "user_prompt_submit", prompt: "hi", transcriptPath }),
+    });
+    // What a killed hook leaves behind: a marker and a watcher, no flag.
+    rmSync(submitted, { force: true });
+    await waitFor(() => reports().includes("agent report --agent grok cleared"));
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
+  itWithPython3("leaves a turn alone once its prompt-submit hook has finished", async () => {
+    const { transcriptPath } = session({ cancellations: 0 });
+    run("started", {
+      env: { PRAGMA_SUBMIT_GRACE: "1" },
+      stdin: JSON.stringify({ hookEventName: "user_prompt_submit", prompt: "hi", transcriptPath }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(reports()).not.toContain("agent report --agent grok cleared");
+    expect(existsSync(markerPath())).toBe(true);
+  });
+
   itWithPython3("clears on a non-end_turn turn_completed record", async () => {
     const { transcriptPath } = session();
     run("started", {

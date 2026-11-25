@@ -5,7 +5,9 @@ contributions, attaches them to live PTY sessions through `@pragma-sh/sdk`, stre
 and writes watcher-originated key bytes back through the gateway. The `WatcherContext` a
 watcher receives carries `agentId` (the full plugin-qualified agent id) so a watcher can
 `sdk.agents.connect({ agent: agentId, ... })` to read the control channel (verdicts,
-interjections) scoped to its own agent + tab.
+interjections) scoped to its own agent + tab. It carries `selection` (the launch's model,
+reasoning, and mode) only when the host passed `--selection`, which it does only for a
+watcher started together with a fresh launch (`src/selection.ts`).
 
 ## Rules
 

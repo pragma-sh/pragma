@@ -29,6 +29,20 @@ set -u
 # Outside Pragma there is no server to report to; every event is a silent no-op.
 [ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
+# Other agents run this hook too. Grok and Cursor both load Claude Code's
+# enabled plugins for compatibility, so every turn of theirs also fired these
+# hooks -- reporting a second agent, "claude-code", onto their tab: duplicate
+# user messages, a bogus "turn completed" reply, and a `cleared` that wiped
+# their running status mid-turn. Each exports its own marker into the hook
+# environment (verified: Grok 1.0.92 sets GROK_HOOK_EVENT, cursor-agent
+# 2026.10.22 sets CURSOR_VERSION) and Claude Code sets CLAUDECODE. Only a
+# foreign marker *without* CLAUDECODE is another host: a Claude Code started
+# from inside one of them (their shell tool, Cursor's terminal) inherits the
+# marker but is still Claude Code, and must keep reporting.
+if [ -z "${CLAUDECODE:-}" ] && [ -n "${GROK_HOOK_EVENT:-}${CURSOR_VERSION:-}" ]; then
+  exit 0
+fi
+
 agent="claude-code"
 pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
@@ -54,6 +68,10 @@ children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 # marker-guarded report for the rest of the turn. This file lets `cleared` tell
 # a stale clear from a legitimate one.
 turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
+# Present while the parent's turn has ended but background subagents keep the
+# session working. Claude Code reports the session idle for that whole phase,
+# so the watcher's idle check (see session_status) must stand down while it exists.
+subagent_wait_file="${state_dir}/pragma-cli-${agent}-${tab}.subagent-wait"
 assistant_cursor_file="${state_dir}/pragma-cli-${agent}-${tab}.assistant-cursor"
 assistant_hash_file="${state_dir}/pragma-cli-${agent}-${tab}.assistant-hash"
 
@@ -695,6 +713,42 @@ interrupted_since() {
   tail -c "+$((off + 1))" "$tp" 2>/dev/null | grep -q "$interrupt_pattern"
 }
 
+# Prints the status Claude Code records for the session whose transcript is
+# `$1` (`busy`, `idle`, ...), or nothing when it records none.
+#
+# Claude Code keeps one `<config>/sessions/<pid>.json` per live process, with a
+# `status` it flips to `busy` when a turn starts and back to `idle` when the
+# turn ends -- for any reason. That makes it the one signal for a cancel that
+# leaves no trace in the transcript: pressing Esc before the reply has produced
+# anything makes Claude Code put the prompt back in the input box and write no
+# "[Request interrupted by user]" line at all (verified on 2.1.331), so the
+# transcript watcher alone left the tab on `running` forever. The config root
+# is derived from the transcript path, so a relocated CLAUDE_CONFIG_DIR works.
+session_status() {
+  tp="$1"
+  [ -n "$tp" ] || return 0
+  sessions_dir="$(dirname "$(dirname "$(dirname "$tp")")")/sessions"
+  [ -d "$sessions_dir" ] || return 0
+  sid=$(basename "$tp" .jsonl)
+  # A crashed process can leave its file behind; the newest one is the live one.
+  # shellcheck disable=SC2046 # word splitting of the match list is intended
+  file=$(ls -t $(grep -l "\"sessionId\":\"$sid\"" "$sessions_dir"/*.json 2>/dev/null) 2>/dev/null | head -n 1)
+  [ -n "$file" ] || return 0
+  sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([a-zA-Z_-]*\)".*/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+# Succeeds when the session went idle while this turn is still marked in
+# flight: the turn was cancelled. A normal completion can never look like this,
+# because the Stop hook removes the marker while Claude Code still reports
+# `busy` (measured: marker gone ~0.2s before the status flips). The exception
+# is the background-subagent phase, where the parent is legitimately idle with
+# the marker kept -- there only the transcript marker can report a cancel.
+turn_went_idle() {
+  [ -f "$subagent_wait_file" ] && return 1
+  has_tracked_subagents && return 1
+  [ "$(session_status "$1")" = "idle" ]
+}
+
 # Stops the current watcher (if any) and forgets its pid. Best-effort: the
 # watcher also self-exits once the marker is gone, so a missed kill is harmless.
 stop_watcher() {
@@ -714,15 +768,24 @@ run_watcher() {
   token="$2"
   offset="${3:-0}"
   deadline=$(($(date +%s) + max_lifetime))
+  idle_polls=0
   while :; do
     # Turn ended or was superseded -> nothing to clear, exit quietly.
     [ -f "$marker" ] || exit 0
     [ "$(cat "$marker" 2>/dev/null)" = "$token" ] || exit 0
-    if interrupted_since "$tp" "$offset"; then
+    # Two consecutive idle polls, not one: a single read can land in the gap
+    # between a hook's state writes.
+    if turn_went_idle "$tp"; then
+      idle_polls=$((idle_polls + 1))
+    else
+      idle_polls=0
+    fi
+    if interrupted_since "$tp" "$offset" || [ "$idle_polls" -ge 2 ]; then
       # Re-check the token right before acting so we never clear a turn that
       # started in the gap between the poll and now.
       [ "$(cat "$marker" 2>/dev/null)" = "$token" ] || exit 0
-      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file" \
+        "$subagent_wait_file"
       report cleared
       exit 0
     fi
@@ -787,12 +850,43 @@ fi
 
 case "${1:-}" in
   started)
-    # A new turn is in flight. Tag the marker with a unique token, report
-    # running, then replace any prior watcher with a fresh one bound to this
-    # turn's transcript and token.
+    # A new turn is in flight. Tag the marker with a unique token, replace any
+    # prior watcher with a fresh one bound to this turn's transcript and token,
+    # and only then report.
+    #
+    # The watcher comes first because this hook can be killed mid-run: Esc
+    # pressed while UserPromptSubmit hooks are still executing cancels the
+    # prompt *and the hooks*. With the reports first, that left a tab reported
+    # `running` with a marker and no watcher -- nothing would ever clear it
+    # (a phone's Stop button sends exactly that early Esc). Everything after the
+    # spawn is safe to lose; the watcher sees the idle session and clears.
     token="$$-$(date +%s)"
+    rm -f "$subagent_wait_file"
+    stop_watcher
     printf '%s' "$token" >"$marker"
     printf '%s' "$hook_session_id" >"$turn_session_file"
+    rm -f "$assistant_cursor_file" "$assistant_hash_file"
+    tp="$(transcript_path "$input")"
+    if [ -n "$tp" ]; then
+      # Pin the watcher to where the transcript stands *now* so a prior turn's
+      # interrupt marker (already in the file) can't be mistaken for this turn's
+      # cancel while Claude is still thinking and has appended nothing yet.
+      offset=$(wc -c <"$tp" 2>/dev/null | tr -d '[:space:]')
+      [ -n "$offset" ] || offset=0
+      # Fully detached, because Esc can cancel this hook while it runs and
+      # Claude Code then kills the hook *and what it started*: a watcher left
+      # as this script's child died with it, taking the only thing that could
+      # clear the tab. The subshell exits at once, so the watcher is orphaned
+      # (out of the hook's process tree), and job-control mode gives it a
+      # process group of its own (out of the hook's group). A shell that
+      # cannot enable job control (dash without a tty) still gets the orphaning.
+      (
+        set -m 2>/dev/null
+        nohup sh "$0" __watch "$tp" "$token" "$offset" >/dev/null 2>&1 &
+        echo "$!" >"$pidfile"
+      )
+      assistant_text_count "$tp" >"$assistant_cursor_file"
+    fi
     report started
     # UserPromptSubmit carries the user's prompt: surface it as the chat's user
     # bubble; fall back to the coarse status line when it can't be extracted.
@@ -812,19 +906,6 @@ case "${1:-}" in
       report_session_name "$prompt"
       ;;
     esac
-    stop_watcher
-    rm -f "$assistant_cursor_file" "$assistant_hash_file"
-    tp="$(transcript_path "$input")"
-    if [ -n "$tp" ]; then
-      assistant_text_count "$tp" >"$assistant_cursor_file"
-      # Pin the watcher to where the transcript stands *now* so a prior turn's
-      # interrupt marker (already in the file) can't be mistaken for this turn's
-      # cancel while Claude is still thinking and has appended nothing yet.
-      offset=$(wc -c <"$tp" 2>/dev/null | tr -d '[:space:]')
-      [ -n "$offset" ] || offset=0
-      nohup sh "$0" __watch "$tp" "$token" "$offset" >/dev/null 2>&1 &
-      echo "$!" >"$pidfile"
-    fi
     ;;
   stopped)
     # `Stop` fires only on normal completion (never on a cancel). The
@@ -833,7 +914,8 @@ case "${1:-}" in
     tp="$(transcript_path "$input")"
     if turn_interrupted "$tp"; then
       stop_watcher
-      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file" \
+      "$subagent_wait_file"
       report cleared
       message system "Claude Code turn interrupted"
     elif has_running_subagents "$input" || has_tracked_subagents; then
@@ -842,7 +924,8 @@ case "${1:-}" in
       # they finish -- the session is NOT done. Stay on `started`, keep the
       # marker and abort watcher alive so a cancel during the subagent phase
       # is still detected, and surface the parent's interim reply.
-      [ -f "$marker" ] || printf '%s' "$$-$(date +%s)" >"$marker"
+      [ -f "$marker" ] || printf '%s' "$-$(date +%s)" >"$marker"
+      : >"$subagent_wait_file"
       report started
       sync_assistant_transcript "$tp"
       reply="$(json_field last_assistant_message "$input")"
@@ -856,7 +939,7 @@ case "${1:-}" in
       # Tear down the watcher, clear the in-flight marker, and report the
       # green "done" dot.
       stop_watcher
-      rm -f "$marker" "$turn_session_file"
+      rm -f "$marker" "$turn_session_file" "$subagent_wait_file"
       # Stop carries the completed reply directly on current Claude builds.
       # Prefer it over rereading the transcript, then retain transcript support
       # for older builds that omit the field.
@@ -886,7 +969,8 @@ case "${1:-}" in
       exit 0
     fi
     stop_watcher
-    rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
+    rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file" \
+      "$subagent_wait_file"
     clear_subagents
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
@@ -975,7 +1059,8 @@ case "${1:-}" in
     # Claude Code build emits it, a lingering marker still clears the turn.)
     if [ -f "$marker" ]; then
       stop_watcher
-      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file" \
+      "$subagent_wait_file"
       report cleared
       message system "Claude Code turn cleared"
     fi

@@ -187,6 +187,22 @@ impl InvocationRecord {
         self.state == InvocationState::Interrupted && self.harness_session_id.is_some()
     }
 
+    /// The launch-time choices a watcher starting now should apply, as JSON:
+    /// only for a launch prepared within `window_secs`, whose child has not
+    /// exited. An older record means the agent is already past its start
+    /// screen, where a watcher driving the TUI would type into a live turn.
+    #[must_use]
+    pub fn fresh_launch_selection(&self, now: i64, window_secs: i64) -> Option<String> {
+        let launching = matches!(
+            self.state,
+            InvocationState::Prepared | InvocationState::Active
+        );
+        let fresh = (0..=window_secs).contains(&(now - self.created_at));
+        (launching && fresh)
+            .then(|| serde_json::to_string(&self.selection).ok())
+            .flatten()
+    }
+
     /// Explicitly restorable: interrupted, or a failed attempt that kept its
     /// harness id. `Prepared` (never started) and `Ended`/`Superseded` never
     /// qualify.
@@ -589,6 +605,22 @@ impl InvocationStore {
             .map_err(InvocationError::from)
     }
 
+    /// The selection of the tab's newest launch while it is still fresh; see
+    /// [`InvocationRecord::fresh_launch_selection`]. A store error reads as
+    /// "none": a watcher without a selection is the pre-existing behaviour.
+    #[must_use]
+    pub fn fresh_launch_selection(
+        &self,
+        worktree_id: &str,
+        tab_id: &str,
+        window_secs: i64,
+    ) -> Option<String> {
+        self.latest_for_tab(worktree_id, tab_id)
+            .ok()
+            .flatten()
+            .and_then(|record| record.fresh_launch_selection(now(), window_secs))
+    }
+
     /// The newest record for a tab, live or recently ended, by insertion order.
     pub fn latest_for_tab(
         &self,
@@ -835,6 +867,41 @@ mod tests {
 
     fn prepare(store: &InvocationStore, tab_id: &str) -> PreparedInvocation {
         store.prepare(&new(tab_id)).expect("prepare")
+    }
+
+    /// A watcher may drive the harness's start screen only while the launch
+    /// is on it: a fresh, still-running launch hands its selection over, an
+    /// older or finished one hands nothing.
+    #[test]
+    fn only_a_fresh_running_launch_hands_its_selection_to_a_watcher() {
+        let store = store();
+        let mut launch = new("t1");
+        launch.selection.model_id = Some("openai/gpt".to_string());
+        let prepared = store.prepare(&launch).expect("prepare");
+        let record = |store: &InvocationStore| {
+            store
+                .record(&prepared.run_id)
+                .expect("read")
+                .expect("exists")
+        };
+
+        let fresh = record(&store);
+        let selection = fresh
+            .fresh_launch_selection(fresh.created_at + 1, 3)
+            .expect("fresh launch has a selection");
+        assert!(selection.contains("\"modelId\":\"openai/gpt\""));
+        assert_eq!(
+            fresh.fresh_launch_selection(fresh.created_at + 4, 3),
+            None,
+            "a launch past the window is already on its prompt"
+        );
+        assert!(store
+            .fresh_launch_selection("w-t1", "t1", 3)
+            .is_some_and(|json| json.contains("openai/gpt")));
+
+        assert!(store.finish(&prepared.run_id, Some(0)).expect("finish"));
+        let ended = record(&store);
+        assert_eq!(ended.fresh_launch_selection(ended.created_at, 3), None);
     }
 
     #[test]

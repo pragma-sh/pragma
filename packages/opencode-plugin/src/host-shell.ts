@@ -1,6 +1,4 @@
-import type { PluginContext } from "@pragma-sh/plugin/catalog";
-
-import { pluginCwd } from "./cwd";
+import { pluginCwd, type HostContext } from "./cwd";
 
 /**
  * `exec.run` interprets each command through the host's default shell:
@@ -32,7 +30,7 @@ export function withOpenCode(command: string): string {
 
 /** Runs one host command from the plugin's working directory. */
 export async function runOnHost(
-  ctx: PluginContext,
+  ctx: HostContext,
   command: string,
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
   const [result] = await ctx.sdk.exec.run({ cwd: pluginCwd(ctx), commands: [command] });
