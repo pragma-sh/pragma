@@ -9,6 +9,7 @@
     "tabs",
     "agents",
     "fanout",
+    "ci",
     "scratchpad",
     "whiteboard",
     "computer"

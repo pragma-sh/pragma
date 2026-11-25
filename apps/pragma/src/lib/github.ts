@@ -559,6 +559,26 @@ export async function listBaseRepoOptions(repo: GitHubRepoRef): Promise<RepoTarg
   );
 }
 
+/**
+ * Whether the signed-in user may merge pull requests in `target`: GitHub grants
+ * merging to anyone with write (`push`), `maintain`, or `admin` access. Read
+ * from the PR's base repository, which is where a merge happens.
+ */
+export async function canMergePullRequests(target: {
+  owner: string;
+  repo: string;
+}): Promise<boolean> {
+  return cachedRepoFetch(
+    githubCacheKeys(target).mergePermission(),
+    async (octokit) => {
+      const { data } = await octokit.rest.repos.get({ owner: target.owner, repo: target.repo });
+      const permissions = data.permissions;
+      return Boolean(permissions?.push || permissions?.maintain || permissions?.admin);
+    },
+    { ttlMs: 5 * 60_000 },
+  );
+}
+
 /** Lists a repo's branch names (the base-branch dropdown), sorted alphabetically. */
 export async function listBranches(target: { owner: string; repo: string }): Promise<string[]> {
   return cachedRepoFetch(
@@ -1180,6 +1200,8 @@ export async function mergePullRequest(
   repo: GitHubRepoRef,
   prNumber: number,
   method: MergeMethod = "merge",
+  /** Refuses the merge unless the pull request head is still this commit. */
+  expectedHeadSha?: string,
 ): Promise<void> {
   const octokit = await client();
   await octokit.rest.pulls.merge({
@@ -1187,6 +1209,7 @@ export async function mergePullRequest(
     repo: repo.repo,
     pull_number: prNumber,
     merge_method: method,
+    ...(expectedHeadSha ? { sha: expectedHeadSha } : {}),
   });
   // Drop every cached view of this PR so the next poll shows merged.
   const keys = githubCacheKeys(repo);
@@ -1218,6 +1241,8 @@ function invalidateMergedStack(repo: GitHubRepoRef, stack: PullRequestStack): vo
 export async function mergePullRequestStack(
   repo: GitHubRepoRef,
   stack: PullRequestStack,
+  /** Cancels the merge unless the top pull request's head is still this commit. */
+  expectedHeadSha?: string,
 ): Promise<void> {
   const top = stack.entries.at(-1);
   if (!top) throw new Error("Cannot merge an empty pull request stack");
@@ -1228,6 +1253,7 @@ export async function mergePullRequestStack(
     pull_number: top.number,
     merge_method: "merge",
     merge_action: "default",
+    ...(expectedHeadSha ? { sha: expectedHeadSha } : {}),
     headers: STACK_API_HEADERS,
   } as const;
   let result: AsyncMergeResult;

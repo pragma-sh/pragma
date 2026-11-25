@@ -11,6 +11,10 @@ pragma-cli scratchpad create --title "Architecture" result.mdx
 pragma-cli whiteboard create --title "Architecture" scene.excalidraw
 pragma-cli whiteboard search "auth flow"
 pragma-cli whiteboard view <id> architecture.png
+# CI watch on this worktree's PR (host record; the desktop drives it while open).
+pragma-cli ci watch --agent <id> [--model <id>] [--reasoning <id>] [--no-merge]
+pragma-cli ci status | list | clear
+pragma-cli ci disarm --reason "<check, full error, why it can't be fixed here>"
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 # Session name: status-less report that renames the hosting tab (user renames win).
 pragma-cli agent report --agent <id> session-name --name "<name>"
@@ -51,6 +55,12 @@ not write managed files directly.
 `whiteboard` talks directly to `pragma-server`. Scenes are full Excalidraw JSON from a file
 or stdin; preserve unknown fields. `delete` confirms unless `--yes`, and `view` writes
 native-rendered PNG bytes to requested path.
+
+`ci` talks directly to `pragma-server`'s `ciWatches` RPC (`pragma-core::ci_watches`):
+one record per worktree. `disarm` stops a live watch with a reason the desktop shows in
+full; it and `update` are rejected once a record is terminal (`merged`/`failed`/`disarmed`).
+CI fix agents are prompted to disarm instead of pushing a workaround when a failure cannot
+be fixed from the branch.
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
 publishes the matching `AgentDecision`, then prints `allow`/`deny` (exit 0). On timeout it
