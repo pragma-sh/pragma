@@ -49,22 +49,11 @@ export function FixItListDialog({
   onOpenChange: (open: boolean) => void;
   presetComments?: readonly FixItComment[];
 }) {
-  const flagged = useFixItComments(prNumber);
   const isPreset = presetComments !== undefined;
-  // A snapshot taken on open, so a background refresh never reshuffles the list.
-  const [preset, setPreset] = useState<readonly FixItComment[]>(() => presetComments ?? []);
-  const comments = isPreset ? preset : flagged;
+  const { comments, remove, markLaunched } = useDialogComments(prNumber, presetComments);
   const launcher = useFixLauncher(open, worktreeId);
   const [commitAndPush, setCommitAndPush] = useState(false);
   const prompt = comments.length > 0 ? buildListFixPrompt([...comments], { commitAndPush }) : "";
-
-  function remove(threadId: string) {
-    if (isPreset) {
-      setPreset((list) => list.filter((entry) => entry.threadId !== threadId));
-    } else {
-      removeFixItComment(prNumber, threadId);
-    }
-  }
 
   async function submit() {
     if (comments.length === 0) {
@@ -75,9 +64,7 @@ export function FixItListDialog({
       toast.success(
         `Launched agent to fix ${comments.length} comment${comments.length === 1 ? "" : "s"}`,
       );
-      if (!isPreset) {
-        clearFixItComments(prNumber);
-      }
+      markLaunched();
       onOpenChange(false);
     }
   }
@@ -95,25 +82,7 @@ export function FixItListDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {comments.length === 0 ? (
-          <p className="rounded-md border border-border bg-canvas px-3 py-6 text-center text-xs text-muted-foreground">
-            {isPreset
-              ? "No unresolved comments to fix."
-              : "No comments flagged yet. Use “Add to fix it list” on a review comment."}
-          </p>
-        ) : (
-          <ScrollArea className="max-h-48 rounded-md border border-border bg-canvas">
-            <ul className="divide-y divide-border">
-              {comments.map((comment) => (
-                <FixItRow
-                  comment={comment}
-                  key={comment.threadId}
-                  onRemove={() => remove(comment.threadId)}
-                />
-              ))}
-            </ul>
-          </ScrollArea>
-        )}
+        <FixItList comments={comments} isPreset={isPreset} onRemove={remove} />
 
         <FixAgentControls launcher={launcher} prompt={prompt} autoRegistry={auto.registry} />
 
@@ -136,6 +105,63 @@ export function FixItListDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The comments a dialog covers: the user's live fix it list, or a local copy of
+ * `presetComments` whose removals and launch never touch that list.
+ */
+function useDialogComments(prNumber: number, presetComments?: readonly FixItComment[]) {
+  const flagged = useFixItComments(prNumber);
+  // A snapshot taken on open, so a background refresh never reshuffles the list.
+  const [preset, setPreset] = useState<readonly FixItComment[]>(() => presetComments ?? []);
+  if (presetComments === undefined) {
+    return {
+      comments: flagged,
+      remove: (threadId: string) => removeFixItComment(prNumber, threadId),
+      markLaunched: () => clearFixItComments(prNumber),
+    };
+  }
+  return {
+    comments: preset,
+    remove: (threadId: string) =>
+      setPreset((list) => list.filter((entry) => entry.threadId !== threadId)),
+    markLaunched: () => {},
+  };
+}
+
+/** The scrollable comment list, or a note explaining why it is empty. */
+function FixItList({
+  comments,
+  isPreset,
+  onRemove,
+}: {
+  comments: readonly FixItComment[];
+  isPreset: boolean;
+  onRemove: (threadId: string) => void;
+}) {
+  if (comments.length === 0) {
+    return (
+      <p className="rounded-md border border-border bg-canvas px-3 py-6 text-center text-xs text-muted-foreground">
+        {isPreset
+          ? "No unresolved comments to fix."
+          : "No comments flagged yet. Use “Add to fix it list” on a review comment."}
+      </p>
+    );
+  }
+  return (
+    <ScrollArea className="max-h-48 rounded-md border border-border bg-canvas">
+      <ul className="divide-y divide-border">
+        {comments.map((comment) => (
+          <FixItRow
+            comment={comment}
+            key={comment.threadId}
+            onRemove={() => onRemove(comment.threadId)}
+          />
+        ))}
+      </ul>
+    </ScrollArea>
   );
 }
 

@@ -346,11 +346,7 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
   // view (each comment marks its DOM node with `data-review-comment`).
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusPath = useReviewFocus(prNumber);
-  // The comment a single-comment "Fix" dialog is open for (null when closed), and
-  // which list dialog is open: the user's fix it list, or every unresolved comment.
-  const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
-  const [listOpen, setListOpen] = useState(false);
-  const [fixAllComments, setFixAllComments] = useState<FixItComment[] | null>(null);
+  const [fixDialog, setFixDialog] = useState<ReviewFixDialog | null>(null);
   useReviewFocusScroll(state, prNumber, focusPath, sectionEls);
   // Memoized so the toolbar's keyboard listener isn't re-bound on every render.
   const commentKeys = useMemo(
@@ -395,8 +391,13 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
       <ReviewToolbar
         commentKeys={commentKeys}
         commentTargets={commentTargets}
-        onAddressFixIt={() => setListOpen(true)}
-        onFixAll={() => setFixAllComments(unresolvedFixItComments(data.files, data.threadsByPath))}
+        onAddressFixIt={() => setFixDialog({ kind: "list" })}
+        onFixAll={() =>
+          setFixDialog({
+            kind: "all",
+            comments: unresolvedFixItComments(data.files, data.threadsByPath),
+          })
+        }
         prNumber={data.pr.number}
         unresolvedCount={unresolvedCount}
         scrollRef={scrollRef}
@@ -413,7 +414,7 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
           base={data.pr.baseRef}
           file={file}
           key={file.path}
-          onFix={setFixTarget}
+          onFix={(comment) => setFixDialog({ kind: "comment", comment })}
           onThreadResolvedChange={setThreadResolved}
           prNumber={data.pr.number}
           registerCommentTarget={registerCommentTarget}
@@ -422,40 +423,63 @@ export function ReviewTab({ tab }: { tab: Pick<Tab, "worktreeId" | "prNumber"> }
           worktreeId={worktreeId}
         />
       ))}
-      {fixTarget !== null ? (
-        <FixCommentDialog
-          comment={fixTarget}
-          onOpenChange={(open) => {
-            if (!open) {
-              setFixTarget(null);
-            }
-          }}
-          open={true}
-          worktreeId={worktreeId}
-        />
-      ) : null}
-      {listOpen ? (
-        <FixItListDialog
-          onOpenChange={setListOpen}
-          open={true}
-          prNumber={data.pr.number}
-          worktreeId={worktreeId}
-        />
-      ) : null}
-      {fixAllComments !== null ? (
-        <FixItListDialog
-          onOpenChange={(open) => {
-            if (!open) {
-              setFixAllComments(null);
-            }
-          }}
-          open={true}
-          prNumber={data.pr.number}
-          presetComments={fixAllComments}
-          worktreeId={worktreeId}
-        />
-      ) : null}
+      <ReviewFixDialogs
+        dialog={fixDialog}
+        onClose={() => setFixDialog(null)}
+        prNumber={data.pr.number}
+        worktreeId={worktreeId}
+      />
     </div>
+  );
+}
+
+/**
+ * Which fix dialog is open: one comment's "Fix", the user's fix it list, or every
+ * unresolved comment.
+ */
+type ReviewFixDialog =
+  | { kind: "comment"; comment: FixItComment }
+  | { kind: "list" }
+  | { kind: "all"; comments: FixItComment[] };
+
+/** Mounts the open fix dialog, if any. */
+function ReviewFixDialogs({
+  dialog,
+  onClose,
+  prNumber,
+  worktreeId,
+}: {
+  dialog: ReviewFixDialog | null;
+  onClose: () => void;
+  prNumber: number;
+  worktreeId: string;
+}) {
+  if (dialog === null) {
+    return null;
+  }
+  const onOpenChange = (open: boolean) => {
+    if (!open) {
+      onClose();
+    }
+  };
+  if (dialog.kind === "comment") {
+    return (
+      <FixCommentDialog
+        comment={dialog.comment}
+        onOpenChange={onOpenChange}
+        open={true}
+        worktreeId={worktreeId}
+      />
+    );
+  }
+  return (
+    <FixItListDialog
+      onOpenChange={onOpenChange}
+      open={true}
+      prNumber={prNumber}
+      presetComments={dialog.kind === "all" ? dialog.comments : undefined}
+      worktreeId={worktreeId}
+    />
   );
 }
 
