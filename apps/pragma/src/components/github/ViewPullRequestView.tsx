@@ -725,6 +725,32 @@ function useMergeControlKind(
   return !watchShown && isCiWatchOffered(pr, checks) ? "watch" : "merge";
 }
 
+/** Renders the control picked by {@link useMergeControlKind}; "watch" renders none here. */
+function MergeControl({
+  kind,
+  merge,
+  onChanged,
+  onConfirm,
+  pr,
+  repo,
+  worktreeId,
+}: {
+  kind: ReturnType<typeof useMergeControlKind>;
+  merge: ReturnType<typeof useMergeActionState>;
+  onChanged: PullRequestChanged;
+  onConfirm: () => void;
+  pr: PullRequestSummary;
+  repo: GitHubRepoRef;
+  worktreeId: string;
+}) {
+  if (kind === "conflict") {
+    return (
+      <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
+    );
+  }
+  return kind === "merge" ? <MergeAction onConfirm={onConfirm} state={merge} /> : null;
+}
+
 /** Checks summary + CI watch + Merge button → confirm → branch-cleanup dialog. */
 function MergeCard({
   checks,
@@ -770,11 +796,15 @@ function MergeCard({
         pr={pr}
         worktreeId={worktreeId}
       />
-      {controlKind === "conflict" ? (
-        <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
-      ) : controlKind === "merge" ? (
-        <MergeAction onConfirm={confirmMerge} state={mergeState} />
-      ) : null}
+      <MergeControl
+        kind={controlKind}
+        merge={mergeState}
+        onChanged={onChanged}
+        onConfirm={confirmMerge}
+        pr={pr}
+        repo={repo}
+        worktreeId={worktreeId}
+      />
 
       <MergeConfirmDialog
         onMerge={() => {
