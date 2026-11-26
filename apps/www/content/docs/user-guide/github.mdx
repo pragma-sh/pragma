@@ -128,7 +128,11 @@ Every review thread offers:
 
 The tab header's **Address fix it list** hands the whole list to an agent — in the same
 worktree, or on a fresh one it creates for the fix. The agent receives every comment with
-its file and context in one prompt.
+its file and context in one prompt. **Fix all** opens the same dialog preset to every
+unresolved comment on the PR, without touching your fix it list.
+
+Each fix dialog has a **Commit and push** switch that asks the agent to commit its changes
+and push the current branch when it finishes.
 
 ## Stacks
 
