@@ -1,4 +1,11 @@
-import { isValidElement, useEffect, useLayoutEffect, useState } from "react";
+import {
+  Fragment,
+  isValidElement,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { toast as sonner, type ToastT } from "sonner";
 
@@ -135,7 +142,7 @@ function remeasure(node: HTMLElement) {
   // Re-issue through the call matching the toast's type: plain `toast()`
   // resets the type, which would drop an error's icon and colours.
   const reissue = TYPED[current.type as keyof typeof TYPED] ?? sonner;
-  reissue(<>{current.title}</>, { ...current, id });
+  reissue(<>{unwrap(current.title)}</>, { ...current, id });
 }
 
 const TYPED = {
@@ -144,6 +151,13 @@ const TYPED = {
   warning: sonner.warning,
   info: sonner.info,
 };
+
+/** The title a caller passed, without the fragment `remeasure` wraps it in. */
+function unwrap(title: ReactNode): ReactNode {
+  return isValidElement<{ children?: ReactNode }>(title) && title.type === Fragment
+    ? title.props.children
+    : title;
+}
 
 /** Text sonner renders for a plain string or number; undefined for anything richer. */
 function plainText(value: unknown): string | undefined {
@@ -164,17 +178,18 @@ function renderedSignature(node: HTMLElement): string {
  * The id of the live toast `node` renders. Sonner puts no id in the DOM, and
  * repeated errors share their text, so the title alone is not unique: match
  * type, title and description, then break a remaining tie by order. Sonner
- * renders its toasts in `getToasts()` order, so the nth rendered twin is the
- * nth matching entry.
+ * renders newest first while `getToasts()` lists oldest first, so twins pair up
+ * from the oldest end. A toast already re-issued by `remeasure` still matches.
  */
 function findToastId(node: HTMLElement): string | number | undefined {
   const signature = renderedSignature(node);
-  const twins = [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].filter(
-    (other) => renderedSignature(other) === signature,
-  );
+  // A dismissed toast stays in the DOM while it animates out, but is no longer live.
+  const twins = [
+    ...document.querySelectorAll<HTMLElement>(`${STYLED_TOAST}:not([data-removed="true"])`),
+  ].filter((other) => renderedSignature(other) === signature);
   const matches = sonner.getToasts().filter((entry): entry is ToastT => {
-    if (!("title" in entry) || isValidElement(entry.title)) return false;
-    const title = plainText(entry.title);
+    if (!("title" in entry) || typeof entry.title === "function") return false;
+    const title = plainText(unwrap(entry.title));
     if (title === undefined) return false;
     const description = entry.description === undefined ? "" : plainText(entry.description);
     return (
@@ -182,7 +197,8 @@ function findToastId(node: HTMLElement): string | number | undefined {
       JSON.stringify([entry.type ?? "default", title, description]) === signature
     );
   });
-  return matches[twins.indexOf(node)]?.id;
+  const index = twins.indexOf(node);
+  return index === -1 ? undefined : matches[twins.length - 1 - index]?.id;
 }
 
 function textLength(content: HTMLElement): number {

@@ -58,6 +58,11 @@ describe("Toaster", () => {
   });
 });
 
+const titleOf = (id: string | number) => {
+  const entry = toast.getToasts().find((live) => live.id === id);
+  return entry && "title" in entry ? entry.title : undefined;
+};
+
 const toastNode = () => document.querySelector<HTMLElement>("[data-sonner-toast]");
 
 describe("long toasts", () => {
@@ -136,6 +141,43 @@ describe("long toasts", () => {
 
     expect(toastNode()?.hasAttribute(OPEN_TOAST_ATTR)).toBe(true);
     expect(await screen.findByRole("button", { name: "Show less" })).toBeInTheDocument();
+    scrollHeight.mockRestore();
+  });
+
+  it("re-measures each of two identical long toasts under its own id", async () => {
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-description") ? 100 : 0;
+      });
+    render(<Toaster />);
+    const description = "x".repeat(LONG_TOAST_CHARS + 1);
+    // Both arrive before the first scan, so neither has a cached id yet.
+    const ids: (string | number)[] = [];
+    await act(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        ids.push(toast.error("Failed", { description, duration: Number.POSITIVE_INFINITY }));
+      }
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Show more" })).toHaveLength(2),
+    );
+
+    // Sonner renders the newest toast first.
+    const buttons = screen.getAllByRole("button", { name: "Show more" });
+    const nodes = [...document.querySelectorAll("[data-sonner-toast]")];
+    for (const [position, id] of ids.toReversed().entries()) {
+      const button = buttons.find((candidate) => nodes[position]?.contains(candidate));
+      const other = ids.find((candidate) => candidate !== id) ?? id;
+      const before = titleOf(id);
+      const otherBefore = titleOf(other);
+      act(() => {
+        fireEvent.click(button as HTMLElement);
+      });
+      expect(titleOf(id)).not.toBe(before);
+      expect(titleOf(other)).toBe(otherBefore);
+    }
     scrollHeight.mockRestore();
   });
 
