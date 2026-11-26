@@ -1,6 +1,8 @@
 import type { AutoSelectProviderUsage } from "@pragma-sh/accounts-view";
 import { constants } from "@pragma-sh/constants";
 import type {
+  CiWatch,
+  CiWatchMode,
   AgentProgressEstimate,
   ComputerActivityEvent,
   ComputerActivitySnapshot,
@@ -1096,6 +1098,49 @@ export function openScratchpadTab(
   title: string,
 ): Promise<Tab> {
   return invoke<Tab>("open_scratchpad_tab", { worktreeId, filePath, title });
+}
+
+/** Fields the desktop reports as a host-owned CI watch makes progress. */
+export type CiWatchUpdate = Partial<
+  Pick<
+    CiWatch,
+    "status" | "attempts" | "error" | "prNumber" | "fixTabId" | "fixHeadSha" | "fixChecks"
+  >
+>;
+
+function ciWatchRpc<T>(worktreeId: string, payload: Record<string, unknown>): Promise<T> {
+  return invoke<T>("ci_watch_rpc", { worktreeId, payload });
+}
+
+/** Lists the CI watches for `worktreeIds`, asked of the host that owns `viaWorktreeId`. */
+export function listCiWatches(viaWorktreeId: string, worktreeIds: string[]): Promise<CiWatch[]> {
+  return ciWatchRpc(viaWorktreeId, { action: "list", worktreeIds });
+}
+
+/** Arms (or re-arms) a worktree's CI watch on its owning host. */
+export function armCiWatch(input: {
+  worktreeId: string;
+  mode: CiWatchMode;
+  agentId: string;
+  modelId: string | null;
+  reasoningId: string | null;
+  prNumber: number;
+}): Promise<CiWatch> {
+  return ciWatchRpc(input.worktreeId, { action: "arm", ...input });
+}
+
+/** Reports progress; rejects with a stale write once the watch was stopped elsewhere. */
+export function updateCiWatch(
+  worktreeId: string,
+  watchId: string,
+  changes: CiWatchUpdate,
+): Promise<CiWatch> {
+  return ciWatchRpc(worktreeId, { action: "update", worktreeId, watchId, ...changes });
+}
+
+/** Forgets a worktree's watch record; with `watchId`, only if it is still that arm. */
+export function clearCiWatch(worktreeId: string, watchId?: string): Promise<{ cleared: boolean }> {
+  return ciWatchRpc(worktreeId, { action: "clear", worktreeId, watchId });
 }
 
 /** Creates a host-owned whiteboard. */

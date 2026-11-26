@@ -88,14 +88,14 @@ export function modelLaunchArgs(
   // plugin/catalog arg builders entirely.
   const modelCmd = selection?.modelCmd?.trim();
   if (modelCmd) {
-    const optionArgs = pluginAgentLaunchArgs(agent.id, {
+    const optionArgs = pluginAgentLaunchArgs(agent, {
       ...selection,
       modelId: null,
       reasoningId: null,
     });
     return [...modelCmd.split(/\s+/), ...(optionArgs ?? [])];
   }
-  const pluginArgs = pluginAgentLaunchArgs(agent.id, selection);
+  const pluginArgs = pluginAgentLaunchArgs(agent, selection);
   if (pluginArgs !== null) {
     return pluginArgs;
   }
@@ -122,7 +122,7 @@ export function launchPrompt(
   prompt: string | undefined,
   selection: AgentModelSelection | null | undefined,
 ): string | undefined {
-  return pluginAgentPrompt(agent.id, selection?.slashCommand, prompt);
+  return pluginAgentPrompt(agent, selection?.slashCommand, prompt);
 }
 
 /** Resolves explicit or compact deep-link selectors against loaded model metadata. */

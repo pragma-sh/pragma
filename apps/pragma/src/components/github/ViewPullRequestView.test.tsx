@@ -15,6 +15,7 @@ const {
 } = vi.hoisted(() => ({
   browserOpenExternal: vi.fn(),
   github: {
+    canMergePullRequests: vi.fn(),
     createIssueComment: vi.fn(),
     getChecksStatus: vi.fn(),
     listIssueComments: vi.fn(),
@@ -109,6 +110,7 @@ const repo: GitHubRepoRef = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  github.canMergePullRequests.mockResolvedValue(true);
   github.getChecksStatus.mockResolvedValue({ state: "none", total: 0, passed: 0, failed: 0 });
   github.getPullRequestStack.mockResolvedValue(null);
   github.listIssueComments.mockResolvedValue([
@@ -369,6 +371,92 @@ describe("ViewPullRequestView", () => {
         "Remote branch deletion failed: remote branch is already gone",
       );
     });
+  });
+});
+
+describe("merge permission", () => {
+  it("disables merging without permission", async () => {
+    github.canMergePullRequests.mockResolvedValue(false);
+    render(
+      <ViewPullRequestView
+        onChanged={vi.fn()}
+        pr={{
+          number: 1,
+          title: "Feature",
+          body: "",
+          state: "open",
+          htmlUrl: "https://github.com/acme/widget/pull/1",
+          headRef: "feature",
+          headSha: "a1b2c3d4e5f6",
+          baseRef: "main",
+          draft: false,
+          merged: false,
+          mergeable: true,
+          user: null,
+        }}
+        repo={repo}
+        worktreeId="worktree-1"
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have permission to merge pull requests in acme/widget."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Merge pull request" })).toBeDisabled();
+    expect(github.canMergePullRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "acme", repo: "widget" }),
+    );
+  });
+});
+
+describe("merge control choice", () => {
+  const openPr = {
+    number: 1,
+    title: "Feature",
+    body: "",
+    state: "open",
+    htmlUrl: "https://github.com/acme/widget/pull/1",
+    headRef: "feature",
+    headSha: "a1b2c3d4e5f6",
+    baseRef: "main",
+    draft: false,
+    merged: false,
+    mergeable: true,
+    user: null,
+  } as const;
+
+  it("hands the merge to the CI watch menu while checks are failing", async () => {
+    github.getChecksStatus.mockResolvedValue({
+      state: "failure",
+      total: 2,
+      passed: 1,
+      failed: 1,
+      pending: 0,
+      items: [],
+    });
+    render(
+      <ViewPullRequestView onChanged={vi.fn()} pr={openPr} repo={repo} worktreeId="worktree-1" />,
+    );
+
+    expect(await screen.findByText("1 of 2 checks failed")).toBeInTheDocument();
+    // CiWatchControls is mocked out here; its own tests cover the menu's merge.
+    expect(screen.queryByRole("button", { name: "Merge pull request" })).not.toBeInTheDocument();
+  });
+
+  it("shows the plain merge button once every check passes", async () => {
+    github.getChecksStatus.mockResolvedValue({
+      state: "success",
+      total: 2,
+      passed: 2,
+      failed: 0,
+      pending: 0,
+      items: [],
+    });
+    render(
+      <ViewPullRequestView onChanged={vi.fn()} pr={openPr} repo={repo} worktreeId="worktree-1" />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Merge pull request" })).toBeInTheDocument();
   });
 });
 
