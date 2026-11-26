@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { Icon } from "@iconify/react";
-import { Bot, GitPullRequestCreate } from "lucide-react";
+import type { CiWatch } from "@pragma-sh/constants";
+import { Bot, GitPullRequestCreate, XCircle } from "lucide-react";
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { ChecksStateIcon } from "@/components/github/ChecksStateIcon";
 import { AgentProgressLine } from "@/components/sidebar/AgentProgressLine";
@@ -15,6 +17,7 @@ import {
   type VisibleAgentStatus,
 } from "@/lib/agent-status-style";
 import { useAgentStatusSnapshot } from "@/state/agent-status-store";
+import { isStoppedCiWatch, stoppedCiWatchTitle, useCiWatch } from "@/state/ci-watch-store";
 import { useKanban } from "@/state/kanban-context";
 import { usePullRequestDrafted } from "@/state/pull-request-draft-store";
 import { useWorkspace } from "@/state/workspace-context";
@@ -53,6 +56,8 @@ export interface WorktreeRowDetailsData {
   prChecks: ChecksStatus["state"] | null;
   /** An AI-drafted PR is waiting to be opened, and the branch has no PR yet. */
   readyForPr: boolean;
+  /** A CI watch (and its merge) that failed or was disarmed, until dismissed. */
+  stoppedCiWatch: CiWatch | null;
 }
 
 /** Gathers a row's details; {@link hasWorktreeRowDetails} says whether any exist. */
@@ -63,19 +68,25 @@ export function useWorktreeRowDetails(
   prChecks: ChecksStatus["state"] | null,
 ): WorktreeRowDetailsData {
   const drafted = usePullRequestDrafted(worktreeId);
+  const ciWatch = useCiWatch(worktreeId)?.record;
   return {
     agents: useWorktreeAgents(worktreeId),
     activity: useLatestWorktreeActivity(worktreeId),
     prNumber,
     prChecks,
     readyForPr: drafted && !hasPr,
+    stoppedCiWatch: ciWatch && isStoppedCiWatch(ciWatch) ? ciWatch : null,
   };
 }
 
 /** Whether a row has anything to show under its title line. */
 export function hasWorktreeRowDetails(data: WorktreeRowDetailsData): boolean {
   return (
-    data.agents.length > 0 || data.activity !== null || data.prNumber !== null || data.readyForPr
+    data.agents.length > 0 ||
+    data.activity !== null ||
+    data.prNumber !== null ||
+    data.readyForPr ||
+    data.stoppedCiWatch !== null
   );
 }
 
@@ -108,6 +119,25 @@ function ReadyForPullRequestLine() {
       <GitPullRequestCreate aria-hidden className="size-3 shrink-0 text-success" />
       <span className="truncate">Ready for PR</span>
     </span>
+  );
+}
+
+/** A CI watch that stopped short; hovering shows its full reason. */
+function StoppedCiWatchLine({ record }: { record: CiWatch }) {
+  const line = (
+    <span className="flex min-w-0 items-center gap-1.5 text-xs text-destructive">
+      <XCircle aria-hidden className="size-3 shrink-0" />
+      <span className="truncate">{stoppedCiWatchTitle(record)}</span>
+    </span>
+  );
+  if (!record.error) return line;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{line}</TooltipTrigger>
+      <TooltipContent className="break-words whitespace-pre-wrap" side="right">
+        {record.error}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -161,7 +191,7 @@ export function WorktreeRowDetails({
   worktreeId: string;
   data: WorktreeRowDetailsData;
 }) {
-  const { agents, activity, prNumber, prChecks, readyForPr } = data;
+  const { agents, activity, prNumber, prChecks, readyForPr, stoppedCiWatch } = data;
   return (
     <>
       {prNumber !== null || activity ? (
@@ -170,6 +200,7 @@ export function WorktreeRowDetails({
           {activity ? <WorktreeActivityLine activity={activity} className="min-w-0" /> : null}
         </span>
       ) : null}
+      {stoppedCiWatch ? <StoppedCiWatchLine record={stoppedCiWatch} /> : null}
       {readyForPr && !activity ? <ReadyForPullRequestLine /> : null}
       {agents.map((agent) => (
         <WorktreeAgentLine

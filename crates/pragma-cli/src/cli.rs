@@ -82,6 +82,13 @@ pub enum TopCommand {
         #[command(subcommand)]
         fanout: FanoutCommand,
     },
+    /// Watch a worktree's pull request CI: fix failures with an agent and
+    /// optionally merge once every check passes. Disarm a watch an agent
+    /// cannot fix.
+    Ci {
+        #[command(subcommand)]
+        ci: CiCommand,
+    },
     /// Worktree-scoped Excalidraw whiteboards.
     Whiteboard {
         #[command(subcommand)]
@@ -441,6 +448,64 @@ pub struct ComputerPermissionsArgs {
     /// Show the OS permission prompts (or open System Settings).
     #[arg(long)]
     pub request: bool,
+}
+
+// -------------------------- ci --------------------------
+
+/// CI watch records live on the host; the Pragma desktop app drives them (it
+/// polls GitHub, opens fix-agent tabs, and merges), so a watch only makes
+/// progress while the app is running.
+#[derive(Debug, Subcommand)]
+pub enum CiCommand {
+    /// Arm a watch on this worktree's pull request. Merges once all checks
+    /// pass unless `--no-merge` is given.
+    Watch(CiWatchArgs),
+    /// Show this worktree's watch: status, fix attempts, and the full error
+    /// when it stopped.
+    Status(CiWorktreeArgs),
+    /// List every CI watch on this host.
+    List,
+    /// Stop a watch you cannot fix, recording why. The reason is shown in full
+    /// in the Pragma sidebar and PR pane, and no merge happens.
+    Disarm(CiDisarmArgs),
+    /// Forget this worktree's watch (live or stopped) without recording a reason.
+    Clear(CiWorktreeArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CiWatchArgs {
+    /// Catalog id of the agent that fixes failures (e.g. `claude-code`).
+    #[arg(long)]
+    pub agent: String,
+    /// Model id for the fix agent. Defaults to the agent's default model.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Reasoning effort id for the fix agent.
+    #[arg(long)]
+    pub reasoning: Option<String>,
+    /// Only watch and fix; never merge.
+    #[arg(long)]
+    pub no_merge: bool,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CiWorktreeArgs {
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CiDisarmArgs {
+    /// Why the failure cannot be fixed. Shown to the user in full.
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Worktree id. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
 }
 
 // -------------------------- whiteboard --------------------------

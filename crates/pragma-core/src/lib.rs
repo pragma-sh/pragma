@@ -14,6 +14,7 @@ use pragma_constants::ProtocolRpcMethod;
 pub mod accounts;
 pub mod ai;
 pub mod cancel;
+pub mod ci_watches;
 pub mod computer;
 pub mod computer_task;
 pub mod exec;
@@ -75,6 +76,7 @@ impl From<std::io::Error> for CoreError {
 /// letting server protocol code grow ad-hoc dispatch branches.
 pub struct Core {
     whiteboards: whiteboards::WhiteboardStore,
+    ci_watches: ci_watches::CiWatchStore,
 }
 
 impl Core {
@@ -82,6 +84,7 @@ impl Core {
     pub fn new(state_dir: &Path) -> CoreResult<Self> {
         Ok(Self {
             whiteboards: whiteboards::WhiteboardStore::new(state_dir)?,
+            ci_watches: ci_watches::CiWatchStore::new(),
         })
     }
 
@@ -98,6 +101,7 @@ impl Core {
             ProtocolRpcMethod::Exec => exec::handle(payload),
             ProtocolRpcMethod::Scratchpads => scratchpads::handle(payload),
             ProtocolRpcMethod::Whiteboards => self.whiteboards.handle(payload),
+            ProtocolRpcMethod::CiWatches => self.ci_watches.handle(payload),
             ProtocolRpcMethod::Database
             | ProtocolRpcMethod::Kanban
             | ProtocolRpcMethod::Worktrees

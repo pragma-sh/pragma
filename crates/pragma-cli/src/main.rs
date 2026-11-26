@@ -15,6 +15,7 @@ mod agent_launch;
 mod agent_run;
 mod agent_verify;
 mod broker;
+mod ci;
 mod cli;
 mod commands;
 mod computer;
@@ -88,6 +89,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Verify(args) => agent_verify::run(args, out),
         },
         TopCommand::Fanout { fanout } => fanout::run(fanout, out),
+        TopCommand::Ci { ci } => ci::run(ci, out),
         TopCommand::Whiteboard { whiteboard } => whiteboard::run(whiteboard, out),
         TopCommand::Computer { computer } => computer::run(computer, out),
         TopCommand::Scratchpad { scratchpad } => match scratchpad {

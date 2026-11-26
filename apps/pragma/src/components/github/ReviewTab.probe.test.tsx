@@ -153,6 +153,23 @@ describe("ReviewTab interactions", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Fix review comment" })).toBeInTheDocument(),
     );
+    const commitAndPush = screen.getByRole("switch", { name: "Commit and push" });
+    expect(commitAndPush).not.toBeChecked();
+    fireEvent.click(commitAndPush);
+    expect(commitAndPush).toBeChecked();
+  });
+
+  it("opens the fix all dialog preset to every unresolved comment", async () => {
+    render(<ReviewTab tab={tab} />);
+    await screen.findByRole("button", { name: /Resolve/ });
+    const fixAll = screen.getByRole("button", { name: /^Fix all/ });
+    expect(fixAll).toBeEnabled();
+    fireEvent.click(fixAll);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Fix all comments" })).toBeInTheDocument(),
+    );
+    expect(screen.getAllByRole("button", { name: "Remove from list" })).toHaveLength(1);
+    expect(screen.getByRole("switch", { name: "Commit and push" })).toBeInTheDocument();
   });
 
   it("steps to a comment when the toolbar next arrow is clicked", async () => {

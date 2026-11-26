@@ -53,6 +53,15 @@ describe("buildSingleFixPrompt", () => {
     expect(prompt).toContain("Verify and fix a code review issue.");
     expect(prompt).toContain("`a.ts:5`");
     expect(prompt).toContain("> fix me");
+    expect(prompt).not.toContain("commit all resulting changes");
+  });
+
+  it("appends commit and push instructions when requested", () => {
+    const prompt = buildSingleFixPrompt(
+      { threadId: "t", path: "a.ts", line: 5, body: "fix me" },
+      { commitAndPush: true },
+    );
+    expect(prompt).toContain("commit all resulting changes and push the current branch.");
   });
 });
 

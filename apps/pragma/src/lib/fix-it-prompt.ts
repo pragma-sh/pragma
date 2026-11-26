@@ -27,22 +27,45 @@ function quoteBody(body: string): string {
     .join("\n");
 }
 
+/** Options shared by the fix prompts. */
+export interface FixPromptOptions {
+  /** Ask the agent to commit its changes and push the current branch when done. */
+  commitAndPush?: boolean;
+}
+
+/** Appends the commit-and-push instruction when requested, then joins the lines. */
+function finishPrompt(lines: string[], options: FixPromptOptions): string {
+  if (options.commitAndPush) {
+    lines.push(
+      "",
+      "After addressing all applicable issues, commit all resulting changes and push the current branch.",
+    );
+  }
+  return lines.join("\n");
+}
+
 /** Prompt asking an agent to verify-and-fix a single code-review comment. */
-export function buildSingleFixPrompt(comment: FixItComment): string {
-  return [
-    "Verify and fix a code review issue.",
-    "First confirm the issue actually exists in the current code. If it is not present or no longer relevant, do not change anything — instead explain to the user why it is not relevant.",
-    "",
-    `The comment to address concerns \`${commentLocation(comment)}\` and is as follows:`,
-    "",
-    quoteBody(comment.body),
-  ].join("\n");
+export function buildSingleFixPrompt(
+  comment: FixItComment,
+  options: FixPromptOptions = {},
+): string {
+  return finishPrompt(
+    [
+      "Verify and fix a code review issue.",
+      "First confirm the issue actually exists in the current code. If it is not present or no longer relevant, do not change anything — instead explain to the user why it is not relevant.",
+      "",
+      `The comment to address concerns \`${commentLocation(comment)}\` and is as follows:`,
+      "",
+      quoteBody(comment.body),
+    ],
+    options,
+  );
 }
 
 /** Prompt asking an agent to verify-and-fix every comment on the fix-it list. */
 export function buildListFixPrompt(
   comments: FixItComment[],
-  options: { commitAndPush?: boolean } = {},
+  options: FixPromptOptions = {},
 ): string {
   const items = comments
     .map(
@@ -50,19 +73,15 @@ export function buildListFixPrompt(
         `${index + 1}. \`${commentLocation(comment)}\`:\n${quoteBody(comment.body)}`,
     )
     .join("\n\n");
-  const prompt = [
-    "Verify and fix all of the following code review issues.",
-    "For each one, first confirm the issue actually exists in the current code. If an issue is not present or no longer relevant, do not change anything for it — instead explain to the user why it is not relevant.",
-    "",
-    "The comments to address are as follows:",
-    "",
-    items,
-  ];
-  if (options.commitAndPush) {
-    prompt.push(
+  return finishPrompt(
+    [
+      "Verify and fix all of the following code review issues.",
+      "For each one, first confirm the issue actually exists in the current code. If an issue is not present or no longer relevant, do not change anything for it — instead explain to the user why it is not relevant.",
       "",
-      "After addressing all applicable issues, commit all resulting changes and push the current branch.",
-    );
-  }
-  return prompt.join("\n");
+      "The comments to address are as follows:",
+      "",
+      items,
+    ],
+    options,
+  );
 }
