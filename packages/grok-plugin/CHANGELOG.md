@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.5](https://github.com/pragma-sh/pragma/compare/grok-plugin-v1.2.4...grok-plugin-v1.2.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **grok-plugin:** cancel a Grok turn with Ctrl+C and notice an early cancel ([32a7473](https://github.com/pragma-sh/pragma/commit/32a74734d69078e04e321d795f9b6e3e48b0029d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.2.4](https://github.com/pragma-sh/pragma/compare/grok-plugin-v1.2.3...grok-plugin-v1.2.4) (2026-11-23)
 
 

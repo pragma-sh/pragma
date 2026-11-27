@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.0](https://github.com/pragma-sh/pragma/compare/www-v1.8.0...www-v1.9.0) (2026-11-27)
+
+
+### Features
+
+* **pragma-server:** hand a launch's selection to the watcher started with it ([bf4b440](https://github.com/pragma-sh/pragma/commit/bf4b4401aa49ff492f9ee9505e54c0cef641eb4d))
+* **pragma:** add fix all and commit-and-push to review fix dialogs ([a35fe14](https://github.com/pragma-sh/pragma/commit/a35fe14f8ea80e17fef835d8f5f3ff242dce52b6))
+* **pragma:** add Fix all and commit-and-push to review fix dialogs ([e54e589](https://github.com/pragma-sh/pragma/commit/e54e58961e964eafa802f80a51530af5a1a041c2))
+
+
+### Bug Fixes
+
+* **pragma:** harden CI watches against stale merges, polls, and project switches ([8545994](https://github.com/pragma-sh/pragma/commit/8545994fe8aac6f5579d4f86fc29b57c042dcce4))
+
 ## [1.8.0](https://github.com/pragma-sh/pragma/compare/www-v1.7.0...www-v1.8.0) (2026-11-23)
 
 

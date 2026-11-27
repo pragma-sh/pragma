@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.5](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.2.4...claude-code-plugin-v1.2.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **claude-code-plugin:** clear the tab when a turn is cancelled before it replies ([e0b586f](https://github.com/pragma-sh/pragma/commit/e0b586f36fae95bb8f3a6b45afc70a1cc05c921b))
+* **claude-code-plugin:** stay silent when Grok or Cursor runs the hooks ([de07b9a](https://github.com/pragma-sh/pragma/commit/de07b9a8c84d438e748b5779eebd8c68026eac5f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.2.4](https://github.com/pragma-sh/pragma/compare/claude-code-plugin-v1.2.3...claude-code-plugin-v1.2.4) (2026-11-23)
 
 

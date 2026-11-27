@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.5](https://github.com/pragma-sh/pragma/compare/kimi-plugin-v1.2.4...kimi-plugin-v1.2.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **kimi-plugin:** answer Kimi's folder-trust gate from the watcher ([69b9fae](https://github.com/pragma-sh/pragma/commit/69b9fae16731d15ad24f8734c2a34b19018a4d6d))
+* **kimi-plugin:** stop an OSC ended by ST from hiding the trust gate ([9afaf47](https://github.com/pragma-sh/pragma/commit/9afaf47238d7039426017207f0489873ccd8c415))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.2.4](https://github.com/pragma-sh/pragma/compare/kimi-plugin-v1.2.3...kimi-plugin-v1.2.4) (2026-11-23)
 
 

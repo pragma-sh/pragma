@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.5](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.3.4...codex-plugin-v1.3.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **codex-plugin:** deliver a typed answer to a Codex question ([b033068](https://github.com/pragma-sh/pragma/commit/b033068428b73f27c376ec80ef13f0fd6cd44269))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.3.4](https://github.com/pragma-sh/pragma/compare/codex-plugin-v1.3.3...codex-plugin-v1.3.4) (2026-11-23)
 
 

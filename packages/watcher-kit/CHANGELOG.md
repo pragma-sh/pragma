@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/watcher-kit-v1.7.0...watcher-kit-v1.8.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **codex-plugin:** deliver a typed answer to a Codex question ([b033068](https://github.com/pragma-sh/pragma/commit/b033068428b73f27c376ec80ef13f0fd6cd44269))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/sdk bumped to 1.8.0
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/watcher-kit-v1.6.0...watcher-kit-v1.7.0) (2026-11-23)
 
 

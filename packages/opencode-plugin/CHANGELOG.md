@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.0](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.2.4...opencode-plugin-v1.3.0) (2026-11-27)
+
+
+### Features
+
+* **opencode-plugin:** select the model, variant, and agent on OpenCode 2 ([f44377f](https://github.com/pragma-sh/pragma/commit/f44377f8b1532fc37ba9dca1083f16dc100efb41))
+
+
+### Bug Fixes
+
+* **opencode-plugin:** launch OpenCode 2 without the flags it dropped ([50fe207](https://github.com/pragma-sh/pragma/commit/50fe20780e0322381b293f63ad6a680d14d81b7a))
+* **opencode-plugin:** report an OpenCode 2 question's text, not its header ([768ec48](https://github.com/pragma-sh/pragma/commit/768ec48e1bb77302b799f0fddc1dc9932acc6781))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/sdk bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.2.4](https://github.com/pragma-sh/pragma/compare/opencode-plugin-v1.2.3...opencode-plugin-v1.2.4) (2026-11-23)
 
 

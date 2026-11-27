@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/pragma-protocol-v1.7.0...pragma-protocol-v1.8.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **gateway:** answer 404 for a session that no longer exists ([7f0a66f](https://github.com/pragma-sh/pragma/commit/7f0a66f8aff6172a23bb1a55bbd8a7ac24d6e7be))
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-protocol-v1.6.0...pragma-protocol-v1.7.0) (2026-11-23)
 
 

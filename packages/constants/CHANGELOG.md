@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/constants-v1.7.0...constants-v1.8.0) (2026-11-27)
+
+
+### Features
+
+* **constants:** add CI watch record type and fix-attempt cap ([093c30a](https://github.com/pragma-sh/pragma/commit/093c30adad1f8160b448eec86d7d740d54c67d30))
+
+
+### Bug Fixes
+
+* **pragma:** harden CI watches against stale merges, polls, and project switches ([8545994](https://github.com/pragma-sh/pragma/commit/8545994fe8aac6f5579d4f86fc29b57c042dcce4))
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/constants-v1.6.0...constants-v1.7.0) (2026-11-23)
 
 

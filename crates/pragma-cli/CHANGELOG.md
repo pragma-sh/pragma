@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.7.0...pragma-cli-v1.8.0) (2026-11-27)
+
+
+### Features
+
+* **pragma-cli:** add ci command to arm, read, and disarm CI watches ([9e36108](https://github.com/pragma-sh/pragma/commit/9e3610805ae7e68ade2e753a74d976f3c2bdc9e9))
+
+
+### Bug Fixes
+
+* **pragma-cli:** accept multi-question attention in verify stream integrity ([3c5e9a8](https://github.com/pragma-sh/pragma/commit/3c5e9a860dac64579d5215d0b6af36d3767dd208))
+* **pragma-cli:** give the host time to authorize an agent run ([e62b223](https://github.com/pragma-sh/pragma/commit/e62b2233237c3bb99b3ddf952937912197af058e))
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-cli-v1.6.0...pragma-cli-v1.7.0) (2026-11-23)
 
 

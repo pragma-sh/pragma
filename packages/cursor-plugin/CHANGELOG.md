@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.5](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.2.4...cursor-plugin-v1.2.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **cursor-plugin:** declare questions unsupported ([4e0303a](https://github.com/pragma-sh/pragma/commit/4e0303a7c4ef04052097aec793d0f1c2d9010e93))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.2.4](https://github.com/pragma-sh/pragma/compare/cursor-plugin-v1.2.3...cursor-plugin-v1.2.4) (2026-11-23)
 
 
