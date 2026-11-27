@@ -283,7 +283,7 @@
     },
     "packages/antigravity-plugin": {
       "name": "@pragma-sh/antigravity-plugin",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "devDependencies": {
         "@pragma-sh/plugin": "workspace:*",
         "@pragma-sh/watcher-kit": "workspace:*",
@@ -515,7 +515,7 @@
     },
     "packages/omp-plugin": {
       "name": "@pragma-sh/omp-plugin",
-      "version": "0.1.1",
+      "version": "1.0.0",
       "devDependencies": {
         "@pragma-sh/pi-plugin": "workspace:*",
         "@pragma-sh/plugin": "workspace:*",
