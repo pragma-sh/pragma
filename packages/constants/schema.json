@@ -6138,6 +6138,8 @@
         "helperName",
         "macHelperBundleId",
         "macHelperAppName",
+        "macDevHelperBundleId",
+        "macDevHelperAppName",
         "grantsFile",
         "screenshotsDirectory",
         "screenshotTtlMs",
@@ -6190,6 +6192,14 @@
         "macHelperAppName": {
           "type": "string",
           "description": "Name of the macOS helper app bundle (without `.app`) that wraps the helper executable beside the server; the name System Settings shows."
+        },
+        "macDevHelperBundleId": {
+          "type": "string",
+          "description": "Bundle identifier of every macOS helper that is not a distribution-signed release (dev and ad hoc builds). TCC keeps one grant per bundle identifier, so sharing `macHelperBundleId` would let each dev rebuild replace the installed app's Accessibility and Screen Recording grants."
+        },
+        "macDevHelperAppName": {
+          "type": "string",
+          "description": "Name System Settings shows for a dev helper, so it is never mistaken for the installed app's. The bundle directory keeps `macHelperAppName`, which the server and the Tauri bundle look up."
         },
         "grantsFile": {
           "type": "string",

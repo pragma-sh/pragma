@@ -213,6 +213,7 @@ pub fn pragma_identifiers() -> Vec<String> {
         format!("mac:{identifier}"),
         format!("mac:{identifier}.dev"),
         format!("mac:{}", CONSTANTS.computer.mac_helper_bundle_id),
+        format!("mac:{}", CONSTANTS.computer.mac_dev_helper_bundle_id),
         "win:pragma.exe".to_string(),
         "win:pragma-dev.exe".to_string(),
         format!("win:{}.exe", CONSTANTS.computer.helper_name),
@@ -1084,6 +1085,17 @@ mod tests {
             name: "Pragma",
         };
         assert!(is_blocked(&pragma, &[]));
+        for helper in [
+            &CONSTANTS.computer.mac_helper_bundle_id,
+            &CONSTANTS.computer.mac_dev_helper_bundle_id,
+        ] {
+            let helper = AppIdentity {
+                bundle_id: Some(helper),
+                path: None,
+                name: "Pragma Computer Use",
+            };
+            assert!(is_blocked(&helper, &[]));
+        }
         let keychain = AppIdentity {
             bundle_id: Some("com.apple.KeychainAccess"),
             path: None,
