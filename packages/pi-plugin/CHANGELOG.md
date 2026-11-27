@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.3](https://github.com/pragma-sh/pragma/compare/pi-plugin-v1.3.2...pi-plugin-v1.3.3) (2026-11-27)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/sdk bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.3.2](https://github.com/pragma-sh/pragma/compare/pi-plugin-v1.3.1...pi-plugin-v1.3.2) (2026-11-23)
 
 

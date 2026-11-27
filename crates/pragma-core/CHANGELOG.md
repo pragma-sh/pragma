@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.7.0...pragma-core-v1.8.0) (2026-11-27)
+
+
+### Features
+
+* **pragma-core:** add host CI watch records and the ciWatches RPC ([1a076d9](https://github.com/pragma-sh/pragma/commit/1a076d9d45347bc676a0b3a8fde45182584afe4e))
+
+
+### Bug Fixes
+
+* **pragma:** harden CI watches against stale merges, polls, and project switches ([8545994](https://github.com/pragma-sh/pragma/commit/8545994fe8aac6f5579d4f86fc29b57c042dcce4))
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-core-v1.6.0...pragma-core-v1.7.0) (2026-11-23)
 
 

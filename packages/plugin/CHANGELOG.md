@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.7.0...plugin-v1.8.0) (2026-11-27)
+
+
+### Features
+
+* **pragma-server:** hand a launch's selection to the watcher started with it ([bf4b440](https://github.com/pragma-sh/pragma/commit/bf4b4401aa49ff492f9ee9505e54c0cef641eb4d))
+
+
+### Bug Fixes
+
+* **grok-plugin:** cancel a Grok turn with Ctrl+C and notice an early cancel ([32a7473](https://github.com/pragma-sh/pragma/commit/32a74734d69078e04e321d795f9b6e3e48b0029d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped from ^1.7.0 to ^1.8.0
+    * @pragma-sh/sdk bumped from ^1.7.0 to ^1.8.0
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/plugin-v1.6.0...plugin-v1.7.0) (2026-11-23)
 
 

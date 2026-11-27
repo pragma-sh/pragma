@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.1](https://github.com/pragma-sh/pragma/compare/antigravity-plugin-v1.1.0...antigravity-plugin-v1.1.1) (2026-11-27)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/watcher-kit bumped to 1.8.0
+
 ## [1.1.0](https://github.com/pragma-sh/pragma/compare/antigravity-plugin-v1.0.0...antigravity-plugin-v1.1.0) (2026-11-23)
 
 

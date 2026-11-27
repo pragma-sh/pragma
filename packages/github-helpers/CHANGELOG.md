@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/github-helpers-v1.7.0...github-helpers-v1.8.0) (2026-11-27)
+
+
+### Miscellaneous Chores
+
+* **github-helpers:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.8.0
+    * @pragma-sh/sidecar-kit bumped to 1.8.0
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/github-helpers-v1.6.0...github-helpers-v1.7.0) (2026-11-23)
 
 

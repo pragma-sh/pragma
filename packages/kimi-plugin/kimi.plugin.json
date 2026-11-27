@@ -1,6 +1,6 @@
 {
   "name": "pragma-kimi",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Report Kimi Code agent status into Pragma via pragma-cli.",
   "author": {
     "name": "Pragma"

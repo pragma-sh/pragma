@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/automations-v1.7.0...automations-v1.8.0) (2026-11-27)
+
+
+### Miscellaneous Chores
+
+* **automations:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sidecar-kit bumped from ^1.7.0 to ^1.8.0
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/automations-v1.6.0...automations-v1.7.0) (2026-11-23)
 
 

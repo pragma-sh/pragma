@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.3.2...pragma-go-v1.3.3) (2026-11-27)
+
+
+### Bug Fixes
+
+* **pragma-go:** replay a terminal whose document was replaced ([d3680e1](https://github.com/pragma-sh/pragma/commit/d3680e193c78eb0896b369a21e19a8bc176b7638))
+
 ## [1.3.2](https://github.com/pragma-sh/pragma/compare/pragma-go-v1.3.1...pragma-go-v1.3.2) (2026-11-18)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/create-pragma-plugin-v1.7.0...create-pragma-plugin-v1.8.0) (2026-11-27)
+
+
+### Miscellaneous Chores
+
+* **create-pragma-plugin:** Synchronize desktop versions
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/create-pragma-plugin-v1.6.0...create-pragma-plugin-v1.7.0) (2026-11-23)
 
 

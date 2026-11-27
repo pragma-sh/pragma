@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.8.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.7.0...pragma-v1.8.0) (2026-11-27)
+
+
+### Features
+
+* **pragma:** add ciWatches RPC and drive CI watches from the PR pane ([764ac6e](https://github.com/pragma-sh/pragma/commit/764ac6e8f2f34a2ba5ffe3a0863f95e5f45fe5bb))
+* **pragma:** add fix all and commit-and-push to review fix dialogs ([a35fe14](https://github.com/pragma-sh/pragma/commit/a35fe14f8ea80e17fef835d8f5f3ff242dce52b6))
+* **pragma:** add Fix all and commit-and-push to review fix dialogs ([e54e589](https://github.com/pragma-sh/pragma/commit/e54e58961e964eafa802f80a51530af5a1a041c2))
+
+
+### Bug Fixes
+
+* **pragma:** don't clamp custom toasts or crush short text with buttons ([2cbfa69](https://github.com/pragma-sh/pragma/commit/2cbfa69a3f32ca7b4d8b365d9ef3c4537f150db2))
+* **pragma:** don't clamp custom toasts or crush short text with buttons ([42049fa](https://github.com/pragma-sh/pragma/commit/42049fa2284115acf9b0b8c0fed6f4f79cf844d0))
+* **pragma:** harden CI watches against stale merges, polls, and project switches ([8545994](https://github.com/pragma-sh/pragma/commit/8545994fe8aac6f5579d4f86fc29b57c042dcce4))
+* **pragma:** resolve ids for identical long toasts ([2d2c238](https://github.com/pragma-sh/pragma/commit/2d2c238893eb083b0eac893fc1e09aaae36a375d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.8.0
+    * @pragma-sh/plugin bumped to 1.8.0
+    * @pragma-sh/scratchpad bumped to 1.8.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.8.0
+    * @pragma-sh/sdk bumped to 1.8.0
+
 ## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.6.0...pragma-v1.7.0) (2026-11-23)
 
 
