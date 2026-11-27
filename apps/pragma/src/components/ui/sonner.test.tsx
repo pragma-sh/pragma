@@ -1,9 +1,15 @@
+import { isValidElement } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_MOUNTED_TOASTS, Toaster } from "./sonner";
-import { LONG_TOAST_ATTR, LONG_TOAST_CHARS, OPEN_TOAST_ATTR } from "./toast-overflow";
+import {
+  LONG_TOAST_ATTR,
+  LONG_TOAST_CHARS,
+  MIN_TOAST_TEXT_WIDTH,
+  OPEN_TOAST_ATTR,
+} from "./toast-overflow";
 
 const mountedToasts = () => document.querySelectorAll("[data-sonner-toast]").length;
 
@@ -52,6 +58,11 @@ describe("Toaster", () => {
   });
 });
 
+const titleOf = (id: string | number) => {
+  const entry = toast.getToasts().find((live) => live.id === id);
+  return entry && "title" in entry ? entry.title : undefined;
+};
+
 const toastNode = () => document.querySelector<HTMLElement>("[data-sonner-toast]");
 
 describe("long toasts", () => {
@@ -80,6 +91,33 @@ describe("long toasts", () => {
     await waitFor(() => expect(toastNode()?.hasAttribute(LONG_TOAST_ATTR)).toBe(true));
   });
 
+  it("moves the buttons below short text when they leave it too narrow", async () => {
+    // jsdom has no layout: a 356px toast whose two buttons take most of it.
+    const clientWidth = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-sonner-toast") ? 356 : 0;
+      });
+    const offsetWidth = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-button") ? 356 - MIN_TOAST_TEXT_WIDTH : 0;
+      });
+    render(<Toaster />);
+
+    await act(async () => {
+      toast("Saved", {
+        duration: Number.POSITIVE_INFINITY,
+        action: { label: "Open", onClick: () => {} },
+        cancel: { label: "Undo", onClick: () => {} },
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(toastNode()?.hasAttribute(LONG_TOAST_ATTR)).toBe(true));
+    clientWidth.mockRestore();
+    offsetWidth.mockRestore();
+  });
+
   it("offers Show more only when the clamp hides text, and toggles it", async () => {
     // jsdom has no layout: report the description as taller than its box.
     const scrollHeight = vi
@@ -94,11 +132,75 @@ describe("long toasts", () => {
       await Promise.resolve();
     });
     const button = await screen.findByRole("button", { name: "Show more" });
+    // Adding the button grows the toast, so sonner must measure it again: the
+    // toast is re-issued with its title in a fresh fragment.
+    const [live] = toast.getToasts();
+    expect(live && "title" in live && isValidElement(live.title)).toBe(true);
 
     fireEvent.click(button);
 
     expect(toastNode()?.hasAttribute(OPEN_TOAST_ATTR)).toBe(true);
     expect(await screen.findByRole("button", { name: "Show less" })).toBeInTheDocument();
+    scrollHeight.mockRestore();
+  });
+
+  it("re-measures each of two identical long toasts under its own id", async () => {
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-description") ? 100 : 0;
+      });
+    render(<Toaster />);
+    const description = "x".repeat(LONG_TOAST_CHARS + 1);
+    // Both arrive before the first scan, so neither has a cached id yet.
+    const ids: (string | number)[] = [];
+    await act(async () => {
+      for (let index = 0; index < 2; index += 1) {
+        ids.push(toast.error("Failed", { description, duration: Number.POSITIVE_INFINITY }));
+      }
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Show more" })).toHaveLength(2),
+    );
+
+    // Sonner renders the newest toast first.
+    const buttons = screen.getAllByRole("button", { name: "Show more" });
+    const nodes = [...document.querySelectorAll("[data-sonner-toast]")];
+    for (const [position, id] of ids.toReversed().entries()) {
+      const button = buttons.find((candidate) => nodes[position]?.contains(candidate));
+      const other = ids.find((candidate) => candidate !== id) ?? id;
+      const before = titleOf(id);
+      const otherBefore = titleOf(other);
+      act(() => {
+        fireEvent.click(button as HTMLElement);
+      });
+      expect(titleOf(id)).not.toBe(before);
+      expect(titleOf(other)).toBe(otherBefore);
+    }
+    scrollHeight.mockRestore();
+  });
+
+  it("leaves custom JSX toasts alone, even when their content is taller than three lines", async () => {
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute("data-title") ? 100 : 0;
+      });
+    render(<Toaster />);
+
+    await act(async () => {
+      toast.custom(() => <button type="button">codex finished</button>, {
+        duration: Number.POSITIVE_INFINITY,
+      });
+      await Promise.resolve();
+    });
+    await screen.findByRole("button", { name: "codex finished" });
+    // Let the overflow scan's animation frame run.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(toastNode()?.hasAttribute(LONG_TOAST_ATTR)).toBe(false);
     scrollHeight.mockRestore();
   });
 });
