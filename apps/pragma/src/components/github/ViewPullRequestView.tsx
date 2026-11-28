@@ -14,6 +14,7 @@ import {
   MergeConflictControls,
   type PullRequestChanged,
 } from "@/components/github/MergeConflictControls";
+import { MergeAction, useMergeActionState } from "@/components/github/MergeActionControls";
 import { ChangeGroup } from "@/components/right-sidebar/ChangeGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -65,6 +66,8 @@ import {
   mergePullRequestStack,
 } from "@/lib/github";
 import { browserOpenExternal, githubDeleteRemoteBranch } from "@/lib/tauri";
+import { useAsyncValue } from "@/hooks/use-async-value";
+import { isCiWatchOffered, isShownCiWatch, useCiWatch } from "@/state/ci-watch-store";
 import { requestReviewFocus } from "@/state/review-focus-store";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -649,27 +652,106 @@ export function ActorAvatar({ actor }: { actor: GitHubActor | null }) {
 
 /** Loads GitHub's stack membership for a PR (undefined while the request is in flight). */
 function useStackMembership(repo: GitHubRepoRef, pr: PullRequestSummary) {
-  const [stack, setStack] = useState<PullRequestStack | null | undefined>(undefined);
-
-  useEffect(() => {
-    let active = true;
-    void getPullRequestStack(repo, pr.number)
-      .then((loadedStack) => {
-        if (active) setStack(loadedStack);
-        return loadedStack;
-      })
-      .catch(() => {
-        if (active) setStack(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [pr.number, repo]);
-
-  return stack;
+  return useAsyncValue(
+    `${repo.owner}/${repo.repo}#${pr.number}`,
+    () => getPullRequestStack(repo, pr.number),
+    null,
+  );
 }
 
-/** Checks summary + Merge button → confirm → branch-cleanup dialog. */
+/** Merges right away (single PR or stack), reporting progress and success. */
+function useMergeNow({
+  onMerged,
+  onMergingChange,
+  pr,
+  repo,
+  stack,
+}: {
+  onMerged: () => void;
+  onMergingChange?: (merging: boolean) => void;
+  pr: PullRequestSummary;
+  repo: GitHubRepoRef;
+  stack: PullRequestStack | null | undefined;
+}) {
+  const [merging, setMerging] = useState(false);
+  const merge = useCallback(async () => {
+    if (stack === undefined) {
+      toast.error("Stack membership is still loading.");
+      return;
+    }
+    setMerging(true);
+    onMergingChange?.(true);
+    try {
+      if (stack) {
+        await mergePullRequestStack(repo, stack);
+        toast.success(`Merged stack #${stack.number}`);
+      } else {
+        await mergePullRequest(repo, pr.number);
+        toast.success(`Merged pull request #${pr.number}`);
+      }
+      onMerged();
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setMerging(false);
+      onMergingChange?.(false);
+    }
+  }, [repo, pr.number, onMerged, onMergingChange, stack]);
+  return { merging, merge };
+}
+
+/** Mirrors a CI watch's own merge into the header's "merging" badge. */
+function useCiWatchMergingBadge(worktreeId: string, onMergingChange?: (merging: boolean) => void) {
+  const merging = useCiWatch(worktreeId)?.record.status === "merging";
+  useEffect(() => {
+    if (!merging) return undefined;
+    onMergingChange?.(true);
+    return () => onMergingChange?.(false);
+  }, [merging, onMergingChange]);
+}
+
+/**
+ * Which merge control the card shows: conflict resolution when GitHub reports a
+ * conflict, the CI watch split button (which carries a plain merge in its menu)
+ * while CI is failing or running, and the plain merge button otherwise.
+ */
+function useMergeControlKind(
+  worktreeId: string,
+  pr: PullRequestSummary,
+  checks: ChecksStatus | null,
+): "conflict" | "watch" | "merge" {
+  const watchShown = isShownCiWatch(useCiWatch(worktreeId));
+  if (pr.mergeable === false) return "conflict";
+  return !watchShown && isCiWatchOffered(pr, checks) ? "watch" : "merge";
+}
+
+/** Renders the control picked by {@link useMergeControlKind}; "watch" renders none here. */
+function MergeControl({
+  kind,
+  merge,
+  onChanged,
+  onConfirm,
+  pr,
+  repo,
+  worktreeId,
+}: {
+  kind: ReturnType<typeof useMergeControlKind>;
+  merge: ReturnType<typeof useMergeActionState>;
+  onChanged: PullRequestChanged;
+  onConfirm: () => void;
+  pr: PullRequestSummary;
+  repo: GitHubRepoRef;
+  worktreeId: string;
+}) {
+  if (kind === "conflict") {
+    return (
+      <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
+    );
+  }
+  return kind === "merge" ? <MergeAction onConfirm={onConfirm} state={merge} /> : null;
+}
+
+/** Checks summary + CI watch + Merge button → confirm → branch-cleanup dialog. */
 function MergeCard({
   checks,
   pr,
@@ -686,36 +768,18 @@ function MergeCard({
   onMergingChange?: (merging: boolean) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [merging, setMerging] = useState(false);
   const [cleanup, setCleanup] = useState(false);
   const stack = useStackMembership(repo, pr);
   const workspace = useWorkspace();
-
-  const merge = useCallback(async () => {
-    if (stack === undefined) {
-      toast.error("Stack membership is still loading.");
-      return;
-    }
-    setConfirming(false);
-    setMerging(true);
-    onMergingChange?.(true);
-    try {
-      if (stack) {
-        await mergePullRequestStack(repo, stack);
-        toast.success(`Merged stack #${stack.number}`);
-      } else {
-        await mergePullRequest(repo, pr.number);
-        toast.success(`Merged pull request #${pr.number}`);
-      }
-      setCleanup(true);
-      onChanged();
-    } catch (cause) {
-      toast.error(errorMessage(cause));
-    } finally {
-      setMerging(false);
-      onMergingChange?.(false);
-    }
-  }, [repo, pr.number, onChanged, onMergingChange, stack]);
+  const onMerged = useCallback(() => {
+    setCleanup(true);
+    onChanged();
+  }, [onChanged]);
+  const { merging, merge } = useMergeNow({ onMerged, onMergingChange, pr, repo, stack });
+  const mergeState = useMergeActionState({ merging, pr, repo, stack });
+  const controlKind = useMergeControlKind(worktreeId, pr, checks);
+  const confirmMerge = useCallback(() => setConfirming(true), []);
+  useCiWatchMergingBadge(worktreeId, onMergingChange);
 
   const cleanupTargets = useMemo(
     () => stackCleanupTargets(stack ?? null, pr, worktreeId, workspace.worktrees),
@@ -725,15 +789,28 @@ function MergeCard({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
       <ChecksSummary checks={checks} />
-      <CiWatchControls repo={repo} pr={pr} worktreeId={worktreeId} checks={checks} />
-      {pr.mergeable === false ? (
-        <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
-      ) : (
-        <MergeAction merging={merging} onConfirm={() => setConfirming(true)} stack={stack} />
-      )}
+      <CiWatchControls
+        checks={checks}
+        merge={mergeState}
+        onMerge={confirmMerge}
+        pr={pr}
+        worktreeId={worktreeId}
+      />
+      <MergeControl
+        kind={controlKind}
+        merge={mergeState}
+        onChanged={onChanged}
+        onConfirm={confirmMerge}
+        pr={pr}
+        repo={repo}
+        worktreeId={worktreeId}
+      />
 
       <MergeConfirmDialog
-        onMerge={() => void merge()}
+        onMerge={() => {
+          setConfirming(false);
+          void merge();
+        }}
         onOpenChange={setConfirming}
         open={confirming}
         pr={pr}
@@ -747,42 +824,6 @@ function MergeCard({
         targets={cleanupTargets}
       />
     </div>
-  );
-}
-
-/** The merge button shown while the PR is mergeable. */
-function MergeAction({
-  merging,
-  onConfirm,
-  stack,
-}: {
-  merging: boolean;
-  onConfirm: () => void;
-  stack: PullRequestStack | null | undefined;
-}) {
-  const label =
-    stack === undefined
-      ? "Checking stack membership…"
-      : stack
-        ? "Merge stack"
-        : "Merge pull request";
-  return (
-    <>
-      <Button
-        className="w-full"
-        disabled={merging || stack === undefined}
-        onClick={onConfirm}
-        size="sm"
-      >
-        {merging ? <Loader2 className="animate-spin" /> : null}
-        {label}
-      </Button>
-      {stack === undefined ? (
-        <p className="text-xs text-muted-foreground">
-          Merge stays disabled until GitHub confirms stack membership.
-        </p>
-      ) : null}
-    </>
   );
 }
 

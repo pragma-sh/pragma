@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.6.0...pragma-server-v1.7.0) (2026-11-23)
+
+
+### Features
+
+* **pragma-server:** recover a broken listening socket in place ([34863f7](https://github.com/pragma-sh/pragma/commit/34863f7456cbb57480a3cbdb5e516b6fb7d6ab37))
+* **pragma:** add global lifecycle scripts ([ccff899](https://github.com/pragma-sh/pragma/commit/ccff89949f35a79dd5380d4625582e40711de965))
+
+
+### Bug Fixes
+
+* **pragma-client:** don't resend control requests on hang-up; shorten socket staging path ([8586454](https://github.com/pragma-sh/pragma/commit/85864542889b790ef641b2c0370d9f598ac89437))
+* **pragma:** address scripts review feedback ([f14baab](https://github.com/pragma-sh/pragma/commit/f14baab7a425d184feb2dc78846dcd488f5c12c0))
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-server-v1.5.0...pragma-server-v1.6.0) (2026-11-21)
 
 

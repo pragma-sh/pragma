@@ -11,6 +11,7 @@ import {
 it("launches Cursor's unambiguous binary", () => {
   expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual(["cursor-agent", "--approve-mcps"]);
   expect(cursorAgentPlugin.agents?.[0]?.excludeFeatures).toEqual([
+    "questions",
     "commandApproval",
     "subagents",
     "abort",

@@ -64,3 +64,18 @@ export function applyTerminalEvent(event: { type: string }, target: StreamTarget
   ) => void;
   handler(event as SessionEvent, target);
 }
+
+/** A terminal grid, in character cells. */
+export interface TerminalGrid {
+  cols: number;
+  rows: number;
+}
+
+/**
+ * Whether two grids differ in either dimension. Used to notice that the
+ * renderer settled on a new size while a viewport lease was still being
+ * acquired, when that resize could not be sent.
+ */
+export function gridChanged(from: TerminalGrid, to: TerminalGrid): boolean {
+  return from.cols !== to.cols || from.rows !== to.rows;
+}

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/watcher-v1.6.0...watcher-v1.7.0) (2026-11-23)
+
+
+### Miscellaneous Chores
+
+* **watcher:** Synchronize desktop versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/sdk bumped to 1.7.0
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/watcher-v1.5.0...watcher-v1.6.0) (2026-11-21)
 
 

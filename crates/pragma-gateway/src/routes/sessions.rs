@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::response::{empty_response, json_response, stream_ndjson_response};
 use crate::http::router::RouteMatch;
-use crate::http::{read_body, read_json, AppState};
+use crate::http::{read_body, read_json, respond_json, AppState};
 
 use super::param;
 
@@ -92,9 +92,16 @@ pub fn events(request: Request, state: &AppState, matched: &RouteMatch) -> Gatew
         .query
         .get("cursor")
         .and_then(|value| value.parse::<u64>().ok());
-    let stream = state
+    // A failed attach is answered, not propagated: an error returned from
+    // here drops the request, and the client sees a bare 500 with no body in
+    // place of the status that tells it whether retrying can ever work.
+    let stream = match state
         .client
-        .attach_stream(session_id.clone(), cols.zip(rows), cursor)?;
+        .attach_stream(session_id.clone(), cols.zip(rows), cursor)
+    {
+        Ok(stream) => stream,
+        Err(error) => return respond_json(request, Err(error)),
+    };
     drop_pending_spawn_stream(state, &session_id);
     stream_ndjson_response(request, stream)
 }

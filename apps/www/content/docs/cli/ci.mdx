@@ -1,0 +1,66 @@
+---
+title: CI
+description: pragma-cli ci — arm, inspect, list, disarm, and clear a worktree's CI watch (watch, fix, and merge).
+---
+
+```sh
+pragma-cli ci watch --agent <ID> [--model <ID>] [--reasoning <ID>] [--no-merge]
+pragma-cli ci status
+pragma-cli ci list
+pragma-cli ci disarm [--reason "<why>"]
+pragma-cli ci clear
+```
+
+A CI watch follows a worktree's pull request: when a check fails it opens an agent to fix
+it, and in its default mode it merges the pull request once **every** check passes. It is
+the same watch the PR pane's **Watch, fix and merge** button arms — see
+[GitHub → Watch, fix and merge](/docs/user-guide/github#watch-fix-and-merge) for the tour.
+
+There is one watch per worktree. The worktree defaults to `$PRAGMA_WORKTREE_ID`; pass
+`--worktree <id>` to act elsewhere. The record lives on the host, so these commands work
+from any terminal, but the watch only _makes progress_ while the Pragma app is open — the
+app polls GitHub, opens the fix agents, and performs the merge.
+
+| Command  | Notes                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `watch`  | Arms (or re-arms) the watch. Merges once all checks pass unless `--no-merge`. `--agent` is the catalog id of the agent that fixes failures.        |
+| `status` | Status, mode, pull request, fix attempts used, and — when it stopped — the full reason.                                                            |
+| `list`   | Every watch on this host.                                                                                                                          |
+| `disarm` | Stops a live watch and records `--reason`. The watch shows as stopped, with that reason in full, in the sidebar and the PR pane. No merge happens. |
+| `clear`  | Forgets the watch, live or stopped, without recording anything.                                                                                    |
+
+While a watch is `merging`, `watch`, `disarm`, and `clear` fail: the merge has already been
+sent to GitHub.
+
+## Statuses
+
+| Status     | Meaning                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| `watching` | Waiting for checks to finish.                                                                 |
+| `fixing`   | A fix agent is working. Its tab closes when CI restarts on a new push or a rerun.             |
+| `merging`  | Every check passed; the merge is in flight and can no longer be cancelled.                    |
+| `merged`   | The pull request merged.                                                                      |
+| `failed`   | CI still failed after the last fix attempt, or GitHub rejected the merge. The reason is kept. |
+| `disarmed` | Someone ran `ci disarm`. The reason is kept.                                                  |
+
+A watch launches at most **three** fix agents. If checks still fail after the third, it
+stops as `failed` and the pull request is not merged.
+
+## Disarming from a fix agent
+
+Every fix agent's prompt tells it what to do when it cannot fix the failure from the branch
+— a missing secret or permission, broken CI infrastructure, a fix outside the pull
+request's scope: don't push a workaround, disarm with the full error.
+
+```sh
+pragma-cli ci disarm --reason "e2e needs STAGING_TOKEN, which this environment cannot read.
+Error: Missing required secret STAGING_TOKEN (tests/e2e/setup.ts:14)"
+```
+
+The reason is shown verbatim — line breaks included — so write it for the person who will
+read it: which check, the error, and why it can't be fixed here. `disarm` prints the
+stopped watch with its reason, and exits non-zero if there is no live watch.
+
+```sh
+pragma-cli --json ci status   # read the record from a script
+```

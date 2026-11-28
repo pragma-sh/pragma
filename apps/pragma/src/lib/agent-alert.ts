@@ -258,7 +258,7 @@ function agentToast(
     {
       type: "button",
       className:
-        "flex w-[var(--width)] flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
+        "flex w-[var(--width)] max-w-full flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
       onClick: dismiss,
     },
     createElement("span", { className: "text-sm font-medium" }, title),
@@ -317,7 +317,7 @@ function commandApprovalToast(
     "div",
     {
       className:
-        "flex w-[var(--width)] flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
+        "flex w-[var(--width)] max-w-full flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
     },
     createElement("span", { className: "text-sm font-medium" }, title),
     createElement(

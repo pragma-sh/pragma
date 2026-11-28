@@ -143,7 +143,8 @@ export function useActivePlugins(activeProjectId: string | null): PluginRecord[]
   );
 }
 
-function preferHigherScope(records: PluginRecord[]): PluginRecord[] {
+/** Keeps one record per plugin: a later (project) entry replaces an earlier (global) one. */
+export function preferHigherScope(records: PluginRecord[]): PluginRecord[] {
   const winningIndex = new Map<string, number>();
   records.forEach((record, index) => winningIndex.set(record.pluginId, index));
   return records.filter((record, index) => winningIndex.get(record.pluginId) === index);

@@ -1,5 +1,4 @@
-import type { PluginContext } from "@pragma-sh/plugin/catalog";
-
+import type { HostContext } from "./cwd";
 import { hostQuote, runOnHost } from "./host-shell";
 
 /**
@@ -11,7 +10,7 @@ import { hostQuote, runOnHost } from "./host-shell";
  * hold secrets (credential values); they stay in the calling sidecar.
  */
 export async function openCodeApi(
-  ctx: PluginContext,
+  ctx: HostContext,
   method: "GET" | "POST" | "PATCH",
   path: string,
   body?: Record<string, unknown>,

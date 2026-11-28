@@ -200,10 +200,17 @@ watchers: [
 | `sdk`                | A ready `PragmaClient` with gateway credentials.          |
 | `agentId` / `config` | The plugin-qualified agent id and your validated config.  |
 | `session`            | `{ id, tabId, worktreeId }`.                              |
+| `selection`          | The launch's model, reasoning, and mode; see below.       |
 | `output`             | Async iterable of decoded terminal output chunks.         |
 | `sendKeys(data)`     | Write into the live session (answer prompts, press keys). |
 | `reportMessage(msg)` | Publish a rich agent message.                             |
 | `signal`             | Aborts when the session exits or the watcher is stopped.  |
+
+`selection` is for a host that has no launch flag for its model or mode, so the watcher
+can apply them through the TUI (the OpenCode 2 integration does). It is set only on a
+watcher started together with a fresh launch, while the host is still on its start
+screen, and never on a later restart or a resumed session. Prefer `args` flags whenever
+the host has them.
 
 The host supervises one `pragma-watch` sidecar per live session — it re-establishes
 itself with fresh gateway credentials after a gateway restart and backs off on crash

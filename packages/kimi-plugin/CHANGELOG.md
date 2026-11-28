@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.4](https://github.com/pragma-sh/pragma/compare/kimi-plugin-v1.2.3...kimi-plugin-v1.2.4) (2026-11-23)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @pragma-sh/plugin bumped to 1.7.0
+    * @pragma-sh/watcher-kit bumped to 1.7.0
+
 ## [1.2.3](https://github.com/pragma-sh/pragma/compare/kimi-plugin-v1.2.2...kimi-plugin-v1.2.3) (2026-11-21)
 
 

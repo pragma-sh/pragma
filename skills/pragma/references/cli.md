@@ -167,6 +167,25 @@ pragma-cli agent start --agent <id> [--model <id> [--reasoning <id>]] [--mode <i
 Verification launches real sessions and can consume model tokens. Default is headless;
 pass `--headed` only to test desktop launch brokering. Load `agent-plugin.md` for full rules.
 
+## CI Watches
+
+```sh
+pragma-cli ci watch --agent claude-code [--model <id>] [--no-merge]
+pragma-cli ci status
+pragma-cli ci list
+pragma-cli ci disarm --reason "<failing check, full error, why it cannot be fixed here>"
+pragma-cli ci clear
+```
+
+A CI watch follows the worktree's pull request: on failure Pragma opens a fix agent (at most
+three attempts), and by default it merges once every check passes. One watch per worktree;
+`--worktree <id>` overrides `$PRAGMA_WORKTREE_ID`. The Pragma app drives watches while open.
+If you are a CI fix agent and the failure cannot be fixed by changing the branch (a missing
+secret or permission, broken CI infrastructure, a fix outside the PR's scope), do not push a
+workaround: run `ci disarm` with a reason that states the check, the full error, and why,
+then stop. The user sees that reason verbatim and nothing is merged. Once a watch is
+`merging`, `watch`, `disarm`, and `clear` fail: the merge has already been sent.
+
 ## Whiteboards, Scratchpads, And Fanouts
 
 ```sh

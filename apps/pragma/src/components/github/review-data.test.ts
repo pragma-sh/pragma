@@ -9,6 +9,7 @@ import {
   groupThreadsByPath,
   reuseUnchangedReviewData,
   reviewDataSignature,
+  unresolvedFixItComments,
 } from "./review-data";
 
 function file(path: string, additions = 1): PullFile {
@@ -78,5 +79,19 @@ describe("reuseUnchangedReviewData", () => {
     const merged = reuseUnchangedReviewData(prev, data([file("a.ts")], [thread("a1", "a.ts")]));
     expect(merged.files.map((entry) => entry.path)).toEqual(["a.ts"]);
     expect([...merged.threadsByPath.keys()]).toEqual(["a.ts"]);
+  });
+});
+
+describe("unresolvedFixItComments", () => {
+  it("keeps only unresolved threads in file order", () => {
+    const resolved = { ...thread("b1", "b.ts"), isResolved: true };
+    const byPath = new Map([
+      ["a.ts", [thread("a1", "a.ts")]],
+      ["b.ts", [resolved, thread("b2", "b.ts")]],
+    ]);
+    const ids = unresolvedFixItComments([file("b.ts"), file("a.ts")], byPath).map(
+      (comment) => comment.threadId,
+    );
+    expect(ids).toEqual(["b2", "a1"]);
   });
 });

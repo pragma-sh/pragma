@@ -523,6 +523,19 @@ invisible as events:
 Nothing else may spawn `pragma-watch`: two watchers on one session type every
 interjection twice.
 
+**A watcher started with a launch is handed that launch's selection** (`--selection`,
+`WatcherContext.selection`), for a harness that takes its model through the TUI because
+it has no launch flag (OpenCode 2). Only then: the tab's newest invocation must be
+`prepared` or `active` and at most `LAUNCH_SELECTION_WINDOW_SECS` (3s) old
+(`InvocationRecord::fresh_launch_selection`). A watcher that starts later — replaced
+after a crash or a gateway restart, attached to a resume or a hand-typed agent — gets
+none, so a plugin applying it can never type a picker into a running turn.
+`prepare_invocation` therefore restarts the tab's watcher: the desktop publishes a tab
+before it prepares the launch, and a watcher already running would never see the
+selection. This handoff exists for one workaround; see _OpenCode v2 selection — a
+sticking point_ in `packages/opencode-plugin/AGENTS.md` for why, and for the launch hook
+that should replace it.
+
 ## Port Inventory
 
 `ProtocolRpcMethod::Ports` returns TCP listeners attributable to requested worktrees. Each

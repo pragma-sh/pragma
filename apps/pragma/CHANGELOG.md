@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.7.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.6.0...pragma-v1.7.0) (2026-11-23)
+
+
+### Features
+
+* **pragma:** add global lifecycle scripts ([ccff899](https://github.com/pragma-sh/pragma/commit/ccff89949f35a79dd5380d4625582e40711de965))
+* **pragma:** clamp long toasts with a show more toggle ([e6c6664](https://github.com/pragma-sh/pragma/commit/e6c666405f202c438ccc1f03856c382156ec7c8d))
+
+
+### Bug Fixes
+
+* **pragma:** address scripts review feedback ([f14baab](https://github.com/pragma-sh/pragma/commit/f14baab7a425d184feb2dc78846dcd488f5c12c0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @pragma-sh/constants bumped to 1.7.0
+    * @pragma-sh/plugin bumped to 1.7.0
+    * @pragma-sh/scratchpad bumped to 1.7.0
+    * @pragma-sh/scratchpad-viewer bumped to 1.7.0
+    * @pragma-sh/sdk bumped to 1.7.0
+
 ## [1.6.0](https://github.com/pragma-sh/pragma/compare/pragma-v1.5.0...pragma-v1.6.0) (2026-11-21)
 
 

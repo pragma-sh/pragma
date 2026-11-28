@@ -449,6 +449,7 @@
         "ports",
         "scratchpads",
         "whiteboards",
+        "ciWatches",
         "wsl",
         "fanouts",
         "sessions",
@@ -1462,7 +1463,8 @@
         "accessTokenUrl",
         "apiBaseUrl",
         "homepageUrl",
-        "prSignature"
+        "prSignature",
+        "ciWatchMaxFixAttempts"
       ],
       "properties": {
         "oauthClientId": {
@@ -1500,6 +1502,11 @@
           "type": "string",
           "format": "uri",
           "description": "Pragma's public GitHub home page, linked from the pull-request signature footer."
+        },
+        "ciWatchMaxFixAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many agent fix attempts a CI watch launches for one pull request before it gives up and reports the watch (and any pending merge) as failed."
         },
         "prSignature": {
           "$ref": "#/definitions/PrSignature"
@@ -3523,6 +3530,88 @@
           "type": "object",
           "additionalProperties": true
         }
+      }
+    },
+    "CiWatchMode": {
+      "title": "CiWatchMode",
+      "description": "What a CI watch does once checks pass: `watch` only fixes failures, `watchMerge` also merges the pull request.",
+      "type": "string",
+      "enum": ["watch", "watchMerge"]
+    },
+    "CiWatchStatus": {
+      "title": "CiWatchStatus",
+      "description": "Lifecycle of a host-owned CI watch. `watching`, `fixing` and `merging` are live; `merged`, `failed` and `disarmed` are terminal and kept until cleared so the user sees why it stopped.",
+      "type": "string",
+      "enum": ["watching", "fixing", "merging", "merged", "failed", "disarmed"]
+    },
+    "CiWatchCheck": {
+      "title": "CiWatchCheck",
+      "description": "One check as it stood when a CI fix attempt started, kept so a rerun is recognised even after the desktop restarts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state"],
+      "properties": {
+        "name": { "type": "string" },
+        "state": { "type": "string", "enum": ["success", "failure", "pending"] },
+        "id": { "type": ["integer", "null"] },
+        "startedAt": { "type": ["string", "null"] }
+      }
+    },
+    "CiWatch": {
+      "title": "CiWatch",
+      "description": "One worktree's CI watch, owned by the host so the desktop, the CLI, and agents see the same record. The desktop drives it (GitHub polling, fix agents, the merge) and reports progress here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "worktreeId",
+        "mode",
+        "agentId",
+        "status",
+        "attempts",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identity of this arm. Re-arming a worktree issues a new one, so progress from an earlier watch is rejected."
+        },
+        "worktreeId": { "type": "string" },
+        "mode": { "$ref": "#/definitions/CiWatchMode" },
+        "agentId": {
+          "type": "string",
+          "description": "Catalog id of the agent launched to fix failures."
+        },
+        "modelId": { "type": ["string", "null"] },
+        "reasoningId": { "type": ["string", "null"] },
+        "prNumber": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "The watched pull request, once the desktop has resolved it."
+        },
+        "status": { "$ref": "#/definitions/CiWatchStatus" },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Fix agents launched so far."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Why the watch stopped (the full disarm reason or failure), or a transient error while live."
+        },
+        "fixTabId": { "type": ["string", "null"], "description": "The running fix agent's tab." },
+        "fixHeadSha": {
+          "type": ["string", "null"],
+          "description": "The head commit the running fix attempt started from."
+        },
+        "fixChecks": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/CiWatchCheck" },
+          "description": "The checks as they stood when the running fix attempt started."
+        },
+        "createdAt": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "type": "integer", "minimum": 0 }
       }
     },
     "Whiteboard": {

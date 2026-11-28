@@ -1,6 +1,9 @@
+import { useState } from "react";
+
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CommitAndPushToggle } from "@/components/github/CommitAndPushToggle";
 import { FixAgentControls } from "@/components/github/FixAgentControls";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +22,7 @@ import type { FixItComment } from "@/state/fix-it-store";
 /**
  * Launches an agent to verify-and-fix a single review comment. Quotes the comment
  * at the top, lets the user pick the agent, and optionally branch a new worktree
- * to fix on (collapsed by default). `comment` being non-null drives the open state.
+ * to fix on (collapsed by default), and optionally have it commit and push. `comment` being non-null drives the open state.
  */
 export function FixCommentDialog({
   comment,
@@ -33,7 +36,8 @@ export function FixCommentDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const launcher = useFixLauncher(open, worktreeId);
-  const prompt = comment ? buildSingleFixPrompt(comment) : "";
+  const [commitAndPush, setCommitAndPush] = useState(false);
+  const prompt = comment ? buildSingleFixPrompt(comment, { commitAndPush }) : "";
 
   async function submit() {
     if (!comment) {
@@ -67,6 +71,8 @@ export function FixCommentDialog({
         ) : null}
 
         <FixAgentControls launcher={launcher} prompt={prompt} autoRegistry={auto.registry} />
+
+        <CommitAndPushToggle checked={commitAndPush} onCheckedChange={setCommitAndPush} />
 
         {launcher.error ? <p className="text-xs text-destructive">{launcher.error}</p> : null}
 

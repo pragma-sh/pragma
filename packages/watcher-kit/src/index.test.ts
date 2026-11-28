@@ -29,6 +29,13 @@ const shortcutQuestionWatcher = createTuiWatcher({
   questionOtherMode: "shortcut-z",
   questionDismissKeys: "X",
 });
+/** Free text goes in a Tab-opened note on the row past the options (Codex 0.171). */
+const noteQuestionWatcher = createTuiWatcher({
+  agent: "codex",
+  handleDecisions: false,
+  handleQuestionAnswers: true,
+  questionOtherMode: "navigate-tab",
+});
 const plainFollowUpWatcher = createTuiWatcher({
   agent: "pi",
   handleDecisions: false,
@@ -644,6 +651,31 @@ describe("host-specific native question controls", () => {
     expect(sendKeys).toHaveBeenNthCalledWith(1, "z");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "custom\r");
     expect(sendKeys).toHaveBeenNthCalledWith(3, "X");
+  });
+});
+
+describe("free text entered as a note on the row past the options", () => {
+  it("moves past the options and opens the note with Tab, never Enter", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-1", ["alpha", "beta"]),
+      answer("custom marker", { requestId: "req-1" }),
+    ]);
+    await noteQuestionWatcher.watch(ctx as never);
+    // Enter on that row would submit "None of the above" with no text.
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\t");
+    // The Enter is its own write: sent with the text, the paste-aware note
+    // field handles it before the text lands and submits an empty note.
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "custom marker");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, "\r");
+  });
+
+  it("still answers a listed option with its digit", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-1", ["alpha", "beta"]),
+      answer("beta", { requestId: "req-1" }),
+    ]);
+    await noteQuestionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledWith("2");
   });
 });
 

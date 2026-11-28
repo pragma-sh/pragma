@@ -26,6 +26,8 @@ packages/opencode-plugin/
 │   ├── pragma-plugin.ts     # Agent + watcher + account definitions loaded by plugin sidecars
 │   ├── accounts.ts          # openCodeStoreAccount: v1 auth.json swap / v2 credential binding
 │   ├── opencode-version.ts  # isOpenCodeV2 (cached `opencode --version`)
+│   ├── opencode-v2-catalog.ts # v2 models / providers / agents from `opencode api`
+│   ├── tui-selection.ts     # v2 only: the watcher applies a launch selection through the TUI (workaround)
 │   ├── opencode-api.ts      # `opencode api` calls into the v2 background service
 │   ├── host-shell.ts        # Host-shell quoting + `opencode` existence check (POSIX / PowerShell)
 │   └── usage-limits.ts      # OpenCode Go cost windows (v1 `opencode db`, v2 session stats)
@@ -333,9 +335,76 @@ TUI plugin target.
 
 **Resume.** `launch.resume` returns the full literal argv
 `["opencode", "--session", <id>, ...selection args]`. `--session`, `--model`, and
-`--agent` are all top-level options (verified with `opencode --help`), so an explicit
+`--agent` are all top-level options on v1 (verified with `opencode --help`), so an explicit
 launch selection is replayed and no default mode is forced — the stored session keeps
 its own agent/model. The original slash command and prompt are never replayed.
+
+**v2 takes no model or agent at launch.** OpenCode 2 (verified on 2.1.1) kept only
+`--session` on its TUI command: `opencode --model x` and `opencode --agent x` print
+`Unrecognized flag` and exit, so a launch carrying either never starts and Pragma types
+the prompt into the bare shell. Nothing else reaches the TUI either:
+`OPENCODE_CONFIG_CONTENT` / `OPENCODE_CLI_CONFIG_CONTENT` are ignored by it, and the TUI
+plugin API can read the selected model but only set its variant. So on v2 the argument
+builders return nothing (`openCodeTakesSelectionFlags`, fed by the version the catalog
+providers probe). Re-check `opencode --help` on each major release; if the flags return,
+drop the v2 branch **and the watcher workaround below**.
+
+### OpenCode v2 selection — a sticking point
+
+**This is a workaround, and the most fragile part of this plugin. Read this before
+touching it, and replace it when you can.**
+
+On v2 the launch's model, reasoning variant, and agent are applied by the **watcher
+typing into OpenCode's own pickers** (`src/tui-selection.ts`), because nothing else can
+do it today:
+
+- The lists come from OpenCode's server API through `opencode api`
+  (`src/opencode-v2-catalog.ts`): `GET /api/model` (names, providers, variants),
+  `/api/provider` (provider titles), `/api/agent`. Model ids are `provider/model`, as
+  `opencode models` prints them. If the API cannot be read the catalog falls back to
+  one "OpenCode default" entry and the built-in `build` / `plan` agents.
+- The host hands the watcher the launch selection (`WatcherContext.selection`), but
+  only to a watcher it starts with a fresh launch (see _Watcher supervision_ in
+  `crates/pragma-server/AGENTS.md`).
+- The watcher waits for the start screen, then: Ctrl+X A → agent id → Enter;
+  Ctrl+X M → `<model name> <provider title>` → Enter; then the variant picker, which
+  OpenCode opens by itself only when the model has no remembered variant — otherwise
+  it is reached through the command palette (Ctrl+P → "Switch model variant").
+
+What makes it fragile, each found the hard way:
+
+- **It races the launch prompt.** Pragma types the prompt `prefillDelayMs` (6s) after
+  the command, on a timer that knows nothing about the watcher. A full selection takes
+  about 1.5s after the start screen appears, so it normally wins; on a slow start it can
+  lose, and the prompt is then typed into a picker's search box and lost. The watcher
+  gives itself 3.5s from the start screen and drops whatever is left.
+- **Text is typed only after its picker's title has just been drawn.** A shortcut that
+  opened nothing is followed by Escape, never by text and Enter — typed into the prompt
+  box those are sent to the model as a message. Keep this rule in any change.
+- **OpenCode redraws only changed cells.** "Select model" turning into "Select variant"
+  sends just `variant`, so titles are matched on what is freshly drawn, not on the
+  whole string a person reads. A restyle of a picker can break a match silently.
+- **The picker searches names, not ids**, and matches the model name and provider
+  title together (`GPT-5.6 Sol OpenAI`). The first result is taken; two models whose
+  names and providers both collide cannot be told apart.
+- **Enter goes in its own write.** Sent with the text, OpenCode reads a paste.
+- **It changes OpenCode's own remembered model and agent**, exactly as doing it by
+  hand would. Launches outside Pragma then start on the last Pragma pick.
+- **The watcher has no project directory**, so it reads the model list from OpenCode's
+  global config; a model defined only in a project's `opencode.json` is not applied.
+- A resumed session, a hand-typed `opencode`, and a watcher restarted mid-session get
+  no selection, by design.
+
+The watcher logs one `watcher.opencodeSelection` line per launch saying which of the
+three it applied. Every string and shortcut is verified against 2.1.1 only.
+
+**The real fix is a per-launch plugin hook in core** — a `launch.prepare(selection)`
+beside `launch.resume`. OpenCode 2's API can already do this without a single
+keystroke: `POST /api/session` with `agent` and `model`, then `opencode --session <id>`
+opens that session (verified: the TUI started on the chosen agent and model). It was
+not done because it needs the host to call the plugin on every fresh launch; the
+watcher route was chosen as the smaller change. When that hook exists, delete
+`tui-selection.ts` and the `selection` handoff with it.
 
 ## Plugin launcher
 

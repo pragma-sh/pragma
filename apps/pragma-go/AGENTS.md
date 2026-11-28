@@ -193,6 +193,23 @@ the explicit close on its row.
   any `type` it has no own handler for. The SDK already drops gateway keepalives,
   but an unguarded handler-map dispatch throws on one before replay and the retry
   loop then hits it forever (#213); keep the guard.
+- **A replaced document is replayed.** The terminal document is rebuilt for a new
+  palette (the host theme is polled, and re-read when a terminal changes the viewed
+  project), and the OS can discard it outright: iOS kills a backgrounded web view's
+  content process, Android can lose the renderer. The replacement starts blank, and the
+  stream — resuming from its byte cursor — sends only what is new, so the terminal
+  stayed empty until the program happened to repaint. The command queue's `ready()`
+  now reports whether this document missed output, `TerminalSurface` answers with
+  `session.replay()` (cursor cleared, stream restarted), and the native twin reloads on
+  `onContentProcessDidTerminate` / remounts on `onRenderProcessGone`. Any new path
+  that swaps the document must go through `queue.reset()` so the next `ready` knows.
+- **A resize that lands while the lease is being acquired is sent once it is granted.**
+  `resize` can only be applied under a lease, so one arriving mid-request (the keyboard
+  rising, a safe-area inset) was recorded and never sent; over a tunnel that window is
+  hundreds of milliseconds, and the PTY kept the stale grid.
+- **A session the host no longer has is a 404**, which the hook reports as "no longer
+  running" and stops retrying. The gateway used to answer a bare 500 for it, which is
+  retryable — so a tab whose shell had ended sat on "Connecting…" forever.
 - **Renderer commands are gated on the document's `ready` message**
   (`lib/terminal-command-queue.ts`, used by both `TerminalWebView` twins).
   `injectJavaScript` and `postMessage` are both dropped by a document that has

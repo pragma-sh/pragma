@@ -1,12 +1,12 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { CommitAndPushToggle } from "@/components/github/CommitAndPushToggle";
 import { FixAgentControls } from "@/components/github/FixAgentControls";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Switch } from "@/components/ui/switch";
 import { useAutoSubmit } from "@/hooks/use-auto-agent-selection";
 import { useFixLauncher } from "@/hooks/use-fix-launcher";
 import { buildListFixPrompt, commentLocation } from "@/lib/fix-it-prompt";
@@ -32,23 +31,29 @@ import {
  * removable), an agent picker, and a collapsible "fix on a new worktree" section.
  * Launching seeds one agent session with a prompt covering every listed comment,
  * then clears the list.
+ *
+ * Given `presetComments`, it is instead the "Fix all comments" dialog: the list
+ * starts as exactly those comments (every unresolved thread), removals stay local
+ * to the dialog, and launching leaves the user's fix it list untouched.
  */
 export function FixItListDialog({
   prNumber,
   worktreeId,
   open,
   onOpenChange,
+  presetComments,
 }: {
   prNumber: number;
   worktreeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  presetComments?: readonly FixItComment[];
 }) {
-  const comments = useFixItComments(prNumber);
+  const isPreset = presetComments !== undefined;
+  const { comments, remove, markLaunched } = useDialogComments(prNumber, presetComments);
   const launcher = useFixLauncher(open, worktreeId);
   const [commitAndPush, setCommitAndPush] = useState(false);
   const prompt = comments.length > 0 ? buildListFixPrompt([...comments], { commitAndPush }) : "";
-  const commitAndPushId = useId();
 
   async function submit() {
     if (comments.length === 0) {
@@ -59,7 +64,7 @@ export function FixItListDialog({
       toast.success(
         `Launched agent to fix ${comments.length} comment${comments.length === 1 ? "" : "s"}`,
       );
-      clearFixItComments(prNumber);
+      markLaunched();
       onOpenChange(false);
     }
   }
@@ -69,37 +74,19 @@ export function FixItListDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Address fix it list</DialogTitle>
+          <DialogTitle>{isPreset ? "Fix all comments" : "Address fix it list"}</DialogTitle>
           <DialogDescription>
-            Launch an agent to verify and fix every comment you flagged on this pull request.
+            {isPreset
+              ? "Launch an agent to verify and fix every unresolved comment on this pull request."
+              : "Launch an agent to verify and fix every comment you flagged on this pull request."}
           </DialogDescription>
         </DialogHeader>
 
-        {comments.length === 0 ? (
-          <p className="rounded-md border border-border bg-canvas px-3 py-6 text-center text-xs text-muted-foreground">
-            No comments flagged yet. Use “Add to fix it list” on a review comment.
-          </p>
-        ) : (
-          <ScrollArea className="max-h-48 rounded-md border border-border bg-canvas">
-            <ul className="divide-y divide-border">
-              {comments.map((comment) => (
-                <FixItRow comment={comment} key={comment.threadId} prNumber={prNumber} />
-              ))}
-            </ul>
-          </ScrollArea>
-        )}
+        <FixItList comments={comments} isPreset={isPreset} onRemove={remove} />
 
         <FixAgentControls launcher={launcher} prompt={prompt} autoRegistry={auto.registry} />
 
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-canvas px-3 py-2">
-          <div className="space-y-0.5">
-            <Label htmlFor={commitAndPushId}>Commit and push</Label>
-            <p className="text-xs text-muted-foreground">
-              Ask agent to commit resulting changes and push current branch.
-            </p>
-          </div>
-          <Switch checked={commitAndPush} id={commitAndPushId} onCheckedChange={setCommitAndPush} />
-        </div>
+        <CommitAndPushToggle checked={commitAndPush} onCheckedChange={setCommitAndPush} />
 
         {launcher.error ? <p className="text-xs text-destructive">{launcher.error}</p> : null}
 
@@ -121,8 +108,65 @@ export function FixItListDialog({
   );
 }
 
-/** One flagged comment in the list, with a remove button. */
-function FixItRow({ comment, prNumber }: { comment: FixItComment; prNumber: number }) {
+/**
+ * The comments a dialog covers: the user's live fix it list, or a local copy of
+ * `presetComments` whose removals and launch never touch that list.
+ */
+function useDialogComments(prNumber: number, presetComments?: readonly FixItComment[]) {
+  const flagged = useFixItComments(prNumber);
+  // A snapshot taken on open, so a background refresh never reshuffles the list.
+  const [preset, setPreset] = useState<readonly FixItComment[]>(() => presetComments ?? []);
+  if (presetComments === undefined) {
+    return {
+      comments: flagged,
+      remove: (threadId: string) => removeFixItComment(prNumber, threadId),
+      markLaunched: () => clearFixItComments(prNumber),
+    };
+  }
+  return {
+    comments: preset,
+    remove: (threadId: string) =>
+      setPreset((list) => list.filter((entry) => entry.threadId !== threadId)),
+    markLaunched: () => {},
+  };
+}
+
+/** The scrollable comment list, or a note explaining why it is empty. */
+function FixItList({
+  comments,
+  isPreset,
+  onRemove,
+}: {
+  comments: readonly FixItComment[];
+  isPreset: boolean;
+  onRemove: (threadId: string) => void;
+}) {
+  if (comments.length === 0) {
+    return (
+      <p className="rounded-md border border-border bg-canvas px-3 py-6 text-center text-xs text-muted-foreground">
+        {isPreset
+          ? "No unresolved comments to fix."
+          : "No comments flagged yet. Use “Add to fix it list” on a review comment."}
+      </p>
+    );
+  }
+  return (
+    <ScrollArea className="max-h-48 rounded-md border border-border bg-canvas">
+      <ul className="divide-y divide-border">
+        {comments.map((comment) => (
+          <FixItRow
+            comment={comment}
+            key={comment.threadId}
+            onRemove={() => onRemove(comment.threadId)}
+          />
+        ))}
+      </ul>
+    </ScrollArea>
+  );
+}
+
+/** One comment in the list, with a remove button. */
+function FixItRow({ comment, onRemove }: { comment: FixItComment; onRemove: () => void }) {
   return (
     <li className="flex items-start gap-2 px-3 py-2">
       <div className="min-w-0 flex-1">
@@ -130,10 +174,10 @@ function FixItRow({ comment, prNumber }: { comment: FixItComment; prNumber: numb
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{comment.body}</p>
       </div>
       <IconButton
-        aria-label="Remove from fix it list"
+        aria-label="Remove from list"
         className="shrink-0 text-muted-foreground hover:text-foreground"
         label="Remove"
-        onClick={() => removeFixItComment(prNumber, comment.threadId)}
+        onClick={onRemove}
         size="icon-sm"
         variant="ghost"
       >

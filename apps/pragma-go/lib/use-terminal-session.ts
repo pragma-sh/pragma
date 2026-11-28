@@ -1,9 +1,15 @@
 import { constants } from "@pragma-sh/constants";
-import { PragmaGatewayError, type StreamOptions } from "@pragma-sh/sdk";
+import { PragmaGatewayError, type PragmaClient, type StreamOptions } from "@pragma-sh/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
-import { applyTerminalEvent, type TerminalSink, type TerminalStatus } from "./terminal-events";
+import {
+  applyTerminalEvent,
+  gridChanged,
+  type TerminalGrid,
+  type TerminalSink,
+  type TerminalStatus,
+} from "./terminal-events";
 import { errorText } from "./utils";
 
 /** How long to wait before retrying a dropped stream, and the ceiling. */
@@ -21,6 +27,12 @@ export interface TerminalSession {
   write: (bytes: Uint8Array) => void;
   /** Reports the renderer's grid; applied only while this client holds the lease. */
   resize: (cols: number, rows: number) => void;
+  /**
+   * Reattaches from the start of the retained scrollback. For a renderer whose
+   * document was replaced: its screen is empty, and resuming from the byte
+   * cursor would send only what is new.
+   */
+  replay: () => void;
 }
 
 /**
@@ -38,6 +50,10 @@ export interface TerminalSession {
  *   cursor is too old, in which case the renderer is reset first.
  * - **Input is never replayed.** A write that may or may not have arrived is
  *   not retried: resending a keystroke can run a command twice.
+ *
+ * The one time output *is* replayed is when the renderer asks ({@link
+ * TerminalSession.replay}): its document was rebuilt and no longer shows what
+ * the cursor says it was sent.
  */
 export function useTerminalSession(
   sessionId: string | undefined,
@@ -56,6 +72,11 @@ export function useTerminalSession(
   const lease = useRef<string | null>(null);
   const size = useRef<{ cols: number; rows: number } | null>(null);
   const attached = options.attached;
+  // Bumped by `replay`. The state restarts the stream; the ref lets a pump that
+  // is still mid-read see at once that it has been superseded — otherwise one
+  // late event would move the cursor the restart has just cleared.
+  const [epoch, setEpoch] = useState(0);
+  const epochRef = useRef(0);
 
   useEffect(() => {
     if (!client || !sessionId || !attached) return undefined;
@@ -77,10 +98,11 @@ export function useTerminalSession(
       return failure.kind === "retry";
     };
 
+    const startedAt = epochRef.current;
     const pump = async (): Promise<void> => {
       const request = attachOptions(controller.signal, lease.current, size.current, cursor.current);
       for await (const event of client.sessions.attach(sessionId, request)) {
-        if (!attachment.live) return;
+        if (!attachment.live || epochRef.current !== startedAt) return;
         delay = RECONNECT_INITIAL_MS;
         applyTerminalEvent(event, { cursor, sink: sinkRef.current, setStatus, setExitCode });
       }
@@ -114,7 +136,7 @@ export function useTerminalSession(
       controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [attached, client, handleUnauthorized, sessionId]);
+  }, [attached, client, epoch, handleUnauthorized, sessionId]);
 
   // The lease: taken once the renderer has reported a grid, renewed while the
   // screen is up, released on the way out.
@@ -135,6 +157,7 @@ export function useTerminalSession(
           return;
         }
         lease.current = granted.leaseId;
+        sendSettledGrid(client, sessionId, granted.leaseId, grid, size.current);
         renew = setInterval(() => {
           void client.sessions.renewViewport(sessionId, granted.leaseId).catch(() => undefined);
         }, constants.terminalViewport.renewIntervalMs);
@@ -185,7 +208,32 @@ export function useTerminalSession(
     [client, sessionId],
   );
 
-  return { status, exitCode, error, write, resize };
+  const replay = useCallback(() => {
+    cursor.current = null;
+    epochRef.current += 1;
+    setEpoch(epochRef.current);
+  }, []);
+
+  return { status, exitCode, error, write, resize, replay };
+}
+
+/**
+ * Applies the grid the renderer settled on while a lease was being acquired.
+ *
+ * The renderer may have resized while the request was in flight (the keyboard
+ * rising, a safe-area inset landing). That resize was recorded but not sent —
+ * there was no lease to send it under — so the PTY would keep the stale grid
+ * until the next change.
+ */
+function sendSettledGrid(
+  client: PragmaClient,
+  sessionId: string,
+  leaseId: string,
+  acquired: TerminalGrid,
+  settled: TerminalGrid | null,
+): void {
+  if (!settled || !gridChanged(acquired, settled)) return;
+  void client.sessions.resizeLeased(sessionId, settled, leaseId).catch(() => undefined);
 }
 
 /** Why an attach attempt failed, and so whether it is worth another. */

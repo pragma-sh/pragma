@@ -32,6 +32,7 @@ mod plugin_distribution;
 mod plugins;
 mod ports;
 pub(crate) use pragma_core::process_env;
+mod ci_watches;
 mod mini_window;
 mod projects;
 mod pty;
@@ -1546,6 +1547,7 @@ pub fn run() {
             scratchpads::export_scratchpad_html,
             scratchpads::list_scratchpads,
             scratchpads::open_scratchpad_tab,
+            ci_watches::ci_watch_rpc,
             whiteboards::create_whiteboard,
             whiteboards::get_whiteboard,
             whiteboards::list_whiteboards,

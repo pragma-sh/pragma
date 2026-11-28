@@ -11,6 +11,10 @@ pragma-cli scratchpad create --title "Architecture" result.mdx
 pragma-cli whiteboard create --title "Architecture" scene.excalidraw
 pragma-cli whiteboard search "auth flow"
 pragma-cli whiteboard view <id> architecture.png
+# CI watch on this worktree's PR (host record; the desktop drives it while open).
+pragma-cli ci watch --agent <id> [--model <id>] [--reasoning <id>] [--no-merge]
+pragma-cli ci status | list | clear
+pragma-cli ci disarm --reason "<check, full error, why it can't be fixed here>"
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 # Session name: status-less report that renames the hosting tab (user renames win).
 pragma-cli agent report --agent <id> session-name --name "<name>"
@@ -52,6 +56,12 @@ not write managed files directly.
 or stdin; preserve unknown fields. `delete` confirms unless `--yes`, and `view` writes
 native-rendered PNG bytes to requested path.
 
+`ci` talks directly to `pragma-server`'s `ciWatches` RPC (`pragma-core::ci_watches`):
+one record per worktree. `disarm` stops a live watch with a reason the desktop shows in
+full; it and `update` are rejected once a record is terminal (`merged`/`failed`/`disarmed`).
+CI fix agents are prompted to disarm instead of pushing a workaround when a failure cannot
+be fixed from the branch.
+
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
 publishes the matching `AgentDecision`, then prints `allow`/`deny` (exit 0). On timeout it
 prints nothing and exits non-zero so a blocking harness hook (Claude Code
@@ -90,7 +100,10 @@ to be run by hand. It inherits the terminal (the child owns stdin/stdout/stderr)
 `PRAGMA_AGENT_RUN_ID` in the child's environment, and exits with the child's code.
 
 Its host protocol is strict in three places. **The host must authorize the start before
-the child exists**: `startRun` has to succeed (a stale, closed, or session-less run id is
+the child exists** (and waits up to 20s for it, not the 1s an end report gets — the host
+resolves the launch's account env through the plugin host before answering, and a
+timed-out start is not retried because the late reply would make the retry stale):
+`startRun` has to succeed (a stale, closed, or session-less run id is
 rejected) or the child is never executed and the failure is surfaced. That reply also
 carries `env`, resolved from the record's saved account references; the wrapper applies it
 to the child directly, so the execution runs under the account the launch was prepared

@@ -95,7 +95,10 @@ export function TerminalSurface({ attached, onTitle, tabId }: TerminalSurfacePro
         <TerminalWebView
           onInput={handleInput}
           onLink={(url) => void Linking.openURL(url)}
-          onReady={() => {
+          onReady={({ missedOutput }) => {
+            // A document that replaced one with output on it starts blank, and
+            // the stream only sends what is new: ask for the scrollback again.
+            if (missedOutput) session.replay();
             if (attached) renderer.current?.send({ type: "focus" });
           }}
           onResize={session.resize}
