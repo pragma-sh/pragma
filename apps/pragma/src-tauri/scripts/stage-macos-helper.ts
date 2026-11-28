@@ -39,13 +39,26 @@ const identity =
   profile === "release"
     ? process.env.APPLE_SIGNING_IDENTITY || "-"
     : process.env.PRAGMA_DEV_SIGNING_IDENTITY || savedDevIdentity || "-";
+// Only a distribution-signed release claims the shipped bundle identifier.
+// TCC keeps one grant per identifier, pinned to the code requirement of the
+// copy last granted, so a dev or ad hoc helper under the same identifier
+// replaces the installed app's grants and the installed helper then reads
+// as denied. Every other build gets its own identifier and name.
+const distribution = profile === "release" && identity !== "-";
+const helperIdentity = distribution
+  ? { bundleId: constants.computer.macHelperBundleId, name: constants.computer.macHelperAppName }
+  : {
+      bundleId: constants.computer.macDevHelperBundleId,
+      name: constants.computer.macDevHelperAppName,
+    };
 const xml = (s: string) =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>${xml(constants.computer.macHelperBundleId)}</string>
-<key>CFBundleName</key><string>${xml(constants.computer.macHelperAppName)}</string>
+<key>CFBundleIdentifier</key><string>${xml(helperIdentity.bundleId)}</string>
+<key>CFBundleName</key><string>${xml(helperIdentity.name)}</string>
+<key>CFBundleDisplayName</key><string>${xml(helperIdentity.name)}</string>
 <key>CFBundleExecutable</key><string>${xml(constants.computer.helperName)}</string>
 <key>CFBundleIconFile</key><string>icon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -88,7 +101,6 @@ if (
   cpSync(binary, executable);
   cpSync(icon, bundledIcon);
   writeFileSync(join(bundle, "Contents/Info.plist"), infoPlist);
-  const distribution = profile === "release" && identity !== "-";
   const certificate = distribution ? process.env.APPLE_CERTIFICATE : undefined;
   let temporary: string | undefined;
   let keychain: string | undefined;
@@ -133,7 +145,7 @@ if (
         "--sign",
         identity,
         "--identifier",
-        constants.computer.macHelperBundleId,
+        helperIdentity.bundleId,
         ...(distribution ? ["--options", "runtime", "--timestamp"] : []),
         ...(keychain ? ["--keychain", keychain] : []),
         bundle,

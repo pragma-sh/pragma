@@ -96,9 +96,16 @@ exercise them by piping NDJSON into `target/debug/pragma-computer`, or through
   (`macos/responsible.rs`), so the grants attach to the helper, not the app or
   terminal that started the chain. System Settings refuses a bare ad hoc binary,
   so in dev `stage-daemon-sidecar.sh` (run by `bun run dev`) wraps it in
-  `target/debug/<macHelperAppName>.app` (bundle id `macHelperBundleId`, signed
-  ad hoc), and `pragma-server` prefers that bundle when it sits beside it
-  (`helper_path`). It shows in System Settings as "Pragma Computer Use". An ad
+  `target/debug/<macHelperAppName>.app` (signed ad hoc), and `pragma-server`
+  prefers that bundle when it sits beside it (`helper_path`). **Only a
+  distribution-signed release uses `macHelperBundleId`** ("Pragma Computer
+  Use"); every other build is `macDevHelperBundleId` ("Pragma Dev Computer
+  Use"). TCC keeps one grant per bundle id, pinned to the code requirement of
+  the copy granted last, so a dev helper sharing the release id silently
+  replaced the installed app's grants, and the installed helper then reported
+  both as denied after any dev rebuild or update. The bundle _directory_ keeps
+  `macHelperAppName` either way, because `helper_path` and
+  `tauri.macos.conf.json` look it up by that name. An ad
   hoc bundle is identified by its hash, so a rebuilt helper needs the grants
   re-added — remove the entry with **−** and add it again, since toggling keeps
   the old hash. To stop re-granting on every rebuild, export

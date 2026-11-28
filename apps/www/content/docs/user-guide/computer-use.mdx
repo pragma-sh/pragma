@@ -32,9 +32,11 @@ The CLI equivalent is `pragma-cli computer permissions --request`. Without
 `--request`, it only checks status. After enabling access, return to Pragma or run
 `pragma-cli computer permissions` again. Pragma refreshes an idle helper that previously
 reported a missing grant, so macOS's cached denial does not require restarting the app.
-In dev builds, rebuilding the ad hoc signed helper can invalidate its grants. If a
-fresh check still says denied, remove the old **Pragma Computer Use** entry and add the
-current `target/debug/Pragma Computer Use.app` again.
+Development builds use a separate helper, **Pragma Dev Computer Use**, so granting
+or rebuilding it never touches the installed app's **Pragma Computer Use** grants.
+Rebuilding the ad hoc signed dev helper can invalidate its own grants. If a fresh check
+still says denied, remove the old **Pragma Dev Computer Use** entry and add the current
+`target/debug/Pragma Computer Use.app` again.
 
 ## Who may control apps
 
